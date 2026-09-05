@@ -256,6 +256,7 @@ its line moving with it.
 - [D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05) — in-flight needs no new callback, one-at-a-time is already structural, and the freeze risk is whether `perform` can be driven beside an event loop
 - [D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) — the dialog's `$` line and the command log's are not the same line, and the read side is a manifest rather than a feed
 - [D234](#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05) — `--read-only`'s box went stale twice, and the carve-out I ordered is the thing to attack
+- [D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05) — the delete that removed a pod nobody had seen, and why the fix costs no read
 
 ## Why it exists — where the gap is
 
@@ -20220,3 +20221,86 @@ must leave the write path unreachable rather than merely undrawn — the failure
 invariant 2 was written against. The driver's single door is the right answer for
 a driver and is not the answer for a console; that is Phase 12's box and it is
 where *structural* becomes a claim about types rather than about doors.
+
+### D235 — the delete that removed a pod nobody had seen, and why the fix costs no read (2026-09-05)
+
+The kind verification ran every operation against a real apiserver
+([reports/2026-09-05-every-operation-against-a-real-cluster.md](reports/2026-09-05-every-operation-against-a-real-cluster.md)).
+Most of Phase 7 held. One finding is a blocker and it is
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s scenario, live.
+
+**The measurement.** A StatefulSet pod, whose name its controller reuses by
+design, with the confirmation held open on a fifo while the pod was replaced:
+three different `uid`s for one name — the one the operator opened the dialog on,
+the one holding the name when it was typed, and the one alive two seconds after
+the run. **k8rs deleted a pod the operator never saw**, and the audit line says
+`uid not read`, so the record cannot say which. `ops.rs` already names this
+exactly — *"Sending a delete by name here is how the wrong pod gets deleted"* —
+and answers it with `Answer::Gone`, which `main.rs` documents as **unreachable
+headless** because a script has no watch. So the guard the design leans on is
+switched off in the only shape that exists today.
+
+**This is not [D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)'s
+case and the difference is the whole ruling.** D228 removed a `resourceVersion`
+precondition because that field moves when **nothing about the object changed** —
+a `status` write by its own controller bumps it, so the guard refused healthy
+workloads. **`metadata.uid` is immutable.** It cannot produce a false positive:
+it differs only when the object genuinely is a different one, which is precisely
+the question being asked. Measured against v1.36.1, a wrong-uid precondition is a
+`409` naming both uids and *"The object might have been deleted and then
+recreated"*, and the pod survived.
+
+**The fix costs no read, and that is why
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 4 stands.** That ruling declined a `GET` because it would pull container
+environments into k8rs for a dialog that shows none of them, and
+[D227](#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05)
+ruling 2 measured the one mechanism that looked like a cheap way round it and
+found it leaks the same thing. **None of that changes**: `delete` still reads
+nothing. What changes is that [`Deleting`] gains an **optional `uid`**, and
+`delete` sends `DeleteParams::preconditions` when it is `Some`. The headless
+driver passes `None` — it has no watch and may not buy one — and Phase 11's
+dialog passes `Some` off the watch that is already running behind the modal,
+which is where D22 put it in the first place.
+
+**The reason this is a Phase 7 blocker rather than a Phase 11 box is the
+freeze.** `ops.rs` freezes at the end of this phase. A `Deleting` with no `uid`
+field is a `delete` Phase 11 **cannot** hand a uid to without reopening a frozen
+file — the same shape
+[D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)
+ruling 3 was asked to catch, and it is caught here by a cluster instead of by a
+question. **What is not claimed is that this closes the headless hazard.** It
+does not: a script still deletes by name, and its window is milliseconds rather
+than the seconds a human takes to type. That residue is real, is bounded, and is
+recorded rather than papered over.
+
+**Three more the same run found, all in the file that is about to freeze.**
+
+- **`scale`'s audit line names the instance that was *read*, over a change made
+  to a different one.** Same window, a Deployment deleted and recreated between
+  the dry-run and the yes: the line records `uid 8656c3ec…`, which nothing
+  changed, and the dialog said *Right now: 2 copies* over an object running 1.
+  `PatchParams` has no preconditions, so this is not free the way the delete is —
+  what is owed is that **the record stops asserting what it did not verify**. The
+  `uid` is honestly *what k8rs read*; the line must not read as *what k8rs
+  changed*.
+- **`unread` is the one refusal that never names the namespace, and the
+  namespace is the likeliest mistake it reports.** `ops scale deploy/web 3 -n
+  no-such-ns` answers *"k8rs could not read how many copies of deployment/web are
+  running right now — the cluster has no object with that name"*, and nothing in
+  the run names `no-such-ns`. `restart` and `delete` escape this only because
+  `show` prints the namespace first; `scale` is the only operation that fails
+  *above* [`perform`], so its refusal is the whole screen. Invariant 14: the
+  reader is sent to look at the wrong object.
+- **`scale` and `restart` disagree about `replicaset`, which is
+  [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+  shape.** `rollout` refuses it in words; `scalable` admits it, and on a
+  controller-owned ReplicaSet both records say *the change was made* and the count
+  is back in under three seconds — [D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)'s
+  class with no warning. **The ruling is a sentence, not a refusal**, because a
+  standalone ReplicaSet is legal and scaling it works: refusing every one would
+  break a real operation to fix a common one. And k8rs cannot tell them apart for
+  free — measured, the `Scale` subresource strips `ownerReferences`, so knowing
+  costs a second `GET` that D223 ruling 3 discourages. So the consequence says
+  *if* a deployment manages this replicaset its controller will put the count
+  back, which is true either way and costs nothing.

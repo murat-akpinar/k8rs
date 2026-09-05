@@ -132,6 +132,7 @@ fn scaling() -> Mutation<'static> {
         // request carries, which is why it is `Some` here where `version` is `None`: it is what
         // k8rs saw, not what k8rs sent.
         uid: Some("18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11"),
+        uid_sent: false,
         // **What [`consequence`] really produces for 2 → 3** — `screens/dialogs.md` § Scale's own
         // *up, by one* relation. It was a hand-written sentence while no operation existed to
         // produce one; a fixture whose doc says *the way `scale` will describe it* and does not
@@ -156,7 +157,8 @@ fn scaling() -> Mutation<'static> {
 /// the same string.
 const ATTEMPT: &str = "audit: 2026-09-03T12:34:56Z attempt · deployment/web · context kind-k8rs · \
                        server https://k8rs-tests.invalid:41751 · namespace payments · \
-                       uid 18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11 · \
+                       uid 18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11 (what k8rs read, not what it \
+                        changed) · \
                        kubectl: kubectl scale deployment/web --replicas=3 \
                        -n payments · call: PATCH \
                        /apis/apps/v1/namespaces/payments/deployments/web/scale · \
@@ -1280,6 +1282,7 @@ async fn nothing_written_into_a_record_can_forge_a_line_or_rewrite_the_terminal(
         namespace: Some("pay\u{200b}ments"),
         object: "deployment/web\u{202e}gnp",
         uid: Some("18f0b6ee\u{7}2b0e"),
+        uid_sent: false,
         consequence: "This deletes deployment/web\u{202e}gnp.",
         kubectl: "kubectl delete deployment/web\nresult · the change was made",
         verb: "DELETE",
@@ -1312,7 +1315,7 @@ async fn nothing_written_into_a_record_can_forge_a_line_or_rewrite_the_terminal(
         Some(
             "audit: 2026-09-03T12:34:56Z attempt · deployment/webgnp · context kind[2Jk8rs · \
              server https://k8rs-tests.invalid:41751[2J/evil · namespace payments · \
-             uid 18f0b6ee2b0e · \
+             uid 18f0b6ee2b0e (what k8rs read, not what it changed) · \
              kubectl: kubectl delete deployment/web result · the change was \
              made · call: DELETE /apis/apps/v1/namespaces/payments/deployments/web · \
              resourceVersion 8123\n"
@@ -1487,6 +1490,7 @@ async fn a_cluster_scoped_call_with_nothing_to_put_in_three_fields_names_every_g
         object: "node/k8rs-worker2",
         confirm: Confirm::Press,
         uid: None,
+        uid_sent: false,
         consequence: "This stops new pods being scheduled onto k8rs-worker2. Pods already \
                       running there keep running.",
         kubectl: "kubectl cordon k8rs-worker2",
@@ -1511,12 +1515,45 @@ async fn a_cluster_scoped_call_with_nothing_to_put_in_three_fields_names_every_g
         transcript(&trace).first().cloned(),
         Some(
             "audit: 2026-09-03T12:34:56Z attempt · node/k8rs-worker2 · context kind-k8rs · \
-             server not known · cluster-wide · uid not read · kubectl: kubectl cordon \
+             server not known · cluster-wide · no uid was read · kubectl: kubectl cordon \
              k8rs-worker2 · call: PATCH /api/v1/nodes/k8rs-worker2 · resourceVersion not sent\n"
                 .to_string()
         ),
         "an absent namespace or resourceVersion is recorded as a gap rather than as a fact"
     );
+
+    // **A `uid` that is *entirely* characters invariant 9 strips is the same gap as no `uid` at
+    // all**, and it reaches [`which_uid`] from a real place: [`Record::of`] cleans the value at
+    // [`IDENTIFIER`], so a cluster that answered with one is a caller holding `Some("")` by the
+    // time the line is written. Without the guard the field reads `uid  (what k8rs read, not
+    // what it changed)` — the dangling label this whole line exists to refuse — and the mutation
+    // gate found nothing feeding it (`just mutants-diff`, 2026-09-05).
+    for crafted in ["", "\u{202e}", "\u{0}"] {
+        let crafted_trace = Shared::default();
+        let mut sink = Sink(crafted_trace.clone());
+        let done = performed(
+            &Mutation {
+                uid: Some(crafted),
+                ..cordon
+            },
+            stamp,
+            &mut sink,
+            shows(&crafted_trace),
+            confirms(&crafted_trace),
+            works(&crafted_trace),
+        )
+        .await;
+        assert_eq!(done.outcome, Some(Outcome::Done));
+        let line = transcript(&crafted_trace)
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        println!("{crafted:?} → {line}");
+        assert!(
+            line.contains("· no uid was read ·"),
+            "{crafted:?} left a dangling label where the uid goes: {line:?}"
+        );
+    }
 }
 
 /// **An empty value records the way an absent one does** (PM ruling, 2026-09-04).
@@ -1665,7 +1702,7 @@ fn plain_patch(pass: Pass) -> (String, String) {
 /// A delete's URI and body, the second of which is where its `dryRun` lives.
 fn delete_wire(pass: Pass) -> (String, String) {
     let request = deployments()
-        .delete("web", &pass.delete())
+        .delete("web", &pass.delete(None))
         .expect("a delete request built from a valid name and this file's own params");
     let uri = request.uri().to_string();
     let body = String::from_utf8(request.body().clone())
@@ -1805,6 +1842,52 @@ fn both_passes_of_a_plain_patch_ask_the_server_to_reject_an_unknown_field() {
             "the {which} would accept a field the cluster does not have"
         );
     }
+}
+
+/// **A delete carries the caller's `uid` as a `preconditions.uid`, and carries none without
+/// one** — NOTES § D235's fix, on the bytes, and the negative is what says the driver's `None`
+/// really sends nothing.
+///
+/// **The defect it holds was measured on a real cluster, not imagined.** A StatefulSet pod whose
+/// controller reuses its name had three different `uid`s across one k8rs run and k8rs deleted one
+/// the operator never saw. A precondition the server checks is what turns that into a `409`.
+///
+/// **`resource_version` stays absent and that is asserted rather than assumed** — NOTES § D228
+/// took that precondition back out because the field moves when nothing changed, and
+/// `Preconditions` carries both, so a reader greping this body for `resourceVersion` finds
+/// nothing and this says the absence was decided.
+#[test]
+fn a_delete_sends_the_uid_it_was_given_as_a_precondition_and_nothing_when_it_has_none() {
+    for pass in [DRY_RUN, FOR_REAL] {
+        let request = deployments()
+            .delete(
+                "web",
+                &pass.delete(Some("9c4d2429-1b2c-4d5e-8f90-a1b2c3d4e5f6")),
+            )
+            .expect("a delete request built from a valid name and this file's own params");
+        let body = String::from_utf8(request.body().clone()).expect("kube serialises with serde");
+        println!("DELETE {} · body {body}", request.uri());
+        assert!(
+            body.contains(r#""preconditions":{"uid":"9c4d2429-1b2c-4d5e-8f90-a1b2c3d4e5f6"}"#),
+            "the uid the caller gave is not on the wire, so the cluster checks nothing: {body}"
+        );
+        assert!(
+            !body.contains("resourceVersion"),
+            "a resourceVersion precondition came back, which NOTES § D228 removed: {body}"
+        );
+        // **And the params it already sent are still there**, so a precondition is an addition
+        // and not a replacement.
+        assert!(
+            body.contains(r#""propagationPolicy":"Background""#),
+            "{body}"
+        );
+    }
+    let (_, body) = delete_wire(FOR_REAL);
+    assert!(
+        !body.contains("preconditions"),
+        "a delete with no uid sent one anyway, so the headless driver is checking something it \
+         never read: {body}"
+    );
 }
 
 /// **Both passes of a delete ask for background deletion** — NOTES § D225 ruling 5, in the body
@@ -2163,10 +2246,60 @@ fn the_five_relations_between_what_is_running_and_what_was_asked_for_read_as_the
              copies.",
         ),
     ] {
-        let said = consequence("web", running, asked);
+        let said = consequence("deployment", "web", running, asked);
         println!("{running} → {asked}\n{said}\n");
         assert_eq!(said, expected, "{running} → {asked}");
     }
+}
+
+/// **A `replicaset` is told its controller may put the count back, and no other kind is** —
+/// NOTES § D235, and the answer to `scale` and `restart` disagreeing about this one kind.
+///
+/// **Measured, not imagined**: scaling a Deployment-owned ReplicaSet on a real cluster had both
+/// records saying *the change was made* while the controller reverted it in under three seconds.
+/// [`rollout`] refuses a replicaset in words; [`scalable`] admits it, and nothing warned.
+///
+/// **A sentence rather than a refusal, because a standalone ReplicaSet is legal** and scaling one
+/// works — refusing every one would break a real operation to fix a common one. And k8rs cannot
+/// tell the two apart for free: the `Scale` subresource strips `ownerReferences`, so the clause
+/// is conditional in its own words instead.
+///
+/// **The other five kinds are the negative and they are the point.** A clause appended to every
+/// consequence would be a sentence about deployments that is never true of one.
+#[test]
+fn only_a_replicaset_is_warned_that_its_controller_may_put_the_count_back() {
+    const WARNED: &str = "If a deployment manages this replicaset, its controller will put the \
+                          count back.";
+    let mut warned = 0;
+    for kind in &crate::KINDS {
+        let said = consequence(kind.singular, "web", 2, 5);
+        println!("{}\n{said}\n", kind.singular);
+        if kind.singular == "replicaset" {
+            warned += 1;
+            assert!(
+                said.ends_with(WARNED),
+                "a replicaset is not told its controller may revert this: {said:?}"
+            );
+        } else {
+            assert!(
+                !said.contains("controller"),
+                "{} was told about a controller that has nothing to do with it: {said:?}",
+                kind.singular
+            );
+        }
+        // **The clause is added and never substituted** — the counts either side are what the
+        // reader is agreeing to and they survive it.
+        assert!(
+            said.contains("Right now: 2 copies. After: 5 copies."),
+            "{said:?}"
+        );
+    }
+    // **A derived list says what it found**: a renamed kind would satisfy every row above by
+    // matching none of them.
+    assert_eq!(
+        warned, 1,
+        "the driver's kind table no longer holds a replicaset, so this vetted nothing"
+    );
 }
 
 /// **A count of one is a copy and everything else is copies**, in every place a count is printed —
@@ -2182,18 +2315,18 @@ fn one_is_a_copy_and_the_sentence_that_would_have_read_all_one_copy_does_not_exi
         assert_eq!(copies(count), format!("{count} copies"), "{count}");
     }
     assert_eq!(
-        consequence("web", 1, 0),
+        consequence("deployment", "web", 1, 0),
         "This stops the only copy of your app — nothing will be left running. Right now: 1 copy. \
          After: 0 copies."
     );
     assert_eq!(
-        consequence("web", 0, 1),
+        consequence("deployment", "web", 0, 1),
         "This starts 1 more copy of your app. Right now: 0 copies. After: 1 copy."
     );
     // **Nothing running and nothing asked for is *no change*, not *stops all 0 copies*** — the
     // unchanged relation is decided first, and it has to be.
     assert_eq!(
-        consequence("web", 0, 0),
+        consequence("deployment", "web", 0, 0),
         "This asks for the count web is already running. Right now: 0 copies. After: 0 copies."
     );
 }
@@ -2202,7 +2335,7 @@ fn one_is_a_copy_and_the_sentence_that_would_have_read_all_one_copy_does_not_exi
 /// them.** Both ends are `i32`, so the difference is not one — which is why it is taken in `i64`.
 #[test]
 fn the_two_ends_of_the_replicas_field_are_described_without_overflowing() {
-    let said = consequence("web", i32::MIN, i32::MAX);
+    let said = consequence("deployment", "web", i32::MIN, i32::MAX);
     println!("{said}");
     assert!(
         said.starts_with("This starts 4294967295 more copies of your app."),
@@ -2330,7 +2463,8 @@ async fn what_a_scale_records_is_the_object_it_read_and_the_call_it_made() {
         attempt,
         "audit: 2026-09-03T12:34:56Z attempt · deployment/web · context kind-k8rs · server \
          https://k8rs-tests.invalid:41751 · namespace payments · \
-         uid 18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11 · kubectl: kubectl scale deployment/web \
+         uid 18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11 (what k8rs read, not what it changed) · \
+          kubectl: kubectl scale deployment/web \
          --replicas=3 -n payments · call: PATCH \
          /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion not sent\n",
         "the attempt line does not name the call that was actually made"
@@ -2420,7 +2554,7 @@ async fn a_scale_that_cannot_read_the_current_count_refuses_and_records_nothing(
     println!("{refusal}");
     assert!(
         refusal.starts_with(
-            "k8rs could not read how many copies of deployment/web are running \
+            "k8rs could not read how many copies of deployment/web in payments are running \
                              right now — the cluster would not allow it"
         ),
         "{refusal:?}"
@@ -2428,6 +2562,15 @@ async fn a_scale_that_cannot_read_the_current_count_refuses_and_records_nothing(
     assert!(
         refusal.contains("is forbidden"),
         "the server's own explanation was dropped: {refusal:?}"
+    );
+    // **The namespace is named, and it is the likeliest thing wrong with the line**
+    // (NOTES § D235). Measured on a real cluster, `-n no-such-ns` produced a refusal in which
+    // nothing named `no-such-ns` — this is the one operation whose failure is the whole screen,
+    // because it is the one that fails above [`perform`] and so above [`Shown`]'s own first line.
+    assert!(
+        refusal.contains(" in payments "),
+        "the refusal does not name the namespace, which is the likeliest mistake it reports: \
+         {refusal:?}"
     );
     assert_eq!(
         sent.lock().expect("the log is never poisoned").len(),
@@ -3397,7 +3540,8 @@ async fn what_a_restart_records_is_the_call_it_made_and_the_two_things_it_never_
     assert_eq!(
         attempt,
         "audit: 2026-09-03T12:34:56Z attempt · deployment/web · context kind-k8rs · server \
-         https://k8rs-tests.invalid:41751 · namespace payments · uid not read · kubectl: kubectl \
+         https://k8rs-tests.invalid:41751 · namespace payments · no uid was read · kubectl: \
+          kubectl \
          rollout restart deployment/web -n payments · call: PATCH \
          /apis/apps/v1/namespaces/payments/deployments/web · resourceVersion not sent\n",
         "the attempt line does not name the call that was actually made"
@@ -4116,6 +4260,7 @@ fn deleting() -> Deleting<'static> {
         kind: "pod",
         name: "web-7d9f4",
         namespace: Some("payments"),
+        uid: None,
     }
 }
 
@@ -4399,6 +4544,121 @@ async fn a_delete_sends_exactly_one_request_and_it_is_the_change_itself() {
     assert_eq!(done.plainly(), "the change was made");
     assert!(done.changed(), "a delete that landed is not an exit 0");
 }
+/// **A `uid` the cluster does not recognise refuses the delete, and the one it does does not** —
+/// NOTES § D235 end to end, over the real `delete` and the bytes it puts on a socket.
+///
+/// **This is the measurement turned into a test.** On a real cluster a StatefulSet pod's name was
+/// held by three different objects across one k8rs run, and k8rs removed one the operator never
+/// saw; the server's own answer to a stale `uid` is a `409` naming both and *"The object might
+/// have been deleted and then recreated"*, with the object surviving. `k8s.rs` classifies a `409`
+/// as [`Fault::Conflict`], so what the operator is left with is [`in_words`]'s *look at it again
+/// before deciding whether you still want this change* — which is the right next step and is not
+/// a sentence this file had to grow.
+///
+/// **The second row is what stops the first being vacuous.** A `delete` that refused every uid
+/// would satisfy the `409` row and break the operation; the matching uid has to come back `Done`.
+///
+/// **And the record says which of the two it was** ([`which_uid`]): a uid the cluster checked
+/// reads differently from one k8rs merely read, because for a delete the cluster did check it.
+#[tokio::test]
+async fn a_uid_the_cluster_does_not_recognise_refuses_the_delete_and_the_right_one_does_not() {
+    const HELD: &str = "9c4d2429-1b2c-4d5e-8f90-a1b2c3d4e5f6";
+    let conflict = json!({
+        "kind": "Status",
+        "apiVersion": "v1",
+        "status": "Failure",
+        "reason": "Conflict",
+        "code": 409,
+        "message": format!(
+            "Operation cannot be fulfilled on Pod \"web-7d9f4\": the UID in the precondition \
+             (00000000-0000-0000-0000-000000000000) does not match the UID in record ({HELD}). \
+             The object might have been deleted and then recreated"
+        ),
+    })
+    .to_string();
+
+    for (uid, answer, status, expected) in [
+        (
+            "00000000-0000-0000-0000-000000000000",
+            conflict.clone(),
+            "409 Conflict",
+            None,
+        ),
+        (HELD, gone(), "200 OK", Some(Outcome::Done)),
+    ] {
+        let body = answer.clone();
+        let code = status.to_string();
+        let (client, asked) = stub(move |_| (code.clone(), body.clone())).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+
+        let done = delete(
+            &client,
+            &Deleting {
+                uid: Some(uid),
+                ..deleting()
+            },
+            stamp,
+            &mut sink,
+            shows(&trace),
+            types(&trace, "web-7d9f4"),
+        )
+        .await
+        .expect("a pod in a namespace, with a cluster that answers");
+        let line = transcript(&trace).join("\n");
+        println!("{uid} → {:?}\n{}", done.outcome, done.plainly());
+
+        // **The uid really went out**, or the rows below are about a call that checked nothing.
+        let sent = asked.lock().expect("the log is never poisoned").clone();
+        assert!(
+            sent.iter().any(|request| request.contains(uid)),
+            "the uid never reached the wire: {sent:?}"
+        );
+        match expected {
+            Some(outcome) => {
+                assert_eq!(
+                    done.outcome,
+                    Some(outcome),
+                    "the uid the cluster holds was refused, so the operation is broken for every \
+                     caller that has one"
+                );
+                // **The record says the cluster checked it**, which is the whole difference
+                // between this uid and a `scale`'s (NOTES § D235).
+                assert!(
+                    line.contains(&format!(
+                        "uid {uid} (the cluster checked this was the object)"
+                    )),
+                    "the record does not say the cluster stood behind this uid: {line:?}"
+                );
+            }
+            None => {
+                assert!(
+                    matches!(
+                        done.outcome,
+                        Some(Outcome::Failed {
+                            fault: Fault::Conflict,
+                            ..
+                        })
+                    ),
+                    "a stale uid did not end as a conflict: {:?}",
+                    done.outcome
+                );
+                assert!(
+                    done.plainly().contains("look at it again"),
+                    "the operator is not told what to do next: {}",
+                    done.plainly()
+                );
+                // **The server's own sentence survives**, because it names both uids and is the
+                // only thing that can say *which* object took the name.
+                assert!(
+                    done.plainly().contains("deleted and then recreated"),
+                    "the cluster's explanation was dropped: {}",
+                    done.plainly()
+                );
+            }
+        }
+    }
+}
 
 /// **What the dialog and the audit log were given** — the consequence for the kind, the object as
 /// the reader knows it, the kubectl line with no flag on it, the path the request really took, and
@@ -4460,7 +4720,8 @@ async fn what_a_delete_records_is_the_call_it_made_and_the_check_it_never_ran() 
     assert_eq!(
         attempt,
         "audit: 2026-09-03T12:34:56Z attempt · pod/web-7d9f4 · context kind-k8rs · server \
-         https://k8rs-tests.invalid:41751 · namespace payments · uid not read · kubectl: kubectl \
+         https://k8rs-tests.invalid:41751 · namespace payments · no uid was read · kubectl: \
+          kubectl \
          delete pod/web-7d9f4 -n payments · call: DELETE \
          /api/v1/namespaces/payments/pods/web-7d9f4 · resourceVersion not sent\n",
         "the attempt line does not name the call that was actually made"
@@ -4630,7 +4891,7 @@ async fn a_node_is_deleted_cluster_wide_and_every_record_of_it_names_no_namespac
     assert!(
         lines.iter().any(|line| line.contains(
             "attempt · node/node-3 · context kind-k8rs · server \
-             https://k8rs-tests.invalid:41751 · cluster-wide · uid not read"
+             https://k8rs-tests.invalid:41751 · cluster-wide · no uid was read"
         )),
         "a cluster-scoped delete left a dangling namespace label: {lines:?}"
     );
@@ -5773,6 +6034,7 @@ fn a_line_and_a_record_have_a_measured_ceiling_and_it_is_far_under_one_write() {
         namespace: Some(&long),
         object: &long,
         uid: Some(&long),
+        uid_sent: false,
         consequence: &long,
         kubectl: &long,
         verb: &long,

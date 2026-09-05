@@ -10930,6 +10930,7 @@ async fn confirmation(
         namespace: Some("payments"),
         object: "pod/web-7d9f4",
         uid: None,
+        uid_sent: false,
         consequence: "This removes the pod. Whatever created it will normally replace it — k8rs \
                       has not checked whether anything did.",
         kubectl: "kubectl delete pod/web-7d9f4 -n payments",
@@ -10976,6 +10977,7 @@ async fn one_mutation(
         namespace: Some("payments"),
         object: "pod/web-7d9f4",
         uid: None,
+        uid_sent: false,
         consequence: "This removes the pod.",
         kubectl: "kubectl delete pod/web-7d9f4 -n payments",
         verb: "DELETE",
@@ -12422,7 +12424,7 @@ async fn a_headless_restart_prints_the_dialog_as_three_lines_and_exits_zero() {
         written.contains(
             "kubectl: kubectl rollout restart deployment/web -n payments · call: PATCH \
              /apis/apps/v1/namespaces/payments/deployments/web · resourceVersion not sent"
-        ) && written.contains("· uid not read ·")
+        ) && written.contains("· no uid was read ·")
             && written.contains("· the change was made"),
         "the audit log does not hold the call that was made: {written:?}"
     );

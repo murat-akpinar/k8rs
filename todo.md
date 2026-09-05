@@ -4013,10 +4013,44 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       **A one-door guard was priced and refused** — a reachability guard is a
       call graph in Python (2 false positives at n=8) and `main.rs` is deleted at
       Phase 12, where doors become types
-- [ ] Verified against kind: scale it, watch the replicas change through the
+- [x] Verified against kind: scale it, watch the replicas change through the
       watch stream, read the audit line back. Then the same for each operation
+      ([D235](NOTES.md#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05) ·
+      [reports/2026-09-05](reports/2026-09-05-every-operation-against-a-real-cluster.md)).
+      **Done when:** every operation ran against a real apiserver, not a stub. The
+      two records are **byte-identical** on a real cluster and every taught
+      `kubectl` line was run by hand and did what k8rs said it would; the watch
+      redrew `4 → 5 → 6` for a scale k8rs itself performed; **+1 LIST and +1 WATCH
+      per kind** over 62 s with **0 s CPU** idle (invariant 6 and 7, measured off
+      the apiserver's own counters); the audit log paired 26 attempts with 26
+      results across *overlapping* operations, where adjacency alone would have
+      mispaired them; all six kinds deleted including the cluster-scoped node; the
+      `Started` case reproduced twice, on a grace period and on a planted
+      finalizer.
+      **It found a blocker, which is what a cluster is for.** `delete` addressed
+      by name alone, and on a StatefulSet pod whose controller reuses the name it
+      **removed a pod the operator never saw** — three uids for one name, audit
+      line `uid not read`. `Deleting` now carries an optional `uid` and sends
+      `preconditions` when it has one; `delete` still reads nothing, so D225
+      ruling 4 stands. **The freeze is why it is this phase's**: without the field,
+      Phase 11's dialog could not hand a uid to a frozen `delete`.
+      Three more, all in that file: the audit line stops asserting a uid it did
+      not verify against, `unread` names the namespace, and a `replicaset` scale
+      says its controller may put the count back.
+      `just check` green (**1058 + 30**), `just mutants-diff` **20 caught, 0
+      missed** — and the first run found a real gap, a uid that strips to empty
+      leaving a dangling label
 - [ ] e2e job under `--read-only` that fails if any mutating request reaches
-      the API server
+      the API server.
+      **Two notes from the cluster run to fold in rather than lose**
+      ([reports/2026-09-05](reports/2026-09-05-every-operation-against-a-real-cluster.md)):
+      `kubectl rollout restart` refuses a second restart inside one second and
+      exits `1`, where k8rs stamps to nanoseconds and cheerfully does two — k8rs's
+      direction is the truthful one, it did what it said, but the taught line run
+      twice does not reproduce it, and that is a sentence the box owes rather than
+      a change. And a precise semantic refusal (`ops restart rs/x`) is followed by
+      eight lines of `ops_usage()`, which is invariant 14's second half: the reader
+      typed a well-formed line and got a correct answer buried under a synopsis
 
 **🔒 Security gate — the heaviest one in the plan:** object names are
 sanitised before they touch a path or a URL segment — `../` must not escape,

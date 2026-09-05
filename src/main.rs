@@ -7376,6 +7376,16 @@ async fn deleted(
         kind: ready.kind.singular,
         name: ready.name,
         namespace: ready.namespace,
+        // **No `uid`, because this driver has no watch to read one from** (NOTES § D235).
+        // `ops::delete` sends a `preconditions.uid` when it is given one, and Phase 11's dialog
+        // will give it off the watch running behind the modal; a script has neither, and
+        // `ops::delete` reads nothing of its own (NOTES § D225 ruling 4).
+        //
+        // **So the hazard the field closes is still open on this path and the record says so** —
+        // the attempt line reads *no uid was read*, and a delete by name alone can still remove
+        // an object that took the name after it was typed. Its window is milliseconds here rather
+        // than the seconds a human spends typing, which is smaller and is not none.
+        uid: None,
     };
     let out = std::cell::RefCell::new(out);
     let performed = match ops::delete(

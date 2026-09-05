@@ -136,8 +136,13 @@ use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, namespace_name, object_nam
 // and parked in a struct. What a caller may *not* do is own the audit log inside the same struct
 // that holds the future: that is a self-reference and `rustc` refuses it (D232 ruling 3).
 //
-// **A cluster can also refuse every dry-run there is**: a `ValidatingWebhookConfiguration` with
-// `sideEffects: Some | Unknown` fails `dryRun=All` for a fully authorised user. That is accepted
+// **A cluster can also refuse every dry-run there is, and it is rarer than this used to read**:
+// a `ValidatingWebhookConfiguration` with `sideEffects: Some | Unknown` fails `dryRun=All` for a
+// fully authorised user. **On v1.36.1 the API refuses to register one** — *"Unsupported value:
+// `Unknown`: supported values: `None`, `NoneOnDryRun`"* — because those two values were settable
+// only through `v1beta1`, gone since 1.22, and validation runs on write (`k8s-admin`,
+// 2026-09-05). So the shape survives only on a configuration written before 1.22 and never
+// rewritten since; it is not something k8rs can meet on a cluster built today. That is accepted
 // rather than designed around — there is no flag for it — and what makes it diagnosable is that
 // the verdict is keyed on the [`Fault`] and the server's own *"admission webhook … does not
 // support dry run"* travels beside it.
@@ -178,7 +183,25 @@ pub struct Mutation<'a> {
     /// (`k8s-admin`, 2026-09-04): the ReplicaSet replaces the pod while the name is being typed,
     /// k8rs refuses, and *which* pod that was is a question only the `uid` answers — the name is
     /// now somebody else's. `None` where the caller had none to give.
+    ///
+    /// **On its own it says what k8rs *read* and never what k8rs *changed*, and the attempt line
+    /// now says so in those words** (NOTES § D235). Measured on a real cluster: a Deployment
+    /// deleted and recreated between the dry-run and the yes left the record naming
+    /// `uid 8656c3ec…`, which nothing changed, beside a `PATCH` that landed on a different
+    /// instance. The value is honest; the label was not.
     pub uid: Option<&'a str>,
+    /// **Whether that `uid` went out as a `preconditions.uid`** — the difference between a value
+    /// k8rs read and a value the cluster agreed to (NOTES § D235, invariant 4's *resourceVersion
+    /// sent*, which is this class).
+    ///
+    /// **Only [`delete`] can set it**, because `DeleteParams` is the only params type in this
+    /// file with a `preconditions` field — `PatchParams` has none, which is why [`scale`]'s own
+    /// case is answered by the label and not by a guard.
+    ///
+    /// **It is a field and not derived from `uid.is_some()`**, which is true of a `scale` too, nor
+    /// from [`Self::verb`], which is free text an operation writes. Both would be the second copy
+    /// NOTES § D103 is named for, on the one line invariant 4 says may not lie.
+    pub uid_sent: bool,
     /// **What is about to happen, in words someone in their first month reads without a
     /// glossary** (invariant 14). It is what [`Shown`] puts on screen.
     pub consequence: &'a str,
@@ -269,6 +292,7 @@ struct Record {
     verb: String,
     path: String,
     version: Option<String>,
+    uid_sent: bool,
     checkable: bool,
     /// The name that has to be typed back, or `None` for [`Confirm::Press`] — the enum flattened
     /// to the one thing that is left to compare once it has been stripped.
@@ -745,6 +769,23 @@ impl Pass {
     /// indistinguishable by every observation the report took, while `Foreground` was plainly
     /// different: what this removes is a dependence on a per-resource server default.
     ///
+    /// **The `uid` is a precondition and not a read** (NOTES § D235). Measured on a real cluster:
+    /// a StatefulSet pod whose controller reuses its name had **three** different `uid`s across
+    /// one k8rs run, and k8rs deleted one the operator never saw — NOTES § D22's scenario, live,
+    /// with the guard the design leans on ([`Answer::Gone`]) switched off in the only shape that
+    /// exists today, because a headless script has no watch to notice with. A `uid` that does not
+    /// match is a `409` naming both and *"The object might have been deleted and then
+    /// recreated"*, measured, with the object surviving.
+    ///
+    /// **It costs no `GET`, which is why NOTES § D225 ruling 4 is untouched**: `delete` still
+    /// reads nothing at all. The value comes from a caller that already has it — Phase 11's dialog
+    /// off the watch running behind the modal, which is where NOTES § D22 put it — and the
+    /// headless driver passes `None` because it has no watch and may not buy one.
+    ///
+    /// **This is not NOTES § D228's reversal.** That removed a `resourceVersion` precondition
+    /// because the field moves when nothing about the object changed; `metadata.uid` is immutable
+    /// and differs only when the object genuinely is a different one, which is the question.
+    ///
     /// **These are also what `Api::delete_collection` accepts, and bulk mutation does not
     /// exist** (invariant 2). No caller exists, and outside this file `clippy.toml` refuses the
     /// call — a note to the next reader, not a mechanism.
@@ -756,10 +797,17 @@ impl Pass {
     /// request: the URI ends `…/deployments/web?` with nothing after it, and the body carries
     /// `"dryRun":["All"]`. Nothing here has to do anything about it; it is written down because
     /// a reviewer grepping a delete's URL for `dryRun` finds nothing and is right to worry.
-    pub fn delete(self) -> DeleteParams {
+    pub fn delete(self, uid: Option<&str>) -> DeleteParams {
         DeleteParams {
             dry_run: self.0,
             propagation_policy: Some(PropagationPolicy::Background),
+            // **The one precondition k8rs sends, and it is `None` unless a caller had a `uid`
+            // to give** (NOTES § D235). `Preconditions::resource_version` stays empty for
+            // NOTES § D228's reason and is a different field with a different failure mode.
+            preconditions: uid.map(|uid| kube::api::Preconditions {
+                uid: Some(uid.to_string()),
+                resource_version: None,
+            }),
             ..DeleteParams::default()
         }
     }
@@ -995,6 +1043,7 @@ impl Record {
             verb: cleaned(record.verb, IDENTIFIER),
             path: cleaned(record.path, FREE_TEXT),
             version: record.version.map(|value| cleaned(value, IDENTIFIER)),
+            uid_sent: record.uid_sent,
             checkable: record.checkable,
             // **A name by D146's rule, so [`IDENTIFIER`]** — and it is stripped for a reason the
             // other fields do not have: this one is *compared* against what a person typed, and
@@ -1036,15 +1085,19 @@ impl Record {
     /// pair because neither answers *which cluster* alone ([`Mutation::server`]), and `namespace`
     /// and `uid` sit with the object for the same reason — a name plus a namespace names whatever
     /// holds it now, and the `uid` names the thing that was there (`k8s-admin`, 2026-09-04).
+    ///
+    /// **The `uid` says which of two things it is, because it was one word for both and one of
+    /// them was a lie** (NOTES § D235, [`which_uid`]). Written `uid <x>`, the field read as *the
+    /// object k8rs changed* — measured false on a real cluster.
     fn attempt_line(&self, now: Timestamp) -> String {
         format!(
-            "{now} attempt · {} · context {} · server {} · {} · uid {} · kubectl: {} · \
+            "{now} attempt · {} · context {} · server {} · {} · {} · kubectl: {} · \
              call: {} {} · resourceVersion {}\n",
             self.object,
             gap(Some(&self.context), "not named", ""),
             gap(Some(&self.server), "not known", ""),
             gap(self.namespace.as_deref(), "cluster-wide", "namespace "),
-            gap(self.uid.as_deref(), "not read", ""),
+            which_uid(self.uid.as_deref(), self.uid_sent),
             self.kubectl,
             self.verb,
             self.path,
@@ -1162,6 +1215,30 @@ fn and_said(line: String, said: Option<&str>) -> String {
     match said {
         Some(said) => format!("{line}: {said}"),
         None => line,
+    }
+}
+
+/// **The `uid` field of an attempt line: the value first, then which of two things it is**
+/// (NOTES § D235).
+///
+/// **`uid <x>` alone read as *the object k8rs changed*, and that was measured false.** A `scale`
+/// whose Deployment was deleted and recreated between the dry-run and the yes recorded the
+/// instance it had *read* over a `PATCH` that landed on the one that replaced it. Only a `delete`
+/// carrying a `preconditions.uid` has the cluster's word for it ([`Mutation::uid_sent`]).
+///
+/// **The qualifier goes after the value and not between the label and it**, which is not a style
+/// choice: an operator greps an audit log for `uid <value>`, and a phrase in the middle of that
+/// breaks the log's own primary access pattern to say something a trailing clause says as well.
+///
+/// **It is [`gap`]'s job with one more fact, and not [`gap`] with a suffix parameter** — a fourth
+/// argument used by one of its five callers is a helper shaped by its exception.
+fn which_uid(uid: Option<&str>, sent: bool) -> String {
+    match uid {
+        Some(uid) if !uid.is_empty() && sent => {
+            format!("uid {uid} (the cluster checked this was the object)")
+        }
+        Some(uid) if !uid.is_empty() => format!("uid {uid} (what k8rs read, not what it changed)"),
+        _ => "no uid was read".to_string(),
     }
 }
 
@@ -1558,18 +1635,23 @@ where
         ));
     }
     let api: Api<DynamicObject> = Api::namespaced_with(client.clone(), namespace, &resource);
-    let read = api
-        .get_scale(scaling.name)
-        .await
-        .map_err(|failed| unread(&object, in_words(fault(&failed)), said(&failed).as_deref()))?;
+    let read = api.get_scale(scaling.name).await.map_err(|failed| {
+        unread(
+            &object,
+            namespace,
+            in_words(fault(&failed)),
+            said(&failed).as_deref(),
+        )
+    })?;
     let Some(running) = read.spec.and_then(|spec| spec.replicas) else {
         return Err(unread(
             &object,
+            namespace,
             "the cluster's answer did not say how many it is asking for",
             None,
         ));
     };
-    let consequence = consequence(scaling.name, running, scaling.count);
+    let consequence = consequence(scaling.kind, scaling.name, running, scaling.count);
     // **The kind is spelled out — `deployment/web`, never `deploy/web`** (`screens/dialogs.md`
     // § Scale). `deploy` is real kubectl shorthand and buys nothing invariant 4 needs; this line's
     // whole job is teaching a newcomer a command they can read (invariant 14).
@@ -1595,6 +1677,12 @@ where
         // **What k8rs saw, not what k8rs sent** — the `uid` is off the `Scale` that was just
         // read, and it is what makes a record checkable after the object's name has moved on.
         uid: read.metadata.uid.as_deref(),
+        // **And `PatchParams` has no `preconditions`, so nothing verifies it** (NOTES § D235).
+        // Measured: an object deleted and recreated between the check and the yes leaves this
+        // naming the instance that was read over a `PATCH` that landed on its replacement. The
+        // record says *uid k8rs read* for exactly that reason, and the fix is a label rather than
+        // a guard because there is no guard to be had on this verb.
+        uid_sent: false,
         consequence: &consequence,
         kubectl: &kubectl,
         verb: "PATCH",
@@ -1652,11 +1740,21 @@ fn unaddressable(object: &str, which: &str) -> String {
 ///
 /// The reason is [`in_words`]'s, keyed on the [`Fault`] and never on which call raised it, for
 /// the reason [`verdict`] is (`PRIOR-ART § C1`).
-fn unread(object: &str, why: &str, message: Option<&str>) -> String {
+///
+/// **It names the namespace, and it is the only refusal in this file that had to be told to**
+/// (NOTES § D235, invariant 14). Measured on a real cluster:
+/// `ops scale deploy/web 3 -n no-such-ns` answered *"the cluster has no object with that name"*
+/// and **nothing in the whole run named `no-such-ns`** — so the reader is sent to look at
+/// `deployment/web`, which is fine, instead of at the namespace, which is the likeliest mistake
+/// a line like that carries. [`restart`] and [`delete`] escape it only by accident: they fail
+/// *inside* [`perform`], where [`show`](Shown) has already printed the namespace. [`scale`] is
+/// the one operation that can fail **above** the contract, so this sentence is the whole screen.
+fn unread(object: &str, namespace: &str, why: &str, message: Option<&str>) -> String {
     and_said(
         format!(
-            "k8rs could not read how many copies of {} are running right now — {why}",
-            cleaned(object, FREE_TEXT)
+            "k8rs could not read how many copies of {} in {} are running right now — {why}",
+            cleaned(object, FREE_TEXT),
+            cleaned(namespace, IDENTIFIER)
         ),
         message,
     )
@@ -1674,7 +1772,7 @@ fn unread(object: &str, why: &str, message: Option<&str>) -> String {
 ///
 /// **The arithmetic is `i64` over two `i32`s**, which costs nothing and removes the one overflow a
 /// hostile or broken `spec.replicas` could reach.
-fn consequence(name: &str, running: i32, asked: i32) -> String {
+fn consequence(kind: &str, name: &str, running: i32, asked: i32) -> String {
     let (running, asked) = (i64::from(running), i64::from(asked));
     // **One `cmp` and not a chain of `<`/`>`/`==`**, which is a readability preference *and* the
     // thing that makes this function's tests able to fail: `asked > running` written under an
@@ -1713,10 +1811,34 @@ fn consequence(name: &str, running: i32, asked: i32) -> String {
         ),
     };
     format!(
-        "{change} Right now: {}. After: {}.",
+        "{change} Right now: {}. After: {}.{}",
         copies(running),
-        copies(asked)
+        copies(asked),
+        reverted(kind)
     )
+}
+
+/// **The clause a `replicaset` gets and no other kind does** (NOTES § D235).
+///
+/// **[`scale`] and [`restart`] disagreed about this kind and the disagreement was silent.**
+/// [`rollout`] refuses a ReplicaSet in words; [`scalable`] admits it — and measured on a real
+/// cluster, scaling a Deployment-owned ReplicaSet had both records saying *the change was made*
+/// while the controller put the count back in under three seconds. NOTES § D224's class, with no
+/// warning at all.
+///
+/// **A sentence and not a refusal, because a standalone ReplicaSet is legal and scaling it
+/// works.** Refusing every one would break a real operation to fix a common one.
+///
+/// **And k8rs cannot tell the two apart for free** — measured, the `Scale` subresource
+/// [`scale`] already reads **strips `ownerReferences`**, so knowing which it is costs a second
+/// `GET` that NOTES § D223 ruling 3 discourages. So the clause is conditional in its own words
+/// rather than in code: *if* a deployment manages it. That is true of both, and true for free.
+fn reverted(kind: &str) -> &'static str {
+    if kind == "replicaset" {
+        " If a deployment manages this replicaset, its controller will put the count back."
+    } else {
+        ""
+    }
 }
 
 /// **`1 copy`, `3 copies`** — the counted noun, in one place, so the five relations above and the
@@ -2057,8 +2179,10 @@ where
         namespace: Some(namespace),
         object: &object,
         // **Nothing was read, so there is no `uid` to give** (NOTES § D223 ruling 3) — the
-        // field's own documented case for a caller with none.
+        // field's own documented case for a caller with none, and nothing to send one on either
+        // (`PatchParams` has no `preconditions`).
         uid: None,
+        uid_sent: false,
         consequence,
         kubectl: &kubectl,
         verb: "PATCH",
@@ -2301,6 +2425,19 @@ pub struct Deleting<'a> {
     pub name: &'a str,
     /// The namespace it is in, or `None` for a node.
     pub namespace: Option<&'a str>,
+    /// **The `uid` of the object the caller is looking at, where it has one** — sent as a
+    /// `preconditions.uid`, so the cluster refuses the delete if the name has moved on to a
+    /// different object (NOTES § D235, [`Pass::delete`]).
+    ///
+    /// **`None` is the headless driver and is not a default worth having.** A script has no watch
+    /// and `delete` reads nothing (NOTES § D225 ruling 4), so there is no `uid` to give — and a
+    /// delete by name alone is still the hazard it was, with a window of milliseconds instead of
+    /// the seconds a human takes to type. That residue is real and is not closed by this field.
+    ///
+    /// **The field exists in Phase 7 because `ops.rs` freezes at the end of it.** A `Deleting`
+    /// with no `uid` is a `delete` Phase 11 could not hand one to without reopening a frozen
+    /// file — NOTES § D232 ruling 3's shape, found by a cluster instead of by a question.
+    pub uid: Option<&'a str>,
 }
 
 /// **A delete, performed** — the whole of NOTES § Operations' `d` row.
@@ -2409,9 +2546,13 @@ where
         server: deleting.server,
         namespace: deleting.namespace,
         object: &object,
-        // **Nothing was read, so there is no `uid` to give** (NOTES § D225 ruling 4) — the
-        // field's own documented case for a caller with none.
-        uid: None,
+        // **Still nothing read — this `uid` is the caller's** (NOTES § D225 ruling 4 stands,
+        // NOTES § D235 adds the field). `None` from the headless driver, `Some` from a dialog
+        // holding a watch, and either way `delete` sends no `GET` of its own.
+        uid: deleting.uid,
+        // **And it goes out as a `preconditions.uid`**, so where there is one the record names
+        // the instance the *cluster* agreed to rather than the one k8rs happened to read.
+        uid_sent: deleting.uid.is_some(),
         consequence: &consequence,
         kubectl: &kubectl,
         verb: "DELETE",
@@ -2434,7 +2575,7 @@ where
         show,
         ask,
         move |pass| {
-            let params = pass.delete();
+            let params = pass.delete(deleting.uid);
             async move {
                 api.delete(deleting.name, &params)
                     .await
