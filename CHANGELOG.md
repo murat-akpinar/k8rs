@@ -209,6 +209,7 @@
 - *(docs)* The dialog's $ line and the command log's are not the same line ([f42e498](https://github.com/murat-akpinar/k8rs/commit/f42e4982ca6af3f4baeb1defaea522683df64af1)) — The command-log box needed no code: reads already build "$ kubectl …" in command_log, the dialog already writes "$ {shown.kubectl}", and both come from one Mutation::kubectl stripped once by Record::of, so invariant 4's two records cannot disagree about a name.
 - *(docs)* Move the phase pointer forward with phase 8's close ([8de87c0](https://github.com/murat-akpinar/k8rs/commit/8de87c02b9381077be9794d237e4d0f7d0ca41db))
 - *(docs)* Record phase 9's close date and the decisions it took ([447dede](https://github.com/murat-akpinar/k8rs/commit/447dede721fe9993436d412336855ca39f942978))
+- *(docs)* Move phase 5's own pointer forward with phase 9's close ([4c31b09](https://github.com/murat-akpinar/k8rs/commit/4c31b091fad0ab44c7e8a18f99a4a91ae7993476))
 
 ### ⚡ Performance
 
