@@ -142,12 +142,41 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
    `may_i(...)` lives in `ops.rs` despite mutating nothing, because it is
    performed with `create`
    ([D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)).
+   **"One file to audit" is one file *plus its test module*, and that is worth
+   saying because it is not obvious.** `ops_tests.rs` is a `#[path]` child module
+   (invariant 11), so `ops.rs`'s inner `#![allow]` covers it lexically and banned
+   calls legitimately appear in two files. Proven not a hole rather than assumed
+   ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04))
+   — **and the proof written here was the wrong one, which is worth more than a
+   quiet fix** ([D226](NOTES.md#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04)).
+   It said *the test module holds no `Client`, no `.send(`, no `.request(`*; it
+   holds **four** `Client`s and did before this claim was written, because the
+   operation tests dispatch real requests at a stub. What actually holds is
+   narrower and does not depend on counting: every client there is built from a
+   `kube::Config::new` over a literal `http://127.0.0.1:<kernel-assigned>` — no
+   kubeconfig, no `KUBECONFIG`, structurally unable to reach a cluster.
+   `write-guard.py` still reports
+   exactly one silencer, and it scans `tests/` as well as `src/` — measured, by
+   planting one and watching it fail.
 2. **No write is implicit.** Every mutation requires: an explicitly selected
    object → a keypress → a confirmation dialog stating the consequence in plain
-   language → a server-side `dryRun=All` where the API supports it → an audit
-   line. Deletes and drains additionally require typing the object name.
-   `--read-only` makes the whole path unreachable, not merely unbound. Bulk
-   mutation does not exist.
+   language → a server-side `dryRun=All` **where the operation asks for one** →
+   an audit line. Deletes and drains additionally require typing the object
+   name. `--read-only` makes the whole path unreachable, not merely unbound.
+   Bulk mutation does not exist.
+   **That dry-run clause read *where the API supports it* until 2026-09-04, and
+   `delete` narrowed it** — the API dry-runs a `DELETE` and k8rs declines,
+   because the marker rides in the request body and the cluster's own audit
+   record at `Metadata` level cannot then tell a cancelled dialog from the
+   delete that happened
+   ([D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+   ruling 1). **The narrowing is real and it costs something**: the preflight was
+   also the connectivity probe, so a dead socket on a delete now ends in *k8rs
+   does not know whether the change was made* where `scale` would have said
+   *never sent*. **Declining is per operation, is recorded in that operation's
+   box, and is never a default and never silent** — the two halves of this
+   invariant that are not negotiable are the typed name and the audit line, and
+   neither moved.
 3. **Nothing is deployed into the cluster.** k8rs runs on the user's machine
    against their kubeconfig, and that is the entire trust model.
 4. **Every mutation is visible twice, and neither record may lie.** The
@@ -191,9 +220,11 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     mutual-exclusion table**
     ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
     **The flag list here is a fact about the code, it gets no `check-docs` and no
-    operator review, and it has now gone stale twice** — four when the binary had
-    six (fixed 2026-08-30, [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
-    six when it had fourteen (fixed 2026-08-31). **Counted, not recalled:**
+    operator review, and it has now gone stale three times** — four when the binary
+    had six (fixed 2026-08-30, [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
+    six when it had fourteen (fixed 2026-08-31), fourteen when it had fifteen
+    (fixed 2026-09-05 — `--subresource`, and it was `dev-core` who counted it, not
+    this file). **Counted, not recalled:**
     `grep -oE '^const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs`. Two groups, and
     the split is the point:
     **released** — `--read-only` `--context` `--namespace` `--once` `--analysis`
@@ -201,10 +232,10 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     [D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30));
     **temporary driver's, and gone at Phase 12** — `--live`, plus the verbs and
     the selector that name one object: `--logs` `--describe` `--yaml`, `--object`
-    `--kind` `--container` `--previous` `--follow`
+    `--kind` `--container` `--previous` `--follow` `--subresource`
     ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) ·
     [D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
-    `--namespace` also answers to `-n`. **Nine of these fourteen are scaffolding,
+    `--namespace` also answers to `-n`. **Ten of these fifteen are scaffolding,
     which is why the count alone was never the thing to defend** — the threshold
     below is. No `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
@@ -298,15 +329,37 @@ that goes green says nothing about those.
       `details`, so a formatter reading `details.group`/`details.kind` prints an
       empty sentence and the only true one names the path: *"this kubeconfig may
       not `get /apis`"*.
-- [ ] `--read-only` is structurally true — `ops.rs` unreachable, keys unbound.
+- [ ] `--read-only` is structurally true — **no mutation is reachable**, keys
+      unbound. **The row said *`ops.rs` unreachable* until 2026-09-05 and that is
+      no longer the same sentence**
+      ([D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+      ruling 3): `may_i` is in `ops.rs` for [D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)'s
+      *mechanical* reason and writes nothing, and `--read-only` refusing it told
+      the read-only user they could not ask what they were allowed to do. The
+      invariant's subject was always mutation; the shorthand stopped being true
+      the moment the allowlist's own cost landed in the file.
 
 **The write path**
 
 - [ ] Mutations exist only in `ops.rs` (allowlist check, invariant 1).
-- [ ] Dry-run precedes the real call wherever the API supports it.
+- [ ] Dry-run precedes the real call for every operation that asks for one, and
+      an operation that declines has said why in its own box
+      ([D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+      ruling 1 is the only one so far, and it is `delete`). *Wherever the API
+      supports it* is what this row said until 2026-09-04 and the API supports
+      all of them.
 - [ ] Destructive actions require the typed object name.
 - [ ] Applies carry the resourceVersion that was read; a 409 offers a re-read,
-      never a blind overwrite.
+      never a blind overwrite. **"Applies" is the word to read literally — it
+      means a read-modify-write, which today is only v0.4's `edit`, and this row
+      is not a licence to put a precondition on every mutation**
+      ([D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)).
+      A Phase 7 box read it as *every call*, `scale` got one, and it was measured
+      refusing **5 of 9** runs against rolling and crashlooping Deployments —
+      because `metadata.resourceVersion` moves on a `status` write by the object's
+      own controller, which falsifies nothing an operator agreed to. `scale
+      --replicas=N` is absolute intent and needs no precondition; the second half
+      of the row — a `409` names a next step — is live and shipped.
 - [ ] No bulk mutation, no operation without a selected object.
 - [ ] Every attempt — success, failure, refusal — reaches the audit log.
 
@@ -334,7 +387,12 @@ that goes green says nothing about those.
 
 - [ ] Environment variable values are never displayed. Secret values require an
       explicit reveal and never enter the command log, the audit log, or the
-      YAML shown by `y`.
+      YAML shown by `y`. **One path into this arrives from the server rather
+      than from anything k8rs chose to render, which is why it was missed for a
+      month**: a `fieldValidation=Strict` rejection on a workload object returns
+      the *whole object* in `Status.message` — 4859 bytes on a trivial
+      Deployment, measured — and that message is what the audit line quotes
+      ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
 - [ ] *(from v0.4, when `edit` lands)* The edit temp file is mode 0600, in the
       user's own temp dir, and removed on exit *and* on panic.
 - [ ] The audit log is mode 0600 and append-only.
@@ -564,6 +622,34 @@ thing between the machine and a leak is the script reaching its final statement,
 there is no cleanup. **`just mutants-diff` is already
 this shape** — `scripts/mutants.sh` names its own scratch volume — which is why the
 hand sweeps are the ones that need saying.
+
+**No agent runs a destructive git command. Ever, on any tree.** Not
+`git checkout`, not `git reset`, not `git stash`, not `git clean` — **and the
+rule is the class, not the spelling.** The first draft of this paragraph said
+*not `git checkout -- .`* and a second agent ran
+`git checkout -- src/ops.rs src/main.rs` the next day, named files, straight
+past it (D94: a guard the obvious wrong name walks past is not a guard).
+**Restoring a file you edited is the same command as deleting a box, and git
+cannot tell them apart.**
+The working tree is the PM's, it usually holds a box in flight, and none of those
+commands can tell your scratch file from somebody's afternoon. `tester` ran
+`git checkout -- .` to tidy one probe file and destroyed a finished, unreviewed
+box; it recovered it only because it happened to have captured a `git diff`
+first, and it was still unable to vouch for its own doc comments — `rustfmt` and
+the tests cannot see a typo in a comment
+([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)).
+**An agent that wants a clean tree copies it** and gives the copy its own
+`CARGO_TARGET_DIR`; `k8s-admin` and `dev-core` both already do. An agent that
+wants a file gone deletes *that file by name*. Anything that would discard work
+is the PM's, and the PM backs up first.
+
+**And a sweep's restore goes to a snapshot it took, never to HEAD.** This is
+where the second occurrence came from: the trap was there, exactly as
+[D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)
+requires, and it restored to `HEAD` — so it did not undo the sweep's edits, it
+deleted the uncommitted box underneath them. `cp` the files first and restore
+from the copies. D185 says cleanup belongs in the trap; it does not say what
+*to*, and that is the half that cost a box twice.
 
 **A re-dispatch to fix a finding is a write, not a review** — `screens/` went to
 its owner for a rewrite in the slot the table below reserves for two *reviewers*,

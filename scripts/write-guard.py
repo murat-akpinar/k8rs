@@ -3,8 +3,32 @@
 
 **The matching is clippy's.** `clippy.toml`'s `disallowed-methods` resolves
 paths, so it tells `kube::Api::replace` from `str::replace`; with `-D warnings`
-it is the containment. This script owns the half clippy cannot do — proving that
-list is still *complete* against the kube actually in `Cargo.lock`.
+it is the containment. This script owns the two halves clippy cannot do.
+
+**One: the ban list is still complete** against the kube actually in
+`Cargo.lock` — the derivation below, and most of this file.
+
+**Two: the exception to it is still singular.** An allowed lint never fires, so
+an `#[allow(clippy::disallowed_methods)]` in some other file is a hole neither
+clippy nor half one can report — there is nothing to report *about*. Invariant 1
+puts exactly one such attribute in the tree, in `src/ops.rs`; § the single
+exception proves no second one appeared, in any of the shapes clippy actually
+accepts, including the three that never spell the lint out
+(`clippy::style`, `clippy::all`, `warnings`) and the ones that are not in a
+`.rs` file at all — `Cargo.toml`, `.cargo/config{,.toml}`, and a `-A` on a rustc
+command line in the `justfile`, a workflow or a `scripts/` shell file
+(todo.md, Phase 7).
+
+**Ceilings of half two, each measured 2026-09-03 and not argued.** It does not
+parse Rust, so an attribute quoted in a doc comment or a string literal is
+counted — fail-closed on purpose: a naive `//.*$` strip turns
+`let s = "http://x"; #[allow(…)]` into `let s = "http:` and loses a *real*
+attribute, and a false positive is loud where a hole is not. Both failure
+messages say so, because `src/ops.rs` is the one file whose prose is *about*
+the attribute. What is left outside the repo after `flag_holes` is two things,
+both watched silence a firing lint: `RUSTFLAGS` in the ambient environment, and
+a `.cargo/config.toml` in a parent directory of the checkout (so also
+`$CARGO_HOME`). No file this repo owns can rule those out.
 
 Written as an **allowlist**, deliberately. Outside `ops.rs` only these kube
 methods may appear, on any type:
@@ -333,6 +357,259 @@ def hatch_drift(got: set[str]) -> list[str]:
     )
 
 
+# --- the single exception to the ban list START ---
+# `clippy.toml` is the containment; an `#[allow]` is the hole in it, and neither
+# clippy nor the drift check above can see one — an allowed lint never fires, so
+# there is nothing for either to report. Invariant 1 puts exactly one such
+# attribute in the tree, in `src/ops.rs`, and this half proves it is still the
+# only one (todo.md, Phase 7: "CI's containment check now expects exactly this
+# file"). Until it existed, the exception could have been added to any file in
+# the crate and the build would have stayed green.
+EXCEPTION = "src/ops.rs"
+LINT = "clippy::disallowed-methods"
+
+# `warnings` is not a member of anything — rustc's own group table describes it
+# as "all lints that are set to issue warnings" and prints no sub-lint list — so
+# the derivation below cannot reach it. `disallowed-methods` defaults to `warn`,
+# and `#![allow(warnings)]` was watched silence it *under* `-D warnings` on
+# 2026-09-03: a crate attribute beats the command-line flag.
+ALWAYS = {"warnings"}
+
+# What the derivation has to find, or it parsed nothing and is about to vet
+# nothing (CLAUDE.md § A derived list asserts it found something). Measured the
+# same day off `clippy-driver -W help`: `disallowed-methods` is a member of
+# `clippy::style`, which is a member of `clippy::all`. Both were then confirmed
+# against a compiling crate — `#![allow(clippy::style)]` and
+# `#![allow(clippy::all)]` each turned a firing lint green.
+GROUP_CANARIES = {"clippy::all", "clippy::style"}
+
+# One group per line: the name, then whitespace, then its members. The second
+# field is anchored to `clippy::` so the *lint* table printed above the group
+# table — whose second field is a level word (`warn`, `allow`) — cannot be read
+# as a group with one member called `warn`.
+GROUP_LINE = re.compile(r"^\s*(clippy::[a-z-]+)\s\s+(clippy::[a-z-]+.*)$", re.M)
+
+ATTR = re.compile(r"#!?\[")
+# Run over text whose `::` has been un-spaced first, so this matches
+# `clippy :: disallowed_methods` — valid Rust that a grep for the literal
+# attribute string misses.
+TOKEN = re.compile(r"[a-z_][a-z_0-9]*(?:::[a-z_][a-z_0-9]*)*")
+
+# The roots cargo compiles under `--all-targets`, which is the list
+# `security-guard.py` scans for the same reason. `src/*_tests.rs` and
+# `src/*_tests/` need no entry of their own: invariant 11 makes them `#[path]`
+# child modules of this crate, so `src/**` already holds them — and an inner
+# `#![allow]` in one silences the lint for that module, measured 2026-09-03
+# rather than reasoned from the module system.
+ROOTS = ("src", "tests", "examples", "benches")
+
+
+def rust_sources(root: Path) -> list[Path]:
+    """Every .rs file cargo compiles, plus `build.rs` if there is one."""
+    return sorted(
+        p for r in ROOTS for p in (root / r).rglob("*.rs")
+    ) + [p for p in [root / "build.rs"] if p.is_file()]
+
+
+def silencing_lints(help_text: str) -> set[str]:
+    """Every lint name whose `allow` turns `disallowed-methods` off.
+
+    Derived from clippy rather than pinned, for the same reason the ban list is
+    derived from kube: which group a lint belongs to is clippy's to change, and
+    a pinned set goes stale in the one direction that opens a hole. Names are
+    returned in the underscore spelling, because that is the only one an
+    attribute can carry — `#![allow(clippy::disallowed-methods)]` does not parse
+    at all (measured: "expected one of `(`, `,`, `::`, or `=`, found `-`").
+    """
+    found = {LINT} | ALWAYS
+    for name, members in GROUP_LINE.findall(help_text):
+        if LINT in [m.strip() for m in members.split(",")]:
+            found.add(name)
+    return {n.replace("-", "_") for n in found}
+
+
+def clippy_help() -> str:
+    """`clippy-driver -W help`, which prints the group table this derives from.
+
+    `clippy-driver` and not `cargo clippy -- -W help`: the second compiles the
+    crate first, and this needs a table, not a build. It ships with the same
+    rustup component CI already installs, so a missing binary is a loud error
+    rather than a missing step (CLAUDE.md § `just check` is the whole of CI).
+    """
+    out = subprocess.run(["clippy-driver", "-W", "help"], cwd=ROOT,
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        sys.exit(f"write-guard: clippy-driver -W help failed, so the set of lints "
+                 f"whose `allow` silences {LINT} cannot be derived\n{out.stderr.strip()}")
+    return out.stdout + out.stderr
+
+
+def attributes(text: str) -> list[str]:
+    """Every `#[…]` / `#![…]` body, bracket-balanced.
+
+    Not `#\\[[^]]*\\]`: an attribute carrying a `]` before its `allow` would be
+    truncated into two harmless halves, and truncation is the direction this
+    guard may not be wrong in. Deliberately not line-anchored either — a whole
+    `fn f() { #[allow(…)] let x = …; }` on one line is a real silencer.
+    """
+    out = []
+    for m in ATTR.finditer(text):
+        depth = 0
+        for i in range(m.end() - 1, len(text)):
+            if text[i] == "[":
+                depth += 1
+            elif text[i] == "]":
+                depth -= 1
+                if depth == 0:
+                    out.append(text[m.end():i])
+                    break
+    return out
+
+
+def silences(attr: str, lints: set[str]) -> bool:
+    """True if this attribute body turns `disallowed_methods` off.
+
+    Both halves are required, which is what keeps `#[deny(clippy::all)]` and
+    `#[allow(unused)]` out. `cfg_attr` needs no case of its own: its wrapped
+    `allow(…)` is inside the same body.
+    """
+    names = set(TOKEN.findall(re.sub(r"\s*::\s*", "::", attr)))
+    return bool(names & {"allow", "expect"}) and bool(names & lints)
+
+
+def carriers(root: Path, lints: set[str]) -> dict[str, int]:
+    """How many silencing attributes each file carries, files with none omitted."""
+    out = {}
+    for path in rust_sources(root):
+        n = sum(1 for a in attributes(path.read_text(encoding="utf-8", errors="replace"))
+                if silences(a, lints))
+        if n:
+            out[path.relative_to(root).as_posix()] = n
+    return out
+
+
+def exception_drift(got: dict[str, int]) -> list[str]:
+    """Exactly one file, carrying exactly one attribute. Empty is a failure too."""
+    bad = [
+        f"{p} silences {LINT}. Invariant 1 allows that in {EXCEPTION} and nowhere "
+        f"else — a call banned crate-wide is not banned in a file that turns the "
+        f"lint off, and clippy reports nothing about a lint it was told to allow. "
+        f"If the attribute was aimed at some other lint, it named a group that "
+        f"contains this one (`clippy::all`, `clippy::style`, `warnings`): narrow "
+        f"it to the lint you meant."
+        for p in sorted(got) if p != EXCEPTION
+    ]
+    if EXCEPTION not in got:
+        bad.append(
+            f"no file silences {LINT}, so {EXCEPTION}'s single "
+            f"`#![allow(clippy::disallowed_methods)]` is gone. Either the write "
+            f"path lost the one line that announces the exception, or this check "
+            f"stopped finding attributes and was about to vet nothing. This check "
+            f"does not parse Rust: it would also have counted the attribute "
+            f"quoted in a comment or a string literal, so neither is there "
+            f"either."
+        )
+    elif got[EXCEPTION] > 1:
+        bad.append(
+            f"{EXCEPTION} carries {got[EXCEPTION]} silencing attributes. There is "
+            f"one visible exception to audit, not a scattering of them "
+            f"(NOTES § Operations, \"writes live in exactly one file\"). **Before "
+            f"reading that as a second exception smuggled in:** this check does "
+            f"not parse Rust, so an `#[allow(…)]` quoted inside a doc comment or "
+            f"a string literal counts too — and this is the one file whose prose "
+            f"is *about* the attribute. If that is what happened, reword the "
+            f"prose; do not delete the attribute."
+        )
+    return bad
+
+
+# Committed files that put flags on rustc's own command line. `-D warnings` is
+# set job-wide in the first two — justfile:14 and ci.yml:17 — and justfile:10-13
+# says why: setting it only on the clippy line left warnings invisible locally.
+# That makes those exact lines where someone goes when a lint turns noisy, and a
+# specific-lint `-A` beats a group-level `-D` later on the same rustc line
+# (measured by k8s-admin, 2026-09-03: `-D warnings -A clippy::disallowed_methods`
+# with `Api::delete` in `src/k8s.rs` leaves both this guard and `cargo clippy`
+# at exit 0). `scripts/*.sh` is in the list because `guards.sh` is the file CI
+# runs this guard *from*.
+FLAG_FILES = ("justfile", ".github/workflows/*.y*ml", "scripts/*.sh")
+
+# `-Aclippy::all`, `-A clippy::all`, `--allow clippy::all`, `--allow=clippy::all`.
+# Gated on the lint name and not on the flag, which is what keeps `declare -A
+# want` and `kubectl get pods -A -o json` out — both are all over `scripts/` and
+# the justfile, and a guard red for those is one people learn to wave through.
+# The hyphen spelling *is* live here, unlike in an attribute, so the captured
+# name is normalised before it is looked up.
+FLAG = re.compile(r"(?<![A-Za-z0-9])(?:-A|--allow)[=\s]*([A-Za-z][A-Za-z_:-]*)")
+
+
+def flag_holes(root: Path, lints: set[str]) -> list[str]:
+    """An `-A` on a committed rustc command line — the off-switch for all of this.
+
+    Its own ceiling is the module docstring's: what is left after this is the
+    ambient environment and a `.cargo/config.toml` above the checkout, neither
+    of which is a file this repo owns.
+    """
+    bad = []
+    for pattern in FLAG_FILES:
+        for path in sorted(root.glob(pattern)):
+            for name in FLAG.findall(path.read_text(encoding="utf-8", errors="replace")):
+                if name.replace("-", "_") in lints:
+                    bad.append(
+                        f"{path.relative_to(root).as_posix()} names {name} in an "
+                        f"`-A` / `--allow` flag to rustc. That silences {LINT} "
+                        f"for every build the file "
+                        f"drives — including the one CI runs this guard from — "
+                        f"with nothing in src/, Cargo.toml or .cargo/ changed. A "
+                        f"specific-lint `-A` beats the `-D warnings` beside it."
+                    )
+    return bad
+
+
+def manifest_holes(root: Path) -> list[str]:
+    """Lint levels set outside a `#[…]` attribute — the two places nobody greps.
+
+    Measured 2026-09-03: a `[lints.clippy] disallowed_methods = "allow"` in
+    `Cargo.toml` and a `-A` in `.cargo/config.toml`'s `[build] rustflags` each
+    silence the containment with the word `allow` nowhere in any `.rs` file.
+
+    The other committed off-switch — a `-A` on a rustc command line in the
+    justfile or a workflow — is `flag_holes` above. This one is the manifest.
+    """
+    bad = []
+    cfg = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
+    tables = [("lints", cfg.get("lints", {}))]
+    tables += [("workspace.lints", cfg.get("workspace", {}).get("lints", {}))]
+    for where, table in tables:
+        for tool, lints in table.items():
+            if not isinstance(lints, dict):
+                continue
+            for lint, level in lints.items():
+                lvl = level if isinstance(level, str) else level.get("level", "")
+                if lvl == "allow":
+                    bad.append(
+                        f"Cargo.toml [{where}.{tool}] sets {lint} = \"allow\". Lint "
+                        f"levels are not configured here — clippy.toml plus the one "
+                        f"attribute in {EXCEPTION} is the whole of invariant 1, and "
+                        f"a manifest entry silences it with no `.rs` file changed."
+                    )
+    # Both names: cargo still reads the extensionless `.cargo/config`, and a
+    # guard that only knew the modern spelling would be walked past by the
+    # deprecated one. Matched as text rather than parsed, because `rustflags`
+    # has several table paths (`build`, every `target.<cfg>`) and this file has
+    # no business carrying any of them.
+    for name in ("config.toml", "config"):
+        conf = root / ".cargo" / name
+        if conf.is_file() and "rustflags" in conf.read_text(encoding="utf-8"):
+            bad.append(
+                f".cargo/{name} sets rustflags. A `-A` there silences the "
+                f"containment for every build in this checkout, including CI's, "
+                f"with nothing in src/ to see. Lint levels belong in clippy.toml."
+            )
+    return bad
+# --- the single exception to the ban list END ---
+
+
 def render(want: set[str]) -> str:
     """The `disallowed-methods` body, in the exact form this guard accepts.
 
@@ -550,13 +827,168 @@ def self_test() -> None:
         # …and a package that is not there at all is not a pass.
         assert len(dead_prefixes({})) == len(RE_EXPORTS), dead_prefixes({})
 
+        # --- the single exception is singular START ---
+        # The derived set, off the real clippy this checkout runs. Pinning it
+        # would be the staleness this file refuses everywhere else.
+        lints = silencing_lints(clippy_help())
+        assert GROUP_CANARIES <= lints, lints
+        assert {LINT.replace("-", "_"), "warnings"} <= lints, lints
+        # Not every group, or the guard would go red on any `#[allow]` naming
+        # any group at all — and a gate that is red for nothing is one people
+        # learn to wave through. Stated as "fewer than clippy prints" rather
+        # than by naming a group, so a lint clippy re-categorises tomorrow makes
+        # this guard wider and not this assertion wrong.
+        groups = {n for n, _ in GROUP_LINE.findall(clippy_help())}
+        assert 1 < len(lints) < len(groups), (len(lints), len(groups))
+        # The lint table above the group table has a level word in its second
+        # column; reading one of those as a group is how the set silently widens.
+        assert not any(n in lints for n in ("warn", "allow", "deny")), lints
+
+        # Every shape measured against a compiling crate on 2026-09-03. Each one
+        # turned a firing `disallowed_methods` green; the hyphen spelling is
+        # absent because it does not parse, which was measured too.
+        SILENCERS = [
+            "#![allow(clippy::disallowed_methods)]",          # the sanctioned one
+            "#[allow(clippy::disallowed_methods)]",           # outer, on an item
+            "#[expect(clippy::disallowed_methods)]",          # the other keyword
+            "#[allow(dead_code, clippy::disallowed_methods)]",  # buried in a list
+            "#![allow(clippy::style)]",                       # the group…
+            "#![allow(clippy::all)]",                         # …and the group of groups
+            "#![allow(warnings)]",                            # rustc's own
+            "#![allow(clippy :: disallowed_methods)]",        # whitespace in the path
+            "#![cfg_attr(all(), allow(clippy::disallowed_methods))]",
+            # Not at the start of a line — a line-anchored guard misses this one.
+            'fn f(s: &str) { #[allow(clippy::disallowed_methods)] let _ = s.len(); }',
+            # A `]` before the `allow`, which truncates a `[^]]*` match into two
+            # harmless halves.
+            '#[cfg_attr(all(), doc = "[x]", allow(clippy::disallowed_methods))]',
+        ]
+        for src in SILENCERS:
+            assert any(silences(a, lints) for a in attributes(src)), src
+
+        # The negatives, or the check is "does this file contain an attribute".
+        for src in [
+            "#[deny(clippy::all)]",
+            "#[warn(clippy::disallowed_methods)]",
+            "#[allow(unused)]",
+            "#[allow(clippy::pedantic)]",
+            "#[derive(Debug, Clone)]",
+            "#[cfg(test)]",
+        ]:
+            assert not any(silences(a, lints) for a in attributes(src)), src
+
+        # A fake tree, one silencer per root, because a guard is proven only for
+        # the shapes it was fed (NOTES § D29). `src/rules_tests/pod.rs` is the
+        # `#[path]` child module case: it compiles into this crate and an inner
+        # attribute in it silences the lint for that module (measured).
+        tree = fake / "tree"
+        for rel in ("src", "src/rules_tests", "tests", "examples", "benches"):
+            (tree / rel).mkdir(parents=True)
+        (tree / "Cargo.toml").write_text('[package]\nname = "k"\n')
+        ops = tree / EXCEPTION
+        ops.write_text("//! doc\n#![allow(clippy::disallowed_methods)]\n")
+        assert carriers(tree, lints) == {EXCEPTION: 1}, carriers(tree, lints)
+        assert not exception_drift(carriers(tree, lints))
+
+        for rel in ("src/analysis.rs", "src/rules_tests/pod.rs", "tests/binary.rs",
+                    "examples/spike.rs", "benches/b.rs", "build.rs"):
+            other = tree / rel
+            other.write_text("#![allow(clippy::all)]\nfn f() {}\n")
+            got = carriers(tree, lints)
+            assert set(got) == {EXCEPTION, rel}, got
+            found = exception_drift(got)
+            assert len(found) == 1 and found[0].startswith(rel), found
+            other.unlink()
+        assert carriers(tree, lints) == {EXCEPTION: 1}, carriers(tree, lints)
+
+        # A file with no silencer is not a carrier — the check is not "this root
+        # has a file in it".
+        (tree / "src" / "rules.rs").write_text(
+            "#[allow(dead_code)]\nfn f() {}\n#[deny(clippy::all)]\nfn g() {}\n")
+        assert carriers(tree, lints) == {EXCEPTION: 1}, carriers(tree, lints)
+
+        # Empty is a failure, not a pass: a parser that stopped finding
+        # attributes reports the same clean tree as a clean tree does.
+        ops.write_text("//! doc\n")
+        gone = exception_drift(carriers(tree, lints))
+        assert len(gone) == 1 and "no file silences" in gone[0], gone
+
+        # …and one file may not carry two of them.
+        ops.write_text("#![allow(clippy::disallowed_methods)]\n"
+                       "#[allow(clippy::all)]\nfn f() {}\n")
+        twice = exception_drift(carriers(tree, lints))
+        assert len(twice) == 1 and "2 silencing" in twice[0], twice
+        ops.write_text("#![allow(clippy::disallowed_methods)]\n")
+
+        # Outside a `.rs` file entirely — both measured, both green in clippy.
+        assert not manifest_holes(tree), manifest_holes(tree)
+        (tree / "Cargo.toml").write_text(
+            '[package]\nname = "k"\n\n[lints.clippy]\n'
+            'disallowed_methods = "allow"\n')
+        assert len(manifest_holes(tree)) == 1, manifest_holes(tree)
+        (tree / "Cargo.toml").write_text(
+            '[package]\nname = "k"\n\n[lints.clippy]\n'
+            'all = { level = "allow", priority = -1 }\n')
+        assert len(manifest_holes(tree)) == 1, manifest_holes(tree)
+        # A table that sets a level *up* is not a hole.
+        (tree / "Cargo.toml").write_text(
+            '[package]\nname = "k"\n\n[lints.rust]\nunsafe_code = "forbid"\n')
+        assert not manifest_holes(tree), manifest_holes(tree)
+        (tree / ".cargo").mkdir()
+        for name in ("config.toml", "config"):
+            conf = tree / ".cargo" / name
+            conf.write_text('[build]\nrustflags = ["-Aclippy::disallowed_methods"]\n')
+            assert len(manifest_holes(tree)) == 1, manifest_holes(tree)
+            conf.unlink()
+        # An empty `.cargo/` is not a finding.
+        assert not manifest_holes(tree), manifest_holes(tree)
+
+        # A `-A` on a committed rustc command line: the switch that turns all of
+        # the above off, in the two files that already set `-D warnings`
+        # job-wide. `guards.sh` is here because it is what CI runs this from.
+        (tree / ".github" / "workflows").mkdir(parents=True)
+        (tree / "scripts").mkdir()
+        assert not flag_holes(tree, lints), flag_holes(tree, lints)
+        for rel, text in (
+            ("justfile", 'export RUSTFLAGS := "-D warnings %s"\n'),
+            (".github/workflows/ci.yml", "env:\n  RUSTFLAGS: -D warnings %s\n"),
+            ("scripts/guards.sh", "cargo clippy -- -D warnings %s\n"),
+        ):
+            for flag in ("-Aclippy::disallowed_methods",   # no space
+                         "-A clippy::disallowed-methods",  # hyphen: live on a
+                                                           # command line, unlike
+                                                           # in an attribute
+                         "-A clippy::all",                 # the group
+                         "--allow warnings",               # rustc's own
+                         "--allow=clippy::style"):         # `=` form
+                (tree / rel).write_text(text % flag)
+                got = flag_holes(tree, lints)
+                assert len(got) == 1 and got[0].startswith(rel), (rel, flag, got)
+            # `-D` is not `-A`, and the real files must go through clean.
+            (tree / rel).write_text(text % "-D clippy::all")
+            assert not flag_holes(tree, lints), (rel, flag_holes(tree, lints))
+        # The shapes that are all over this repo and are not lint flags: a bash
+        # associative array and kubectl's all-namespaces. A guard red for these
+        # is one people learn to wave through.
+        (tree / "scripts" / "guards.sh").write_text(
+            "declare -A want\nkubectl get pods -A -o json\n"
+            "cargo mutants -A left --all-features\n")
+        assert not flag_holes(tree, lints), flag_holes(tree, lints)
+        # --- the single exception is singular END ---
+
     print(f"write-guard: self-test passed — {len(TYPES)} types are derived from "
           f"kube's signature shapes without reading its trait impls over "
           f"http::Request, and the clippy.toml check fails on a missing Api "
           f"method, on a missing Request method, on a method kube does not have, "
           f"on a wrong path prefix, on an `allow-invalid` outside the "
           f"feature-gated set, and on any single hop of a re-export chain going "
-          f"away")
+          f"away; and the single-exception check fails on a silencer in any of "
+          f"{len(ROOTS) + 1} cargo roots, on each of {len(SILENCERS)} attribute "
+          f"shapes clippy was watched accept, on {EXCEPTION} carrying two or "
+          f"none, on a lint level set in Cargo.toml or .cargo/config.toml, and "
+          f"on an `-A` naming any of them on a rustc command line in the "
+          f"justfile, a workflow or a script — without firing on `declare -A` "
+          f"or `kubectl get -A`")
 
 
 if __name__ == "__main__":
@@ -595,19 +1027,37 @@ if __name__ == "__main__":
                      f"{prefix}… list — the signature parser is missing methods, so "
                      f"the containment is partial. Fix the parser before trusting it.")
 
+    lints = silencing_lints(clippy_help())
+    if not GROUP_CANARIES <= lints:
+        sys.exit(f"write-guard: clippy-driver printed a group table this could not "
+                 f"read — {sorted(GROUP_CANARIES - lints)} do not contain {LINT} "
+                 f"according to it, and they have for the crate's whole life. Fix "
+                 f"the parser: a short list here means an `#[allow]` shape nobody "
+                 f"is looking for.")
+
     want = wanted(found)
-    problems = drift(want, listed(ROOT / CLIPPY))
-    problems += hatch_drift(silenced(ROOT / CLIPPY))
-    for line in problems:
+    listing = drift(want, listed(ROOT / CLIPPY)) + hatch_drift(silenced(ROOT / CLIPPY))
+    holes = (exception_drift(carriers(ROOT, lints)) + manifest_holes(ROOT)
+             + flag_holes(ROOT, lints))
+    for line in listing + holes:
         print(f"FAIL {line}", file=sys.stderr)
-    if problems:
+    # Only when the *list* is wrong. Printing "paste this into clippy.toml"
+    # under a finding about an `#[allow]` in some other file would be advice
+    # that fixes nothing — the same defect `render`'s docstring already names,
+    # in the other direction.
+    if listing:
         print(f"\n{CLIPPY} is generated, not hand-written. Replace its "
               f"`disallowed-methods` with exactly this:\n\ndisallowed-methods = [",
               file=sys.stderr)
         print(render(want) + "]", file=sys.stderr)
+    if listing or holes:
         sys.exit(1)
     known = sum(len(m) for m in found.values())
     print(f"write-guard: {known} methods known across {len(TYPES)} types "
           f"({', '.join(f'{p[:-2]} {len(m)}' for p, m in sorted(found.items()))}), "
-          f"{len(want)} banned outside src/ops.rs, and {CLIPPY} names exactly "
-          f"those — OK")
+          f"{len(want)} banned outside src/ops.rs, {CLIPPY} names exactly "
+          f"those, and {EXCEPTION} is the only file in "
+          f"{len(ROOTS) + 1} cargo roots that silences any of the "
+          f"{len(lints)} lints whose `allow` would turn the ban off — with no "
+          f"`-A` naming one of those on any committed rustc command line "
+          f"either — OK")

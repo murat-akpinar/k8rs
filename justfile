@@ -1020,9 +1020,26 @@ fixtures:
     echo "captured $(ls tests/fixtures | wc -l) fixtures from $(cat tests/fixtures/K8S_VERSION)"
     echo "the cluster is left broken on purpose — scripts/cluster.sh unbreak puts the nodes back"
 
-# Body lands in Phase 7, the target is declared now.
+# The cluster leg of the `--read-only` box, and Phase 2's one declared freeze
+# exception spent (NOTES § D236 ruling 2). `tests/binary.rs` § THE WIRE is the
+# other half of that box and watches the socket; this half runs the real binary
+# against a real apiserver and asserts what a cluster can show — the object did
+# not change, `--read-only` opened no audit log at all, and the one advertised
+# row that is a question came back with the cluster's answer under the flag
+# (NOTES § D230 ruling 3). Which row is which is read off the row's own tail,
+# the same test `Advertised::mutates` makes in tests/binary.rs.
+#
+# The body is `scripts/e2e.sh` and not written out here, for the reason `guards`
+# is a script: a recipe cannot be run against fakes, and this one is all
+# decisions no cluster is needed to get wrong. `scripts/e2e.sh --self-test`
+# drives every failure sentence in it and is in `scripts/guards.sh`, so the logic
+# is covered by `just check` on a machine with no cluster.
+#
+# The real run is deliberately NOT in `just check` and is not a CI job:
+# REQUIREMENTS § CI refuses a kind job in v1 and requires the tests pass with no
+# KUBECONFIG. It is the PM's to run.
 #
 # End-to-end write path against kind, in --read-only mode and with the operations enabled
 e2e:
-    @echo "not yet — Phase 7 writes this recipe (ops.rs against a real cluster)"
-    @exit 1
+    cargo build --locked
+    bash scripts/e2e.sh

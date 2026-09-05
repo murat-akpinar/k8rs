@@ -58,9 +58,68 @@ Five mechanisms, each a requirement rather than a nicety:
 |---|---|
 | **Containment** — writes exist only in `ops.rs` | An accidental mutation anywhere else in the codebase |
 | **Consent** — selected object + keypress + confirmation stating the consequence | Acting on the wrong object, or without understanding what happens |
-| **Preflight** — server-side `dryRun=All`, abort on rejection | Discovering an admission-webhook rejection halfway through a change |
+| **Preflight** — server-side `dryRun=All` where the operation asks for one, abort on rejection | Discovering an admission-webhook rejection halfway through a change |
 | **Typed confirmation** for delete and drain | The keyboard-slip class of accident |
-| **Audit** — every attempt, including refusals and failures | Not being able to answer "what happened to this cluster" |
+| **Audit** — every described mutation, including refusals and failures | Not being able to answer "what happened to this cluster" |
+
+**Which operations ask for a preflight is each operation's own decision, and it
+is not a fact about the API** — a real cluster dry-runs every verb k8rs sends
+([NOTES § D215](../NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
+`scale` and `restart` ask; **`delete` declines**, and the row below on the
+`DELETE` verb is why
+([NOTES § D225](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1). Its dialog carries *"k8rs did not check this one with the cluster
+first."* instead of a verdict.
+
+**Opening a confirmation dialog for an operation that has a preflight sends one
+request to the API server, and that is by design rather than by accident.**
+`screens/dialogs.md` requires the
+dry-run's verdict to be shown *before* the confirm button is live — the dialog's
+own line is *"The cluster checked it first and accepted it."* — so for those
+operations the `dryRun=All` goes out while the dialog is on
+screen and before anybody has agreed to anything. Nothing is mutated, which is
+what `dryRun=All` means, and **authorization is identical to the real call**
+(`tmp/k8s/api-concepts.txt:759`) — so the preflight adds no permission to the
+documented read-only role and widens no grant. What it does do is leave a trace,
+and a reviewer should meet the shape of that trace here rather than find it:
+
+- **The marker rides in a different place per verb, and that is why `delete`
+  has no preflight at all.** The `scale` and `restart` PATCHes carry
+  `dryRun=All` in the **query string**; a `DELETE` would carry it in the
+  **request body**, because `DeleteOptions` is the delete verb's body parameter.
+  Measured against a real apiserver's own audit log at `level: Metadata`, a
+  dry-run `DELETE` and a real one are **byte-identical in every recorded
+  field** — same `requestURI`, `verb`, `objectRef`, `responseStatus`,
+  `userAgent` — and the string `dryRun` appears nowhere in either record; the
+  whole difference is 17 bytes of request body, visible only at `Request` level
+  and above. So a delete preflight would have put a live `DELETE` on the wire
+  before anybody typed a name, indistinguishable in the cluster's own record
+  from the delete that happened
+  ([reports/2026-09-04-delete-on-the-wire.md](../reports/2026-09-04-delete-on-the-wire.md)
+  § 4). k8rs sends none, so no such record exists to be misread.
+- **A SIEM rule must therefore not be written against the URI alone.** A rule
+  counting `patch deployments/scale` counts scale dialogs, including ones nobody
+  confirmed. **The inverse holds for `delete` and is the more useful half:**
+  every `DELETE` k8rs sends is a delete somebody typed an object's name to
+  confirm — there are no rehearsals to filter out.
+- **One spelling detail, because a reviewer will grep for it:** kube emits
+  `?&dryRun=All`, with an empty leading pair, so a pattern anchored on
+  `?dryRun=All` matches nothing k8rs sends.
+- **Every patch also carries `fieldValidation=Strict`, on both passes**, so the
+  server rejects a field it does not know instead of accepting the write and
+  changing nothing. A delete carries none — `DeleteOptions` is not an object and
+  has nothing to validate. Worth knowing when comparing against kubectl: **no
+  `kubectl patch` of any kind sends `fieldValidation`**, so k8rs is deliberately
+  stricter than the command its own command log teaches
+  ([NOTES § D217](../NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
+- Every matching admission webhook is invoked with `dryRun: true`.
+
+k8rs's own audit log records the outcome of a cancelled dialog as *nothing was
+changed*, which is true — but for `scale` and `restart` a request was sent, and
+that is the fact this section exists to state. For `delete`, nothing was sent
+either
+([NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) ·
+[§ D215](../NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
 
 Plus two absences that matter: **no bulk mutation** (single object, single
 confirmation — the multi-select delete is how outages happen) and **no
@@ -75,8 +134,14 @@ widen the trust boundary, and the one that needs a temp file full of object
 YAML, at the end where they get their own scrutiny.
 
 **Restart is not an API verb.** For workloads it patches the
-`kubectl.kubernetes.io/restartedAt` annotation, exactly as
-`kubectl rollout restart` does. For a bare pod it is a *delete* — and the
+`kubectl.kubernetes.io/restartedAt` annotation — **the key `kubectl rollout
+restart` itself writes, which is not the key kube-rs's `Api::restart` helper
+writes.** That helper spells it `kube.kubernetes.io/restartedAt`, and a
+different key means the pod template differs from the one kubectl would have
+produced: the operator who runs the command the command log taught them gets a
+**second** rollout, and finds an annotation in their Deployment that nothing in
+their cluster wrote. So k8rs builds this patch itself
+([NOTES § D215](../NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)). For a bare pod it is a *delete* — and the
 confirmation says so, because a beginner must not learn "restart" as a
 synonym for "delete" by accident.
 
@@ -171,11 +236,77 @@ rules:
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["patch"]                 # cordon / uncordon
+    verbs: ["patch", "delete"]       # cordon / uncordon; delete
   - apiGroups: ["apps"]
+    # `delete` is on the same rule and not a separate one: `ctrl-d` applies to
+    # any kind (NOTES § Operations), which is six of them and not the pod alone
+    # (NOTES § D225 ruling 3).
     resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["patch", "update"]       # scale, rollout restart, edit
+    # `get` is for the operator, not for k8rs: k8rs sends a bare PATCH and needs
+    # none, but `kubectl rollout restart` — the line the command log teaches —
+    # fetches the object first and 403s without it (NOTES § D224 finding 4).
+    # It widens nothing. A PATCH response *is* the object — measured at 6919
+    # bytes with a container environment value in it — so `patch` already reads
+    # the object whole for anyone willing to patch it harmlessly and read the
+    # answer. Removing `get` costs the operator their command and buys nothing.
+    verbs: ["get", "patch", "update", "delete"] # rollout restart, edit, delete
+  # `replicasets` has no rule above because neither scale nor restart patches
+  # one — scale reaches it through the subresource below. `delete` does reach
+  # it, so the parent resource needs its own rule (NOTES § D226 finding 1).
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["delete"]
+  # scale is a subresource, and RBAC matches `resource/subresource` as one
+  # string — the rule above does not carry these (NOTES § D222).
+  - apiGroups: ["apps"]
+    resources:
+      ["deployments/scale", "statefulsets/scale", "replicasets/scale"]
+    verbs: ["get", "patch"]          # scale
+  # `may_i` asks the cluster what this login may do, so keys the user cannot use
+  # can be dim from the start instead of failing after the object's name has been
+  # typed (NOTES § D23). A `SelfSubject*Review` can only ask about its own caller,
+  # reads no object and cannot escalate — the cheapest grant in RBAC.
+  #
+  # **On an ordinary cluster this rule changes nothing**: the default
+  # `system:basic-user` ClusterRole already grants both to every authenticated
+  # user. It matters only on a cluster that dropped that binding, which is
+  # exactly the condition that hid the `nonResourceURLs` gap above until one was
+  # tried (NOTES § D160) — measured needed *and* sufficient there, 2026-09-05.
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectrulesreviews", "selfsubjectaccessreviews"]
+    verbs: ["create"]
 ```
+
+**`k8rs-readonly` does not carry that last rule, and since 2026-09-05 that is a
+gap rather than a policy.** This paragraph said *no read-only code path calls
+`may_i` today*, holding the file to *every rule is reachable by code that
+exists* — [D187](../NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
+removed two grants on that test. **Phase 7 shipped one**:
+[D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3 made `k8rs --read-only ops may-i …` permitted, precisely so a read-only
+user can ask what they are allowed to do. So on a cluster without the default
+`system:basic-user` binding — [D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)'s
+condition — a user bound only to `k8rs-readonly` gets `CouldNotTell` and exit `2`
+for a subcommand shipped for them. **It fails open, so nothing breaks and nothing
+is granted by accident**; what is wrong is a role that does not cover a path that
+now exists. Found by the Phase 7 family review
+([reports/2026-09-05](../reports/2026-09-05-the-frozen-write-path-read-whole.md)). It arrives with the browser row that reads it
+([NOTES § D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)).
+The probe **fails open**, so a read-only login without the grant is told k8rs
+could not find out — never that it may not.
+
+**The `/scale` rule is separate on purpose, and `get` is not a typo.** RBAC
+matches `resource/subresource` as one string, so a grant on `deployments` does
+not carry `deployments/scale`; upstream's own `edit` ClusterRole lists
+`deployments/scale` in both its read rule and its write rule, which it would not
+need to if the parent covered it. And `get` is there because every operation
+reads the count *before* it can say what the change would do — `ops::scale`
+calls `get_scale` to build the sentence the confirmation states, so a role with
+`patch` alone meets a 403 before the dialog ever opens. `replicasets` appears
+here and nowhere above because scale is the only operation it takes
+([NOTES § Operations](../NOTES.md#operations--the-full-admin-surface)).
+**Measured against a live cluster after the documented role failed every scale**
+([NOTES § D222](../NOTES.md#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)).
 
 `pods/exec` and `pods/portforward` are intentionally absent — grant them only
 when those features ship and only to users who need them.
@@ -214,9 +345,28 @@ resource.
 - `clippy.toml` still carries a `disallowed-methods` list crate-wide as the
   fast feedback loop (CI runs clippy with `-D warnings`), and `ops.rs` carries
   the single `#![allow(clippy::disallowed_methods)]` in the project — the
-  exception announces itself at the top of the file that owns it.
-- The e2e job runs under `--read-only` against kind and fails if any mutating
-  request reaches the API server.
+  exception announces itself at the top of the file that owns it. **That it is
+  still the only one is checked, because clippy structurally cannot check it**:
+  an allowed lint never fires, so nothing in the build reports the file that
+  turned it off. `scripts/write-guard.py` pins the exception to `ops.rs` — in
+  every cargo root, and in `Cargo.toml`, `.cargo/config.toml` and the committed
+  rustc command lines that can silence it with no `.rs` file changed
+  ([NOTES § D212](../NOTES.md#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03)).
+- **`--read-only` is proven at two ranges, and the split is forced by what each
+  one can see**
+  ([NOTES § D236](../NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)
+  ruling 1). **The wire**: `tests/binary.rs` § THE WIRE runs the built binary
+  under the flag, for every verb the binary's own usage advertises, against a
+  recording stub that logs `METHOD target body` per request — and fails if any
+  mutating method went out. It runs on every push. **The cluster**: `just e2e`
+  runs the same binary against kind and asserts what a real apiserver makes
+  visible — the object did not change, and `--read-only` opened no audit log at
+  all. It is run by hand, not by CI. **A kind apiserver cannot tell you what one
+  client sent it** — `apiserver_request_total` carries no client label, and an
+  audit policy would mean recreating the control plane of the cluster the
+  committed fixtures come from — so *fails if any mutating request reaches the
+  API server* is the stub's claim to make, not kind's. This row said it was one
+  job against kind until 2026-09-05.
 - **The mechanizable half of the review checklist is a script**, not a list
   somebody re-reads:
   [`scripts/security-guard.py`](../scripts/security-guard.py) fails the build on
@@ -326,28 +476,54 @@ resource.
 
 ## The audit log
 
-`~/.local/state/k8rs/audit.log`, mode 0600, append-only, plain text. One line
-per attempted mutation:
+`~/.local/state/k8rs/audit.log`, **created** mode 0600 in a directory created
+0700, append-only, plain text. *Created*, because k8rs does not narrow a log
+somebody has since widened — an operator who opened it for a log collector
+should not have that undone every run. What it does instead is **look**: it
+refuses outright when something at that path is not an ordinary file (a pipe
+there used to hang k8rs forever), and it says so once, without refusing, when
+the file can be written by anyone else — because then what is already in it may
+not be what k8rs wrote
+([NOTES § D219](../NOTES.md#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04)).
+Two lines per attempted mutation:
 
 ```
-2026-08-11T14:22:07Z  ctx=prod-eu  ns=payments  deployment/web
-  shown: kubectl scale deployment/web --replicas=3 -n payments
-  call:  PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale
-         rv=88213  dry-run=ok                                    → ok
-2026-08-11T14:23:15Z  ctx=prod-eu  ns=payments  pod/web-7d9f4
-  shown: kubectl delete pod web-7d9f4 -n payments
-  call:  (none)                                      → refused by user
+2026-09-05T10:17:38.70883222Z attempt · deployment/web · context prod-eu · server https://10.0.0.1:6443 · namespace payments · uid 3713e7a9-73ee-4a4e-bb7c-663a8abe51f3 (what k8rs read, not what it changed) · kubectl: kubectl scale deployment/web --replicas=5 -n payments · call: PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion not sent
+result · attempt 2026-09-05T10:17:38.70883222Z · recorded 2026-09-05T10:17:38.713311965Z · deployment/web · dry-run: the cluster checked it first and accepted it · the change was made
 ```
 
-Two lines, not one, and the difference matters: k8rs calls
-`Api::patch_scale`, not `kubectl scale`. The `shown:` line is what the user
-saw and learned from; the `call:` line is what actually reached the API
-server, with the resourceVersion sent and the dry-run verdict. An audit trail
-that records only the teaching aid is fiction.
+**Two lines per mutation, and both records are on them.** k8rs calls
+`Api::patch_scale`, not `kubectl scale`, so the `kubectl:` field is the
+*equivalent* command — what the user saw and learned from — and the `call:`
+field is what actually reached the API server, with the resourceVersion sent.
+An audit trail that records only the teaching aid is fiction
+([NOTES § D8](../NOTES.md#d8--invariant-4-was-not-literally-true)).
+
+**Two timestamps, because what you want is a window and not a duration.** The
+attempt stamp is taken before anything is sent and the `recorded` stamp when
+the call returns, so the real request is inside `[attempt, recorded]` by
+construction — which is what makes it greppable against the **apiserver's own**
+audit log, the thing an operator actually does at 3am. A duration would have to
+be subtracted back into a window before it was usable, and the subtraction needs
+a stamp you would then not have. The gap is wide because it contains the
+confirmation dialog and however long the operator spent reading it; that is not
+a defect, it is why the field is not called `took`. Both stamps are the
+*client's* clock.
 
 It records refusals and failures as well as successes — a trail that only
 records what worked cannot answer "what did they try". Nothing about it
 involves the cluster; it is a local file.
+
+**Where that stops is the point at which a change has been described**
+([NOTES § D221](../NOTES.md#d221--the-audit-log-records-mutations-not-intentions-and-that-is-where-screensdialogsmd-rule-5-stops-2026-09-04)).
+Every operation reads the object before it can say what the change would do —
+`scale` fetches the count its confirmation states — and a line refused *there*
+has no consequence, no kubectl command and no request path to record, so a line
+written for it would be a record of a change nobody described. The log holds
+mutations, not intentions; what the operator tried is on stderr, with the fault
+and the server's own words. Everything from the confirmation onward — cancelled,
+refused by the cluster, failed mid-call — is in the log, which is
+`screens/dialogs.md` rule 5's whole population.
 
 **Order matters:** the attempt line is written and flushed *before* the API
 call and the result is appended when it returns, so a crash mid-call leaves an
@@ -360,8 +536,12 @@ opened at startup, k8rs says so and runs read-only rather than exiting —
 someone should still be able to look at their cluster
 ([NOTES § D21](../NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)).
 
-**It is not rotated.** A few hundred bytes per mutation reaches a megabyte in
-about a decade of daily use. A rotator would be more code than the log.
+**It is not rotated.** A rotator would be more code than the log. Measured, a
+typical record is 425 bytes — a megabyte in 49 days and 74 MiB in a decade at
+fifty mutations a day. The tail where every call is rejected reaches hundreds of
+megabytes, and is unreachable without a symptom the operator meets on day one:
+a wall of refusals, not a full disk in 2036
+([NOTES § D21](../NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)).
 
 ## Data displayed and stored
 

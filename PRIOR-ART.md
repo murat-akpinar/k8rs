@@ -525,12 +525,28 @@ edit and delete while read-only mode was on. Also
 unsafe way) · [#2613](https://github.com/derailed/k9s/issues/2613),
 [#3961](https://github.com/derailed/k9s/pull/3961) (runtime toggles).
 
-**immune.** Invariant 2's `--read-only` makes the write path *unreachable*, not
-merely unbound, so a new view cannot forget to check a flag — there is nothing to
-call. #3858 is what the other design costs, once per view, forever. It is also the
-argument to weigh if a runtime read-only toggle is ever requested: a mode you can
-turn off at runtime is a mode every code path must re-check, which is the design
-#3858 came from.
+**immune — and the mechanism that earns it changed in Phase 7, so the argument is
+written out rather than assumed.** This entry used to say *there is nothing to
+call*. There is now: `ops::scale`, `ops::restart` and `ops::delete` are `pub` and
+called from `src/main.rs`, and `grep -i read.only src/ops.rs` finds three prose
+mentions and no parameter, type or token. **What holds today is one guarded
+entry point** — `ops_line`, with each operation at a single call site — and it is
+proven by an equivalence rather than by a shape: `tests/binary.rs` asserts, for
+every verb the binary's own usage advertises and in both flag positions, that a
+line is permitted **if and only if** it is the question, so a fourth operation
+widens the test with nobody editing it
+([D234](NOTES.md#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05) ·
+[D236](NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)
+ruling 1 adds the wire half: no mutating request leaves the process). **It is not
+a compile-time guarantee, and D234 says so in the same breath as claiming it.**
+Phase 12 is where *unreachable* becomes a claim about types instead of about
+doors — a console has keys, and a guarded door is the right answer for a driver
+and the wrong one for a view. #3858 is what the other design costs, once per view,
+forever. It is also the argument to weigh if a runtime read-only toggle is ever
+requested: a mode you can turn off at runtime is a mode every code path must
+re-check, which is the design #3858 came from. **The tag is kept because the
+failure #3858 describes — a view that forgot the flag — still cannot happen here;
+what is no longer true is the reason originally given for it.**
 
 ### G3 — building a command out of strings
 

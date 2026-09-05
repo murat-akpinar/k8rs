@@ -233,6 +233,32 @@ its line moving with it.
 - [D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03) — the freeze is narrowed to what was actually checked, and two browser performers are named as Phase 11's
 - [D210](#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03) — Phase 6 closes, and the phase-close mutation sweep is narrowed against what the phase touched
 - [D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03) — `development` was red for seven days and nobody read it: the toolchain is pinned, and a feature flag added compiled code without adding a package
+- [D212](#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03) — an allowed lint never fires, so clippy cannot report the file that turns it off, and the switch was in the justfile
+- [D213](#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04) — the write path is the fifth consumer of `Fault` and it cannot see the two answers it meets most
+- [D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) — the mutation contract: four lies a record could tell, and the three operations that have no dry-run
+- [D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04) — the API dry-runs all three: it was kube's convenience helper that did not, and the annotation it writes is not kubectl's
+- [D216](#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04) — the dry-run goes in a different place per verb, and the checkout that destroyed a box
+- [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04) — `Strict` on every write that can carry it, and the 422 that hands back the object you sent
+- [D218](#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04) — the headless driver: five divergences from kubectl, and why piping a word is not `--yes`
+- [D219](#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04) — the audit log refuses what it cannot trust, and says what it cannot fix
+- [D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04) — the seven rulings `scale` could not be briefed without, and the frozen file that stayed shut
+- [D221](#d221--the-audit-log-records-mutations-not-intentions-and-that-is-where-screensdialogsmd-rule-5-stops-2026-09-04) — the audit log records mutations, not intentions, and that is where `screens/dialogs.md` rule 5 stops
+- [D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04) — the `scale` review round: the sentence that named neither fault nor message, and the admin role that could not scale
+- [D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04) — the four rulings `restart` could not be briefed without, and the pod arm that is `delete`'s
+- [D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04) — the `restart` review round: two blockers a stand-in apiserver could not produce, and the sentence that promised a cluster's settings
+- [D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04) — the five rulings `delete` could not be briefed without, and the preflight it declines
+- [D226](#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04) — the `delete` review round: a token that could be replayed, a removal that had not happened, and the sandbox that was not one
+- [D227](#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05) — the resourceVersion goes only where a read already happened, and the metadata read that leaks what a `GET` was refused for
+- [D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05) — the review round that reversed the box: a precondition on a field that moves when nothing changed, and the dry-run window that was 0.2% of what it claimed
+- [D229](#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05) — the four rulings `may_i` could not be briefed without, and the box's arithmetic that went stale under it
+- [D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) — the `may_i` review round: a spelling that answers the opposite of `kubectl`, and the read-only user who could not ask what they may do
+- [D231](#d231--the-audit-box-was-built-under-three-other-boxes-and-d21s-startup-clause-belongs-to-a-screen-that-does-not-exist-2026-09-05) — the audit box was built under three other boxes, and D21's startup clause belongs to a screen that does not exist
+- [D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05) — in-flight needs no new callback, one-at-a-time is already structural, and the freeze risk is whether `perform` can be driven beside an event loop
+- [D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) — the dialog's `$` line and the command log's are not the same line, and the read side is a manifest rather than a feed
+- [D234](#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05) — `--read-only`'s box went stale twice, and the carve-out I ordered is the thing to attack
+- [D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05) — the delete that removed a pod nobody had seen, and why the fix costs no read
+- [D236](#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05) — the four rulings the e2e box needs: where a wire is visible, what `just e2e` is then, and the synopsis that buried a correct answer
+- [D237](#d237--the-phase-7-family-review-what-the-freeze-forced-into-this-turn-what-the-sweep-can-and-cannot-cover-and-the-tag-whose-reason-stopped-being-true-2026-09-05) — the Phase 7 family review: what the freeze forced into this turn, what the sweep can and cannot cover, and the tag whose reason stopped being true
 
 ## Why it exists — where the gap is
 
@@ -394,7 +420,7 @@ the browser stays generic. This split is the single decision that keeps
 | `d` | describe — object + its events | any | read | v0.1 |
 | `y` | view YAML | any | read | v0.1 |
 | `s` | scale replicas | deploy/sts/rs | confirm + dry-run | v0.1 |
-| `r` | rollout restart | deploy/sts/ds | confirm | v0.1 |
+| `r` | rollout restart | deploy/sts/ds | confirm + dry-run | v0.1 |
 | `ctrl-d` | delete | any | **type the name** | v0.1 |
 | `c` | cordon / uncordon | nodes | confirm | v0.2 |
 | `ctrl-r` | drain (respects PDBs, reports blockers) | nodes | **type the name** | v0.2 |
@@ -961,10 +987,33 @@ recorded must not occur.
   read-only mode. It does not exit — a broken state directory should not stop
   someone from looking at their cluster — and it does not quietly drop the
   trail, which is the only unacceptable option.
-- **No rotation.** A few hundred bytes per mutation, at fifty mutations a day,
-  is a megabyte in something like a decade. A rotator would be more code than
-  the log itself and is the sort of thing that gets written because it feels
-  responsible.
+- **No rotation.** A rotator would be more code than the log itself and is the
+  sort of thing that gets written because it feels responsible.
+  **The arithmetic this originally rested on was wrong by about 74× and the
+  conclusion survives it** (`dev-core`, 2026-09-04, measured off the real record
+  the end-to-end test writes rather than estimated). The sentence used to read
+  *a few hundred bytes per mutation, at fifty mutations a day, is a megabyte in
+  something like a decade*. The first half is right — a typical record is **425
+  bytes**. The second is not: that is a megabyte in **49 days** and **74 MiB in
+  a decade**. The tails: every call answering with a
+  [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)-sized
+  `422` is **824 MiB** per decade, and every field at its cap is 2.7 GiB.
+  **A number reasoned about rather than read off the object is the class
+  [CLAUDE.md](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)
+  names**, and this paragraph has now been caught by it twice: the original
+  sentence sat here from 2026-08-11 until the box that builds the file measured
+  it, and the rewrite's own `422` figure was reasoned from D217's raw 4859 bytes
+  when the log can never hold that — `text()` cuts at `FREE_TEXT` and appends a
+  23-byte marker, so 4119 is the ceiling (`k8s-admin`, same day, on the
+  paragraph written to fix exactly this).
+
+  **And *74 MiB is nothing* is not the argument that should be leaned on.** The
+  one that survives an arithmetic error is the operator's: **the tail is
+  unreachable without a symptom met long before the disk is.** Gigabytes need
+  essentially every mutation to fail validation for ten years, on a tool whose
+  whole write surface is scale/restart/delete — which the operator meets as a
+  wall of refusals on day one, not as a full disk in 2036. The file also lives
+  in `~/.local/state`, which is where a person actually looks.
 
 ### D22 — a confirmation can outlive the thing it confirms
 
@@ -977,13 +1026,24 @@ The watch is still running behind the modal, so the dialog does not need to
 poll anything:
 
 - The dialog holds the object's `uid` **and** the `resourceVersion` it was
-  opened with.
+  opened with. (**The `resourceVersion` half is withdrawn** — see the `Changed`
+  bullet below and D228.)
 - **Gone:** the dialog becomes *"this pod is already gone — something else
   removed it"* and the confirm button dies. Deleting by name what the user
   believes is the object they selected is how the wrong pod gets deleted.
 - **Changed:** it says so and offers a re-read. This is the 409 mechanic from
   [REQUIREMENTS § Conflict handling](REQUIREMENTS.md#write-operations-new--the-reversal), moved to
   where the user can still do something about it cheaply.
+  **This bullet named the wrong field and is superseded by
+  [D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)
+  (2026-09-05).** `metadata.resourceVersion` moves on every write to the object,
+  a `status` write by its own controller included — measured at **20 writes in
+  99.4 s, median gap 2.45 s**, on a `CrashLoopBackOff` Deployment whose spec
+  never moved. Keyed on it, this modal kills its own confirm button every couple
+  of seconds on precisely the object the dialog was opened for. **The `Changed`
+  state is retired rather than re-keyed**, and the dialog holds the `uid` alone:
+  `Gone` — *is this still the object you selected* — was always the hazard this
+  entry was written for, and it is untouched.
 
 ### D23 — permissions are discovered by failing, and that is backwards
 
@@ -12437,6 +12497,27 @@ functions for the same reason and are likewise unbanned. They **build** a reques
 rather than send one, so they fall under the residual named above — reaching a
 server still needs `Client` — and they are behind the `kubelet-debug` feature,
 which is off.
+**Correction, 2026-09-03: "No list closes that" is false, and it is left visible
+here rather than restated.** `k8s-admin`, reviewing Phase 7's first box, measured
+that two entries close it —
+`http::Request::method_mut` and `http::request::Builder::method`, the only two
+ways a verb reaches a hand-built request. Red on the probe, and green on all
+three real call sites (`k8s.rs:3079`, `6526`, `8157`); the field route is not an
+escape, because rebuilding `parts` needs `http::Request::from_parts`, and `http`
+is not a direct dependency nor re-exported by kube
+([reports/2026-09-03](reports/2026-09-03-invariant-1-containment-operator-review.md)).
+**What stays true is everything the ruling rests on** — `Client` is
+verb-agnostic, Phase 5 needs it outside `ops.rs` for a read, and the lint is
+defence in depth rather than the guarantee. What was wrong was the claim that the
+door cannot be narrowed at all, and that claim is why nobody looked. Not acted on
+in the box that found it: `scripts/write-guard.py` requires `clippy.toml` to name
+*exactly* the derived set, so a hand-added ban is unrepresentable there, and
+taking it means changing that guard's contract in the same turn as landing it.
+The open ruling — the two entries, and
+[PRIOR-ART § G2](PRIOR-ART.md#g-destructive-actions)'s **immune** tag, which
+reads one layer weaker for a `Client::send` call site than for `Api` — is in
+[`backlog.md`](backlog.md).
+
 
 ### D143 — the eleventh crate, and why the list of ten was wrong rather than the task (2026-08-22)
 
@@ -18055,3 +18136,2552 @@ push and the phase-close PR**, so a seven-day breakage can only surface as a mer
 blocker. That is [`backlog.md`](backlog.md)'s, because a new gate is not something
 to inject into a phase that is closing.
 
+### D212 — an allowed lint never fires, so clippy cannot report the file that turns it off, and the switch was in the justfile (2026-09-03)
+
+Phase 7's first box is two clauses: `ops.rs` carries the single
+`#![allow(clippy::disallowed_methods)]`, and *CI's containment check now expects
+exactly this file*. The first clause is nine lines. The second is the box.
+
+**Why a guard at all, when clippy is the containment.**
+[D141](#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
+gave the matching to clippy because clippy resolves paths and a grep does not.
+But a lint that is *allowed* never fires, so the one thing clippy structurally
+cannot report is the file that switched it off. `write-guard.py` already owned
+the half proving the ban list is complete against the kube in `Cargo.lock`; this
+is the half proving the exception to it is singular. It went in that file and not
+a new one — a second script for the second half of one invariant is the drift
+`scripts/guards.sh`'s own header warns about, and `guards.sh` needed no new line.
+
+**The set of things that silence it is derived, not pinned, because six of the
+fourteen ways contain no occurrence of the lint's name.** Measured off
+`clippy-driver -W help`: `clippy::disallowed-methods` is a member of
+`clippy::style`, which is a member of `clippy::all`. So `#![allow(clippy::all)]`,
+`#![allow(clippy::style)]` and `#![allow(warnings)]` each turn the containment
+off with the string `disallowed_methods` nowhere in the file — and a crate-level
+`#![allow(warnings)]` beats the command line's `-D warnings`. `tester` fed
+fourteen shapes to a throwaway crate and watched clippy accept eleven, including
+`#[expect(…)]`, an attribute inside a `#[path]` child module, a `[lints.clippy]`
+table in `Cargo.toml`, and a `[build] rustflags` line in `.cargo/config.toml`. A
+guard grepping the literal name catches eight of fourteen. The hyphen spelling
+`clippy::disallowed-methods` **does not compile** inside an attribute, so the
+guard returns the underscore spelling only — named rather than dropped.
+
+**The blocker, and it is the reason this entry exists.** The first version's
+docstring named its ceilings honestly and one of them was false: *"`RUSTFLAGS` in
+the environment … No committed file can rule them out."* `RUSTFLAGS` is set in
+exactly two places in this repo and both are committed —
+`justfile:14` and `.github/workflows/ci.yml:17`, the second job-wide, so it
+covers the `bash scripts/guards.sh` step that runs the guard. `k8s-admin`
+measured `-D warnings -A clippy::disallowed_methods` in the justfile line, with
+`Api::delete` sitting in `k8s.rs`: clippy exit 0, the guard exit 0, the ban gone.
+The guard's own off-switch was in the file CI runs it from. **This is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+wearing the one coat that reads as diligence** — a *named ceiling* is a claim
+about the object like any other, and this one was reasoned from what RUSTFLAGS
+is rather than measured against where it is set. A ceiling paragraph now needs
+the same grep as a number does.
+
+**Two ceilings are accepted on purpose, and the second is a choice about which
+direction to be wrong in.** The ambient environment, and a `.cargo/config.toml`
+in a parent directory or `$CARGO_HOME`, genuinely cannot be read out of a
+committed file. And the scan does **not** strip comments or string literals, so
+a doc comment quoting the attribute counts as a second silencer: stripping needs
+string-awareness, and getting it wrong loses a real attribute after a `//`
+inside a string — a false positive is loud, a hole is not. The cost is paid in
+the messages, which now say the check does not parse Rust, because the file most
+likely to trip it is `ops.rs`, whose doc comment is *about* the attribute.
+
+**`ops.rs` has no code, so the product does not exercise the attribute — and the
+containment is still not unproven.** Four runs, each one clippy's verdict rather
+than an author's claim: the call inside `ops.rs` is green, the same call in
+`analysis.rs` is red, both removed is green, and — the run that isolates the
+attribute rather than the file — the call back inside `ops.rs` with the
+attribute deleted is red. `dev-core` added the fourth itself, having noticed the
+first three prove only that `ops.rs` is treated differently. Nothing from it was
+committed. The one thing owed before the next box lands on this: the first real
+mutation gets that red/green pair against product code rather than an appended
+probe, which is the moment `ops.rs` stops being an empty announcement.
+
+### D213 — the write path is the fifth consumer of `Fault` and it cannot see the two answers it meets most (2026-09-04)
+
+Phase 7's first box put the first real code in `ops.rs`, and the operator review
+and `tester` independently measured the same thing through it:
+
+```
+--- code 409 reason Conflict     -> Some(Unanswered)
+--- code 422 reason Invalid      -> Some(Unanswered)
+--- code 401 reason Unauthorized -> Some(Expired)
+```
+
+`answer()` has arms for `400 401 403 404` and a `reason` fallback for the same
+four. A **409 Conflict** and a **422 Invalid** match neither and come out
+[`Fault::Unanswered`](#) — *nothing usable came back*, which is a sentence about
+the network. Those are the two answers the write path meets most: a rejected
+dry-run is a 422, a lost race is a 409.
+
+**This is the third occurrence of one defect, and `answer()`'s own doc comment
+records the second.** `400` had no arm until 2026-08-30 and fell to
+`Unanswered` — *a request this side got wrong, reported as a network that
+answered nothing* — filed then as `PRIOR-ART § C1` in the very function written
+to close it. The class is not "an arm is missing". The class is **a fallback
+that is a claim about the cluster**, so every code without an arm silently
+accuses the network.
+
+**Why it was not caught by Phase 6's freeze check.**
+[D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03)
+narrowed the freeze to what was actually checked, and what was checked was
+`k8s.rs`'s **four read consumers**. The write path was not one of them, because
+it did not exist. A freeze verified against every consumer that exists is still
+only verified against the consumers that exist — which is not a flaw in D209's
+check, it is the reason a freeze gets exceptions rather than absolutes.
+
+**The three ways to keep `k8s.rs` closed were each worse than opening it.**
+
+- **`ops.rs` reads `status.code` itself.** A second classifier — the thing
+  § WHAT WENT WRONG deleted `why()` by name to prevent, and the defect class
+  [CLAUDE.md § step 6](CLAUDE.md) says this repo has paid most for: two callers
+  reading one object and disagreeing about what it meant.
+- **Box 3693 string-matches `said`.** Classifying on the server's English.
+- **Live without it.** Box 3693 must choose between *offer a re-read* and *this
+  is a network failure*. It cannot, and neither can the verdict sentence the
+  audit log writes.
+
+**The ruling: `k8s.rs` opens for exactly two arms in `answer()`, and that edit
+is `dev-core`'s.**
+
+- **`422` and `reason::INVALID` → `Fault::Rejected`, no new variant.** A 422 is
+  `Rejected`'s own definition — the server understood the request and will not
+  act on it; what is wrong is the request k8rs made. Routing it to `Unanswered`
+  is the same `400` defect one code along.
+- **`409` and `reason::CONFLICT` → `Fault::Conflict`, a new variant.** This one
+  cannot borrow `Rejected`: a 409 is *not* a bad request. The request was fine
+  and the object moved underneath it, and box 3693 branches on precisely that
+  difference. The enum's counted-variants doc moves with it.
+
+Both constants are upstream in `kube-core-4.2.0/src/response.rs` (`CONFLICT`
+:283, `INVALID` :301) and `use kube::core::response::reason` is already in the
+file, so the edit adds no import and no dependency.
+
+**One more line opens, and it makes `ops.rs` shorter rather than longer.**
+`text()` — the strip that substitutes *one space* for a removed whitespace
+character and bounds the result — is private, so the first draft of `ops.rs`
+spelled its own `clean()` that **removed** instead. Measured on the exact string
+`screens/dialogs.md:39` draws: `start a\nreplacement` came out `areplacement`,
+and two object names fused into `deployment/webdeployment/db`. `text`'s own doc
+already says why — *a boundary deleted glues two words into one* — and
+[D154](#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22)
+ruled this predicate has one spelling in one place. The second copy diverged on
+*disposal* within one box of the first being written, which is that ruling's
+other half arriving late. `text` becomes `pub(crate)`; `ops.rs` deletes `clean`
+and inherits the bounding it did not have. **A visibility change with no
+behaviour change, that removes a duplicate rather than adding a caller.**
+
+**`IDENTIFIER` and `FREE_TEXT` go with it, and that is beyond this entry's first
+letter.** `text(&mut String, cap)` cannot be called without a cap, so naming
+`text` alone would have left `ops.rs` spelling D146's two numbers a second
+time — a duplicated *bound*, which is the thing this exception was opened to
+avoid one level down. `dev-core` took the visibility and said out loud that it
+wanted a line here, which is the report item that exists for exactly this.
+
+**Bounded, named and owned, which is what makes it a plan and not a break.**
+Nothing else in `k8s.rs` opens: two arms in `answer()`, the `Conflict` variant
+they need with its `standing()` arm, and `pub(crate)` on `text` and the two caps
+it cannot be called without. `main.rs`'s `because()` is an exhaustive match on
+`Fault` and does not compile without an arm for the new variant, so that one arm
+is part of the same edit rather than a second exception — `main.rs` is
+`dev-core`'s own file until Phase 12
+([D34](#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12))
+and no freeze is crossed by it. This is
+[CLAUDE.md § Architecture workflow](CLAUDE.md#architecture-workflow)'s *if a
+later step needs a frozen file changed, the plan is wrong: stop, fix the order,
+record it* — D209 did that shape **in advance**, and this one is doing it **on
+discovery**, which is the only difference between them and is why it is written
+here before the code is touched rather than after.
+
+### D214 — the mutation contract: four lies a record could tell, and the three operations that have no dry-run (2026-09-04)
+
+Phase 7's second box put the first real code in `ops.rs`: one function every
+write goes through, sequencing *consequence text → dry-run → confirm → call →
+audit*. It took two review rounds and a third pass by the PM, and what all three
+found was one class of defect — **a record that says something the code cannot
+know**. Invariant 4 says neither record may lie; four of them did.
+
+**1. The verdict was keyed on which branch fired, not on what the fault was.**
+A dead socket during the dry-run logged *"the server refused the dry-run, so the
+change was never sent"*. The server refused nothing; it was not there. The same
+line printed for `Expired` (the login ran out), `BadEntry` (a
+`client-certificate` path that had moved) and `NoCredential` (the login program
+exited 1) — three failures **on the operator's own machine**, recorded as the
+cluster saying no. That is `PRIOR-ART § C1` in the first function of the write
+path, and § WHAT WENT WRONG deleted a second classifier (`why()`) by name to
+prevent it. The sentence is now selected off the [`Fault`] through `in_words`,
+one phrase per fault, and `answered()` splits a failed real call into *nothing
+was changed* (the cluster answered) from *k8rs does not know whether the change
+was made* (nothing usable came back). **A broken pipe after the request went out
+is the case that matters**: the old line asserted the call failed, which is the
+one thing k8rs cannot see from there.
+
+**2. `ask -> bool` collapsed three endings into one, and one of them accused the
+operator.** [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms) gives
+the dialog three ways to end without a call — cancelled, the object is **gone**,
+the object **changed**. All three came back `false` and all three logged *nobody
+confirmed it*. So: the ReplicaSet replaces the pod while its name is being
+typed, k8rs correctly refuses to delete whatever now holds that name, and the
+post-incident review reads *someone opened a delete dialog on prod and backed
+out*. `Answer { Confirmed, Cancelled, Gone, Changed }`, one outcome and one
+sentence each. `Changed` is also what box 3693's re-read returns through, so it
+is not speculative surface.
+
+**3. The dry-run verdict was missing from the record on the two outcomes that
+carry it most.** [D8](#d8--invariant-4-was-not-literally-true) requires *verb,
+path, resourceVersion sent, dry-run verdict, result* — unconditionally. Measured
+by `tester`: on `Done` and on `Cancelled` the word "dry-run" appeared nowhere.
+It showed up on the failures only because those sentences happened to mention
+it. *Did this write get checked first?* is the one question the audit log exists
+to answer **about the contract itself**, and it was unanswerable on 95% of the
+lines. **And the test locked it in**: the expected string was matched to what
+the code printed rather than derived from D8, so it would have gone green on any
+rewording forever.
+
+**4. `nothing was sent` was false on the one arm it was printed from.** Found by
+the PM's step-7 pass over the landed tree, after both agents' rounds. `NotSent`
+is reachable only through the `Err` of the dry-run, which only runs when the
+operation is checkable — so **a `dryRun=All` had always gone out** by the time
+that sentence was written. An operator cross-referencing k8rs's log against the
+apiserver's own finds the request in one and a denial that it happened in the
+other. It is *the change* that was never sent, and the word is now `changed`
+wherever `sent` was wrong — including `screens/dialogs.md`, which carried the
+same claim twice in prose the code had made false.
+
+**Three operations have no dry-run, and the contract has to be able to say so.**
+**— The premise of this paragraph was falsified the next day and the seam it
+argues for survived on a different reason
+([D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
+Read it there, not here: the API dry-runs all three, and what takes no params is
+one kube helper.** The paragraph is left standing rather than rewritten because
+it is what the box was built against, and because the shape of the error — a
+client signature read correctly and concluded from wrongly — is the thing worth
+being able to find again. The rest of it still holds:
+the first draft argued an opt-out "would be a hole with nothing behind it". Four
+things disagree, and the first was measured: `Api::restart(&self, name)` takes
+no params argument at all (`kube-client-4.2.0/src/api/util/mod.rs:19`), as do
+`cordon` and `uncordon`; [§ Operations](#operations--the-full-admin-surface)
+gives `restart`, `cordon`, `delete` and `drain` the guard *confirm* where only
+`scale`, `undo` and `edit` are *confirm + dry-run*; invariant 2 says `dryRun=All`
+**where the API supports it**; and `todo.md`'s own next box says *wherever
+supported*. `Mutation::checkable` cuts the seam in the signature that freezes,
+and the audit line records that no check was run rather than omitting the
+field — D8's verdict recorded honestly. **The sentence it recorded is not the
+one it records now**: that wording blamed the cluster, and
+[D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)
+replaced it with *"k8rs did not check this one with the cluster first"*, which
+is true whatever the reason.
+
+**A cluster can also refuse every dry-run there is, and that is accepted rather
+than designed around.** A `ValidatingWebhookConfiguration` matching the resource
+with `sideEffects: Some | Unknown` fails `dryRun=All` for a fully authorised
+user (`tmp/k8s/api-concepts.txt:743`). There is no flag for it. What makes it
+diagnosable is defect 1's fix: the fault is honest and the server's own
+*"admission webhook … does not support dry run"* travels beside it.
+
+**The ordering: three documents were right and the code was wrong.** Invariant 2
+("confirmation dialog stating the consequence → `dryRun=All`"),
+`screens/dialogs.md` rule 3 ("the verdict is shown *before* the button is live")
+and this box ("consequence text → dry-run → confirm callback") read as three
+different orders and are one: **dialog opens pending → dry-run → verdict into
+the open dialog → button lives → answer → real call → audit.** Invariant 2 is
+the dialog being *shown* first, rule 3 is the verdict landing *in* it, the box
+is the answer *coming back*. No document changed. The code did: `perform` had
+awaited the dry-run to completion before calling `ask`, so **nothing was on
+screen at all** while that request was in flight — the frozen keypress
+[D20](#d20--a-call-that-takes-time-is-a-state-and-there-was-none) refuses.
+
+`show` is `FnOnce(&Shown)` and **synchronous on purpose**: a future here lets an
+implementation park the dialog behind an `await` and rebuild the bug. `Checked`
+has private fields and is constructible only inside `ops.rs`, only after the
+check was answered — so **rule 3 is structural rather than remembered**: an
+operation cannot enable its confirm button without a passing check, because it
+cannot name the type that enables it. Its `Response` is generic because `edit`
+in v0.4 diffs the object the dry-run returned and that *is* its confirmation;
+the channel exists for the verdict anyway, and `ops.rs` freezes at the end of
+this phase.
+
+**`esc` is inert until the verdict arrives** (PM ruling). The alternative was a
+`Drop` guard landing a *"k8rs stopped before the call returned"* line, and that
+would be a record of something that did not happen. Drawing the pending state is
+`screens/dialogs.md`'s and is boxed for Phase 11.
+
+**D21 governs the attempt line and not the result line, and conflating them
+threw away the fact an operator most needs.** A result that cannot be written
+does not un-make a change that has already been made. `Performed { outcome,
+recorded }`: `outcome: None` is D21's pre-flight refusal — nothing was sent,
+nobody was asked — while `Some(Done)` beside `recorded: false` is *the change
+was made and k8rs could not write it down*, which is more honest than *go and
+look* because k8rs holds that fact at the moment the operator is least able to
+go and get it.
+
+**Two things this box did not take, both recorded against box 3696** — the
+audit log's own file, which is the box that owns what the log records. The
+result line names the attempt it belongs to (two k8rs against two clusters share
+one log, and `attempt(A) attempt(B) result(A) result(B)` made B's result read as
+A's), but it carries **no landing time**, so *how long did it take* is still
+unanswerable — `perform` reads the clock once. And `write_line`'s one
+`write_all` + flush is atomic per record only while a record fits one syscall,
+which a 4 KB server message need not. Both are one line in the box that opens
+the file; neither is worth a signature change while `ops.rs` is still open.
+
+### D215 — the API dry-runs all three: it was kube's convenience helper that did not, and the annotation it writes is not kubectl's (2026-09-04)
+
+[D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)
+said *three operations have no dry-run* and cited `Api::restart(&self, name)`
+taking no params argument. **The citation is true and the conclusion drawn from
+it is false**, measured by `k8s-admin` against a real `kubectl` and a recording
+API server:
+
+```
+$ kubectl cordon n1 --dry-run=server
+PATCH /api/v1/nodes/n1?dryRun=All   body {"spec":{"unschedulable":true}}
+$ kubectl patch deployment web -n payments --dry-run=server -p '<restartedAt>'
+PATCH /apis/apps/v1/namespaces/payments/deployments/web?dryRun=All
+```
+
+`restart`, `cordon` and `uncordon` are ordinary PATCHes on ordinary paths and the
+API dry-runs every one of them. What cannot carry the parameter is
+`kube_core::util::Request::restart` / `cordon` / `uncordon`, which build their own
+`PatchParams::default()` internally (`kube-core-4.2.0/src/util.rs:21-60`). **The
+API's capability and one client helper's signature are not the same fact, and
+D214 substituted the second for the first.** This is
+[CLAUDE.md](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)'s
+*a claim reasoned from a definition instead of measured against the object* — the
+quiet half of it, prose rather than a number — committed by the PM, carried
+through a dev round and past a first operator review, and caught only when
+somebody put the question to `kubectl` instead of to a type signature.
+
+**A second thing the same helper gets wrong, and this one reaches the operator.**
+kube writes `kube.kubernetes.io/restartedAt`; `kubectl rollout restart` writes
+`kubectl.kubernetes.io/restartedAt` (`util.rs:28`, measured against kubectl
+v1.36.3). Different key, different pod template. So: an operator restarts
+`deployment/web` from k8rs, the command log teaches them
+`kubectl rollout restart deployment/web -n payments`, they run it five minutes
+later — and get a **second rollout**, because the template now differs by an
+annotation kubectl has never seen. Then they diff the Deployment and find a
+`kube.kubernetes.io/` key nothing in their cluster wrote. Invariant 4 says the
+command log shows the *equivalent* command; that one is not equivalent, and
+`todo.md`'s restart box said to use the helper.
+
+**The ruling, three parts.**
+
+- **`Mutation::checkable` stays, and its reason is rewritten.** The seam is
+  right — *whether this operation has a preflight* is a real question — but
+  *the API cannot* was never the answer. A genuine reason exists and it is
+  finding 3 below, not a missing parameter.
+- **Which operations are checkable belongs to each operation's own box**
+  (`scale` 3687, `restart` 3689, `delete` 3692), not to the box that builds the
+  parameters. What this box owes is to stop asserting the false reason.
+- **`restart` builds its patch by hand** rather than calling the helper, which
+  buys the dry-run and the right annotation key in the same six lines. That is
+  `todo.md:3689`'s work and its box now carries the premise.
+
+**Finding 3, which is the real reason a `delete` might decline a preflight.**
+`kubectl delete --dry-run=server` and a real `kubectl delete` produce the
+**identical request line** — the marker is in the body, because `DeleteOptions`
+is the delete verb's body parameter. So opening a delete dialog on `prod` sends a
+real `DELETE` to the apiserver before anyone has typed a name, and in the
+cluster's own audit record at `Metadata` level a cancelled dialog is
+indistinguishable from the delete that happened. The distinguishing field is
+`requestObject.dryRun`, at `Request` level or above. That is a cost worth
+weighing against catching an admission rejection early, and it is the delete
+box's to weigh — recorded here so it is weighed rather than inherited.
+
+**`post()` is removed rather than kept for the freeze.** It was built for a v0.2
+eviction with no caller, on the argument that `ops.rs` freezes at phase end.
+Three measured things dissolve that argument: kube's eviction body spells the
+field `delete_options` where the API's is `deleteOptions`
+(`kube-core-4.2.0/src/subresource.rs:119`), so a drain setting a grace period
+would silently not set one; `PostParams` has no `field_validation` field at all
+(`params.rs:535`), so the *next box in this phase* cannot use it; and
+[`backlog.md`](backlog.md) already records that drain does not fit `perform`, so
+`ops.rs` reopens for it regardless and `post()` saves nothing. **A freeze
+argument only rescues code that the thing after the freeze could actually use.**
+
+**And what `Pass` still does not close, recorded because review is the only thing
+holding it.** `Mutation::checkable` is a free `bool` an operation asserts about
+itself. Write `restart` with `checkable: true` — a plausible slip, since it *is*
+a patch — and its closure ignores the `Pass` because the helper takes none;
+`perform` then calls it twice and the Deployment gets `restartedAt` set twice a
+second apart. **Two rollouts, and both records say one checked change.** `Pass`
+cannot see this. `scripts/write-guard.py` can, it already reads `ops.rs` by name,
+and `scripts/` does not freeze — which is where it is boxed.
+
+### D216 — the dry-run goes in a different place per verb, and the checkout that destroyed a box (2026-09-04)
+
+`todo.md:3668` asked for *server-side `dryRun=All` wherever supported*. Half of
+it was already built — the contract aborts a rejected check and surfaces the
+server's own sentence — so what the box actually bought was closing `tester`'s
+F7: `Call: Fn(bool)` handed an operation a flag it was **trusted** to turn into
+`?dryRun=All`, and a closure that ignored it and sent the real call twice
+satisfied every test in the file. `Pass` puts the bool behind a private field, so
+the only thing an operation can do with it is ask for the parameters of the call
+it is about to make. One conversion from *which pass* to *what goes on the wire*,
+not one per operation.
+
+**Two shapes, not three.** `post()` was written for a v0.2 eviction with no
+caller, on the argument that `ops.rs` freezes at phase end. Three measured facts
+dissolved it and it was deleted: kube spells the eviction's field
+`delete_options` where the API's is `deleteOptions`
+(`kube-core-4.2.0/src/subresource.rs:120`), so a drain setting a grace period
+silently sets none; `PostParams` has no `field_validation` at all, so the *next
+box in this phase* could not use it; and `backlog.md` already records that drain
+does not fit `perform`, so `ops.rs` reopens for it regardless. **A freeze
+argument only rescues code the thing after the freeze could actually use.**
+
+**Where the marker rides is not the same for every verb, and this is the fact
+worth carrying out of the box.** Measured three independent ways — a scratch
+probe over the vendored crate, kube's own `delete_param_serialize` unit test, and
+real `kubectl` v1.36.3 against a recording HTTP server:
+
+```
+PATCH  …/deployments/web/scale?&dryRun=All
+DELETE …/deployments/web?                    body {"dryRun":["All"]}
+```
+
+`DeleteParams` has no `populate_qp`; `Request::delete` builds an empty query and
+serialises the struct into the **body**, because `DeleteOptions` is the delete
+verb's body parameter. So **a reviewer grepping a delete's URL for `dryRun` finds
+nothing and is right to worry** — and a SIEM rule keyed on `requestURI` sees
+every scale dialog and is blind to every delete one. That went into
+[docs/security.md § Write safety](docs/security.md#write-safety-model), with the
+other half of it: authorization for a dry-run is identical to the real call
+(`api-concepts.txt:759`), so the preflight widens no grant. One spelling detail
+belongs with it, because a reviewer will grep for it: kube emits `?&dryRun=All`,
+with an empty leading pair.
+
+**The false framing had five copies and the brief named two.** D214's *the API
+has no dry-run for these three* (falsified by
+[D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04))
+had propagated into `Pass::patch`'s doc, `Mutation::checkable`'s doc, the region
+comment, `Outcome::Done`'s doc and `perform`'s doc. `dev-core` found the last
+three itself and rewrote them rather than fixing only what was asked. That is the
+rule working: **a surviving copy is the stale one, and it is never the one that
+gets fixed later.** The audit constant went with them — *"the cluster has no way
+to check this one first"* blamed the cluster for a limitation it does not have,
+and is now *"k8rs did not check this one with the cluster first"*, which is true
+whatever the reason.
+
+**An assertion that accuses the code of the wrong defect is a drift trap, and
+`tester` measured it instead of predicting it.** The delete-body test asserted
+byte equality with `{"dryRun":["All"]}`. Adding the `propagationPolicy:
+Background` that box 3692 will want — dry-run wiring untouched and still
+correct — failed with *"the body does not carry it"* when the body plainly did,
+and the obvious repair is to update the literal to match the output. It is
+containment now (`contains` on the check pass, `!contains("dryRun")` on the real
+one), which still catches an inverted or dead `Pass::delete()` — both proven red.
+
+**And a review agent destroyed the box.** `tester` ran `git checkout -- .` to
+clean a scratch file and took the whole uncommitted working tree with it, then
+reconstructed both files from a `git diff` it had already captured and said so
+first, before its findings — including what it could *not* vouch for, since
+`rustfmt` and the tests cannot see a typo in a doc comment. **The PM had an
+independent pre-incident copy**, having read the region in full during its own
+review, and it matched byte for byte; `git diff` was four hunks touching nothing
+else, so the rest was git's own committed bytes. The recovery was sound and the
+honesty about its limits is what made it verifiable at all. **The rule it cost
+nothing to have and everything to lack: an agent never runs a destructive git
+command on a tree it does not own** — the working tree belongs to the PM, and a
+reviewer that needs a clean tree copies it (`k8s-admin` and `dev-core` both do
+exactly that, with their own `CARGO_TARGET_DIR`).
+
+### D217 — `Strict` on every write that can carry it, and the 422 that hands back the object you sent (2026-09-04)
+
+**The ruling: `fieldValidation=Strict` goes on every write whose parameters can
+carry it, unconditionally.** In practice that is `Pass::patch()` and only it —
+`DeleteParams` has no such field and needs none, because a delete sends
+`DeleteOptions` rather than an object, and there is nothing to validate.
+
+**Why not per-operation.** The alternative was opt-in where a rejection is
+recoverable, which is the *trusted to follow a checklist* shape `Checked`
+([D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04))
+and `Pass`
+([D216](#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04))
+were each built to remove. And the thing it prevents is invariant 4 broken **by
+the server**. Measured by the PM against the four-node `k8rs` kind cluster,
+server v1.36.1, on the `scale` subresource with an unknown field:
+
+```
+?dryRun=All&fieldValidation=Warn     → HTTP 200, a Scale object, no message
+?dryRun=All&fieldValidation=Strict   → HTTP 422, reason Invalid
+```
+
+`Warn` is the server's default. So without this line the dry-run passes, the real
+call passes, and the audit log records **a successful mutation that changed
+nothing** — `kubectl` shows it as `scale.autoscaling/healthy-deploy patched (no
+change)` with exit 0 and the only objection in a `Warning:` header kube does not
+surface. That is [D99](#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)'s
+2026-08-15 measurement, re-measured live before being acted on.
+
+**The "behaviour change on a cluster that today accepts the call" objection
+fails, and it fails for a better reason than the one first given.** k8rs never
+serialises a typed object into a patch body: `scale` sends a hand-built
+`{"spec":{"replicas":N}}` and `restart` a hand-built annotation patch. Strict
+rejects *unknown and duplicate* fields, so a hand-built minimal patch cannot trip
+it — which means Strict can only fire on a k8rs bug, or, for `edit`, on YAML the
+operator typed, where firing is exactly what is wanted.
+
+**The load-bearing step in that argument is one the PM did not state, and
+`k8s-admin` supplied it**: the merge-patch handler begins by re-encoding the
+*current* object with the apiserver's own encoder (`patch.go:323-325`), and only
+the decode half of the codec is strict. So the object the strict decode sees is
+the server's own serialization of its own typed struct — **a stored field cannot
+trip Strict on a built-in kind. Only the patch body can introduce one.** The
+duplicate half is narrower still: `serde_json` cannot emit a duplicate key.
+**So the boundary, stated so it can be defended later: this ruling holds exactly
+while every patch body is built by hand from literal field names.** Nothing in
+`src/` builds one any other way today, and the finding below is what happens when
+that stops being true.
+
+**k8rs is stricter than the command it teaches, and that is worth knowing rather
+than hiding.** Measured: no `kubectl patch` of any kind sends `fieldValidation` —
+not `scale`, not `rollout restart`, not `--type=merge`, on either pass. Harmless
+while the bodies are hand-built; at `edit` it is the entire point.
+
+**And the box's *second* question has a stronger answer than "it is moot".** It
+asked where a `Warning: 299` header goes when validation is *not* strict. There
+is now no non-strict patch — but the reason it cannot be routed is deeper:
+**kube reads the HTTP `Warning` header nowhere, at any layer.** Measured by
+grep across `kube-client` and `kube-core`: the only matches are the webhook
+*response* type and `ValidationDirective::Warn`'s own doc. So it is not that
+kube's `Api` methods fail to surface it — kube discards it before k8rs exists.
+That closes the question and it also means `PRIOR-ART § C3` is a gap whose
+mechanism can never be *surface what kube gives us*.
+
+**It rides on both passes, and the reason is `Mutation::checkable` rather than
+the obvious one.** Check and change send the same body, so a passing Strict check
+implies a passing Strict change — the first draft's justification did not hold.
+What does: an operation that declines the preflight has **no check pass at all**,
+and a `Strict` riding only on `DRY_RUN` would leave those writes validated by
+nothing (`dev-core`'s own second pass).
+
+## The 422 hands back the object you sent, and that is a live security finding for two later boxes
+
+The box's original sentence — *the `422` body echoes the whole object, every
+label, annotation and `managedFields` entry* — is **right**, and the PM's
+counter-hypothesis was wrong. The API reference describes Strict as returning
+*400 Bad Request* with a message naming *"all the unknown or duplicate fields"*
+(`tmp/k8s/api-concepts.txt:709`); that describes the create/update path. The
+**merge-patch** path goes through `NewInvalid` and puts the whole patched object
+in `Status.message`, which is the field `k8s::said` reads. **Three sites do this and the one k8rs reaches is
+`patch.go:353`** — the strict decode of the merged object, not the duplicate-key
+branch at `:362` (`k8s-admin`'s refinement; all three pass the same
+`patchedObjJS`, so the conclusion is unchanged). Measured, same cluster:
+
+| patched | HTTP | `Status.message` | carries |
+|---|---|---|---|
+| `scale` subresource | 422 | **681 bytes** | an `autoscaling/v1 Scale` — name, namespace, uid, resourceVersion, replicas, `managedFields` |
+| the **Deployment** itself | 422 | **4859 bytes** | `managedFields`, `annotations`, `containers`, `image` |
+
+**This box is safe and the two after it are not.** `Pass::patch()` has **no
+product caller at all yet** — `ops.rs` is the contract and nothing else, and the
+operations are three boxes down — so *safe* here means the shape the next caller
+will have: `scale` patches the `scale` subresource, its object is a `Scale`, and
+681 bytes sits inside `FREE_TEXT` (4096) with nothing sensitive in it — so `k8s::said`'s existing strip
+and bound are sufficient and **no second sanitizer was added**. But `restart`
+(`todo.md` 3689) and v0.4's `edit` patch the **workload object**, and the
+measurement above is a *trivial* test Deployment with no `env` at all: it already
+overruns the bound at 4859 bytes and already carries annotations and container
+specs. A real Deployment carries `spec.template.spec.containers[].env[].value`.
+
+**Truncation is not redaction.** `text()` cuts at 4096 and says it cut; the first
+4096 bytes still hold whatever the serialiser put there first. So this is a
+second, non-obvious path into the
+[Security gate](CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions)'s
+*environment variable values are never displayed … never enter the command log,
+the audit log* — one that arrives from the **server's error message** rather than
+from an object k8rs chose to render, which is why nobody had it. Boxes 3689 and
+`edit` own it, and their boxes now say so.
+
+*(No cluster object is reproduced here. The measurement is a request k8rs built
+and the shape of the answer — byte counts and field names, not values — which is
+what keeps it on the PM's side of
+[D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)'s
+split: the write into the fixture cluster is the PM's to run, and a
+`--dry-run=server` patch mutated nothing — `healthy-deploy` came back at the same
+`resourceVersion` the 422 had echoed.)*
+
+### D218 — the headless driver: five divergences from kubectl, and why piping a word is not `--yes` (2026-09-04)
+
+The binary's **first subcommand** — `k8rs ops <operation> <kind>/<name> [<value>] -n <namespace>` — exists so every write can be proven headlessly before a key is bound to one, and it disappears at Phase 12
+([D14](#d14--three-plan-corrections) item 2 pre-authorised it, so no `clap` threshold is crossed). It builds the harness around `perform` and wires no operation: the argument surface, the `show` and `ask` callbacks all three operations will share, and a seam. **Most of the box is its refusals**, which is the point — they are what `just e2e` scripts against.
+
+**The confirmation is one line on stdin per invocation, and there is no flag that means yes.** `yes` for a press-confirm, the object's own name for a delete. `--yes` was refused because it makes every scripted invocation an implicit write and one template edit converts every ops line in a repo.
+
+**The question that deserves a straight answer is whether piping a constant string is meaningfully different from `--yes`, and the honest answer is: for two of the three, barely — but the default is what matters.** `k8s-admin` put it plainly and it is worth keeping: `echo yes | k8rs ops restart …` *is* `--yes` with more typing, and a shell loop over `kubectl get deploy -o name` is a bulk mutation this design does not stop and should not — that is the operator's shell, and invariant 2's *bulk mutation does not exist* is about what k8rs **offers**. What the design does buy is threefold, and only the third is about typing:
+
+- **The unattended default is no.** `< /dev/null`, a CI step with no stdin, cron — all EOF, all `Cancelled`. `--yes` has the opposite default the moment it enters a template.
+- **`delete`'s token is the object's own name**, so a script cannot set one answer for every delete: `$NAME` has to agree on both sides of the pipe, and a templating mistake cancels instead of deleting.
+- **`yes | k8rs ops restart …` does not confirm**, because coreutils `yes` emits `y` and `y` is `Cancelled`. That is the single most likely accidental bulk-confirm and it fails closed. Accidental, and kept deliberately.
+
+**What `just e2e` therefore owes is a negative assertion**: a well-formed ops line with `</dev/null` must cancel, exit non-zero, and reach the API server with nothing. That property *is* the difference between this design and `--yes`, and it is the one a regression removes in silence.
+
+**Five divergences from kubectl, decided here so they are not rediscovered as bugs.**
+
+1. **A namespaced object with no `-n` is refused, not defaulted.** kubectl falls back to the context's namespace; k8rs will not, because for a write the current namespace is the one word on the target that nobody typed, and `ops delete pod/web` against whatever a shell happened to be pointing at is the class this file refuses five other ways.
+2. **A `-n` given for a cluster-scoped kind is refused, not ignored.** An ignored flag is a run doing something other than what was typed.
+3. **A namespace named twice is refused, not resolved.** This one was a *defect* before it was a decision: `value_of` is first-wins, kubectl is last-wins, so k8rs silently picked the namespace kubectl discards — on a write path, having just refused to guess when nothing was typed. Found independently by both reviewers. Refusing to guess when nothing was given and then guessing when two were is the contradiction; the read path keeps `value_of` unchanged.
+4. **`ops` must be the first word on the line.** Cost: a file named `ops` needs `./ops`.
+5. **The driver does not enforce `NOTES § Operations`' *Applies to* matrix.** `ops scale pod/web 3` parses and reaches the seam. Which kinds an operation works on is the operation's fact and a second copy here is a second thing to keep in step — and the matrix is not even uniform, since `screens/dialogs.md` rule 4 makes `restart pod/web` a *delete* that does belong. **What that cost was one sentence, not a table**: the seam said *"the operation itself is a later step"*, which is false for the five pairs that are never coming, and it now says this build reads the line and does nothing else.
+
+**Three defects the reviews found, each of a class this repo has paid for.**
+
+- **`k8rs --read-only ops delete …` answered with advice that dropped `--read-only`.** Two paths where one checked the flag and the other did not — the shape `PRIOR-ART § G2` tags *immune* and k9s #2434 is the unsafe precedence of. Fixed at the root: the scan moved to the top of `ops_line`, so the flag is read in exactly one place and refuses wherever it sits. The author's own second pass then found that the fix could have hijacked an ordinary read-only *read* run, and proved it red before reporting.
+- **The unknown-flag refusal printed `--namespace is not a flag … the only one it takes is --namespace`** when the typed word carried a zero-width character — a sentence sending the reader to fix a line that looks correct, and the same call site was the one unbounded echo in the region (9130 bytes on one line). Both closed by `shown(arg, NAME_MAX)`, which every sibling already used. This is the `--object web/` defect of 2026-08-30 through a second door.
+- **`ask` confirmed on EOF against an empty name** — `"" == ""` — so invariant 2's *type the object's name* was satisfied by typing nothing. Unreachable from argv today, and a landmine on the shared callback all three operations wire, reachable the moment a caller takes the name off `Record::of`'s cleaned copy, which can clean to empty. The function's own doc already claimed the opposite.
+
+**What the driver owes later boxes, recorded where they will read it:** the `Confirm` table is deleted rather than kept when `delete` puts it on `Mutation`; `Kind::namespaced` is a second copy of what discovery answers and one of the two must go; exit codes need a vocabulary before `done`, `cancelled` and `failed` all mean `2`; and a mistyped confirmation is not free, because each retry runs `perform` again — a second `dryRun=All` on the wire and a second `attempt` line in the log.
+
+### D219 — the audit log refuses what it cannot trust, and says what it cannot fix (2026-09-04)
+
+The file behind [D21](#d21--if-the-write-cannot-be-audited-the-write-does-not-happen):
+`~/.local/state/k8rs/audit.log`, honouring `$XDG_STATE_HOME`, created 0600 in a
+directory created 0700, append-only. **The PM moved this box above the three
+operations**, because `perform` takes a `&mut impl Write` and nothing had decided
+what it writes to, so no operation below could have run end to end.
+
+**D21 named three outcomes and the code found a fourth: hang.** A FIFO at the log
+path made `open(O_WRONLY|O_APPEND|O_CREAT)` block on a missing reader — measured,
+`exit 124` past a six-second timeout with **no output at all**. Nobody had
+considered it because *pipe my audit trail into a collector* is a reasonable
+thing to try, and the hang arrives later, when the reader dies. k8rs now refuses
+anything at that path that is not an ordinary file, with D21's own sentence and
+its *reading your cluster still works* tail.
+
+**The mode ruling was right in intent and collapsed two facts.** Not narrowing a
+log somebody widened is correct — an operator who opened it for a log collector
+should not have that undone every run. Being *silent* about a log **anyone can
+write** is not the same thing: measured, `chmod 0666` and k8rs appended its audit
+trail into it without a word, and invariant 4 is the whole reason the file
+exists. So: *readable* by others stays quiet, *writable* by others gets one
+sentence naming the exact `chmod`, and k8rs keeps recording. The gate's claim is
+now what the code does — **created** 0600, and it looks.
+
+**`O_NOFOLLOW` is still not used, and the reason it was first given does not
+hold.** *"`$XDG_STATE_HOME` is not a shared directory"* is an assumption about
+the user's environment, and `XDG_STATE_HOME` under `/tmp` is a real CI
+configuration. The reason that holds is measured: `create_dir_all` follows a
+symlinked `k8rs/` **directory** anyway, so the flag closes half a door. The
+`symlink_metadata` check closes it whole. **Consequence, accepted:** a valid
+symlink to a regular file is refused too. Somebody keeping the trail on another
+volume symlinks the **directory**, which still works.
+
+**The state directory was `0777 & ~umask`** — world-writable under `umask 0`,
+which CI runners and some daemons use, and that is exactly the precondition for
+planting the FIFO or the symlink above. `DirBuilder::mode(0o700)`, the XDG spec's
+own rule. **It does not rescue `umask 0177`**: the mode argument is masked too,
+`0700 & ~0177` is `0600`, and a directory with no traverse bit fails the `open`
+inside it — measured, and left alone as one `open` failure carrying D21's
+sentence.
+
+**One capability `std` does not have, and it is not worth a thirteenth crate.**
+There is no `getuid` in `std`, so the *ownership* half of the check reads
+`/proc/self` and therefore does not run on `*-apple-darwin`, which is a shipped
+release target. **Accepted:** the **mode** half is the half an attacker needs and
+it runs everywhere; ownership is defence in depth. `libc` for that would be
+invariant 10's thirteenth crate bought for one platform's second line of
+defence — refused, and written down here so the next reader does not rediscover
+it as an oversight.
+
+**Two timestamps, because what an operator wants is a window and not a
+duration.** `perform` reads the clock twice and the result line carries
+`recorded` beside `attempt`, so the real request is inside `[attempt, recorded]`
+by construction — which is what makes it greppable against the **apiserver's
+own** audit log, the thing somebody actually does at 3am. A duration would have
+to be subtracted back into a window before it was usable, and the subtraction
+needs a stamp you would then not have. It also cannot go negative when NTP steps
+back. The gap is wide because it contains the confirmation dialog; that is why
+the field is not called `took`.
+
+**Three numbers this box measured that had been reasoned about.**
+[D21's rotation arithmetic was wrong by 74×](#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)
+and is corrected there. `write_line`'s per-record atomicity claim held under
+independent re-measurement — 6 writers × 500 records at 11 000 and 65 536 bytes
+on tmpfs and btrfs, zero torn lines, `write(2)` taking 64 MiB whole — but its
+framing was wrong: **the real ceiling on a record is a full disk, not a byte
+count**, and a reader resyncs on `attempt ·` / `result ·`. And the record's own
+size, once the server URL landed, is **20 553 bytes** for both lines at every
+cap, not the ~11 KB first written; the test now asserts a 32 KiB ceiling, so a
+cap moving by a byte is not a red build and an order of magnitude is.
+
+**And the record can finally say which cluster.** It carried `context` and
+nothing else — and `kubeadm` names the context it writes
+`kubernetes-admin@kubernetes` for **every** cluster it builds, so two clusters in
+one `KUBECONFIG` produced identical records. `Mutation` gained `server` (the API
+server URL, already read at `k8s.rs`) and `uid`. It had to be now: `ops.rs`
+freezes when this phase closes and `Mutation` gains no field after that. The
+Kubernetes *subject* is deliberately not here — k8rs cannot know the effective
+identity without `SelfSubjectReview`, which is `may_i`'s box.
+
+### D220 — the seven rulings `scale` could not be briefed without, and the frozen file that stayed shut (2026-09-04)
+
+`scale` is the first operation to reach the cluster, and todo.md 3749 names four
+things that land with it plus three preconditions. Six of the seven below are
+rulings the brief could not be written without; the seventh is a finding
+rejected. Written before the dispatch, not after
+([CLAUDE.md § Agent workflow](CLAUDE.md)).
+
+**1. The exit-code vocabulary is [D17](#d17--the---once-output)'s table read onto
+the write path, and it turns on one question: did the cluster change?** Exit `0`
+for `Outcome::Done` and nothing else. Exit `2` for every refusal of the line, for
+`Cancelled`, `Gone`, `Changed`, `NotSent` and `Failed`, and for D21's
+`outcome: None`. `1` stays unused, so no `--exit-code` is redefined and this is an
+extension of D17 rather than a reversal of it.
+
+**The box's own hazard is the reason:** `echo no | k8rs ops delete … && kubectl
+get pod` must not read a cancellation as success, and today every ops line exits
+`2`, which gets that backwards for the one case that worked.
+
+**`recorded: false` beside a `Done` still exits `0`,** which is the arm worth
+saying out loud. The change happened; a `2` there makes a script re-run a
+mutation that already landed, and `restart` and `delete` are not idempotent under
+that re-run the way a scale is. The fact does not disappear — it is a sentence on
+stderr, which is [D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)'s
+own *"the change was made — but k8rs could not write it to the audit log"*
+reaching somebody. The exit code answers *did it happen*; stderr answers *is the
+trail complete*.
+
+**2. `ops_line`'s signature carries the code back with the sentence.** Today it is
+`Option<String>` and `main` reads it as `ops_line(…).or_else(|| mistyped(…))`, so
+a `scale` that succeeds and returns `None` falls through into `mistyped`, then
+`live_context`, and k8rs starts watching a cluster after performing a mutation.
+Unreachable only because `None` still means *no `ops` word at all*. The
+requirement is the behaviour and not a spelling: **a line that reached the seam
+never reaches `mistyped` or `live_context`, whatever it did there.** It is the
+same change as ruling 1, which is why they are one turn.
+
+**3. An ops line writes to stderr and leaves stdout empty.**
+[`screens/once.md`](screens/once.md)'s split is *stdout is the findings, stderr is
+everything else*, and an operation produces no findings — so the confirmation
+prompt, the verdict, the notes and the outcome all go to stderr and
+`k8rs ops … > out` writes an empty file. The driver's `show`/`ask` already take a
+writer for this reason; this ruling is which one they are handed.
+
+**4. `Kind::namespaced` stays, and the finding that one of the two copies must go
+is rejected.** The two do not answer one question. `Kind::namespaced` is six
+literals consulted *before* a cluster is dialled — the driver refuses a malformed
+line without connecting, which is what `ops_namespace` is for — and
+`Browsable::namespaced` is discovery's answer about every kind the cluster serves,
+read *after*. Deleting the first means refusing `k8rs ops scale deploy/web` (no
+`-n`) only after a connection, which is the opposite of the driver's purpose;
+deleting the second is impossible, `k8s.rs:4885` reads it. `src/main.rs`'s own
+`Kind` doc already said this, landed after the finding was written. **What the box
+is still owed is that `scale` grows no *third* copy:** it takes the kind from the
+driver and re-derives scope nowhere.
+
+**5. The `server:` the audit record names comes from `k8s::contexts`, and
+`k8s.rs` is not opened.** `Mutation::server` wants `Config::cluster_url`, which
+`connect_with` consumes when it builds the client, so the first draft of this
+ruling added a field to `Session` — a third exception this phase to a file frozen
+at Phase 6's close. It is not needed. `k8s::kubeconfig()` is already `pub(crate)`
+and already read once by the caller; `k8s::contexts(&kubeconfig, context)` is a
+lookup over `Vec`s in memory that opens no file and introduces no second reader of
+it, marks `current` by the same first-wins rule kube's own lookup uses, and puts
+every address through `address()` — so the userinfo strip
+[D173](#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28)
+built after a kubeconfig password reached the screen is on this path for free,
+rather than being remembered a second time on the way into a log file that is kept.
+`Address::Undefined` and `Address::Unreadable` become the gap word
+`Record::attempt_line` already spells. **The frozen file stays shut, and the
+cheaper route was the safer one.**
+
+**6. `scale` sends no `resourceVersion`,** and records `version: None`. todo.md
+3824 is one box for *every call* on purpose — the precondition and the `409`
+re-read are one mechanism and building half of it inside `scale` would be a box
+added to a running phase.
+
+**7. A kind `scale` will not work on must be refused before the state directory
+is made.** NOTES § Operations gives `scale` deploy/sts/rs; the driver deliberately
+accepts all six kinds for all three verbs and lets the operation hold that matrix,
+so `k8rs ops scale pod/web 3` reaches the seam. The audit-log box already ruled
+that a line k8rs is going to refuse anyway leaves no state directory behind —
+`k8rs ops bogus` must not — and a kind refusal is that same line. So the
+operation's *can I be pointed at this* answer is read before `audit()` is called,
+not after.
+
+### D221 — the audit log records mutations, not intentions, and that is where `screens/dialogs.md` rule 5 stops (2026-09-04)
+
+`k8s-admin` measured `scale` against a stub that answers `403` on the
+`get_scale` every operation makes before it can describe anything, with a fresh
+`$XDG_STATE_HOME` each run:
+
+| run | state dir | audit.log | lines |
+|---|---|---|---|
+| `--read-only`, no `-n`, unscalable kind | not made | not made | — |
+| **403 on `get_scale`** | made | made | **0** |
+| **404 on `get_scale`** | made | made | **0** |
+| cancelled, and every ending after the dialog opens | made | made | 2 |
+
+An operator refused at 03:00 leaves a zero-byte file, and
+[`screens/dialogs.md`](screens/dialogs.md) rule 5 says *success, failure and
+cancellation all reach the audit log — a trail that records only what worked
+cannot answer "what did they try"*.
+
+**The ruling is that rule 5 is about a dialog that opened, and these refusals
+happen before one exists.** `ops::scale`'s three early `Err`s — a kind
+[`scalable`](src/ops.rs) does not serve, a namespace nobody named, a cluster that
+would not say how many copies are running — all return before a `Mutation` is
+built. There is no consequence, no kubectl line and no path, so a line written
+there would be a record of a change *nobody described*: invariant 4's two records
+would both be inventions. **The log records mutations. What the operator tried is
+on stderr, with the reason and the server's own words** — which is what
+[D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)
+had to fix before this ruling was worth anything.
+
+**Two shipped sentences it falsified, both fixed in the same change.**
+[`docs/security.md`](docs/security.md)'s mechanism table read *"**Audit** — every
+attempt, including refusals and failures"*, and the paragraph below it said the
+same thing at length. Neither is true of a line refused before a `Mutation`
+exists, and the word doing the damage is *attempt*: the refusals that **are**
+recorded are refusals of a described mutation — cancelled at the dialog, refused
+by the cluster, failed mid-call — which is also exactly `screens/dialogs.md` rule
+5's population. The table now says *every described mutation*, and the paragraph
+names the boundary. `todo.md`'s own audit-log box says *"recording refusals and
+failures as well as successes"* and stays true under that reading.
+
+**Written before the freeze rather than after it.** `ops.rs` freezes when this
+phase closes, and `restart` and `delete` have the identical read-then-describe
+shape, so an unrecorded ruling here would have been made silently by the freeze.
+
+### D222 — the `scale` review round: the sentence that named neither fault nor message, and the admin role that could not scale (2026-09-04)
+
+Two blockers against the box as first landed, both measured, plus what the round
+settled.
+
+**The operator's sentence dropped everything the log kept.** `verdict`'s
+`Outcome::NotSent { .. }` arm bound neither `fault` nor `said`, so a `403` and a
+`422` on the `dryRun=All` PATCH printed **byte-identical** stderr —
+*"k8rs: the change was never sent"* — while the audit line beside it carried
+*"not checked, the cluster would not allow it … cannot patch resource
+`deployments/scale` in API group `apps`"*. `Outcome::Failed` named the fault class
+and still dropped the server's sentence, which is the half carrying the verb and
+the resource. It broke the security gate's *a 403 names the missing verb +
+resource*, `PRIOR-ART § C1` in the region written to close it, and the operation's
+own consistency: a `403` on `get_scale` named both, and one forty milliseconds
+later on the PATCH named neither.
+
+**The fix has two owners because the two halves have different readers.** The
+fault goes into `verdict`, which both readers share; the server's words go into
+`Performed::plainly` alone, because `Record::result_line` already appends them and
+a message in `verdict` would print twice on the audit line. One `and_said` owns
+the join, replacing three hand-written ones — and `Record::check` stopped naming
+the fault it now duplicates, becoming `&'static str` again.
+
+**The documented `k8rs-admin` ClusterRole could not perform a single scale, and
+RBAC is why.** It matches `resource/subresource` as **one string**: a grant on
+`deployments` does not carry `deployments/scale`. Measured against a live v1.36.1
+cluster, upstream's own `edit` ClusterRole lists `deployments/scale` separately in
+*both* its read rule and its write rule — which it would not need to if the parent
+covered it — and `system:controller:horizontal-pod-autoscaler` holds
+`*/scale` with no verb at all on the workloads. Three gaps: the resource is
+`<plural>/scale`; **`get` is required**, because every operation reads the count
+before it can describe the change and the role granted no `get` at all; and
+`replicasets` was absent although NOTES § Operations gives scale deploy/sts/rs.
+A user granted exactly `k8rs-readonly` + `k8rs-admin` met a 403 on every scale.
+This is `PRIOR-ART § B4` — *a convenience feature silently added a permission
+requirement* — arriving through the front door, and the hand-checked gate row it
+falsified is the admin half of *least privilege holds*.
+
+**Four more the round fixed.** *"the cluster has no such object any more"*
+asserted an object used to exist, and a mistyped name is the common case — it sent
+the reader hunting for whoever deleted their deployment. The `Unchanged` relation
+said *"This makes no change"* over a `PATCH` whose outcome line then said *"the
+change was made"*; the consequence now describes the request — *"This asks for the
+count `web` is already running."* — and exit `0` does not move, because an
+idempotent re-run reaching `0` is [D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 1's whole point. `Scaling::count` was unguarded where `Scaling::name` was
+guarded by the same argument — the driver bounds it and a Phase 12 console need
+not, and a `-5` produced a consequence, a command-log line and an audit line that
+all lied before the cluster got a say. And the confirmation prompt ended without a
+newline, so under `echo yes |` — the only scripted form D218 allows — the closing
+sentence landed glued to its back; since D220 ruling 1 keeps *the change was made
+but k8rs could not write it down* out of the exit code, that sentence **is** the
+delivery, and it was being hidden. The prompt now ends its own line, which is the
+one placement that adds no blank line on a tty either.
+
+**Three that the tests, not the code, got wrong.** `spec.replicas` versus
+`status.replicas` was unfed everywhere — every stub answered a `Scale` whose two
+counts agreed, the one shape that cannot tell the fields apart; fed, the defect
+announces *the opposite verb* over the number the reader agrees to. A test whose
+doc claimed *all six of `main.rs`'s `KINDS` are fed* wrote six literals and read
+`KINDS` never. And `consequence`'s `1 → 0` arm — *"This stops the only copy of
+your app"*, because *"all 1 copy"* is not a sentence anybody says — existed only
+in the code and in a test asserting it, so its expected value came from the
+implementation rather than the requirement; it is now `screens/dialogs.md`'s sixth
+relation row.
+
+**Boxed rather than fixed**, all in `backlog.md`: scaling a ReplicaSet a
+Deployment owns promises a change the controller undoes within a second (8 of 8
+ReplicaSets in the fixture cluster are Deployment-owned); a one-shot `ops` line
+builds a whole `Session` and pays 12 requests where `kubectl` pays 6; `Mutation`
+carries two conventions for *absent*; and `just check` has no disk-headroom check,
+which is how a full `/tmp` produced twelve confusing test failures instead of one
+sentence naming the disk.
+
+### D223 — the four rulings `restart` could not be briefed without, and the pod arm that is `delete`'s (2026-09-04)
+
+todo.md 3777 is the second operation and the first that patches a workload
+object itself. Four things had to be decided before the brief could be written,
+and the first is a narrowing of the box's own text.
+
+**1. `restart` serves `deployment`, `statefulset` and `daemonset`, and refuses a
+pod in words rather than deleting it.** The box says *"for a bare pod there is no
+restart: it is a delete, and the consequence text must say so in plain words"*,
+which reads two ways: perform the delete under a dialog that says so, or say so
+and refuse. **Refuse**, for a reason that is about the next box and not about
+this one: a pod restart is a `DELETE`, and **both things a `DELETE` in k8rs
+cannot be performed without belong to todo.md 3811** — invariant 2's typed object
+name, which
+[D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)
+leaves unenforceable until a `Confirm` lands on `Mutation`, and the still-open
+question of whether a delete is checkable at all, since a dry-run delete and a
+real one build the identical request line. Performing it here would answer both
+in a box named for the other verb, and leave 3811 with a premise that had already
+been decided underneath it. `restartable` therefore refuses `pod` with a sentence
+of its own, which must say that a pod restart is a delete and must name what to
+restart instead — the wording itself is
+[screens/dialogs.md § Restart](screens/dialogs.md)'s and is not quoted here, so
+there is one copy of it. That requirement is what
+[screens/dialogs.md](screens/dialogs.md) rule 4 exists for: nobody learns
+"restart" as a synonym for "delete" by accident. **Rule 4's dialog is Phase 11's**,
+where `r` on a pod row opens `delete`'s dialog with that consequence, over the
+delete path 3811 will have proven. Nothing is unproven by this narrowing: the
+`DELETE` verb is 3811's to prove, and `Pass::delete` is already written and
+measured on the wire.
+
+**2. `restartedAt` is written as UTC `Z`, and kubectl's local offset is not
+copied.** Measured, `kubectl rollout restart` writes
+`time.Now().Format(time.RFC3339)` — a local-offset stamp. k8rs writes the same
+instant with a `Z`, because the value's only contract is *an RFC3339 instant that
+differs from the last one*, and reading a system time zone would put a second
+ambient input into the write path for a byte nobody compares. **It costs nothing
+invariant 4 protects**: the taught line is `kubectl rollout restart
+deployment/web -n payments`, which carries no timestamp at all, so the command
+log makes no claim this diverges from.
+
+**3. Nothing is read before the patch.** `scale` reads `get_scale` because its
+consequence sentence is built from a number only the cluster has; a restart needs
+no fact about the object to describe itself. So `uid` and `version` are both
+`None` — the field's own documented case for a caller with none to give — and a
+missing object is refused by the dry-run, with the apiserver's own 404 message,
+rather than by a pre-read this operation would otherwise perform only to fetch a
+`uid`. **The direction matters for this box in particular**: a `GET` of a
+Deployment pulls `spec.template.spec.containers[].env[].value` into k8rs for a
+dialog that shows none of it, which is the exposure
+[D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)
+is about, approached from the other side. The `resourceVersion` and the `409`
+re-read are todo.md 3825's, for every call at once.
+
+**4. `Patch::Strategic`, and it is a safety property before it is a fidelity
+one.** D217's `422` hands back the object the server patched, and for a workload
+that object carries annotations, `managedFields` and container environment —
+4859 bytes on a trivial Deployment, past `FREE_TEXT`, with annotations inside the
+first few hundred bytes so truncation does not protect them. A strategic merge
+patch is answered with k8rs's own six-line patch instead
+(`patch.go:770-786` rather than `:353`), and it is what `kubectl rollout restart`
+sends anyway — so invariant 4's *equivalent command* and the exposure fix are one
+choice rather than two. `checkable` stays `true`: the API dry-runs an ordinary
+`PATCH` on an ordinary path
+([D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)),
+and only kube's `Request::restart` helper could not carry the parameter. **The
+dialog says k8rs checked it and never that the taught command can be**:
+`kubectl rollout restart` has no `--dry-run` flag at all, so the kubectl line
+carries none and no sentence claims the preflight was that command's.
+
+### D224 — the `restart` review round: two blockers a stand-in apiserver could not produce, and the sentence that promised a cluster's settings (2026-09-04)
+
+`restart` passed `just check`, `just mutants-diff` with no survivor, and two
+passes against stand-in apiservers. A real one, on three ephemeral review
+clusters, produced two blockers neither stand-in could — because both are the
+*controller's* answer to a `PATCH` the apiserver accepts, and a stand-in has no
+controller ([reports/2026-09-04-restart-against-a-real-apiserver.md](reports/2026-09-04-restart-against-a-real-apiserver.md)).
+
+**Blocker 1 — a paused Deployment: three records lie at once, and one of them
+is the taught command.** Measured: `kubectl rollout pause` first, then
+`k8rs ops restart deploy/web` prints *"This replaces every copy of your app"*,
+the dry-run passes, k8rs says *the change was made* and exits `0`, and twelve
+seconds later the three pods have the same names. Meanwhile the line k8rs
+printed — `kubectl rollout restart deployment/web -n payments` — **exits 1 and
+refuses**: *"can't restart paused deployment (run rollout resume first)"*. So
+invariant 4's *neither record may lie* fails on the consequence, on the result
+sentence and on the command log, and the preflight that exists to catch this
+cannot, because the apiserver accepts the patch.
+
+**The fix is not a pre-read and not a new `Outcome`.** `perform` already hands
+the check pass's response to [`Checked::returned`](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04),
+and [D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3 forbids a `GET` before the patch, not reading an answer k8rs is already
+sent. `restart`'s closure maps that response down to the one fact it needs —
+whether the object came back paused — so `Checked<bool>` carries a boolean and
+never the workload, which keeps ruling 3's exposure argument intact. The
+confirmation then says, above the prompt, that this deployment is paused,
+that nothing will move until `kubectl rollout resume`, and that the taught line
+refuses until then. **The operator still decides**: the annotation is written on
+resume and writing it now is not destructive — what was wrong was not the write,
+it was being told it had done something it had not.
+
+**Blocker 2 — all three consequence sentences state a pacing the cluster owns,
+and k8rs reads none of it.** `PRIOR-ART § F2` in prose: *never state something
+whose denominator you have not read*. The region's own doc reasoned that only
+`Recreate` needs a hedge because only it is *worse* than the words. Measured,
+four configurations falsify the sentences and **three of the four need no
+feature gate**: a DaemonSet with `rollingUpdate.maxUnavailable: 3` took every
+node down at once against *"a node at a time"*; a StatefulSet with
+`partition: 2` left two of three copies on the old template **indefinitely**
+against *"replaces every copy"*; a `nodeSelector`'d DaemonSet ran on 1 of 3
+nodes against *"every node"*; and `updateStrategy: OnDelete` moved nothing at
+all on either kind, while `kubectl rollout status` — the natural next command —
+*errors* on it. The `Recreate` hedge itself is true and names the wrong knob: a
+`RollingUpdate` Deployment with `maxSurge: 0` does the same thing and is not
+"set up to stop them all first" in any wording an operator maps to a strategy
+name.
+
+**The three sentences are `k8s-admin`'s own, checked against every row of that
+table, and *asks* is the load-bearing word** — the patch is a request and the
+controller decides, which stays true under `paused`, `OnDelete`, `partition`
+and every pacing knob at once. Each names *that* the object has such settings
+without naming one, so nothing here reads a field D223 ruling 3 kept k8rs out
+of. They land in a new `screens/dialogs.md § Restart`, which is where the tests
+cite them from: `restart` shipped with three consequence sentences asserted by
+exact equality against copies of themselves, because unlike `scale` there was no
+screen for them to be derived from — an assertion that can fail for the wording
+*changing* and never for it being *wrong*.
+
+**Finding 3, and it is `scale`'s too — the audit log said `dry-run: not checked`
+for a check the cluster had answered.** `Outcome::NotSent` is reachable only from
+the `Err` of `call(DRY_RUN)`, so `not checked` collided with `UNCHECKABLE`, the
+value that means no check was sent, and an operator holding a `422` beside the
+apiserver's own audit log found the `?dryRun=All` there and a k8rs line denying
+it. `verdict()` had been fixed for exactly this argument a few lines away and it
+was not carried to the field one column to the left.
+
+**The first repair replaced one lie with its inverse, and this entry stated the
+premise that caused it.** *Reachable only from the `Err` of `call(DRY_RUN)`* is
+true; **so a check went out** does not follow, and both this decision and the
+brief built on it said it did. `Api::patch` returns `Err` for a refused TCP
+connect, a DNS failure and a request that could not be built — nothing on the
+wire — and the round-2 wording, *"the check was sent and did not pass"*, then
+appeared on the same audit line as *"k8rs could not reach the cluster"*, 305 µs
+after the attempt, measured against a dead port. **The field is keyed on the
+`Fault` and takes three answers, not two**: sent and refused; never left this
+machine; and — for `Unanswered` and `Unfinished`, where a completed handshake
+that is then closed and a connect that never happened arrive as one fault —
+*k8rs does not know whether the check reached the cluster*, which mirrors
+`verdict()`'s own hedge one column right. **`answered()` is not the helper for
+it**, though the brief said it was: it groups the four local faults with the
+answered ones because it asks *was anything changed*, and `NoCredential` — an
+`exec` plugin that answers once and then exits `1` — is reachable at the check
+pass, so reusing it would have kept the identical lie for that fault. Two
+functions, two questions, no shared list, and the `match` is exhaustive so a
+twelfth `Fault` is a red build rather than an inherited claim.
+
+**Finding 4 — the documented `k8rs-admin` role cannot run the command k8rs
+teaches.** k8rs sends a bare `PATCH` and succeeds; `kubectl rollout restart`
+fetches the object first and 403s, because the role grants `patch` and `update`
+and no `get`. [D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)'s
+shape one level up, and a different reason for the same missing verb, which is
+why that round did not catch it. `get` added to the workload rule in
+[docs/security.md](docs/security.md#rbac), with the comment saying whose verb it
+is.
+
+**What `edit` inherits, and it is not what D217 concluded.** The
+`Patch::Strategic` ruling is now measured rather than read off Kubernetes
+source: a strict rejection under `application/strategic-merge-patch+json`
+answers with **109 bytes** — k8rs's own patch — where `merge-patch` and
+`json-patch` on the same object answer with **4895**, carrying `managedFields`,
+`containers` and a planted environment literal. But the strategic message echoes
+*the patch that was sent*: a deeper unknown field came back quoting k8rs's own
+body, env value included. **So strategic merge protects the operator from the
+server's copy of the object and does nothing about the operator's own YAML** —
+and `edit`'s unknown fields come from a buffer a human typed. *"Strategic merge
+means the 422 is small"* is not the ruling that box inherits.
+
+**Not taken here, recorded in [backlog.md](backlog.md).** `Pass::patch()` sets
+`Strict` for every caller and cannot see the `Patch` variant, so two callers are
+safe for two different reasons and the helper enforces neither — D215's shape
+for `checkable`, with no guard and no box. The `restartedAt` value k8rs wrote is
+on no line of the audit log, so *which* restart wrote the annotation on an
+object is answered by a 41 µs nearest match rather than exactly. And a mistyped
+*namespace* is reported as a missing *object*, because the apiserver returns the
+identical 404 for both.
+
+### D225 — the five rulings `delete` could not be briefed without, and the preflight it declines (2026-09-04)
+
+todo.md 3808 is the third operation and the first destructive one. It carries two
+open questions in its own text — whether a delete is checkable at all, and how
+invariant 2's typed name stops being a thing review catches — and three more that
+only appear once the box is read against the two operations already landed.
+
+**1. `delete` declines the preflight: `checkable: false`.**
+[D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)'s
+finding 3 left this to be weighed rather than inherited, and it weighs against.
+A `dryRun=All` delete is a real `DELETE` on the wire, sent **before anybody has
+typed anything**, and the marker distinguishing it from the delete that happened
+rides in the body — so in the cluster's own audit record at `Metadata` level, the
+level most clusters run, opening a delete dialog on `prod` and cancelling it is
+indistinguishable from having deleted the object. That is a lie in a record k8rs
+does not own, cannot annotate and cannot correct, and it is the same class as
+[D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)'s
+three lying records with the one difference that matters: there, k8rs could fix
+its own records.
+
+**What is given up is small and what is kept is not.** A preflight would catch a
+denying admission webhook before the name is typed; a `403` and a `404` come back
+from the real call regardless, and *the object went away* is
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s watch and not a
+dry-run's. Against that, a delete preflight **adds a failure mode of its own**: a
+`ValidatingWebhookConfiguration` with `sideEffects: Some | Unknown` fails
+`dryRun=All` for a fully authorised user, so on such a cluster k8rs would refuse
+a delete that would have worked — on the one operation where being refused
+wrongly is least acceptable.
+
+**The ruling is safe under either reading of the measurement, which is why it is
+made without re-measuring one.** If a dry-run delete turns out to be
+distinguishable after all, declining costs a little diagnostic value; if it is
+not, declining is the only thing that keeps the cluster's record honest.
+`UNCHECKABLE`'s existing sentence — *"k8rs did not check this one with the
+cluster first"* — says what happened and not why, which is exactly right here:
+the why is this entry.
+
+**2. `Confirm` lands on `Mutation`, and the enum alone is not what makes it
+structural.** The box proposes `Confirm::Press | Confirm::Type(&str)` and calls
+it a type error. It is not one by itself: a field on `Mutation` that `perform`
+reads and an operation sets is the same *asserted about itself* shape
+[D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)
+closes with about `checkable`, and `Answer::Confirmed` stays constructible by
+anyone. **What must hold is [`Checked`]'s shape and not a second copy of
+`checkable`'s**: a dialog that never asked for a name must be *unable to
+construct* the answer that proceeds, in the way an operation is unable to reach a
+confirmation without a check having been answered. The minimal form is
+`dev-core`'s to pick; the requirement is that a press-only delete fails to
+compile or fails to build its answer, and never that it merely fails review.
+
+**3. Every kind in the driver's `KINDS`, and no refusal table.**
+[§ Operations](#operations--the-full-admin-surface) gives `delete` *any*, which
+is what makes it unlike `scale` and `restart`: `scalable` and `restartable` exist
+because a restart of a ReplicaSet is a word with no meaning, and there is no kind
+in the set a delete is meaningless on. So no `deletable()` refusing anything —
+the second matrix
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+is named for is not worth writing to refuse nothing.
+
+**`node` is served, and it is the first cluster-scoped mutation k8rs performs.**
+`KINDS`'s own doc put it there so *a rule about the kind that belongs to the whole
+cluster is reachable by a line*, and this is that line: `Api::all_with` where the
+other two operations have only ever built `Api::namespaced_with`, and the
+namespace refusal inverted — a namespace named for a node is the error, not a
+namespace missing. Deleting a Node object is also the one consequence in the set a
+beginner will read exactly backwards, so its sentence is
+[screens/dialogs.md](screens/dialogs.md)'s to write and not this entry's: it
+removes the cluster's *record* of a machine, and it drains nothing. **The rest of
+what this ruling first said about it was wrong, and a measurement taken before any
+code was written is what caught it**
+([reports/2026-09-04-delete-on-the-wire.md](reports/2026-09-04-delete-on-the-wire.md)
+§ 7). It said *a kubelet still running re-registers within seconds*: on kubelet
+v1.36.1 the node was **still absent 2 minutes 45 seconds later**, the kubelet
+logging five `Error updating node status … node not found` lines per ten-second
+cycle with no registration attempt, and it came back **2 s after the kubelet
+process was restarted** — `registerWithAPIServer` runs once per process, so the
+delete strands a live machine the cluster has forgotten rather than being undone
+by it. It also implied the pods stayed: 55 s after the delete the pod on that node
+was gone and its ReplicaSet had made two replacements, both `Pending`, with
+nowhere left to run. **So deleting a Node object is the more destructive reading
+and not the milder one**, which is the opposite of the shape this ruling reached
+for, and the consequence sentence
+[screens/dialogs.md](screens/dialogs.md) draws follows the measurement.
+`drain` is v0.2 and is the operation that empties one.
+
+**4. Nothing is read before the delete, and `Preconditions` is not this box's.**
+[D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3's direction holds for the same reason and one more: a `GET` to fetch a
+`uid` pulls the object — container environments included — into k8rs for a dialog
+that shows none of it. So `uid: None` and `version: None`, and a missing object is
+refused by the apiserver's own 404 on the real call. **`DeleteParams::preconditions`
+is the delete-shaped spelling of todo.md 3822** — *every call sends the
+resourceVersion that was read* — which is the next box in this phase and takes the
+read for every call at once. Writing half of it here would leave that box with a
+premise decided underneath it, which is the mistake
+[D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 1 avoided by refusing the pod.
+
+**5. `propagationPolicy` is measured off `kubectl`, and it holds.** `Pass::delete`'s own doc already says `DeleteParams::default()`
+sends `{}` and lets the server fall back to the object's default, while
+`kubectl delete` sends `Background` — so invariant 4's *equivalent* command needs
+the policy set explicitly, and the taught line then carries **no flag**, because
+what k8rs sends is what `kubectl delete` sends with no flag. **This ruling first called that last step
+*recalled off kubectl's documentation*, and that was itself unmeasured**:
+[reports/2026-09-04-dry-run-on-the-wire.md](reports/2026-09-04-dry-run-on-the-wire.md)
+had already measured it against a stub the same day, for a deployment. It was
+re-measured anyway and the answer holds and now covers more
+([reports/2026-09-04-delete-on-the-wire.md](reports/2026-09-04-delete-on-the-wire.md)
+§ 1-2): against a real apiserver, `kubectl delete` sends exactly
+`{"propagationPolicy":"Background"}` — 34 bytes, no query string at all, no
+`kind`, no `apiVersion` — and the body is **byte-identical across all six kinds**
+in `KINDS`, only the path differing for the cluster-scoped one. `--cascade=background`
+produces the same bytes, so the taught line carrying no flag is exact rather than
+merely defensible. **What the constant buys today is exactness and not a behaviour
+change**: on server v1.36.1 an empty body and `Background` were indistinguishable
+by every observation taken, while `Foreground` was plainly different — so this
+removes a dependence on a per-resource server default rather than fixing something
+visible.
+
+### D226 — the `delete` review round: a token that could be replayed, a removal that had not happened, and the sandbox that was not one (2026-09-04)
+
+`delete` passed its author's red/green, `just check` (1020 + 28), and a
+`just mutants-diff` with no survivor. Then `tester` and `k8s-admin` read it and
+between them found two blockers, one of which is the box's own headline claim,
+and a defect in a hard invariant's stated proof.
+
+**1. `Answer::Confirmed` could be built outside `ops.rs`, and a delete went
+through without a name.** The box exists to make invariant 2's typed name
+structural, and the first implementation was `pub struct Agreed(())` — a private
+field, so unconstructible outside the module — carried as `Answer::Confirmed(Agreed)`.
+**Enum variant fields are public even when the struct's fields are not**, and
+`Agreed` derived `Copy`. So any code holding one legitimate `Confirmed` could
+destructure the token and re-wrap it for a different mutation. `tester` proved it
+from `main_tests.rs` — where every dialog lives — driving the real `perform`:
+press-confirm a `Confirm::Press` scale, keep the token, and the next
+`Confirm::Type` delete confirms with nothing typed and the audit log records *the
+change was made*.
+
+**Unreachable today and reachable at Phase 12, which is what made it a blocker
+now.** `ops_connected` performs one operation per process and `ask` retains
+nothing; the console is one process with many dialogs, and `ops.rs` freezes at
+the end of this phase. **The lesson is narrower than *use a private field*:
+privacy stops forgery and does not stop replay**, and three doc comments in two
+files asserted the stronger property as fact.
+
+**2. `Outcome::Done` recorded *the change was made* for a delete the cluster had
+only accepted.** Measured through the real binary on a Node carrying a
+finalizer: `200 OK`, k8rs exits `0` saying the change was made, and the node is
+still there three seconds later with a `deletionTimestamp` and the finalizer
+listed. Same shape on a pod, whose `200` carried `status.phase: Running` and
+`deletionGracePeriodSeconds: 30`.
+
+**The API answers the question and the code threw the answer away.** A completed
+delete answers `kind: Status, status: Success`; a pending one answers with the
+object, carrying `deletionTimestamp`. `Api::delete` returns `Either<K, Status>`
+and the closure's `.map(|_| ())` discarded it one line before `perform` could
+see it — a `map` that was right for
+[D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3's exposure reason and wrong about which fact it kept.
+**The exit code does not move**: a pending delete *did* change the cluster, so
+`changed()` stays true and
+[D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 1's split holds. What was wrong is the sentence. **And the taught line
+does not behave the way k8rs did**: `kubectl delete` waits by default, and
+`timeout 5 kubectl delete node/<name>` exited `124` still waiting where k8rs had
+returned instantly.
+
+**3. The documented `k8rs-admin` ClusterRole could perform one of the six
+deletes.** Extracted verbatim, applied unedited, bound and asked: `delete` on
+`pods` only. An operator following `docs/security.md` opens `ctrl-d` on
+`deployment/web`, reads the consequence, **types the deployment's name**, presses
+enter, and gets a 403 — for five of six kinds. This is
+[D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)
+recurring three boxes later, on the operation where being refused is most
+expensive. **The role is written by hand and no gate reads it**, which is the
+actual defect: the failure behaviour itself measured clean — verb and resource
+named, one line, exit `2`, no crash, no retry.
+
+**4. Invariant 2 is narrowed, and the narrowing costs something the ruling had
+not weighed.** [CLAUDE.md](CLAUDE.md) invariant 2 required *a server-side
+`dryRun=All` where the API supports it*; the API supports it for `DELETE` and
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1 declines it. That is a reversal of a hard invariant and it is recorded
+here rather than applied quietly: the clause now reads *where the operation asks
+for one*, and an operation that declines says why in its own box.
+
+**The cost D225 ruling 1 missed is the connectivity probe.** Its accounting was
+*a 403 and a 404 come back from the real call regardless* — true, and the wrong
+half: a **transport** failure does not come back at all, and the preflight was
+what made the answer definite. Measured against a dead port, `scale` says *the
+change was never sent* and `delete` says *k8rs does not know whether the change
+was made* — on the one operation where **did it happen?** matters most.
+
+**`k8s-admin` was asked whether the ruling should be reopened and said no, with
+an argument stronger than the one the ruling was made on.** What denies DELETEs
+in real clusters is Kyverno `validate` with `operations: [DELETE]` and CEL
+`ValidatingAdmissionPolicy` — real and common — while Gatekeeper's shipped
+webhook matches CREATE/UPDATE only, and the protection an operator most expects
+to be warned about, a **PodDisruptionBudget, does not apply to `delete` at all**:
+it guards `pods/eviction`. So the refusal still arrives, from the real call, with
+verb, resource and the server's sentence; what is lost is ordering, not
+diagnosis. **And a dry-run DELETE would have taught a falsehood** — it runs no
+garbage collection, consults no finalizers and consults no PDB, so *"the cluster
+checked it first and accepted it"* over a delete is a materially weaker claim
+than the same sentence over a `PATCH`, on the operation where a false green is
+worst. Finding 2 is k8rs already overclaiming about a delete's completion; a
+preflight would have added a second, earlier overclaim.
+
+**5. The sandbox that was not one — `KUBECONFIG` overrides `HOME`.** `dev-core`
+sandboxed its runs of the built binary by setting `HOME` to a scratch directory
+with a stub kubeconfig. `KUBECONFIG` was set in the environment and takes
+precedence, so **four real `DELETE`s went to the user's `k8rs` fixture cluster**.
+Nothing was deleted — every target was a name out of `screens/dialogs.md` that
+does not exist there, all four `404`, and the PM verified the cluster whole
+afterwards — but that was luck, not a guard. **Setting `HOME` is not a sandbox.**
+An agent running the built binary clears `KUBECONFIG` as well and refuses to
+start unless the resolved server is its own stub, which is what `tester` then
+did. This is [D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)'s
+shape: a guard the obvious wrong case walks straight past.
+
+**6. Invariant 1's stated proof was measured wrong.** It said `ops_tests.rs`
+*holds no `Client`, no `.send(`, no `.request(`, so the requests it builds are
+never dispatched*. It holds **four** `Client`s, and did before that sentence was
+written — the operation tests dispatch real requests at a stub. The containment
+still holds, for a reason that does not depend on counting: every client there is
+built from a `kube::Config::new` over a literal `http://127.0.0.1:<kernel-assigned>`,
+with no kubeconfig, structurally unable to reach a cluster. **The sentence that
+was written down is the one nobody re-measured**, and it is the same property
+finding 5 went around.
+
+**7. What a cancelled `delete` leaves in the cluster's record, for the one kind
+`delete` alone reaches.** `ops_tests.rs` claimed *a cancelled delete leaves no
+trace*. True for the namespaced form. **False for `node`**: with no `-n`,
+`k8s::coverage` runs a cluster-wide `LIST pods` probe before the operation — three
+cancelled node deletes produced three `GET /api/v1/pods?&limit=1`. It is a read,
+invariant 1 is untouched, and it is not confusable with a delete, so ruling 1
+survives; the *sentence* did not. **The probe itself is `k8s.rs`'s and that file
+froze at Phase 6**, so it is [backlog.md](backlog.md)'s and a later box's, not
+this one's — `delete` is merely the first operation that can reach it, being the
+first with no namespace.
+
+**8. Two decisions the brief left to `dev-core`, recorded because they were
+made.** `main.rs`'s `Operation::confirm` was **not** deleted, contrary to its own
+doc's promise: `ops::Confirm::Type` carries the object's name and `ops_usage()`
+prints before any object is named, so no `const` table can hold one. It is now a
+help string that only `ops_usage` reads, which is a different fact from *how is
+this confirmed* and does not re-create the second matrix. And `removal` returns
+the namespaced/cluster-wide bit, a second copy of what `KINDS` holds:
+[D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 4 bars re-deriving *which kinds a verb serves*, and this is *how the
+request path is built* — the same reading that already duplicates the
+`object_name` / `namespace_name` guards deliberately.
+
+**What the round landed, and the five choices the review left to `dev-core`.**
+
+**The replay is closed with a ticket and not with a lifetime.** `perform` takes a
+number from a process-wide `AtomicU64` at the start of each call, `Checked`
+carries it privately, `Checked::pressed`/`typed` stamp it into `Agreed(u64)`, and
+`perform` compares it back before the real call. A token from any other call —
+including one whose `Confirm` is identical — confirms nothing. The generative
+("branded") lifetime is the stronger tool and was rejected for a reason this file
+gets to use: it needs `ask` higher-ranked over a future-returning closure, and
+`ops.rs`'s design goal is to stay small enough to read at 3am. `Copy` and `Clone`
+are gone from `Agreed` and `Answer` as well — not the mechanism, but no reason to
+hand out free copies.
+
+**And the first fix had a hole its own probe found**, which is the part worth
+keeping: the ticket comparison was written *inside* the match arm, so a widened
+guard still tripped the `debug_assert_eq!` and the `should_panic` test passed
+over the hole. **The guard routes and the assertion only decorates** — an
+assertion inside the arm it is meant to protect tests the assertion, not the
+guard.
+
+**The unfinished removal gets an outcome rather than a hedge.**
+`pub enum Landing { Finished, Started }` is `perform`'s last parameter; `scale`
+and `restart` pass a shared `finished`, because a `PATCH`'s `200` means applied
+and they grow no case. `delete` reads the answer's *shape* inside its closure —
+a `Status` means gone, the object coming back means something holds it — and
+drops the object there, [D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)'s
+`paused` move. `Started` is a change, so `changed()` is true and the exit stays
+`0`.
+
+**The asymmetry between the two sentences is deliberate and is ruled here.** The
+consequence warns that something attached to the object *may delay this **or act
+first***; the closing line can only ever report the delay, because nothing in a
+`200` tells k8rs whether a controller acted first. That stands. The dialog is
+right to warn about both and the result is right to report only what was
+observed — **a result sentence that hedged about a controller having acted would
+be k8rs asserting something it did not see**, which is the defect this entire
+round was about.
+
+**The five choices, recorded because they were made** (CLAUDE.md § the report the
+PM gets back): the ticket over the lifetime; a replay reported the way this
+region already reports author errors, `debug_assert` plus `Cancelled`, which is
+why its probe is a `should_panic` test; `Landing` as a seventh parameter with a
+test wrapper rather than editing 28 call sites; `delete`'s `Response` becoming
+`bool`, so `Checked<bool>`, readable by a caller though today's driver closes the
+dialog before it could; and a mechanical test that reads `screens/dialogs.md`,
+unwraps its frames and asserts all six consequence sentences **and the screen's
+own *may delay this or act first***, so a reword on either side turns red instead
+of drifting — which deliberately routes screen rewords back through the PM.
+
+**Gates over the final tree:** `just check` `0`, 1026 + 28 tests, and
+`just mutants-diff` **51 mutants, 33 caught, 18 unviable, 0 missed** — with the
+run's own diff snapshot compared line for line against `git diff HEAD` (1506
+added non-comment `src/` lines on both sides, zero differences), because the
+sweep started before the last comment edits and *the gate covered the final tree*
+is exactly the kind of claim this repo requires measured rather than assumed.
+
+### D227 — the resourceVersion goes only where a read already happened, and the metadata read that leaks what a `GET` was refused for (2026-09-05)
+
+todo.md 3837 is Phase 7's next box: *every call sends the resourceVersion that
+was read; a `409` offers a re-read, never a blind overwrite*. Three operations
+have landed and all three set `version: None`, so the box reads as an
+instruction to widen. It is not, and the five rulings below are what the brief
+could not be written without. Every number here is
+[reports/2026-09-05-resourceversion-and-409-on-the-wire.md](reports/2026-09-05-resourceversion-and-409-on-the-wire.md),
+measured against a `K8RS_CLUSTER=review` kind cluster on server v1.36.1.
+
+**The box's scope is narrower than its first sentence, and
+[REQUIREMENTS.md](REQUIREMENTS.md#write-operations-new--the-reversal) is where
+that shows.** The requirement it implements reads *"**apply** uses the
+resourceVersion that was read"*, sits directly under **Edit flow**, and the box's
+own parenthetical says why it is in Phase 7 at all — *the case `edit` will lean
+on in v0.4*. A blind overwrite is a hazard of **read → modify → write back**, and
+`edit` is the only operation in the plan that does that. The box generalised
+`apply` to *every call*; the requirement never did.
+
+**1. `scale` sends it. `restart` and `delete` do not, and this does not reopen
+their boxes.** The box says *the resourceVersion **that was read*** — a
+conditional, not an order to add a read. `scale` already reads: `Api::get_scale`,
+for the running count its consequence sentence turns on. So it holds one and
+throws it away, which is the box's whole subject. `restart` and `delete` read
+nothing, by
+[D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3 and
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 4 — a `GET` of a Deployment pulls `spec.template.spec.containers[].env[]`
+into k8rs for a dialog that shows none of it — so there is no resourceVersion
+that was read, and nothing to send.
+
+**2. The one mechanism that looked like it dissolved that was measured and it
+does not.** A `PartialObjectMetadata` read (`Accept: …as=PartialObjectMetadata…`,
+which `Api::get_metadata` sends) returns no `spec` at all, so it reads as the
+obvious way to buy a resourceVersion without the exposure. It is not: it returns
+`metadata.annotations`, and on any object created with `kubectl apply` that
+carries `kubectl.kubernetes.io/last-applied-configuration` — **the whole applied
+pod spec**. The planted canary `ZZZ-PLANTED-CANARY-ZZZ` appears **once** in the
+PartialObjectMetadata response (twice in the full `GET`). Nor is it cheap:
+**5247 bytes against 7243, 1.38×**, of which **2148** are `managedFields`,
+unpruned — the field invariant 6 drops everywhere else — leaving **260** bytes
+once the annotation and `managedFields` come out. **And the leak is
+user-dependent**: an object created with `kubectl create` carries no such
+annotation, so the safe case is the one a test writes and the leaking case is the
+one an operator has. (A Secret's metadata does *not* carry `data`, plain or
+base64 — measured, and the one reassuring result in the section.) So the
+exposure argument that closed those two boxes survives the mechanism that looked
+like it would answer it, and it survives *measured* rather than argued.
+
+**3. What the precondition buys on `scale` is the record, not the intent — and
+that is why it is worth one field.** `--replicas=3` is absolute: if something
+else scaled to 5 while the dialog was open, sending 3 still expresses exactly
+what the operator asked for, so nothing about the *change* needs guarding. What
+was derived from the read is **the consequence sentence the operator agreed to**
+(*"this starts 2 more copies"*, computed from `spec.replicas`) and **the `uid` on
+the audit line**. If the object moved in between, both records describe a state
+that no longer held — invariant 4's *neither record may lie*, about the one
+number the reader is agreeing to. The precondition makes that premise
+structurally true or stops the call. It is the same argument
+[`scale`] already makes when it refuses a `Scale` with no `spec.replicas` rather
+than reading it as zero.
+
+**4. The conflict lands on the check pass, and costs no new plumbing.** A
+resourceVersion in a merge-patch body **is** a server-side precondition on the
+scale subresource: stale → `409 Conflict`, current → `200`, the identical body
+re-sent → `409`. `?dryRun=All` returns **the same 409**, and it **does not
+consume the value** — `rv=862` before the dry-run, `862` after, and the real call
+with that same `862` succeeds. `scale` is already `checkable: true`, so a
+conflict surfaces as `Outcome::NotSent { fault: Fault::Conflict }` *before anyone
+is asked to confirm*: [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s
+*moved to where it costs the user nothing*, reached in Phase 7 with no watch and
+no dialog. `Fault::Conflict` already exists on a `409` and already has a
+sentence. **What the box still owes is the second half of its own title**: that
+sentence stops at *the object had already been changed by something else* and
+names no next step, where the box says a `409` **offers a re-read**. Headlessly
+the offer is a sentence; the dialog that offers it for real is Phase 11's, drawn
+already in [screens/dialogs.md](screens/dialogs.md).
+
+**5. The taught line stays flagless, and this is the first time invariant 4's
+two-record split carries weight.** No `kubectl` line is both honest and
+precondition-carrying. `kubectl delete`, `kubectl rollout restart` and `kubectl
+patch` have **no such flag at all**. `kubectl scale` has `--resource-version`,
+and it is a *different request*: with a stale value it makes **two GETs and no
+write**, failing client-side with `error: Expected resource version to be 1, was
+908` — no `409`, no `Status` to render — and with a correct one it switches the
+verb to **`PUT` of the whole `Scale`**. The flagless form is
+`PATCH …/scale`, `application/merge-patch+json`, `{"spec":{"replicas":N}}` —
+**byte-identical to what `ops.rs` sends today**. So putting the flag on the
+command log would teach a mechanism k8rs did not use, which is worse than
+omitting one it did. The line stays flagless; the resourceVersion rides on the
+**audit** line, which is exactly where
+[REQUIREMENTS § DevSecOps](REQUIREMENTS.md#devsecops-requirements) put it
+(*"the real API call (verb, path, resourceVersion sent, …)"*) and where
+`Record::attempt_line` already prints it or `not sent`. **The divergence is named
+rather than hidden**, beside `delete`'s `--wait` divergence in [`verdict`]: the
+taught line will succeed where k8rs declines.
+
+**6. An absent or empty resourceVersion is refused, never sent — and nothing
+parses it.** `{"metadata":{"resourceVersion":""}}` in a patch is **`200`, treated
+as no precondition**: a `Some("")` reaching the wire produces a patch that looks
+guarded, is not, and writes a record claiming a precondition that never existed —
+the blind overwrite this box exists to remove, wearing the box's own clothes. (On
+a delete the same value is a `409` **that can never clear**, which is the other
+half of the trap and is why the rule is *refused*, not *coerced*.) So a read that
+comes back without a usable resourceVersion is refused in the same breath as one
+with no `spec.replicas`. **What is not done is validating the value's shape**:
+`resourceVersion` is opaque by API contract and a client may not parse it. A
+non-numeric value is a `500` with **no `reason` field** rather than a `409` —
+recorded because a reader will meet it, not because k8rs should pre-empt it; no
+apiserver hands one back, and baking *must be numeric* into k8rs would encode
+etcd's storage layer as an API rule.
+
+**What is deliberately left, with a home.** `delete`'s
+`preconditions.uid` is measured to work — namespaced and cluster-scoped, with its
+own sentence (*"The object might have been deleted and then recreated"*) — and it
+is the guard for [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s
+*wrong pod deleted*, the worst case in the write path. It is **not this box's**,
+because `delete` reads nothing and D22 puts the `uid` on the dialog, from the
+watch. It is boxed in Phase 11, where that dialog is built — a later phase, never
+the running one. Two more the report names as unmeasured and nothing here leans
+on: a `409` under genuine concurrency (every conflict measured was manufactured
+with `kubectl label --overwrite`), and whether `details.retryAfterSeconds` ever
+appears on a `Conflict` — absent in all seven bodies captured, so no formatter
+may read it. **And one correction owed elsewhere**:
+[D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)'s
+4859-byte `Status.message` echo was **not reproduced** in five shapes on this same
+v1.36.1 — largest body 820 bytes, canary in none. That is not evidence against
+D217; it is a named gap, boxed for a re-measure rather than quietly assumed
+still true.
+
+### D228 — the review round that reversed the box: a precondition on a field that moves when nothing changed, and the dry-run window that was 0.2% of what it claimed (2026-09-05)
+
+[D227](#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05)
+ruled that `scale` should send the `resourceVersion` it had already read. It
+landed, `tester` found and closed a real defect in it, and then the operator
+review measured the thing none of the three of us had:
+[reports/2026-09-05-scale-precondition-under-churn.md](reports/2026-09-05-scale-precondition-under-churn.md).
+**D227 ruling 1 is reversed for `scale`, and rulings 2, 5 and 6 are unaffected.**
+
+**The reversal, and the one sentence it turns on.** `metadata.resourceVersion`
+bumps on **every** write to the object, *including a `status` write by the
+deployment controller*. D227 ruling 3 named exactly what the precondition was
+defending — *the consequence sentence the operator agreed to, computed from
+`spec.replicas`, and the `uid` on the audit line* — and **a status write
+falsifies neither.** So the guard is strictly broader than the invariant it
+defends, and the excess is the population k8rs exists for. Constructed and
+measured: a `PATCH …/deployments/web/status` with `{"status":{"collisionCount":1}}`
+moved the scale subresource's `resourceVersion` from `954` to `1102` with
+`generation` and `spec.replicas` unchanged, and the scale that followed was a
+`409`.
+
+**How often, counted off a watch:** steady at 3/3 ready, **0 writes in 180 s** —
+so the healthy case really is quiet. One `kubectl set image`, **15 writes in
+3.46 s**. One pod deleted, **4 in 0.57 s**. `CrashLoopBackOff` on three pods,
+**20 writes in 99.4 s**, median gap **2.45 s**. Through the built binary with a
+10 s confirmation delay, **5 of 9 runs against churning objects failed** and
+**0 of 2 against a settled one** — and the failures came *after* the operator
+typed `yes`. A rolling Deployment is a healthy one and a crashlooping one is the
+3am case; refusing both is worse than the blind overwrite the box set out to
+remove. This is [PRIOR-ART § B4](PRIOR-ART.md) (k9s #3583) in a new place: a
+check the operation does not need makes a working key stop working for a class
+of users.
+
+**What is *not* the fix, and it was measured rather than dismissed.** A
+`json-patch` `test` op on `/spec/replicas` guards the actual premise and
+**survives a status-only write** — measured. It is refused anyway: the failure
+is a `422 Invalid` whose message is *"the server rejected our request due to an
+error in our request"*, naming no field and no values, which
+[D213](#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04)
+classifies as `Fault::Rejected` — so the conflict sentence this box wrote would
+never be reached, and the operator would get a worse message than the one being
+replaced. **And the deeper reason to decline it: nothing asks for it.**
+[REQUIREMENTS.md](REQUIREMENTS.md#write-operations-new--the-reversal) puts
+conflict handling under **Edit flow** and says *"**apply** uses the
+resourceVersion that was read"*. `scale --replicas=N` is absolute intent, not a
+read-modify-write: if something else scaled to 4 while the dialog was open, sending
+5 still delivers exactly the 5 the operator asked for. **The requirement was
+right and D227 over-read it** — which is why the fix is to stop sending, not to
+send something cleverer.
+
+**Ruling 4's claim was false and is corrected here, not quietly dropped.** D227
+said one body on both passes *"is what makes a conflict surface before the
+operator is asked to confirm rather than after."* Measured: the dry-run lands
+**9–21 ms** after the `GET` in all 24 trials, while the confirmation window is
+seconds — so the check covers **~0.2 %** of the exposure at an 8 s dialog and
+**~0.05 %** at 30 s, and **4 of the 9 conflicts had a `200` dry-run and a `409`
+real call**. It catches the *dense* case by luck, never the *long* case by
+design. [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s *moved to
+where it costs the user nothing* is a property of **a watch behind an open
+dialog**, and borrowing the phrase for a dry-run fired milliseconds after the read
+was the error. Recorded because the next reader would have built on it.
+
+**The finding a per-box review could not have seen, and the reason step 6 exists.**
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s second bullet and
+[screens/dialogs.md](screens/dialogs.md) already pre-commit Phase 11's dialog to
+holding *"the `uid` **and** the `resourceVersion` it was opened with"* and flipping
+to **Changed** on the latter. On the same measurement that is a modal killing its
+own confirm button roughly **every 2.5 seconds** on a crashlooping Deployment whose
+spec never moved. `ops.rs` and `screens/dialogs.md` were about to read one field
+and be wrong the same way, so fixing this box without fixing D22 would have bought
+nothing. **`uid` is the field that means what D22 wants** — *is this still the same
+object* — and `resourceVersion` answers *has anything at all been written*, which
+is not the question.
+
+**`Changed` is retired rather than re-keyed, and that is `tui-designer`'s ruling
+on its own file** (2026-09-05). Re-keying it would mean inventing a per-operation
+*what would make this stale* field that nothing in
+[REQUIREMENTS.md](REQUIREMENTS.md) asks for, to drive a pre-send state that
+duplicates conflict handling that already exists after the call. **And this box's
+own argument about `scale` generalises**: absolute intent means sending N still
+delivers N whatever ran in between, and neither `restart` nor `delete` shows the
+operator a live number whose staleness makes the confirmed change wrong. The one
+operation that does is `edit` — read-modify-write, v0.4 — and
+[REQUIREMENTS § Conflict handling](REQUIREMENTS.md#write-operations-new--the-reversal)
+already scopes it there. So `Gone`, on the `uid`, is the only outcome, and D22's
+bullet, that requirement's second half, `screens/dialogs.md` and Phase 11's box
+all say so.
+
+**What survives the reversal.** `Fault::Conflict`'s sentence keeps its next step —
+a `409` is reachable from other paths, and *"look at it again before deciding
+whether you still want this change"* is what the box's own title owed. The
+`Mutation::version` field, the audit line's `resourceVersion` column and
+[`Record::of`]'s strip stay as they are, unused by any operation until v0.4's
+`edit`, which **is** a read-modify-write and is where the requirement always put
+this. **The contract `tester` found by breaking it was moved from prose into
+[`Record::of`] as a `debug_assert`, and then moved back — the round trip is the
+part worth keeping.** `k8s-admin` proposed it (finding 5) and I took it: one
+check for every future operation instead of a paragraph asking `edit` to
+remember. `tester` then measured it. Plant the strip removal in `Record::of` —
+`version: record.version.map(str::to_string)` — and nothing else: **at `HEAD`
+three tests fail; with the assertion in, all 1056 pass.** Coverage of that strip
+went from three tests to none, and **structurally, not by oversight**: the
+assertion refuses every input where `cleaned(v) != v`, so every value a test may
+supply satisfies `cleaned(v) == v` by construction and the strip is a no-op on
+all of them.
+
+**And it never closed the hole it was added for.** `debug_assert` is compiled out
+in release, so a crafted `resourceVersion` in a release build passes it, gets
+stripped, and the audit line diverges from the wire again — the original defect,
+in the only build that ships. So it enforced the contract exactly where it was
+never going to be violated while removing the coverage that protected the path
+where it could be. The assertion is gone, the three invariant-9 tests are back to
+their `HEAD` shapes, and the strip stays as defence-in-depth for invariant 9 — a
+crafted value must not reach a file somebody `cat`s — now tested again.
+
+**Where the contract actually belongs, and why prose is the honest answer here.**
+It is the *operation's*, held at the point it reads the value, which is what
+`scale`'s removed guard did. `Record::of` sees one half of the invariant: what
+the record will print. The other half — what the request will carry — is the
+operation's and is not in scope at that call. An assertion over half an
+invariant is what this looked like, and v0.4's `edit`, the first operation that
+will set the field, owes the guard in its own box.
+
+**The general lesson, since this repo has now paid for it twice in one box:** a
+guard that makes a hostile input unrepresentable also makes it unfeedable, and
+the tests that were proving the sanitizer are the ones that stop being able to.
+Check what a new assertion makes *untestable* before taking it — the count of
+tests that go red when you break the line underneath it is one command.
+
+**Two corrections owed elsewhere, both from this round.**
+[D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)'s
+4859-byte echo **was reproduced** — yesterday's five failed shapes missed it on
+*media type*, not on version: `application/merge-patch+json` with an unknown field
+under `Strict` returns a **13218-byte** body with a **5132-byte** message carrying
+the planted canary **twice**, where `strategic-merge-patch+json` returns 514 bytes
+and no canary. `Pass::patch`'s doc had this right all along; the backlog entry
+D227 opened had a wrong premise and is retired. And `removal` serves
+**`replicaset`**, which invariant 6 fetches on demand and never watches — so
+Phase 11's *`uid` off the watch* has no watch for that one kind, boxed there
+rather than discovered in it.
+
+### D229 — the four rulings `may_i` could not be briefed without, and the box's arithmetic that went stale under it (2026-09-05)
+
+todo.md's `may_i` box and [D23](#d23--permissions-are-discovered-by-failing-and-that-is-backwards)
+were written on 2026-08-11, before any operation existed. Read at HEAD, three of
+their premises have moved.
+
+**1. "The two cluster-scoped operations" are not built, and the one that exists
+is `delete`.** D23 names **cordon and drain**; both are v0.2 and neither is
+written. The cluster-scoped mutation k8rs performs today is `delete node/<name>`
+([D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 3, the first one). So the box's *plus a `SelfSubjectAccessReview` for the
+two cluster-scoped operations* is one shape and not two, and it is `delete` on a
+Node. The count is not the point; briefing an agent to build two reviews for
+operations that do not exist is.
+
+**2. The gap D23 describes is live for exactly one operation, and this file
+opened it.** D23's case is *the user types a pod name in full, presses `⏎`, and
+only then learns they were never allowed*. For `scale` and `restart` that has
+been false since they landed: both are `checkable: true`, so the `dryRun=All`
+goes out **before** [`perform`] calls `ask`, and a `403` lands as
+`Outcome::NotSent { fault: Refused }` with nobody having typed anything.
+`delete` is the only `checkable: false` mutation
+([D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1 declined its preflight, for reasons that still hold) — so it sends
+nothing at all before asking for the object's name typed in full. **D225 ruling 1
+is what made D23's scenario real, and `may_i` is what closes it.** That is worth
+writing down because the two entries were reasoned a month apart and neither
+knew it.
+
+**3. `may_i` is built now and wired to a key later, and the reason is the
+freeze.** D23's stated payoff — *keys the user cannot use are dim from the start
+and the footer says why* — needs a key map, which is Phase 11. But `ops.rs`
+freezes at the end of Phase 7, and `may_i` must live in `ops.rs` because both
+reviews are performed with `create` (D23's own invariant-1 ruling, unchanged and
+still right). So the function is written and proven here with the headless driver
+as its first caller, and **the dimming is Phase 11's**. What this box does *not*
+do is put a permission check inside [`perform`]: that changes the behaviour of
+three landed operations and belongs beside the dialog that would show its result.
+Phase 11's box carries the `delete` connection from ruling 2.
+
+**4. It fails open, and a refusal of the review is not a refusal of the
+operation.** A cluster can refuse the `SelfSubjectRulesReview` itself. When the
+answer cannot be had, k8rs **assumes the operation is permitted** and lets the
+real call decide — which is exactly today's behaviour, so a failed probe costs
+nothing and changes nothing. Failing *closed* would hide an operation the user is
+in fact allowed to perform, turning a diagnostic into an outage, and it is the
+[PRIOR-ART § B4](PRIOR-ART.md) shape this repo has now met twice: k9s 0.50.12
+gating a shell on a node read the user could not do, and
+[D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)'s
+own precondition. **A probe may never be the reason a permitted action is
+refused.** The security gate's *a 403 degrades that one feature and names the
+missing verb + resource; it never crashes and never retries in a loop* is the
+rule, applied to the probe rather than to the operation.
+
+**What is owed to the documented roles and is not assumed.** Both reviews are
+`create` on `selfsubjectrulesreviews` / `selfsubjectaccessreviews` in
+`authorization.k8s.io`. The default `system:basic-user` ClusterRole grants these
+to every authenticated user on an ordinary cluster, which is exactly the
+condition that hid the `nonResourceURLs` gap until a cluster without the default
+binding was tried
+([D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+So the grant is **measured against a role with no default bindings** before
+[docs/security.md](docs/security.md) claims either role runs it, rather than
+inferred from a cluster that would answer yes regardless.
+
+### D230 — the `may_i` review round: a spelling that answers the opposite of `kubectl`, and the read-only user who could not ask what they may do (2026-09-05)
+
+The operator review measured `may_i` against a real cluster and against
+`kubectl auth can-i`, which is the reference implementation of the same matcher
+([reports/2026-09-05-may-i-against-a-real-cluster.md](reports/2026-09-05-may-i-against-a-real-cluster.md)).
+**The matcher is right and the line is wrong** — every defect is in how the
+driver reads a typed string, and two of them make k8rs state the opposite of the
+truth.
+
+**First, what held.** `dev-core`'s one reasoned claim — that a rule granting
+`patch deployments` does **not** grant `patch deployments/scale` — is correct,
+measured off the API server's own `SubjectAccessReview` rather than off kubectl:
+`subresource=''` allowed, `subresource='scale'` refused, same rule. `addresses()`
+implements `ResourceMatches` and agreed on every wildcard shape fed to it. The
+fail-open half of [D229](#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)
+ruling 4 also held against a real second authorizer: kind's Node authorizer sets
+`incomplete: true` with *"node authorizer does not support user rule
+resolution"*, and every non-matching question under that identity came back
+`CouldNotTell`, never `No`.
+
+**1. `/` means the object's name in `kubectl auth can-i`, not the subresource,
+and k8rs claimed otherwise in a doc and in a test.** Measured: under a rule
+granting `delete pods` with `resourceNames: [only-this-pod]`, `kubectl auth
+can-i delete pods/only-this-pod` is **yes** and k8rs's `may-i delete
+pods/only-this-pod` is **no**; the subresource in kubectl is `--subresource=`.
+So one string is two different questions with two different answers in two tools
+whose syntax k8rs's own comment claims is shared. **The ruling is to take
+`kubectl`'s meaning, not to correct the comment**: `/` after the resource is the
+**object name**, and the subresource moves to `--subresource=<name>`. Both map
+onto fields [`Asking`] already has — `name`, which had no caller, and
+`subresource` — so nothing in the frozen type changes. A flag that takes a value
+is not [D17](#d17--the---once-output)'s threshold
+([D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
+and borrowing a spelling while changing what it means is worse than not
+borrowing it.
+
+**2. A group-less resource is refused, never answered `no`.** The driver
+defaults the group to `""`, so `patch deployments` asks about the *core* group,
+finds nothing, and prints *"no — the cluster says this login is not allowed to do
+that"* — of the everyday spelling, under a login that is in fact allowed.
+Measured wrong for `deployments`, `deployment`, `deploy`, `pod` and `po`, all
+against a `kubectl auth can-i` that says yes. **The cluster said no such thing**;
+it said no rule matches that resource in the core group. k8rs refuses the line
+and names the fix (`deployments.apps`) rather than answering, which is how the
+rest of `ops_run` already handles a word it cannot resolve. Discovery-backed
+resolution is Phase 11's, where the resource and group come off discovery and
+never off a typed word.
+
+**3. `--read-only` permits `may-i`, and this narrows a gate row rather than an
+invariant.** Measured: `k8rs --read-only ops may-i list pods` is refused with
+*"--read-only was asked for, so k8rs will not change anything"*, which is exactly
+backwards for the user most likely to ask what they are allowed to do.
+[Invariant 2](CLAUDE.md)'s subject is **mutation** — *"`--read-only` makes the
+whole path unreachable"* is about the write path — but the security gate row
+spells it *`ops.rs` unreachable*, and `may_i` is the first thing in `ops.rs` that
+is not a write. **D23 predicted this exactly** by putting it there for a
+*mechanical* reason: the allowlist stays mechanical, and the price is that
+`ops.rs` is no longer synonymous with *changes the cluster*. The row now reads
+*no mutation is reachable*. **Ruled now rather than in Phase 11 because `ops.rs`
+freezes at the end of this phase** and `k8s.rs` § THE BROWSER'S ROWS already
+points at `ops::may_i` for *may this kubeconfig list this kind* — a read-only
+feature that `--read-only` would otherwise have killed before it was written.
+
+**4. A `no` exits `1`, and D17 is not spent by it — checked, not recalled.**
+[D17](#d17--the---once-output) rules *findings do not change the exit code — k8rs
+is a report, not a linter*, and keeps `1` unused **so a `--exit-code` flag has
+somewhere to go**. That reservation is about `--once`'s findings, and a probe's
+answer is not a finding — it is the entire output of a different subcommand, so
+`may-i` taking `1` for *no* leaves `--exit-code` exactly the room D17 saved it.
+(The first draft of this ruling said *this is the case D17 reserved `1` for*,
+which is not what D17 says; the anchor it cited was wrong too, and both came from
+recalling the entry instead of opening it.) Today `0` means yes *and* no while `2` means could-not-tell, a malformed
+line and a missing kubeconfig, so a script cannot get the answer out of the exit
+code at all and must grep an English sentence invariant 14 will keep rewriting.
+`kubectl auth can-i` exits `1` on a no, and this subcommand deliberately borrows
+its muscle memory. `0` yes · `1` no · `2` k8rs could not find out.
+
+**5. One question is asked with a `SelfSubjectAccessReview`, always — which is
+what stops two readers of one permission model disagreeing.** Measured, same
+login and same question: `may-i delete pods -n default` answered **yes** and
+`may-i delete pods` answered **no**, because `-n` selected the rules review and
+its local matcher while its absence selected the access review and let the server
+answer. That is [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+class — two rules reading one object and disagreeing — and it is invisible from
+inside either function. The server's answer is the exact one, so a *single*
+question goes to `may_i`. **[`may_i_in`] and [`Permits`] keep their reason for
+existing**: D23's *one call answers everything in this namespace* is the bulk
+path Phase 11 needs to dim a whole key map without a request per key, and it is
+tested directly rather than through the driver.
+
+**6. `Verdict::Yes` may not attribute to the cluster an answer the cluster did
+not give.** `Permits::may` over-reports on `resourceNames` deliberately —
+ruling 4's direction, and right — but the sentence it produces is *"yes — the
+cluster says this login is allowed to do that"*, measured against a `kubectl auth
+can-i` that says **no** for the same question. The over-report stays; the claim
+of the cluster's authority for it goes. A key staying lit is fail-open working
+as designed; a record asserting the cluster said so is invariant 4's *neither
+record may lie*.
+
+**7. Two more, small and both measured.** [`Permits::may`] guards a namespace
+*mismatch* but lets `namespace: None` fall through into the rule match — so the
+cluster-scoped question [`Asking`]'s own doc names, `delete nodes`, would be
+answered from one namespace's rules. Unreachable from today's driver, a trap for
+Phase 11, and one character of guard. And [`unasked`] opens a refused *probe*
+with `in_words(Fault::Refused)` — *"the cluster would not allow it"* — which is
+the same eight words a refused **delete** prints, so the reader meets a denial
+and the *"That is not a no"* disclaimer 180 characters later. Selecting off the
+`Fault` is right; the subject of the sentence is not, and a refused question
+needs its own words.
+
+**What the roles get, and it is not both.** Measured needed *and* sufficient
+under an identity without `system:basic-user`: adding `create` on
+`selfsubjectrulesreviews` / `selfsubjectaccessreviews` turns *could not tell*
+into a real answer. **`k8rs-admin` gets the rule; `k8rs-readonly` does not, yet**
+— no read-only code path calls `may_i` today, and
+[docs/security.md](docs/security.md) holds itself to *every rule is reachable by
+code that exists* ([D187](#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
+removed two grants on that test). It arrives with the browser row that reads it.
+**And a technique in an older report has stopped working:** on v1.36.1 an
+explicit `as-groups` no longer drops the auto-added `system:authenticated`, so
+`reports/2026-08-30-the-read-only-clusterrole-under-itself.md` § 2's
+impersonation no longer reaches the no-default-bindings condition — naming
+`system:unauthenticated` does. Anyone reusing that method measures the wrong
+thing and gets a green.
+
+**A hand-off summary is a second copy, and it lost the thing the ruling was
+about.** The PM sent `tester` a row-by-row table of what each `tests/binary.rs`
+case must become. It never said what the **object name** has to look like on the
+wire — so a rewrite built from the table left `name: None` in `may_i_connected`
+**surviving**, which is the measured defect ruling 1 exists for. `tester` read
+this entry instead, asserted the whole `resourceAttributes` per row, and the
+plant died; the same assertion caught a `namespace` leaking onto the
+cluster-scoped question. **The rule is already in [CLAUDE.md](CLAUDE.md)** — *a
+decision is written once and cited, the second copy is the one that goes stale* —
+and a brief's convenience table is a second copy like any other. Cite the ruling
+and name the file; do not restate it as a list of edits.
+
+**The one that is reasoned and stays open.** An authorizer outside the
+rule-resolver chain — a webhook, cloud IAM — would leave `incomplete` false and
+the rules review silently short, and `Permits::may` would answer a clean `No` for
+a login that is allowed. kind's Node authorizer does the honest thing; no
+evidence either way about GKE/EKS/OpenShift, and no cluster with one was
+buildable in that run. **It is the bulk path's problem, not the single
+question's** (ruling 5), so it is boxed with the Phase 11 dimming and not here.
+
+### D231 — the audit box was built under three other boxes, and D21's startup clause belongs to a screen that does not exist (2026-09-05)
+
+todo.md's *the audit line is written and flushed before the call* is Phase 7's
+next box, and most of it landed under `scale`, `restart` and `delete` because
+[`perform`] could not have been written without it. Read at HEAD, the box is a
+**verification**, not a build — with one clause that is not true of this binary
+and one that never will be.
+
+**What is already there, and where.** [`perform`] writes and flushes the attempt
+line before anything reaches the cluster, returns `Performed { outcome: None,
+recorded: false }` if that write fails — so a mutation that cannot be recorded
+does not happen — and appends the result line afterwards, carrying the outcome
+*and* whether it was recorded rather than replacing one with the other
+([D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
+The driver opens the log **before** the seam and after every complaint about the
+line, so *this machine cannot hold the trail* is answered before a confirmation
+is typed rather than after
+([D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 7). [`audit_log`] refuses what it cannot trust and says what it cannot fix
+([D219](#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04)).
+
+**The clause that is not true of this binary, and the ruling.** D21 says *if the
+log cannot be opened at startup, k8rs says so and continues in read-only mode. It
+does not exit.* The headless driver **refuses the line**, and that is correct
+*for the driver*: an `ops` line is the entire run, so there is no *continue* to
+continue into — the user asked for one mutation, it cannot be audited, and
+refusing is the only honest answer. D21's sentence describes **a TUI that starts,
+draws, and leaves the write keys dead**, which is Phase 11's screen and Phase 12's
+wiring. It is not a gap in this box and it is not a contradiction; it is a
+sentence about a program that does not exist yet, and it is boxed where that
+program is built rather than left to read as an unmet requirement here.
+
+**So the box closes on evidence, not on code** — and the evidence is a test per
+clause, each planted and watched fail, because a clause nobody can break is a
+clause nobody has checked. That is the only honest way to tick a box whose work
+arrived under three other boxes: *it was already done* is a claim, and this repo
+has a rule about those
+([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)).
+
+### D232 — in-flight needs no new callback, one-at-a-time is already structural, and the freeze risk is whether `perform` can be driven beside an event loop (2026-09-05)
+
+todo.md's *in-flight is part of the contract, not a UI detail* is the next Phase 7
+box. [D20](#d20--a-call-that-takes-time-is-a-state-and-there-was-none) is almost
+entirely screen behaviour — the modal, the `…` on the command line, `q`/`X`
+refused, `drain`'s progress pane — so the question this box has to answer is what
+the **contract** owes before `ops.rs` freezes.
+
+**1. *Started* is already reported, and a new callback would be a second copy of
+it.** `ask` is handed a [`Checked`] and its return value is the only path to the real
+call: `Answer::Confirmed` with this call's ticket is the one arm that reaches
+`call(FOR_REAL)`, and `Cancelled`, `Gone` and `Changed` each end the mutation
+without sending anything. So *the caller's own `ask` returning `Confirmed`* **is**
+the started signal, it arrives exactly when D20 wants the modal to close, and it
+cannot drift from what `perform` does because it is what `perform` branches on. A
+`started` callback beside it would be a second thing to keep in step with the
+first, which is the shape this region already refuses for
+[`Pass`] and [`Checked`].
+
+**2. Exactly one mutation can be outstanding, and it is the borrow checker that
+says so — worth stating because it is not obvious.** [`perform`] takes
+`audit: &mut impl Write`, and k8rs opens exactly one audit log
+([`audit_log`]). Two concurrent `perform` calls therefore need two `&mut` borrows
+of the same sink and **do not compile**. That is stronger than a runtime flag and
+it costs nothing, but it is invisible to a reader looking for a guard — the same
+reason [invariant 1](CLAUDE.md)'s *one file to audit* had to be written down
+rather than assumed. It is also why D20's *a second mutation is refused* needs no
+mechanism in `ops.rs`: there is no way to start one.
+
+**3. The freeze risk, and it is the only real work in this box.** D20 says *the
+modal closes on confirmation, not on completion*, and *navigation stays free* —
+so a Phase 12 caller must keep drawing while the real call is outstanding, which
+means driving [`perform`]'s future **concurrently with an event loop**. But
+`perform` borrows: `&Mutation<'_>`, whose fields are `&'a str`, and
+`&mut impl Write`. A borrowed future cannot be `tokio::spawn`ed, which needs
+`'static`, and holding it in the app's own state beside the data it borrows is a
+self-referential struct Rust will not build without pinning work nobody has
+costed. **`ops.rs` freezes at the end of this phase.** If the signature cannot be
+driven that way, Phase 12 discovers it against a frozen file — which is the
+*stop, fix the order* case
+[CLAUDE.md § Architecture workflow](CLAUDE.md) exists for, and the cheapest
+possible moment to find it is now.
+
+**So this box proves it rather than reasoning about it**: a test that drives
+`perform` inside a `select!` beside another stream, with the confirmation
+answered after the loop has gone round — the shape a TUI actually has. If it
+compiles and passes, the signature is proven usable and the fact is recorded
+where Phase 12 will look. If it does not, the plan is wrong and it is wrong while
+the file is still open. **This is `ops.rs`'s own *dangerous code is proven before
+it is bound to a key*, applied to a lifetime instead of to a write.**
+
+**Answered, 2026-09-05: yes, and both shapes work.** A pinned local under
+`tokio::pin!` + `select!` passes, and so does the one the box actually rides on —
+the future **parked in a struct, boxed, polled through `&mut` each iteration**,
+which is what a `ratatui` loop has. `Box::pin` is the mechanism: it makes the
+future `Unpin` enough to live in a field, where a `'static` bound would otherwise
+have forced a `tokio::spawn` this signature cannot satisfy. Both tests assert the
+*interleaving* — two terminal events processed between `asked` and `confirmed`,
+and the console drawing more than the one frame the answer lands in — so a
+mutation awaited straight through fails them.
+
+**And it found the constraint, by making the compiler say it rather than by
+reading the types.** The obvious Phase 12 design — an app struct owning the audit
+`File` and holding the in-flight future that borrows it — is self-referential and
+`rustc` refuses it: *`console.audit` does not live long enough … dropped here
+while still borrowed*. So the `Mutation`, its strings and the `File` all live in
+the frame that runs the loop, and the console carries a lifetime — `Console<'a>`,
+never `Console`. That is workable and it is **a decision about where the `File`
+lives, taken before the struct is designed rather than after**, which is the whole
+value of asking the question while the file is still open. It is boxed in
+Phase 12.
+
+**What stays Phase 11's**: the `…` that becomes an outcome, `q` and `X` refused
+in the footer, and `drain`'s counted progress pane, which is v0.2's operation
+anyway. None of them is reachable from a headless driver, and none of them needs
+`ops.rs` reopened once point 3 is answered.
+
+### D233 — the dialog's `$` line and the command log's are not the same line, and the read side is a manifest rather than a feed (2026-09-05)
+
+todo.md's *the command log feed — every command as the user would have typed it
+(the UI panel comes later; the data starts here)* is the next Phase 7 box. Read
+at HEAD, the data is there and in one format; what is **not** settled is which
+lines belong in a log at all, and that has to be settled before Phase 11 draws a
+panel from it.
+
+**What already holds.** Both paths emit the same shape. Reads build
+`$ kubectl …` lines in `command_log`; the headless dialog writes
+`writeln!(out, "$ {}", shown.kubectl)`. [`Mutation::kubectl`] is the single
+source, stripped once through [`Record::of`], and invariant 4's two records are
+written from one value so they cannot disagree about a name
+([D8](#d8--invariant-4-was-not-literally-true)). Nothing here needs building.
+
+**1. A cancelled mutation must not appear in the command log, and today's `$`
+line would put it there.** The dialog prints its `$ kubectl …` when it **opens**,
+which is right — `screens/dialogs.md` puts the teaching line under the
+consequence, before anyone has agreed to anything. A **command log** is a record
+of what k8rs *ran*. Those are two different lines that happen to carry the same
+text, and an implementer who feeds the dialog's line straight into the panel
+publishes a command that was never run — invariant 4's *neither record may lie*,
+reached by reusing a string rather than by writing a wrong one. **The log line is
+appended when [`ask`] returns `Answer::Confirmed`**, which is the same instant
+[D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)
+ruling 1 identifies as *started* and the same instant
+[D20](#d20--a-call-that-takes-time-is-a-state-and-there-was-none) closes the
+modal — so the `…` D20 wants on that line has a place to be put and a moment to
+be put there. `Cancelled`, `Gone` and `Changed` append nothing.
+
+**2. The feed is view state, and `views.rs` is Phase 10 — `ops.rs` owes it
+nothing more.** A panel needs an accumulating list whose last line is edited in
+place when the outcome arrives. `ops.rs` already hands over everything that
+requires: the text ([`Shown::kubectl`]), the moment ([`ask`]'s return), and the
+outcome ([`Performed`]). Putting the list in `ops.rs` would be a UI structure in
+the file whose whole justification is that it holds writes and nothing else, and
+it would freeze there. So this box does not build one.
+
+**3. The read side is a manifest, not a feed, and `k8s.rs` is frozen — so
+Phase 11 inherits a limitation rather than a bug.** `command_log(analysis,
+coverage, namespace)` is computed **up front** from what the run is *going* to
+do, which is exactly right for `--once`: one pass, a known set of calls, printed
+before they run. A live TUI's panel shows commands *as they happen*, and building
+that means instrumenting the read path — which froze at the end of Phase 6, with
+two named exceptions, neither of them this. **So the panel Phase 11 draws is
+honest only if it says what it is**: the manifest at startup, and mutations
+appended as they are confirmed. A panel that implies every line appeared when its
+request went out would be a third record that lies. Recorded here rather than
+discovered against a frozen file, which is the same reason
+[D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)
+ruling 3 was asked while `ops.rs` was still open. Widening it later is a
+`k8s.rs` reopening and therefore a plan change, not a feature.
+
+### D234 — `--read-only`'s box went stale twice, and the carve-out I ordered is the thing to attack (2026-09-05)
+
+todo.md's `--read-only` box carries its own staleness warning from `tester`
+(2026-09-04) and has gone stale **again since**, in the way that matters more.
+
+**What the box says, and what is true at HEAD.** It says `ops.rs` is *698 lines*;
+it is **3271**. It says the conclusion holds because *`main.rs` declares
+`mod ops;` and calls nothing from it* — that is now flatly false: `main.rs` calls
+`ops::scale`, `ops::restart`, `ops::delete`, `ops::may_i`, `ops::may_i_in` and
+`ops::audit_log`. **The number was the harmless half and the reason was the
+load-bearing one**, which is the shape
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+names: a wrong figure is embarrassing, a reason that has quietly stopped applying
+is a box built on nothing.
+
+**1. What makes the flag true today is a guard at a single door, and that is
+invariant 2's intent rather than a weakening of it.** `ops_line` is the one route
+from argv into any mutation, and the refusal sits in it. *Unreachable, not merely
+unbound* was written against the failure it names — a UI that stops **drawing** a
+key while the path underneath still works. A guarded single entry point is the
+opposite of that. **What it is not is a compile-time guarantee**, and this entry
+says so plainly rather than letting *structurally true* be read as one:
+`ops::scale` and its neighbours are `pub`, and a second caller inside `main.rs`
+would bypass the door entirely. Nothing today is that caller, and **the claim
+that there is exactly one door is a fact about the code that no test asserts** —
+which is what this box owes.
+
+**2. The carve-out I ordered is the hole to attack, and I am naming it because I
+made it.**
+[D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3 made `--read-only` permit `may-i`, so the refusal is now conditional:
+`if !asking && …`. **Every conditional guard is a guard that can be talked out of
+its condition.** If `asking` is ever true for a line that is not a question — a
+verb added to the same branch, a parse that misreads a word — the flag stops
+refusing a mutation and nothing else is standing behind it. `tester` has already
+shown the guard fires for all three operations and in both flag positions; what
+is not shown is that `asking` **cannot** be true for anything that mutates. That
+is the assertion this box needs, and it did not exist before ruling 3 created the
+condition.
+
+**3. The `--read-only` e2e job is the box after this one and stays there.** *Fails
+if any mutating request reaches the API server* is a different proof — it watches
+the wire rather than the door — and splitting them is deliberate: this box proves
+k8rs refuses, that one proves nothing got out. A guard that is wrong in a way both
+boxes miss would have to fool a source assertion and a socket at once.
+
+**Phase 12 inherits the real version of this.** A TUI has keys, and `--read-only`
+must leave the write path unreachable rather than merely undrawn — the failure
+invariant 2 was written against. The driver's single door is the right answer for
+a driver and is not the answer for a console; that is Phase 12's box and it is
+where *structural* becomes a claim about types rather than about doors.
+
+### D235 — the delete that removed a pod nobody had seen, and why the fix costs no read (2026-09-05)
+
+The kind verification ran every operation against a real apiserver
+([reports/2026-09-05-every-operation-against-a-real-cluster.md](reports/2026-09-05-every-operation-against-a-real-cluster.md)).
+Most of Phase 7 held. One finding is a blocker and it is
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s scenario, live.
+
+**The measurement.** A StatefulSet pod, whose name its controller reuses by
+design, with the confirmation held open on a fifo while the pod was replaced:
+three different `uid`s for one name — the one the operator opened the dialog on,
+the one holding the name when it was typed, and the one alive two seconds after
+the run. **k8rs deleted a pod the operator never saw**, and the audit line says
+`uid not read`, so the record cannot say which. `ops.rs` already names this
+exactly — *"Sending a delete by name here is how the wrong pod gets deleted"* —
+and answers it with `Answer::Gone`, which `main.rs` documents as **unreachable
+headless** because a script has no watch. So the guard the design leans on is
+switched off in the only shape that exists today.
+
+**This is not [D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)'s
+case and the difference is the whole ruling.** D228 removed a `resourceVersion`
+precondition because that field moves when **nothing about the object changed** —
+a `status` write by its own controller bumps it, so the guard refused healthy
+workloads. **`metadata.uid` is immutable.** It cannot produce a false positive:
+it differs only when the object genuinely is a different one, which is precisely
+the question being asked. Measured against v1.36.1, a wrong-uid precondition is a
+`409` naming both uids and *"The object might have been deleted and then
+recreated"*, and the pod survived.
+
+**The fix costs no read, and that is why
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 4 stands.** That ruling declined a `GET` because it would pull container
+environments into k8rs for a dialog that shows none of them, and
+[D227](#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05)
+ruling 2 measured the one mechanism that looked like a cheap way round it and
+found it leaks the same thing. **None of that changes**: `delete` still reads
+nothing. What changes is that [`Deleting`] gains an **optional `uid`**, and
+`delete` sends `DeleteParams::preconditions` when it is `Some`. The headless
+driver passes `None` — it has no watch and may not buy one — and Phase 11's
+dialog passes `Some` off the watch that is already running behind the modal,
+which is where D22 put it in the first place.
+
+**The reason this is a Phase 7 blocker rather than a Phase 11 box is the
+freeze.** `ops.rs` freezes at the end of this phase. A `Deleting` with no `uid`
+field is a `delete` Phase 11 **cannot** hand a uid to without reopening a frozen
+file — the same shape
+[D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)
+ruling 3 was asked to catch, and it is caught here by a cluster instead of by a
+question. **What is not claimed is that this closes the headless hazard.** It
+does not: a script still deletes by name, and its window is milliseconds rather
+than the seconds a human takes to type. That residue is real, is bounded, and is
+recorded rather than papered over.
+
+**Three more the same run found, all in the file that is about to freeze.**
+
+- **`scale`'s audit line names the instance that was *read*, over a change made
+  to a different one.** Same window, a Deployment deleted and recreated between
+  the dry-run and the yes: the line records `uid 8656c3ec…`, which nothing
+  changed, and the dialog said *Right now: 2 copies* over an object running 1.
+  `PatchParams` has no preconditions, so this is not free the way the delete is —
+  what is owed is that **the record stops asserting what it did not verify**. The
+  `uid` is honestly *what k8rs read*; the line must not read as *what k8rs
+  changed*.
+- **`unread` is the one refusal that never names the namespace, and the
+  namespace is the likeliest mistake it reports.** `ops scale deploy/web 3 -n
+  no-such-ns` answers *"k8rs could not read how many copies of deployment/web are
+  running right now — the cluster has no object with that name"*, and nothing in
+  the run names `no-such-ns`. `restart` and `delete` escape this only because
+  `show` prints the namespace first; `scale` is the only operation that fails
+  *above* [`perform`], so its refusal is the whole screen. Invariant 14: the
+  reader is sent to look at the wrong object.
+- **`scale` and `restart` disagree about `replicaset`, which is
+  [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+  shape.** `rollout` refuses it in words; `scalable` admits it, and on a
+  controller-owned ReplicaSet both records say *the change was made* and the count
+  is back in under three seconds — [D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)'s
+  class with no warning. **The ruling is a sentence, not a refusal**, because a
+  standalone ReplicaSet is legal and scaling it works: refusing every one would
+  break a real operation to fix a common one. And k8rs cannot tell them apart for
+  free — measured, the `Scale` subresource strips `ownerReferences`, so knowing
+  costs a second `GET` that D223 ruling 3 discourages. So the consequence says
+  *if* a deployment manages this replicaset its controller will put the count
+  back, which is true either way and costs nothing.
+
+### D236 — the four rulings the e2e box needs: where a wire is visible, what `just e2e` is then, and the synopsis that buried a correct answer (2026-09-05)
+
+Phase 7's last box is *e2e job under `--read-only` that fails if any mutating
+request reaches the API server*, plus two notes the kind run
+([reports/2026-09-05](reports/2026-09-05-every-operation-against-a-real-cluster.md))
+left for it. Four things had to be settled before it could be briefed, and two of
+them narrow what the box was written expecting.
+
+**1. The wire is watched at the stub, because kind cannot see one.**
+[D234](#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05)
+ruling 3 split this box from the last one on exactly this axis — *that box proves
+k8rs refuses, this one proves nothing got out* — and the split only pays if the
+second half really observes the socket. **A kind apiserver cannot tell you what
+one client sent it.** `apiserver_request_total` carries `verb`, `resource`,
+`scope` and `code` and **no client label**, so every controller in the cluster is
+in the same counter; attributing a `PATCH` to k8rs off it is not possible. The
+alternatives each buy something else: an audit policy means
+`kubeadmConfigPatches` and a **recreated control plane**, and the fixture cluster
+is the one object in this repo that may not be quietly reshaped
+([D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12));
+a read-only RBAC login proves *the apiserver refused*, which is a different
+claim from *nothing was sent* and is the claim k8rs is not allowed to lean on.
+**The recording stub already in `tests/binary.rs` is the honest observation
+point**: `Ran::asked` holds `METHOD target body` for every request the binary
+actually dispatched, so *no mutating request reached the API server* is a filter
+over a list that exists today. It also runs on every push, which no cluster leg
+can. **The stub is the API server from the binary's side** — kube dialled it, the
+kubeconfig named it, the bytes went over a socket — and that is the whole of what
+the assertion claims.
+
+**2. `just e2e` is therefore the cluster leg, and it asserts what a cluster can
+actually prove.** The recipe is Phase 2's one declared freeze exception
+(`todo.md` Phase 2, *Frozen after*), so leaving `@exit 1` in it at phase close
+would spend the exception on nothing. What it runs is its own declaration —
+the built binary against kind, `--read-only` over every verb the usage
+advertises, and the operations enabled for the cancel case — and what it asserts
+is what is visible from outside a real apiserver: **the object did not change**.
+Not the wire. **The clause this ruling first carried — *and no audit line was
+written* — was true of one leg and false of the other, and `tester` measured it
+rather than taking it**: under `--read-only` nothing is attempted so no log is
+opened at all, but a *cancelled* operation writes attempt **and** result, because
+invariant 2 requires every attempt — success, failure, refusal — to reach the
+audit log. So the cluster leg asserts the record **exists and says nothing was
+changed**, which is the stronger claim: a leg that demanded silence would have
+gone red on the contract working. **It is not in `just check`** and it is
+not a CI job: [REQUIREMENTS § CI](REQUIREMENTS.md#ci-github-actions) refuses a
+kind job in v1 and *tests must pass with no `KUBECONFIG`* — both still hold, and
+this recipe is the PM's to run
+([CLAUDE.md § The boxes no agent can run](CLAUDE.md)). The sentence in
+[docs/security.md](docs/security.md) that said *the e2e job runs against kind and
+fails if any mutating request reaches the API server* was one claim about one
+job; it is two now, and the docs say which range proves which.
+
+**3. The negative assertion is the same box's, at both ranges.**
+[D218](#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)'s
+confirmation design is only distinguishable from a `--yes` flag by what happens
+when nobody answers: a well-formed `ops` line with `</dev/null` must cancel, exit
+non-zero, and reach the cluster with **nothing**. Every positive test in the file
+still passes if that regresses, which is why it was carried in
+[`backlog.md`](backlog.md) waiting for this box rather than assumed.
+
+**4. The synopsis prints when the *form* is wrong, and not when the *meaning*
+is.** Measured at HEAD, `k8rs ops <anything refused>` is one line of message and
+**eight** lines of `ops_usage()`, for all six refusals — the wrong operation name,
+the missing namespace, the missing copies **and** `ops restart rs/x -n payments`,
+whose answer is *a replicaset is normally made by a deployment, and restarting
+that deployment is what replaces its copies*. That last reader typed a well-formed
+line and got a complete, correct answer buried under a synopsis they did not
+need, which is invariant 14's second half. **The split is by what the reader is
+missing**: someone who wrote `frobnicate`, or left out `-n`, or left out the
+copies, does not know the shape and the synopsis is the answer; someone who named
+a real operation and a real object and was told *k8rs does not do that to that
+kind* knows the shape already. Form keeps the synopsis; meaning gets the sentence
+and a one-line pointer back to `k8rs ops`.
+
+**And the note that is a sentence rather than a change.** `kubectl rollout
+restart` refuses a second restart inside the same second and exits `1` — its
+annotation stamp is second-resolution — where k8rs stamps to nanoseconds and
+performs both. k8rs did what it said it would, so this is not a defect in the
+direction that matters; what it costs is that the taught `kubectl` line, run
+twice inside a second, does not reproduce what k8rs did. Invariant 4 says the
+command log shows the equivalent command *as the user would have typed it*, and
+it stays equivalent — but the equivalence has a resolution, and `restart`'s doc
+comment now says so rather than leaving the next reader to find it against a
+cluster.
+
+**And the comment it replaced was not merely silent, it was wrong.** `restart`'s
+doc had said since 2026-09-04 that *two `kubectl rollout restart` runs inside one
+second write the identical value and start no second rollout* — reasoned from the
+annotation being second-resolution, which is true, to a conclusion the cluster
+falsified: kubectl never writes a second value at all. It refuses **client-side**,
+before it sends anything — *if restart has already been triggered within the past
+second, please wait* — and exits `1`, generation `5 → 6`, where k8rs went
+`6 → 8`. This is CLAUDE.md's *a claim reasoned from a definition instead of
+measured against the object*, in its quiet prose form, written by someone being
+careful about a stamp one `kubectl` away
+([D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+Found by `dev-core` while writing the sentence this box owed — which is the
+argument for owing it.
+
+**What the classification came out as, and it is mechanical rather than a
+judgement per site.** Every refusal in the operations driver is produced either by
+*parsing the line* — `ops_words`, `operation_named`, `ops_object`, `ops_value`,
+`ops_namespace`, `may_i_question`, `known_kind`, the word-order and subresource
+checks — or by *asking the operation whether it applies to that kind*, which is
+`applies` and only `applies`. Parse refusals keep the synopsis; `applies` gets the
+sentence and the pointer. **A rule that can be grepped survives a fourth
+operation and a per-site reading does not**, which is why the boundary is drawn at
+the call and not at the wording. Two sites sit on the form side where the call is
+not obvious: `known_kind` — a kind k8rs does not know is not *a real object*, so
+the reader is missing the kind list — and `may-i`'s missing group, whose whole
+sentence is about how to spell the line. **`--read-only` is a third category**: it
+prints no usage at all and did not move
+([D234](#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05)).
+Measured: nine `applies` lines went 9 stderr lines → **2**, the four parse
+refusals stayed at 9, all at exit `2`.
+
+**The recipe's body lives in `scripts/e2e.sh`, and that honours the exception
+rather than dodging it.** `todo.md` Phase 2 says *Phase 7 writes that body and
+nothing else in the file*; the file had `@exit 1` and now has a body, which is
+what the exception was held open for. A justfile recipe cannot be run against
+fakes, and this one is nothing but decisions a cluster is not needed to get
+wrong — which context it refuses, which failure is loud, whether it vetted a
+single row. `scripts/e2e.sh --self-test` drives every one of those and sits in
+`scripts/guards.sh`, so the logic runs on every push on machines that have no
+cluster; the cluster run itself never does. Six scripts in this repo are already
+shaped that way and `scripts/` is not frozen.
+
+**Run against `kind-k8rs` (v1.36.1) by the PM, and it printed a line that lied.**
+Green on its assertions — `deploy/healthy-deploy` unchanged, `--read-only` opened
+no audit log, three cancelled attempts recorded — and the fourth of its per-row
+lines said *`ops may-i list pods.` — refused under `--read-only`, cancelled
+without it (exit 0)*, of which **both halves are false**. Measured in both flag
+positions: the question is permitted by
+[D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3, reached the cluster, and answered *yes — this login is allowed to do
+that*, exit `0`. The Rust half of this box already reads `mutates` off the row's
+own tail; the shell half printed one sentence for every row. **A per-row line that
+says the same thing about a row that did something different is the same defect
+class as invariant 4's**, and it is worse in a green run than in a red one,
+because nobody re-reads a green run — a reader at 3am takes those four lines as
+proof the flag refused four things when it refused three. Found by the PM's own
+run, which is the argument for the run being a gate and not a formality.
+
+**And the screen sync drew a refusal the binary cannot be made to print.**
+`screens/dialogs.md` had said since it was written that *every other kind — a
+Service, a ConfigMap, anything restart was never meant for — gets the same shape
+of answer*, and this box's sync promoted that sentence into a drawn block and put
+the new pointer line under it. Measured at HEAD: `k8rs ops restart
+service/web -n payments` prints **`k8rs does not work on a kind called service —
+the ones an operation can be pointed at are deployment, statefulset, daemonset,
+replicaset, pod and node`**, followed by the whole eight-line synopsis, because
+`known_kind` refuses a Service before `applies` is ever asked. **The `restartable`
+"other" arm is reachable and a Service is not one of its subjects** — the only
+kinds that reach it are inside the six: `node` for `restart`, `node` and
+`daemonset` for `scale`, and `delete` refuses no kind through `applies` at all.
+The reviewer verified the arm's **string builder** in `ops.rs` and not its
+**reachable output**, which is the same defect class as the `restart` doc comment
+two paragraphs up and was found the same way — by running the binary rather than
+reading the function that feeds it. **The error predates this box**; what this box
+did was turn a false sentence into a drawn screen, which is what made it
+blocking. `screens/` has no guard that can catch this: `screens-check.py` measures
+that a mockup fits 80×24, not that it is a thing the program says.
+
+**The `may-i` line was one of three records that were true by luck, and the other
+two were found by the agent sent to fix the first.** Both are the same shape as
+the line that lied — an assertion that reads as a check and is satisfied by a run
+that did nothing. *Refused under `--read-only`* was never checked for the
+operations either: leg 1 asserted only *no audit log and no stdout*, which is
+equally true of a row that failed for any other reason, so it now requires exit
+`2`. And the cancelled-attempt audit log was **inspected if present** rather than
+required, which is what made `3 cancelled attempts recorded` true by coincidence
+— measured against the pre-change script, one operation recording and one not was
+**green**, printing `1 operations refused then cancelled` about two. It is now
+required per operation, and the test is `-s` rather than `-e`, because an empty
+log is a reachable state: with an unreadable kubeconfig `ops::audit_log` opens
+`audit.log` at 0600 and never writes to it, and *opened and never written* is
+*recorded nothing*. **A green run is where this class hides**, because nobody
+re-reads one.
+
+### D237 — the Phase 7 family review: what the freeze forced into this turn, what the sweep can and cannot cover, and the tag whose reason stopped being true (2026-09-05)
+
+Phase 7 closed on eleven findings from the family review
+([reports/2026-09-05](reports/2026-09-05-the-frozen-write-path-read-whole.md)).
+The reviewer would have blocked on none of them; the triage below is the PM's,
+and its axis is **not severity — it is the freeze**.
+
+**1. `ops.rs` freezes, so two nits became blockers and the rest did not.**
+[CLAUDE.md § Phase close](CLAUDE.md) item 6 says a blocker is fixed and everything
+else is boxed later, which is what stops the loop. But *later* is not available
+for the file that closes: after this phase, `ops.rs` changes only by a recorded
+reversal, so a one-sentence defect in it is more expensive tomorrow than a
+three-site defect in `main.rs`, which `dev-ui` deletes at Phase 12 anyway. That is
+[D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05)'s
+precedent applied as a rule rather than re-derived: `Deleting` got its `uid` field
+in this phase for the same reason.
+**So the two that landed are the two the freeze owns** — an attempt line claiming
+*the cluster checked this was the object* about a round trip that has not
+happened when the line is written (`write_line` at `ops.rs:925`, before `show` at
+`:935` and before either `call`), true on a `200`, false on a `409`, and committed
+to disk before either is known; and the missing note that a `preconditions.uid`
+delete has **no** `kubectl` spelling, so the taught line succeeds where k8rs
+declines — the shape
+[D227](#decision-index) ruling 5 and [D226](#decision-index) both wrote down for
+their own divergences. Neither is reachable from today's binary; **Phase 11's
+dialog is the first caller of both**, which is exactly why they could not wait.
+**Four nits went to [`backlog.md`](backlog.md)** with the reasoning, and the phase
+still closed.
+
+**2. The third fix is not about the freeze and is here because it costs a working
+operator time.** Three driver refusals name the word they have just said k8rs does
+not have: with a zero-width space in it, `ops restart dep<U+200B>loyment/web`
+answers *k8rs does not work on a kind called deployment — the ones an operation
+can be pointed at are deployment, …*. The operator retypes an identical-looking
+line and gets an identical refusal. **`ops.rs` already ruled this class and the
+ruling landed in the copy nothing can reach**: `a_kind` quotes the word only where
+the strip left it alone ([D224](#decision-index)), and its own doc says *neither
+is reachable from argv today*.
+[D218](#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)
+finding 2 had claimed the driver's half *closed by `shown(arg, NAME_MAX)`* —
+measured, `shown` removes the character and appends *(with what cannot print
+removed)*, which does not stop the sentence contradicting its own second clause.
+**A ruling that lands only where it is unreachable is not a landed ruling**, and
+that is the general lesson rather than the ZWSP.
+
+**3. The mutation sweep covers the file that freezes and not the one that is
+deleted.** `just mutants` is scoped to `rules.rs` and `analysis.rs` — Phase 7's
+files have never been in the recipe, so there was no standing gate to run.
+Measured: **805 mutants** across `main.rs` (604) and `ops.rs` (201), at ~19s each
+— about nine hours, against a ten-minute cap per foreground call
+([D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)).
+**The ruling: sweep `ops.rs` and not `main.rs`.** `ops.rs` freezes and every
+surviving mutant in it is a test that can never be fixed cheaply again; `main.rs`
+is the temporary driver `dev-ui` replaces at Phase 12, and sweeping code that is
+scheduled for deletion buys a gate nobody will ever collect on. Every diff in this
+phase was gated by `just mutants-diff` when it was written; this is the whole-file
+pass on top of that, and **it is stated as `ops.rs` only rather than left to read
+like a whole-tree sweep that happened**.
+**A shard that looked interrupted was not.** `--shard 0/8` printed `ERROR
+interrupted` and its `outcomes.json` held all 26 entries — 22 caught, 3 honest
+unviables (`Default` is not implemented for the three types), one baseline, **0
+missed**. The kill landed on the reporting, after the work. That is
+[D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+lesson in the other direction — there, a failed run read as a pass; here a passed
+run read as a failure — and both are the same instruction: **read the run's own
+records, never its exit line.**
+
+**4. A `prior-art` tag kept its verdict and lost its argument.**
+[PRIOR-ART § G2](PRIOR-ART.md#g-destructive-actions) said `--read-only` makes the
+write path unreachable *so a new view cannot forget to check a flag — there is
+nothing to call*. There is now: the three operations are `pub`, called from
+`main.rs`, and `ops.rs` contains no read-only parameter, type or token. **The
+verdict survives and the reason does not**, so the entry now states what actually
+holds — one guarded entry point, proven by an equivalence over the verbs the
+binary advertises, plus D236's wire half — and names Phase 12 as where
+*unreachable* becomes a claim about types. **An `immune` tag whose stated
+mechanism has been replaced is worse than no tag**, because it is the sentence a
+future reviewer is told to defend.
+
+**5. Two `docs/security.md` sentences described code this phase changed**, in a
+file that was already in this turn's diff: the audit-line example still showed
+`resourceVersion 88213` on a scale — a precondition
+[D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)
+reversed and no operation sends — while omitting the `server` field D219 added and
+the uid clause D235 added; and *no read-only code path calls `may_i` today* was
+falsified by [D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3 in this same phase. The second one leaves a real gap — `k8rs-readonly`
+does not grant the `create` that the question it now permits needs — which fails
+open and is boxed rather than granted here, because *what a read-only role may
+create* is a decision and not a typo.
+
+**6. The same defect was at five sites, not three, and the ruling is *fix the
+siblings*.** `dev-core` fixed the three the review named, then reported two more
+from its own green sweep — `ops_object`'s `k8s::object_name` arm and
+`not_a_namespace`, where `deploy/we<U+202E>b` answers *`web` … is not the name of
+an object — a name is letters, digits, dashes and dots* about a word that
+satisfies every rule the sentence then states. It was right to stop: the brief
+named three sites and `main.rs` does not freeze. **The ruling is fix, and the
+reason is the shape rather than the count** — the helper already existed and each
+was one call, and a phase that ships three of five sites of one defect leaves the
+next reader no way to tell which sentences were vetted. That is the sibling-caller
+failure, and the fix that is smallest at the root is smaller than the fix repeated
+per report. The turn's deliverable became the **sweep**: every refusal in
+`main.rs` that echoes an argv-derived word, not the five that had been named.
+
+**7. What the shared rule is, and what it is not.** `a_kind`'s decision was not
+copied into `main.rs` and `ops::a_kind` was not made `pub` — its
+`"a {kind}"`/`"that kind"` shape fits none of the driver's frames. What is shared
+is the **decision**: `as_typed` takes the caller's sentence frame as a closure, so
+each site keeps its own words and none can forget the rule. **The predicate is the
+strip and not a character list**, matching `a_kind`; that costs the echo on a word
+carrying an escape sequence, which could have been quoted safely — and a narrower
+rule here beside a broad one in `ops.rs` would be two rules for one decision,
+which is the failure this repo pays most for. Clean-word output is byte-identical
+by construction, which is why the frames stayed and only the slot moved.
+
+**8. And writing the note for finding B found the paragraph already false.**
+`in_words`'s `Fault::Conflict` arm read *"No operation in this file sends one now
+… there is no divergence from the taught line to note."*
+[D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05)
+had falsified both halves in this same phase and the comment had not moved. The
+first draft of its replacement then cited D227 ruling 5 as live, which
+[D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)
+had reversed — caught by the author's own second pass, against `NOTES.md` rather
+than against the brief. **Three of this phase's last findings are the same
+sentence**: a comment that was true when written, about code that moved
+underneath it, in the file where nothing forces the two to agree.
+
+**9. The sweep found eleven sites, not five, and one of them was a live security
+gate row.** Asked to answer *are these all of them* by measurement rather than by
+reading, `dev-core` fed the same zero-width space to every refusal in `main.rs`
+that names an argv-derived word. **Six more**, each finding C exactly: `mistyped`'s
+`--object` name half, its `--container`, and its two separate unknown-flag
+branches; `refuse_count`'s not-a-number arm — *has to be a whole number, and `3` …
+is not one*; and `which_kind`'s no-match arm, which is the cruelest, because it
+tells the reader to **check the spelling** of a spelling that is correct. Verified
+by the PM: `grep -c 'as_typed("' src/main.rs` → **11**.
+**And the two unknown-flag sites used `sanitize` rather than `shown`, so they were
+unbounded** — `k8rs --once --<9000 a's>` printed all nine thousand characters
+back. That is the security gate's *sizes are bounded* row, live, in a file the
+gate has been read against every turn for a phase; routing through `as_typed` cuts
+it. Measured by the PM after the fix: **303 bytes of stderr**, and it is the one
+clean-word sentence that moved, gaining `(shortened by k8rs)`. **A defect nobody
+was looking for came out of a sweep somebody was made to run**, which is the
+argument for asking *are these all of them* as a deliverable rather than as a
+closing question.
+**What was deliberately left is recorded in the test rather than in a head**: the
+sentences where the cleaned word is still true of what is being refused (`--context
+--live`), the extra-word refusals (an extra word is extra however it is spelled),
+and four arms reachable only by a word that *matched* or *parsed*, which a word
+carrying an unprintable character cannot do. `in_namespace` was checked by
+experiment and not by argument — a zero-width space put into a kubeconfig was
+already stripped by `k8s::drawable` before that refusal saw it.
+**The fix retired a test's subject, which is the part that could not be quietly
+absorbed.** `tests/binary.rs`'s crafted-namespace assertion existed as *a terminal
+sink for a value nobody has stripped before*; `as_typed` removes the sink, so the
+value never reaches the terminal and the assertion's premise is gone rather than
+wrong. Updating the expected string to match the new output would have been the
+exact move CLAUDE.md forbids, and `dev-core` stopped at the file boundary and said
+so instead of making it.
+
+**10. And the blocker was the panic under all of it.** `src/main.rs:82` read argv
+with `std::env::args()`, which **panics on a word that is not valid UTF-8**.
+Measured by the PM at HEAD: `k8rs --once $'--\xff'` → *called `Result::unwrap()`
+on an `Err` value: `"--\xFF"`*, **exit 101** where every refusal on that path exits
+`2`. It is reachable without the user typing anything wrong — `k8rs *.json` in a
+directory holding one latin-1 filename, which is the threat this file's own test
+doc already names (*"argv is as untrusted as the API — a shell glob expands
+whatever the directory is named"*). [CLAUDE.md § Phase close](CLAUDE.md) item 6
+names *a crash* as a blocker, so it was fixed rather than boxed, and it is the one
+path in the binary that answered untrusted input with a Rust backtrace instead of
+a k8rs sentence.
+**The ruling is refuse, not convert**, and it is the turn's own rule one layer
+out: `as_typed` had just established that *a word the strip would change is not
+the word it looks like, so it is not echoed*. A word that is not UTF-8 is the same
+class at the process boundary — k8rs cannot act on it and must not pretend it can,
+and a lossy conversion would manufacture a word the user never typed and then
+refuse *that*.
+**Three findings in a row came out of asking for a sweep rather than a fix** —
+eleven echo sites, two unbounded ones, and this. Each was found by the agent sent
+to close the previous one, in the file everyone had already read. **The
+instruction that produced them is one sentence** — *are these all of them, measured
+rather than reasoned* — and it belongs in a brief that fixes anything found by
+sampling.
+
+**11. The sweep, run.** `src/ops.rs` at its freeze, ten shards, **201 mutants:
+169 caught, 32 unviable, 0 missed.** The count matches `cargo mutants --list`
+exactly, which is the only thing that proves no shard silently tested nothing.
+**One shard was re-run with its output visible rather than trusted**: shard 5
+came back with **nine** unviables, which is the shape
+[D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
+is about — and every one of them names a *type* (`ApiResource`, `Patch<Value>`,
+`Performed`, `Verdict`, none of which implement `Default`), with
+`scripts/mutants.sh`'s own log scan reporting *no log names the filesystem or a
+denied lint — 22 log(s) read*. The nine are honest. **The count alone could not
+have told me that**, which is the whole of D133, and the reason the shard was
+re-run is that the first pass had its stdout redirected to `/dev/null` — a saving
+of nothing that cost the evidence.

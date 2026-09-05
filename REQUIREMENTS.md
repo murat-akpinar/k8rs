@@ -29,7 +29,14 @@
      — is appended to `~/.local/state/k8rs/audit.log` and shown in the command
      log panel as the equivalent kubectl command.
    - **Escape hatch:** `--read-only` restores the original guarantee; the write
-     path is unreachable, keys unbound, header marked. CI e2e runs in this mode.
+     path is unreachable, keys unbound, header marked. **Proven at two ranges**,
+     because a cluster cannot show you what one client sent it
+     ([NOTES § D236](NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)):
+     the **wire** — no mutating request leaves the process — is a test against a
+     recording stub and runs on every push; the **cluster** — the object did not
+     change — is `just e2e` against kind and is run by hand. *CI e2e runs in this
+     mode* is what this line said until 2026-09-05 and there has never been a CI
+     e2e job; the CI section below refused one in the same file.
    - **Docs:** two example `ClusterRole` YAMLs (read-only and admin) — the
      proof of what each mode can touch.
 
@@ -127,10 +134,19 @@
   re-read — never a blind overwrite.
 - **A confirmation dialog tracks its object while it is open.** The watch is
   still running behind the modal: if the object is deleted while the user is
-  typing its name, the dialog says it is already gone and the button dies; if
-  it merely changed, the dialog offers the re-read before the call rather than
-  after the 409
+  typing its name, the dialog says it is already gone and the button dies
   ([NOTES § D22](NOTES.md#d22--a-confirmation-can-outlive-the-thing-it-confirms)).
+  **It tracks the `uid` and nothing else.** This bullet also promised a second
+  state — *if it merely changed, the dialog offers the re-read before the call
+  rather than after the 409* — and that state is retired
+  ([NOTES § D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)):
+  the only field that could have driven it, `metadata.resourceVersion`, moves on
+  every write including a `status` write by the object's own controller — 20 in
+  99.4 s on a `CrashLoopBackOff` Deployment whose spec never moved — so it would
+  have killed its own confirm button on the object it was opened for. None of
+  `scale`, `restart` or `delete` shows the operator a live number whose staleness
+  makes the confirmed change wrong. The operation that genuinely needs it is
+  `edit`, and the **Conflict handling** bullet above is already where that lives.
 - **A call in flight is a visible state.** The modal closes on confirmation,
   not on completion; the command log line ends in `…` until the result arrives;
   a second mutation, `X` and `q` are refused until it does. `drain` gets a
@@ -263,7 +279,12 @@
 - Tests must pass with no `KUBECONFIG` — clusterless CI.
 - kind e2e job: **not in v1** (fixtures already come from kind; it would
   test the same thing 10 minutes more expensively). If the watch code ever
-  regresses, add an optional `workflow_dispatch` job.
+  regresses, add an optional `workflow_dispatch` job. **`just e2e` is the
+  hand-run cluster leg and is deliberately not this job** — what CI does run is
+  its `--self-test`, inside `scripts/guards.sh`, so the recipe's decisions are
+  covered on a machine with no cluster
+  ([NOTES § D236](NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)
+  ruling 2).
 - `Swatinem/rust-cache` — one line, halves build time.
 - Don't leave cross-compilation to the last minute: a `cargo check --target`
   matrix runs from day one (check only, not test — cheap).

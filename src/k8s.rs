@@ -202,7 +202,7 @@ use tokio_rustls::rustls::pki_types::ServerName;
 /// `ownerReference`'s kind, container names, images, label and selector keys and values, taints,
 /// tolerations, finalizers, claims, phase, a condition's type and status, a `reason` the rules
 /// compare with `==`, quantities, the kubelet version, a restart-rule action.
-const IDENTIFIER: usize = 512;
+pub(crate) const IDENTIFIER: usize = 512;
 
 /// The longest **sentence or path** kept from one field: 4096 bytes (NOTES § D146).
 ///
@@ -210,7 +210,7 @@ const IDENTIFIER: usize = 512;
 /// verbatim (NOTES § D37) — and `hostPath` with its two subpaths, which Posture prints as a
 /// row's own subject. The two classes cannot be one number: the longest message in the committed
 /// captures is 362 bytes, already 71% of 512, while every identifier beside it is under 50.
-const FREE_TEXT: usize = 4096;
+pub(crate) const FREE_TEXT: usize = 4096;
 
 /// What a cut looks like to the reader, in plain language and attributed to us (invariant 14,
 /// NOTES § D146).
@@ -281,7 +281,7 @@ pub(crate) fn unprintable(character: char) -> bool {
 /// three below the cap; the walk is a bounded range rather than a `while`, so no input and no
 /// edit of this function can turn it into a hang. Byte 0 is always a boundary, which is what
 /// makes the fallback safe rather than a second panic.
-fn text(value: &mut String, cap: usize) {
+pub(crate) fn text(value: &mut String, cap: usize) {
     let mut kept = String::new();
     let mut break_pending = false;
     for character in value.chars() {
@@ -821,9 +821,9 @@ fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
 // [`Fault::Expired`]**, read off the reader's own kubeconfig rather than off anything the cluster
 // sent.
 
-/// **What one failed call actually says** — ten facts, no sentence and no string.
+/// **What one failed call actually says** — eleven facts, no sentence and no string.
 ///
-/// Ordered as the reader meets them: the four that never reached the cluster, then the four the
+/// Ordered as the reader meets them: the four that never reached the cluster, then the five the
 /// cluster answered, then everything that produced no usable answer at all.
 ///
 /// **The count is read off the enum and not carried forward.** It said *six* over eight variants
@@ -831,7 +831,9 @@ fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
 /// names — and the edit that added the ninth found it. It then said **nine over ten** from the
 /// day [`Fault::Unfinished`] landed: that edit corrected the sentence about the count and left
 /// the count, which is the same class one layer in. Counted, 2026-09-03:
-/// `awk '/^pub enum Fault \{/,/^\}/' src/k8s.rs | grep -cE '^    [A-Z][A-Za-z]+,$'`.
+/// `awk '/^pub enum Fault \{/,/^\}/' src/k8s.rs | grep -cE '^    [A-Z][A-Za-z]+,$'`. It said
+/// **ten over eleven** for as long as it took to write the line below it, which is why the
+/// command is here and the number is not trusted (NOTES § D213).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
     /// **The kubeconfig file itself** — not found, unreadable, or not valid YAML. Nothing was
@@ -935,6 +937,20 @@ pub enum Fault {
     /// deletes the ReplicaSet it replaced, and a pod read a moment earlier can name one that is
     /// already gone (§ RESOLVING AN OWNER).
     Gone,
+    /// **The request was fine and the object moved underneath it** — `409`, `reason: Conflict`.
+    ///
+    /// **It cannot borrow [`Rejected`](Fault::Rejected) and that is the whole of why it is its
+    /// own variant** (NOTES § D213). A `409` is *not* a bad request: k8rs sent the
+    /// `resourceVersion` it had read and something else wrote the object in between, which is
+    /// answered by reading it again and never by editing the request. The write path's re-read
+    /// offer branches on exactly that difference, and until 2026-09-04 both a `409` and a `422`
+    /// came out [`Unanswered`](Fault::Unanswered) — a sentence about the network, for the two
+    /// answers a write meets most.
+    ///
+    /// **[`standing`](Fault::standing) is `true`**, which is a fact about the *same* bytes: sent
+    /// again with the same stale `resourceVersion` they get the same answer. A re-read is a
+    /// different request, not a retry.
+    Conflict,
     /// **The server took the request and this run ended before it answered** — the only fault in
     /// the taxonomy that is a fact about the *run* as well as about the call.
     ///
@@ -1027,6 +1043,10 @@ impl Fault {
             | Fault::Expired
             | Fault::Refused
             | Fault::Gone
+            // **A retry is not a re-read.** The same bytes carry the same stale
+            // `resourceVersion` and get the same `409` forever; what clears it is reading the
+            // object again, which is a different request (NOTES § D213).
+            | Fault::Conflict
             | Fault::Unfinished => true,
         }
     }
@@ -1097,17 +1117,28 @@ impl Fault {
 /// reported as a network that answered nothing. The shape that produced it is § ONE CONTAINER'S
 /// LOG's — a log request naming no container against a pod that has several — and it is
 /// [`Fault::Rejected`] now, which is a fact about the request and not about the cluster.
+///
+/// **`409` and `422` had no arm until 2026-09-04 and fell the same way** (NOTES § D213), which
+/// is the third occurrence of one defect and the reason it is written as a class rather than as
+/// a missing arm: **the fallback is a claim about the cluster**, so every code without an arm
+/// silently accuses the network. They are the two answers the *write* path meets most — a
+/// rejected dry-run is a `422`, a lost race is a `409` — and the write path is the fifth
+/// consumer of this classifier and was not one of the four D209's freeze check read.
 fn answer(status: &Status) -> Fault {
     match status.code {
         400 => Fault::Rejected,
         401 => Fault::Expired,
         403 => Fault::Refused,
         404 => Fault::Gone,
+        409 => Fault::Conflict,
+        422 => Fault::Rejected,
         _ => match status.reason.as_str() {
             reason::BAD_REQUEST => Fault::Rejected,
             reason::UNAUTHORIZED => Fault::Expired,
             reason::FORBIDDEN => Fault::Refused,
             reason::NOT_FOUND => Fault::Gone,
+            reason::CONFLICT => Fault::Conflict,
+            reason::INVALID => Fault::Rejected,
             _ => Fault::Unanswered,
         },
     }

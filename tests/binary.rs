@@ -77,7 +77,27 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
     // `--namespace` joined the list when the scoping box landed. It is here for the reason the
     // three beside it are: the synopsis is the only place a reader learns the flag exists, and
     // a flag that scopes what the tool reads is the one a reader most needs offered.
-    for named in ["--analysis", "--live", "--context", "--namespace"] {
+    //
+    // **`--read-only` is the fifth, and it is the one this loop was most owed** (NOTES § D234).
+    // It was in *nothing* the binary printed until 2026-09-05 — measured, `grep -c -- --read-only`
+    // over the no-argument usage, `--help`, `-h` and `k8rs ops` was `0` — while being the one word
+    // standing between a reader and a mutation. A flag nobody can discover refuses nothing.
+    //
+    // **And it is pinned here rather than over the `USAGE` const, which is where it briefly also
+    // was.** The two are not two spellings of one assertion: a unit test calls `run(&[])` and
+    // never sees the process, so its failure set is a strict subset of this one's. Measured, with
+    // `main`'s body made to exit before it prints — which is the mutation this whole file exists
+    // for: `src/main_tests.rs`'s `the_usage_says_ops_reaches_a_cluster_too` passed, and this
+    // assertion's own test failed on the line above. The narrow thing the `contains` adds over
+    // that line count is a `main` that prints a *different*, well-formed usage — thin, and the
+    // reason to keep exactly one of the two rather than both.
+    for named in [
+        "--analysis",
+        "--live",
+        "--context",
+        "--namespace",
+        "--read-only",
+    ] {
         assert!(
             synopsis.contains(named),
             "the synopsis does not offer {named}, so nothing tells a reader how to reach \
@@ -278,25 +298,86 @@ fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
     }
 }
 
-/// **Invariant 9 at the process boundary for the newest thing argv can put on screen.**
+/// **A namespace the strip would change never reaches the terminal at all** (NOTES § D237,
+/// invariant 9).
 ///
-/// A namespace is echoed back when it is not a name — and *not a name* is exactly the class a
-/// control character lands in, so this sentence is a terminal sink for a value nobody has
-/// stripped before. `sanitize` runs at the interpolation; nothing until now watched what left
-/// the process through it.
+/// **This test's subject was replaced rather than reworded, and that is worth saying.** It read
+/// *the readable part of the value still survives into the sentence* — true while the refusal
+/// quoted the namespace back, and the half that made the control-character sweep beside it mean
+/// anything. `as_typed` closed that echo: a word the strip changes is now described and not
+/// quoted. The readable-part claim was retired because the sink it watched stopped existing, not
+/// because it became inconvenient to keep.
 ///
-/// **Both halves, for the reason the path test beside it gives**: nothing controlling survives,
-/// **and** the readable part of the value still does. A `sanitize` that returned nothing would
-/// pass the first assertion and leave the reader a sentence naming no namespace at all
-/// (CLAUDE.md § A derived list asserts it found something).
+/// **So the control-character sweep is gone from here rather than demoted, and what it took to
+/// see that is worth the sentence.** With nothing out of argv left in the refusal, a filter over
+/// it cannot fail — and a filter that cannot fail is not a test (CLAUDE.md § Tests must not lie).
+/// The obvious counter-argument, that a broken `sanitize` would still redden it, was **measured
+/// and is false in the way that matters**: planting `sanitize(text) -> text` does redden this
+/// test, but at the assertion below, because `sanitize` is also `as_typed`'s own predicate — the
+/// crafted word goes back to being quoted and the sentence stops naming the noun. It never
+/// reddens at a surviving control character. The property moved one test down, to
+/// [`a_crafted_extra_word_leaves_the_process_with_no_control_character_on_stderr`] — a refusal
+/// `as_typed` deliberately does not route — so this file still asserts invariant 9 over a value
+/// that does reach the terminal.
+///
+/// **What is asserted instead is the guarantee that replaced it**: no fragment of the word
+/// reaches stderr, on any line. `src/main_tests.rs` proves that of the string `mistyped` returns;
+/// only a process can say the usage under it does not print the word again.
 #[test]
-fn a_crafted_namespace_leaves_the_process_with_no_control_character_on_stderr() {
+fn a_crafted_namespace_never_reaches_the_terminal_at_all() {
     // `ESC`, `CR` and a C1 control — three framings of the class, inside the value rather than
-    // as the whole of one (NOTES § D31). `/` keeps it out of `path_safe` whatever the strip
-    // does, so the arm under test is reached for the same reason on every platform.
+    // as the whole of one (NOTES § D31). The `/` keeps it out of `path_safe` whatever the strip
+    // does, so a refusal is reached for the same reason on every platform even if the strip
+    // branch is ever the one that moves.
     let crafted = "pay\u{1b}[2J\rments\u{9b}/x";
 
     let out = k8rs_with_no_kubeconfig(&["--live", "--namespace", crafted]);
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let stderr = text(out.stderr);
+    let first = stderr.lines().next().expect("the refusal has a first line");
+    // The refusal still names the kind of word it is about. Without this, a binary that printed
+    // an empty line would pass every absence below (CLAUDE.md § A derived list asserts it found
+    // something).
+    assert!(
+        first.contains("the namespace you typed"),
+        "a namespace the strip changes was not refused as one: {stderr:?}"
+    );
+    // Two framings of the one word, because either surviving alone is the leak: what the strip
+    // leaves of it, and the readable tail of the escape sequence itself (NOTES § D31).
+    for fragment in ["ments", "[2J"] {
+        assert!(
+            !stderr.contains(fragment),
+            "{fragment:?}, out of a namespace k8rs said it would not repeat, reached the \
+             terminal: {stderr:?}"
+        );
+    }
+}
+
+/// **Invariant 9 at the process boundary, over a refusal that still quotes what was typed.**
+///
+/// **The sink invariant 9 needs is a sentence that echoes, and `as_typed` closed most of them**
+/// (NOTES § D237): a word the strip changes is described rather than quoted, so no `as_typed`
+/// site can carry a control character to a terminal any more. **Six** classes of refusal
+/// deliberately do not route through it — counted off the list in `src/main_tests.rs` §
+/// `no_refusal_ever_names_a_word_the_same_sentence_offers_back`, which is where the ruling
+/// lives, and not recalled — and this is the second of them: *a word after a complete line*
+/// quotes the extra word through `shown` whatever its spelling, because *there is an extra word
+/// here* stays true of the cleaned one. So this subject is not one about to be closed underneath
+/// the test.
+///
+/// **Both halves, for the reason the path test above gives**: nothing controlling survives,
+/// **and** the readable part of the word still does. A `sanitize` that returned nothing would
+/// pass the first assertion and leave the reader a sentence naming no word at all (CLAUDE.md § A
+/// derived list asserts it found something).
+#[test]
+fn a_crafted_extra_word_leaves_the_process_with_no_control_character_on_stderr() {
+    // `ESC`, `CR` and a C1 control — three framings of the class, inside the value rather than
+    // as the whole of one (NOTES § D31). No name rule runs on this word, so unlike the two tests
+    // around it nothing has to be added to keep it off a happier path.
+    let crafted = "ex\u{1b}[2J\rtra\u{9b}x";
+
+    let out = k8rs_with_no_kubeconfig(&["ops", "scale", "deploy/web", "3", crafted]);
 
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let stderr = text(out.stderr);
@@ -307,9 +388,121 @@ fn a_crafted_namespace_leaves_the_process_with_no_control_character_on_stderr() 
         "control characters left the process: {survivors:?}\n{stderr:?}"
     );
     assert!(
-        first.contains("pay[2Jments/x"),
-        "the namespace was stripped away along with the escape: {stderr:?}"
+        first.contains("ex[2Jtrax"),
+        "the extra word was stripped away along with the escape: {stderr:?}"
     );
+}
+
+/// **An argv word too long to print is cut before it leaves the process** — the security gate's
+/// *sizes are bounded* row, which had no assertion at this boundary until now.
+///
+/// **It was live until 2026-09-05, and the change that closed it was aimed at something else.**
+/// The two unknown-flag refusals interpolated `sanitize` and not `shown`, so they carried no cut
+/// at all and `k8rs --once --<9000 a's>` printed all nine thousand characters back. Routing them
+/// through `as_typed` (NOTES § D237) gave them `shown`'s bound as a side effect. `tests/binary.rs`
+/// bounded a response body and nothing out of argv, so the gap outlived the fix by a turn.
+///
+/// **The cut is asserted as a property and not as a number.** `src/main_tests.rs` pins it at
+/// `k8s::NAME_MAX` and can see the constant; an integration test cannot (no `lib.rs`,
+/// NOTES § D50), and a hand-copied `253` here is the second copy that goes stale. What this
+/// boundary owes is that the answer is a sentence rather than a page, that the cut is not silent,
+/// and that something of the word survives it.
+#[test]
+fn an_over_long_argv_word_is_cut_before_it_leaves_the_process() {
+    let typed = format!("--{}", "a".repeat(9000));
+
+    let out = k8rs_with_no_kubeconfig(&["--once", &typed]);
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let stderr = text(out.stderr);
+    let first = stderr.lines().next().expect("the refusal has a first line");
+    println!("{first}");
+    // A ceiling and not the cut — the same one the unit sibling holds a refusal to. A refusal is
+    // one sentence, and nine thousand characters of `a` is not one.
+    assert!(
+        first.len() < 500,
+        "a {}-character flag word came back at {} bytes, so nothing bounded it: {first:?}",
+        typed.len(),
+        first.len()
+    );
+    assert!(
+        first.contains("(shortened by k8rs)"),
+        "the cut was silent, so the reader is left comparing their line against a flag k8rs \
+         never showed them whole: {first:?}"
+    );
+    // Cut short, not cut away (CLAUDE.md § A derived list asserts it found something): a bound
+    // that printed nothing at all would pass both assertions above.
+    assert!(
+        first.starts_with("k8rs: --aaaa"),
+        "the word was cut away instead of cut short: {stderr:?}"
+    );
+}
+
+/// **A word of argv that is not text is refused with exit `2`, and does not panic**
+/// (NOTES § D237 item 10, `src/main.rs` § [`command_line`]). What `std::env::args()` did with one
+/// was `Result::unwrap()` on an `Err`: a Rust backtrace and exit `101`, a code NOTES § D17's
+/// table does not have, on a line the reader never typed — `k8rs *.json` in a directory holding
+/// one latin-1 filename hands the shell's expansion straight in.
+///
+/// **Only this file can see it, which is why the fix arrived with no test.** No unit test can
+/// watch a process exit, and the panic *is* the process: `src/main_tests.rs` can prove
+/// `command_line` refuses an `OsString` it is handed, and cannot prove that nothing upstream of
+/// it dies before it is called.
+///
+/// **Two byte shapes, because they are two branches of the validator and not two spellings of
+/// one** (CLAUDE.md § A check is proven only for the input shapes it was fed). `\xff` is a byte
+/// that is never valid in any position; `caf\xe9.json` is a lead byte whose continuation bytes
+/// are missing, which is what a latin-1 filename and a truncated one both look like — and it is
+/// the shape that actually reaches a terminal.
+///
+/// **The second one is also the second word**, so the position in the sentence is arithmetic and
+/// not a constant: a refusal that always says *word 2* is wrong for every line but the first.
+#[test]
+fn an_argv_word_that_is_not_text_is_refused_and_does_not_panic() {
+    use std::os::unix::ffi::OsStrExt;
+
+    for (before, bytes, word) in [
+        (&[][..], &b"\xff"[..], "word 2"),
+        (&["--once"][..], &b"caf\xe9.json"[..], "word 3"),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_k8rs"))
+            .args(before)
+            .arg(std::ffi::OsStr::from_bytes(bytes))
+            .env(
+                "KUBECONFIG",
+                "/nonexistent/k8rs-tests/there-is-no-kubeconfig-here",
+            )
+            .output()
+            .expect("the built binary runs");
+
+        let code = out.status.code();
+        // The bytes themselves need no assertion here and deliberately have none: nothing
+        // between them and stderr is a byte, so `text`'s own `expect` is the red for that
+        // framing, and an assertion no defect can reach is the thing this file exists to catch
+        // (CLAUDE.md § Tests must not lie).
+        let stderr = text(out.stderr);
+        println!("{stderr}");
+        // The re-encoded framing of the same rule (CLAUDE.md § D31): `to_string_lossy` is the
+        // conversion `command_line`'s doc names and refuses, and it does not echo the word — it
+        // invents one. `k8rs` would then go looking for that filename, or quote it back at a
+        // reader who cannot match it against anything on their disk.
+        assert!(
+            !stderr.contains('\u{FFFD}'),
+            "the word came back re-encoded, which is a filename nobody has: {stderr:?}"
+        );
+        // Separately from the exit code, and first: a process that dies some other way has no
+        // code at all to compare, and `thread 'main' panicked` is the line that must never
+        // appear whatever the code says.
+        assert!(
+            !stderr.contains("panicked"),
+            "argv killed the process instead of being refused by it: {stderr:?}"
+        );
+        assert_eq!(code, Some(2), "{stderr:?}");
+        assert!(
+            stderr.contains(word),
+            "the refusal does not name which word of the line to go and rename: {stderr:?}"
+        );
+    }
 }
 
 // --- THE EXIT CODE OF A FAILED WRITE START ---
@@ -1335,3 +1528,1340 @@ fn a_log_run_that_named_something_unusable_is_refused_with_nothing_on_stdout() {
 }
 
 // --- ONE OBJECT'S LOG END ---
+
+// --- ONE OPERATION START ---
+//
+// **`ops` is the first subcommand that changes a cluster, and three of the things it owes are
+// only visible from outside the process** (NOTES § D220): which stream every sentence goes to,
+// what the exit code is, and whether a line k8rs refused left a state directory behind. Nothing
+// in `src/main_tests.rs` can see any of the three — it hands `scaled` a `Vec<u8>` and reads it
+// back, which proves the words and not the plumbing.
+//
+// **The cluster is the same shape § ONE OBJECT'S LOG already uses**: a listener on a loopback
+// port the kernel chose, a kubeconfig written beside it, and no network. What is new is the two
+// things an operation needs that a read does not — a state directory it is pointed at with
+// `$XDG_STATE_HOME`, so no test ever appends to the developer's own audit log, and a line on
+// stdin, because there is no flag that means yes (NOTES § D218).
+
+/// **The `uid` the stub's `Scale` carries, with an escape sequence in the middle of it.**
+///
+/// It is the **one** field on a scale's `ops::Mutation` that the *cluster* fills in — every
+/// other one is a literal, or a word the driver refused before it got this far — and it lands in
+/// a file somebody `cat`s at 3am. Invariant 9 is asserted for it in both directions: nothing
+/// controlling survives, and the readable half still does (NOTES § D31; CLAUDE.md § A derived
+/// list asserts it found something).
+///
+/// **Written as JSON escapes and not as the characters themselves**, which is not tidiness: a raw
+/// `U+001B` inside a JSON string is not legal JSON, so a stub that spelled it that way would hand
+/// back a body `serde_json` refuses and every test below would go red on *k8rs could not reach the
+/// cluster* — a decode failure wearing a connection failure's sentence. Measured, not reasoned:
+/// that is exactly what the first draft of this file did.
+const CRAFTED_UID: &str = r"18f0b6ee\u001b[2J2b0e\u202e4b53";
+
+/// The readable part of [`CRAFTED_UID`]. A strip that ate the whole value would satisfy the
+/// *no control characters* half on its own and leave the audit log naming no object.
+const UID_READS: &str = "18f0b6ee";
+
+/// The kubeconfig context every run below is on, except the one that is about not having a name.
+const STUB_CONTEXT: &str = "stub";
+
+/// The namespace whose review this cluster answers, against the rules in [`GRANTED`].
+const GRANTING_NAMESPACE: &str = "payments";
+
+/// **The namespace whose review comes back `201` with no `status` on it** — the answer that is not
+/// one. `ops::may_i` has an arm for it and, until this stub could produce it, nothing outside
+/// `src/ops_tests.rs` reached it.
+const UNANSWERED_NAMESPACE: &str = "unanswered";
+
+/// The namespace whose review this cluster refuses outright, with an apiserver's own `403` body.
+const FORBIDDEN_NAMESPACE: &str = "forbidden";
+
+/// **The three things this login may do**, written as the `resourceAttributes` a
+/// `SelfSubjectAccessReview` carries them in.
+///
+/// **A stub that said yes to everything would make every `yes` row vacuous**, so the answer is a
+/// match against this and the `no` rows are questions that genuinely miss it.
+///
+/// **`patch deployments` is not in it and `patch deployments/scale` is**, which is the one thing
+/// about the matcher D230's cluster run confirmed rather than reasoned — so this stub may not
+/// blur it either.
+const GRANTED: [(&str, &str, Option<&str>); 3] = [
+    ("list", "pods", None),
+    ("delete", "nodes", None),
+    ("patch", "deployments", Some("scale")),
+];
+
+/// **A context name that is read, resolved and connected with — and that invariant 9 strips to
+/// nothing.** `k8s::Session::context`'s third way to be `None` (NOTES § D202), and the only one
+/// that arrives on a connection that *worked*: kube looks the entry up by the file's own
+/// spelling, so `U+200B` names a real context, and only k8rs's own strip removes it.
+const NAMELESS_CONTEXT: &str = "\u{200b}";
+
+/// **What one `k8rs ops` run left behind** — the two streams, the exit code, what reached the
+/// stub, and the audit log it wrote.
+struct Ran {
+    out: Output,
+    /// `METHOD target body`, one per request the stub answered.
+    asked: Vec<String>,
+    /// The audit log's contents, or `""` where the run never made one.
+    audit: String,
+    /// Whether `$XDG_STATE_HOME/k8rs` exists at all — NOTES § D220 ruling 7's own question.
+    state_dir: bool,
+}
+
+impl Ran {
+    /// The requests that were about the scale subresource, which is every request this file
+    /// asserts on: discovery and `/version` are `k8s.rs`'s and are not this box's subject.
+    fn scale_calls(&self) -> Vec<&String> {
+        self.asked
+            .iter()
+            .filter(|asked| asked.contains("/scale"))
+            .collect()
+    }
+}
+
+/// **A cluster that answers one `Scale` and an empty list for everything else it is asked.**
+///
+/// **`spec` and `status` are separate parameters on purpose.** They are equal on every object at
+/// rest and differ on every one mid-rollout, and which of the two the consequence sentence is
+/// built from is the number the reader agrees to (invariant 4). A stub that could only say *3 and
+/// 3* cannot tell the two apart.
+///
+/// **`context` names the kubeconfig entry**, and it is a parameter because one caller needs a
+/// name that survives being read and does not survive invariant 9's strip — `k8s::Session`'s
+/// third way to be `None` (NOTES § D202), which arrives on a connection that *worked*.
+///
+/// **The address is the one the kernel handed back**, never a literal —
+/// `scripts/security-guard.py` § no second outbound path refuses a hardcoded host under `tests/`,
+/// and the two stubs above are written the same way.
+fn a_cluster_that_answers_one_scale(
+    spec: i32,
+    status: i32,
+    context: &str,
+) -> (std::path::PathBuf, Asked) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let asked: Asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = std::sync::Arc::clone(&asked);
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(socket) = socket else { return };
+            let seen = std::sync::Arc::clone(&seen);
+            std::thread::spawn(move || answer_one_scale(socket, spec, status, &seen));
+        }
+    });
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-opsstub-{}-{}.kubeconfig.yaml",
+        std::process::id(),
+        address.port()
+    ));
+    std::fs::write(
+        &path,
+        format!(
+            "apiVersion: v1\nkind: Config\ncurrent-context: '{context}'\n\
+             clusters: [{{name: stub, cluster: {{server: 'http://{address}'}}}}]\n\
+             contexts: [{{name: '{context}', context: {{cluster: stub, user: stub}}}}]\n\
+             users: [{{name: stub, user: {{}}}}]\n"
+        ),
+    )
+    .expect("the stub kubeconfig writes");
+    (path, asked)
+}
+
+/// **How this cluster answers a permission review** — the status line and the body, chosen by the
+/// question rather than by a parameter. [`one_ops_run`] has none for a cluster's mood, and its
+/// **seven** callers (counted, 2026-09-05) are otherwise all about scaling and deleting;
+/// threading one through them would edit five tests that have no permission in them.
+///
+/// **It answers a `SelfSubjectAccessReview` and nothing else, because that is the only review a
+/// question sends** (NOTES § D230 ruling 5). A namespace used to select `ops::may_i_in` and its
+/// local matcher, and measured on a real cluster the same login was told **yes** to
+/// `may-i delete pods -n default` and **no** to `may-i delete pods`. A driver that went back to
+/// branching would send a `SelfSubjectRulesReview` here and be caught by the target the test below
+/// asserts, not by a stub quietly answering it.
+///
+/// **The namespace picks the mood instead**: [`GRANTING_NAMESPACE`] is answered against
+/// [`GRANTED`], [`UNANSWERED_NAMESPACE`] comes back `201` with **no `status` on it at all**, and
+/// [`FORBIDDEN_NAMESPACE`] is refused outright. The middle one is the shape NOTES § D229 ruling 4
+/// is about and the one a green suite would otherwise never see — measured by planting *a
+/// status-less review is an answer* and watching this file go red.
+///
+/// **A question with no namespace is a cluster-scoped one** and gets no mood, which is what keeps
+/// the `nodes` rows about nodes.
+///
+/// **What the request body says is `src/ops_tests.rs` § MAY I's**, which asserts both reviews byte
+/// for byte against a socket. What is only visible from out here is the target, the query string
+/// and how many went out, so those are what the test below reads.
+fn reviewed(body: &str) -> (&'static str, String) {
+    let named = |namespace: &str| body.contains(&format!("\"namespace\":\"{namespace}\""));
+    if named(FORBIDDEN_NAMESPACE) {
+        return (
+            "403 Forbidden",
+            "{\"kind\":\"Status\",\"apiVersion\":\"v1\",\"status\":\"Failure\",\
+             \"message\":\"selfsubjectaccessreviews.authorization.k8s.io is forbidden: User \
+             \\\"probe\\\" cannot create resource \\\"selfsubjectaccessreviews\\\" in API group \
+             \\\"authorization.k8s.io\\\" at the cluster scope\",\
+             \"reason\":\"Forbidden\",\"code\":403}"
+                .to_string(),
+        );
+    }
+    let answered = |status: &str| {
+        (
+            "201 Created",
+            format!(
+                "{{\"kind\":\"SelfSubjectAccessReview\",\
+                 \"apiVersion\":\"authorization.k8s.io/v1\",\
+                 \"metadata\":{{}},\"spec\":{{}}{status}}}"
+            ),
+        )
+    };
+    if named(UNANSWERED_NAMESPACE) {
+        return answered("");
+    }
+    answered(&format!(",\"status\":{{\"allowed\":{}}}", granted(body)))
+}
+
+/// **Whether [`GRANTED`] covers the question in this request body** — the stub's whole authorizer.
+///
+/// **A rule with no subresource does not grant one**, which is why the `None` arm reads the
+/// request for a `subresource` key rather than ignoring it: a stub that let `patch deployments`
+/// answer `patch deployments/scale` would agree with a matcher that had stopped telling them
+/// apart.
+fn granted(body: &str) -> bool {
+    let says = |key: &str, value: &str| body.contains(&format!("\"{key}\":\"{value}\""));
+    GRANTED.iter().any(|(verb, resource, subresource)| {
+        says("verb", verb)
+            && says("resource", resource)
+            && match subresource {
+                Some(name) => says("subresource", name),
+                None => !body.contains("\"subresource\":"),
+            }
+    })
+}
+
+/// **The `autoscaling/v1 Scale` a cluster hands back for `deployment/web` in `payments`**, an
+/// answered permission review for either `selfsubject…` path ([`reviewed`]), and an empty list for
+/// everything else — `/version`, `/api` and `/apis` all arrive on this socket and none of them is
+/// this box's subject.
+///
+/// **A `PATCH` has a body, so a request does not end at the blank line** — the header says how
+/// much more there is, and reading one byte short glues the next request's first line onto this
+/// one's.
+fn answer_one_scale(mut socket: std::net::TcpStream, spec: i32, status: i32, seen: &Asked) {
+    use std::io::{Read, Write};
+    let scale = format!(
+        "{{\"kind\":\"Scale\",\"apiVersion\":\"autoscaling/v1\",\"metadata\":{{\"name\":\"web\",\
+         \"namespace\":\"payments\",\"uid\":\"{CRAFTED_UID}\",\"resourceVersion\":\"41751\"}},\
+         \"spec\":{{\"replicas\":{spec}}},\"status\":{{\"replicas\":{status}}}}}"
+    );
+    let empty =
+        r#"{"apiVersion":"v1","kind":"List","metadata":{"resourceVersion":"1"},"items":[]}"#;
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        let mut chunk = [0_u8; 4096];
+        match socket.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => pending.extend_from_slice(&chunk[..read]),
+        }
+        while let Some(end) = pending.windows(4).position(|window| window == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(&pending[..end]).to_string();
+            let length: usize = head
+                .lines()
+                .find_map(|line| {
+                    line.split_once(':')
+                        .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .and_then(|(_, value)| value.trim().parse().ok())
+                })
+                .unwrap_or(0);
+            if pending.len() < end + 4 + length {
+                break;
+            }
+            let body = String::from_utf8_lossy(&pending[end + 4..end + 4 + length]).to_string();
+            pending.drain(..end + 4 + length);
+            let mut words = head.split_whitespace();
+            let verb = words.next().unwrap_or_default().to_string();
+            let target = words.next().unwrap_or_default().to_string();
+            let asked = format!("{verb} {target} {body}").trim_end().to_string();
+            let (code, sent) = if target.contains("selfsubject") {
+                reviewed(&body)
+            } else if target.contains("/scale") {
+                ("200 OK", scale.clone())
+            } else {
+                ("200 OK", empty.to_string())
+            };
+            seen.lock()
+                .expect("the record is never poisoned")
+                .push(asked);
+            let answer = format!(
+                "HTTP/1.1 {code}\r\ncontent-type: application/json\r\n\
+                 content-length: {}\r\n\r\n{sent}",
+                sent.len()
+            );
+            if socket.write_all(answer.as_bytes()).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// **One `k8rs ops …` run, with a state directory of its own and a scripted stdin.**
+///
+/// **`typed` is `None` for a run with no stdin at all**, which is `< /dev/null`, a CI step and
+/// cron — the unattended default NOTES § D218 says must be *no*.
+///
+/// **`cluster` is `false` for a line the driver refuses before it dials anything**, so a refusal
+/// that started reaching for a socket would fail on the connection with a different sentence
+/// rather than passing quietly.
+///
+/// Everything is torn down **before** the assertions run, so a red run leaves neither a
+/// kubeconfig nor a state directory behind (NOTES § D185).
+fn one_ops_run(
+    spec: i32,
+    status: i32,
+    typed: Option<&str>,
+    args: &[&str],
+    cluster: bool,
+    context: &str,
+) -> Ran {
+    let state = std::env::temp_dir().join(format!(
+        "k8rs-opsstate-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&state);
+    std::fs::create_dir_all(&state).expect("a state directory this test owns");
+    let stub = cluster.then(|| a_cluster_that_answers_one_scale(spec, status, context));
+    let kubeconfig = stub.as_ref().map_or_else(
+        || std::path::PathBuf::from("/nonexistent/k8rs-tests/there-is-no-kubeconfig-here"),
+        |(path, _)| path.clone(),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_k8rs"))
+        .args(args)
+        .env("KUBECONFIG", &kubeconfig)
+        .env("XDG_STATE_HOME", &state)
+        .stdin(if typed.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the built binary runs");
+    if let Some(typed) = typed {
+        use std::io::Write;
+        let mut stdin = child.stdin.take().expect("stdin was piped");
+        stdin
+            .write_all(typed.as_bytes())
+            .expect("the answer is fed");
+    }
+    let out = child.wait_with_output().expect("the child ends");
+    let asked = stub.as_ref().map_or_else(Vec::new, |(_, asked)| {
+        asked.lock().expect("the record is never poisoned").clone()
+    });
+    let audit = std::fs::read_to_string(state.join("k8rs").join("audit.log")).unwrap_or_default();
+    let state_dir = state.join("k8rs").is_dir();
+    if let Some((path, _)) = stub {
+        std::fs::remove_file(path).expect("the stub kubeconfig is removed");
+    }
+    std::fs::remove_dir_all(&state).expect("the state directory is removed");
+    Ran {
+        out,
+        asked,
+        audit,
+        state_dir,
+    }
+}
+
+/// **A line k8rs is going to refuse anyway leaves no state directory behind** (NOTES § D220
+/// ruling 7) — the rule `k8rs ops bogus` already had, reached through the one door that is not a
+/// spelling mistake: a kind the operation does not work on.
+///
+/// **`src/main_tests.rs` counts a closure; this counts a directory.** The unit test hands
+/// `ops_line` a double that says it was asked, which proves the ordering of two calls. What it
+/// cannot see is `ops::audit_log` itself running against a real `$XDG_STATE_HOME` — and *making
+/// a directory in the user's home* is the effect the ruling is about.
+///
+/// **Exit `2` with nothing on stdout is the other half** (NOTES § D220 rulings 1 and 3):
+/// `k8rs ops scale pod/web 3 -n payments > out` writes an empty file, and `&& kubectl …` does
+/// not run.
+#[test]
+fn an_ops_line_that_is_refused_is_exit_2_with_no_stdout_and_no_state_directory() {
+    for line in [
+        vec!["ops", "scale", "pod/web", "3", "-n", "payments"],
+        vec!["ops", "scale", "node/worker-1", "3"],
+        vec!["ops", "bogus", "deploy/web"],
+        vec!["ops", "scale", "deploy/web", "three", "-n", "payments"],
+        vec!["ops", "scale", "deploy/web", "3"],
+        vec![
+            "--read-only",
+            "ops",
+            "scale",
+            "deploy/web",
+            "3",
+            "-n",
+            "payments",
+        ],
+    ] {
+        // **No stdin at all, and that is not incidental.** Every row here is refused before a
+        // confirmation is asked for, so the child never reads — and writing a scripted answer
+        // into a pipe whose reader has already exited is an `EPIPE` race that would redden this
+        // test for a reason it is not about.
+        let ran = one_ops_run(3, 3, None, &line, false, STUB_CONTEXT);
+
+        assert_eq!(
+            ran.out.status.code(),
+            Some(2),
+            "{line:?} did not exit 2: {:?}",
+            text(ran.out.stderr.clone())
+        );
+        assert_eq!(
+            text(ran.out.stdout.clone()),
+            "",
+            "{line:?} put a diagnostic where a report goes"
+        );
+        let stderr = text(ran.out.stderr);
+        assert!(stderr.starts_with("k8rs: "), "{line:?}: {stderr:?}");
+        // **The canary, and `starts_with("k8rs: ")` is not one**: a run that got past the driver
+        // would reach for a kubeconfig that is not there and print `k8rs: ` too. *nothing was
+        // changed* is the lead clause of both sentences past this point — `main`'s `no_cluster`
+        // and `ops::Performed::plainly`'s no-outcome arm — so its absence is what says the line
+        // was refused rather than attempted.
+        assert!(
+            !stderr.contains("nothing was changed"),
+            "{line:?} reached the operation before it was refused: {stderr:?}"
+        );
+        assert!(
+            !ran.state_dir,
+            "{line:?} was refused and made a state directory in the user's home anyway"
+        );
+        assert_eq!(ran.audit, "", "{line:?} wrote an audit line for nothing");
+    }
+}
+
+/// **A confirmed scale: the cluster changes, the process exits `0`, and stdout stays empty.**
+///
+/// **This is the only path in this binary that reaches exit `0` after changing something**
+/// (NOTES § D220 ruling 1), and the only one whose sentences all go to stderr while stdout is a
+/// stream nothing is written to (ruling 3) — `screens/once.md`'s split is *stdout is the
+/// findings*, and an operation produces none.
+///
+/// **The three printed lines are `screens/dialogs.md` § *Printed instead of drawn*'s**, in that
+/// order, with the box removed and nothing reworded for the terminal. The scale is to zero
+/// because that is the relation that file prints in full.
+///
+/// **The wire is asserted too**: read, check, change — three calls on the scale subresource and
+/// none on the Deployment itself.
+#[test]
+fn a_confirmed_scale_changes_the_cluster_exits_0_and_leaves_stdout_empty() {
+    let ran = one_ops_run(
+        3,
+        3,
+        Some("yes\n"),
+        &["ops", "scale", "deploy/web", "0", "-n", "payments"],
+        true,
+        STUB_CONTEXT,
+    );
+
+    let stderr = text(ran.out.stderr.clone());
+    println!("--- stderr ---\n{stderr}\n--- audit ---\n{}", ran.audit);
+    assert_eq!(
+        ran.out.status.code(),
+        Some(0),
+        "a scale that landed did not exit 0: {stderr:?}"
+    );
+    assert_eq!(
+        text(ran.out.stdout.clone()),
+        "",
+        "`k8rs ops scale … > out` wrote a dialog into the file a report goes in"
+    );
+    let lines: Vec<&str> = stderr.lines().collect();
+    // Said before the slice below, because `lines[..3]` on a two-line stderr is an index panic
+    // and not a sentence — the one unhappy path in this test that would report nothing useful.
+    assert!(
+        lines.len() >= 3,
+        "the headless dialog printed fewer than three lines: {stderr:?}"
+    );
+    assert_eq!(
+        lines[..3],
+        [
+            "deployment/web in payments",
+            "This stops all 3 copies of your app — nothing will be left running. Right now: 3 \
+             copies. After: 0 copies.",
+            "$ kubectl scale deployment/web --replicas=0 -n payments",
+        ],
+        "the headless dialog is not the three lines screens/dialogs.md prints: {stderr:?}"
+    );
+    assert!(
+        stderr.ends_with("k8rs: the change was made\n"),
+        "a write with no receipt: {stderr:?}"
+    );
+    let calls = ran.scale_calls();
+    assert_eq!(
+        calls,
+        [
+            "GET /apis/apps/v1/namespaces/payments/deployments/web/scale",
+            // **Neither pass carries a `metadata.resourceVersion`, and that is a reversal of a
+            // version that shipped** (NOTES § D228): a precondition here `409`s on a `status`
+            // write by the deployment controller, which falsifies nothing the operator agreed to.
+            // Whole-list equality is what says it: a body key that came back would be red here
+            // whatever else stayed the same.
+            "PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale\
+             ?&dryRun=All&fieldValidation=Strict {\"spec\":{\"replicas\":0}}",
+            "PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale\
+             ?&fieldValidation=Strict {\"spec\":{\"replicas\":0}}",
+        ],
+        "the binary did not read the subresource, check it, and then change it"
+    );
+    assert_eq!(
+        ran.audit.lines().count(),
+        2,
+        "one mutation is one attempt line and one result line: {:?}",
+        ran.audit
+    );
+    // **Invariant 9 over the one field the *cluster* filled in**, both halves: the escape is
+    // gone from a file somebody `cat`s, and the readable part of the uid is still there
+    // (NOTES § D31).
+    let survivors: Vec<char> = ran
+        .audit
+        .lines()
+        .flat_map(str::chars)
+        .filter(|c| c.is_control())
+        .collect();
+    assert!(
+        survivors.is_empty(),
+        "a uid the cluster chose carried control characters into the audit log: {survivors:?}"
+    );
+    assert!(
+        ran.audit.contains(&format!("uid {UID_READS}")),
+        "the strip ate the uid instead of cleaning it: {:?}",
+        ran.audit
+    );
+    // **`resourceVersion not sent` is the record telling the truth about a request that carries
+    // no precondition** (NOTES § D228). The wire assertion above says none went out; this says
+    // the audit line agrees with it, which is the pair invariant 4 asks for and the only place
+    // the two are read against each other through the built binary.
+    assert!(
+        ran.audit.contains("· resourceVersion not sent\n"),
+        "the record does not agree with the wire about the precondition: {:?}",
+        ran.audit
+    );
+}
+
+/// **Nothing but the word `yes` confirms, and the unattended default is no** (NOTES § D218) —
+/// the property that is the whole difference between this design and a `--yes` flag, and the one
+/// a regression removes in silence.
+///
+/// **The three rows are the three ways it is reached in the wild.** No stdin at all is
+/// `< /dev/null`, a CI step and cron; `y` is what coreutils `yes` emits, which is the single
+/// most likely accidental bulk-confirm; `no` is somebody reading the dialog and declining.
+///
+/// **Each asserts the wire and not only the sentence**: the check went out and the change never
+/// did, which is invariant 2 through the real process.
+#[test]
+fn a_scale_nobody_confirmed_is_exit_2_and_the_change_is_never_sent() {
+    for typed in [None, Some("y\n"), Some("no\n")] {
+        let ran = one_ops_run(
+            2,
+            2,
+            typed,
+            &["ops", "scale", "deploy/web", "5", "-n", "payments"],
+            true,
+            STUB_CONTEXT,
+        );
+
+        let stderr = text(ran.out.stderr.clone());
+        println!("--- {typed:?} ---\n{stderr}");
+        assert_eq!(
+            ran.out.status.code(),
+            Some(2),
+            "{typed:?} confirmed a scale nobody agreed to: {stderr:?}"
+        );
+        assert_eq!(
+            text(ran.out.stdout.clone()),
+            "",
+            "{typed:?} wrote to stdout"
+        );
+        assert!(
+            stderr.ends_with("k8rs: nobody confirmed it, so nothing was changed\n"),
+            "{typed:?}: {stderr:?}"
+        );
+        let calls = ran.scale_calls();
+        assert_eq!(
+            calls.len(),
+            2,
+            "{typed:?} sent something after the check: {calls:?}"
+        );
+        assert!(
+            calls[1].contains("dryRun=All"),
+            "{typed:?}: the one call after the read was not the check: {:?}",
+            calls[1]
+        );
+    }
+}
+
+/// **The count the reader is asked to agree to is the one the object is *asking for*, not the one
+/// it currently has** — `spec.replicas` and never `status.replicas`.
+///
+/// **The two differ on every object mid-rollout**, which is exactly when somebody scales one. A
+/// Deployment asking for 2 with 7 still running, scaled to 5, is *starts 3 more copies*; read off
+/// `status` it would be announced as *stops 2 copies* — the opposite verb, over the one number
+/// the whole consequence turns on (invariant 4, *neither record may lie*).
+///
+/// **No test anywhere fed these two apart before this one**: every other stub answers a `Scale`
+/// whose two counts agree, which is the one shape that cannot tell the fields apart
+/// (NOTES § D29).
+#[test]
+fn the_count_the_reader_agrees_to_is_the_one_the_object_asks_for() {
+    let ran = one_ops_run(
+        2,
+        7,
+        Some("no\n"),
+        &["ops", "scale", "deploy/web", "5", "-n", "payments"],
+        true,
+        STUB_CONTEXT,
+    );
+
+    let stderr = text(ran.out.stderr);
+    println!("{stderr}");
+    assert!(
+        stderr.contains(
+            "This starts 3 more copies of your app. Right now: 2 copies. After: 5 copies."
+        ),
+        "the consequence was not built from spec.replicas: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains("7 copies"),
+        "the count still running was described as the count that was asked for: {stderr:?}"
+    );
+}
+
+/// **A context whose name is nothing but characters invariant 9 strips still records as a gap,
+/// not as a dangling label** — `k8s::Session::context`'s third `None` (NOTES § D202), reached on
+/// a connection that worked.
+///
+/// **This is the shape the record's own doc comment argues for and nothing fed.** Every other
+/// test in this repo hands `ops::Record` a context that is a real word, so
+/// `gap(Some(&self.context), "not named", "")` is indistinguishable from `self.context` to all of
+/// them — and `context ·` with nothing after it is exactly the truncated-looking record the
+/// neighbouring fields are gapped to avoid (`src/ops.rs` § THE MUTATION CONTRACT).
+///
+/// **It has to be the whole process.** The `None` is made in `scale_connected`, which reads the
+/// reader's own kubeconfig and dials it, and is the one part of this operation no unit test
+/// reaches.
+#[test]
+fn a_context_whose_name_strips_to_nothing_is_recorded_as_a_gap_and_not_a_dangling_label() {
+    let ran = one_ops_run(
+        2,
+        2,
+        Some("yes\n"),
+        &["ops", "scale", "deploy/web", "3", "-n", "payments"],
+        true,
+        NAMELESS_CONTEXT,
+    );
+
+    let stderr = text(ran.out.stderr);
+    println!("--- stderr ---\n{stderr}\n--- audit ---\n{}", ran.audit);
+    assert_eq!(
+        ran.out.status.code(),
+        Some(0),
+        "a context k8rs cannot name stopped a scale it could otherwise make: {stderr:?}"
+    );
+    assert!(
+        ran.audit.contains(" · context not named · server "),
+        "a context that strips to nothing left a dangling label in the audit log: {:?}",
+        ran.audit
+    );
+}
+
+// --- ONE OPERATION END ---
+
+// --- ONE QUESTION START ---
+//
+// **`k8rs ops may-i` is the one `ops` line that changes nothing** (NOTES § D23, § D229, § D230),
+// and the four things it owes are the four only a process can be asked: which stream each sentence
+// went to, what it exited with, what actually went on the wire, and whether a probe left anything
+// behind in the reader's `$HOME`.
+//
+// **`src/main_tests.rs` proves the first of those for a line that was *refused*, which is where it
+// holds anyway.** `a_may_i_line_opens_no_audit_log_and_performs_no_operation` feeds a line
+// rejected before the seam is reached, so the double it counts was never going to be called by any
+// implementation. What nothing there can drive is a **well-formed** question: it opens a runtime,
+// reads the reader's own kubeconfig and dials it.
+//
+// **The failure this region exists to make red is a probe that answers `No`** (NOTES § D229
+// ruling 4, `PRIOR-ART § B4`). A refused or unfinished review that came back as a refusal would
+// hide an operation the reader is allowed to perform, and since NOTES § D230 ruling 4 the exit
+// code is where a script reads it — so the two are asserted together, because `1` and `2` are now
+// different answers and were the same one until this round.
+
+/// **A well-formed question is answered on stderr, exits by NOTES § D230 ruling 4's table, and
+/// leaves nothing behind** — `0` yes · `1` no · `2` k8rs could not find out.
+///
+/// **The `1` rows are new and they are the point of ruling 4.** Until this round a yes and a no
+/// both exited `0`, so a script could not get the answer out of the exit code at all and had to
+/// grep an English sentence invariant 14 will keep rewriting.
+///
+/// **The `unanswered` and `forbidden` rows are NOTES § D229 ruling 4.** Both are a probe that
+/// could not be run; neither may reach the reader as the cluster having refused, and neither may
+/// exit `1`. The `no` rows above them are what stop that being vacuous — an implementation that
+/// answered *could not tell* to everything would satisfy the failure rows and fail the `no` ones.
+///
+/// **Every row asserts the review that went out is a `SelfSubjectAccessReview`** (D230 ruling 5).
+/// One question is always that call, whether or not `-n` was given; a driver that went back to
+/// branching on the namespace would send a `SelfSubjectRulesReview` for the namespaced rows and
+/// two matchers could disagree about one login again.
+///
+/// **The question is a literal per row and not built from the line.** `may_i_asked` drops the
+/// trailing dot of the core group, so a question assembled here out of `line[3]` would be this
+/// file re-implementing the thing it is checking — and would agree with it however it changed.
+#[test]
+fn a_may_i_line_is_answered_on_stderr_and_leaves_nothing_behind() {
+    for (line, code, question, answer, attributes) in [
+        // Ruling 2: the group is required, and the core group is a trailing dot. Ruling 6: the
+        // sentence no longer claims the cluster's authority for the answer.
+        (
+            vec!["ops", "may-i", "list", "pods.", "-n", GRANTING_NAMESPACE],
+            0,
+            "may this login list pods in payments?",
+            "yes — this login is allowed to do that",
+            r#"{"group":"","namespace":"payments","resource":"pods","verb":"list"}"#,
+        ),
+        (
+            vec!["ops", "may-i", "delete", "pods.", "-n", GRANTING_NAMESPACE],
+            1,
+            "may this login delete pods in payments?",
+            "no — this login is not allowed to do that",
+            r#"{"group":"","namespace":"payments","resource":"pods","verb":"delete"}"#,
+        ),
+        (
+            vec!["ops", "may-i", "list", "pods.", "-n", UNANSWERED_NAMESPACE],
+            2,
+            "may this login list pods in unanswered?",
+            "That is not a no",
+            r#"{"group":"","namespace":"unanswered","resource":"pods","verb":"list"}"#,
+        ),
+        (
+            vec!["ops", "may-i", "list", "pods.", "-n", FORBIDDEN_NAMESPACE],
+            2,
+            "may this login list pods in forbidden?",
+            "That is not a no",
+            r#"{"group":"","namespace":"forbidden","resource":"pods","verb":"list"}"#,
+        ),
+        // Ruling 1's whole subject, in one line: the `/` is the object's own name and the
+        // subresource is a flag. `patch deployments` is not granted and `patch deployments/scale`
+        // is, so this row is a yes only if the driver put the subresource on the wire.
+        (
+            vec![
+                "ops",
+                "may-i",
+                "patch",
+                "deployments.apps/web",
+                "--subresource=scale",
+                "-n",
+                GRANTING_NAMESPACE,
+            ],
+            0,
+            "may this login patch deployments.apps/web (subresource: scale) in payments?",
+            "yes — this login is allowed to do that",
+            r#"{"group":"apps","name":"web","namespace":"payments","resource":"deployments","subresource":"scale","verb":"patch"}"#,
+        ),
+        // **The parent resource does not carry its subresource** — the one thing about the matcher
+        // D230's cluster run confirmed rather than reasoned (`subresource=''` allowed and
+        // `subresource='scale'` refused off one rule). It is the row above with the flag taken
+        // off, so the two together say the flag is what changed the answer, and it is what makes
+        // this file's own stub answer both cases instead of one.
+        (
+            vec![
+                "ops",
+                "may-i",
+                "patch",
+                "deployments.apps/web",
+                "-n",
+                GRANTING_NAMESPACE,
+            ],
+            1,
+            "may this login patch deployments.apps/web in payments?",
+            "no — this login is not allowed to do that",
+            r#"{"group":"apps","name":"web","namespace":"payments","resource":"deployments","verb":"patch"}"#,
+        ),
+        // A cluster-scoped question: no namespace on the wire at all, which is what `delete
+        // node/<name>` is (NOTES § D229 ruling 1).
+        (
+            vec!["ops", "may-i", "delete", "nodes."],
+            0,
+            "may this login delete nodes?",
+            "yes — this login is allowed to do that",
+            r#"{"group":"","resource":"nodes","verb":"delete"}"#,
+        ),
+        // Ruling 3: `--read-only` refuses every operation and permits a question. Measured, the
+        // old order told the reader most likely to ask what they may do that k8rs *will not change
+        // anything* — and it has to be the whole process, because the flag's claim is structural.
+        (
+            vec![
+                "--read-only",
+                "ops",
+                "may-i",
+                "list",
+                "pods.",
+                "-n",
+                GRANTING_NAMESPACE,
+            ],
+            0,
+            "may this login list pods in payments?",
+            "yes — this login is allowed to do that",
+            r#"{"group":"","namespace":"payments","resource":"pods","verb":"list"}"#,
+        ),
+    ] {
+        // No stdin: a question asks for no confirmation, so a child that read one would hang.
+        let ran = one_ops_run(3, 3, None, &line, true, STUB_CONTEXT);
+        let stderr = text(ran.out.stderr.clone());
+        println!(
+            "--- {line:?} → exit {:?} ---\n{stderr}",
+            ran.out.status.code()
+        );
+
+        assert_eq!(
+            ran.out.status.code(),
+            Some(code),
+            "{line:?} exited the wrong way: {stderr:?}"
+        );
+        assert_eq!(
+            text(ran.out.stdout.clone()),
+            "",
+            "{line:?} put an answer where a report goes, so `k8rs ops may-i … > out` is not empty"
+        );
+        // **The question above the answer, both on stderr, in that order** — so an answer is
+        // never read against a question k8rs did not ask.
+        //
+        // **The question is exact and the answer is a fragment, and the split is deliberate.** The
+        // two could-not-tell rows end in the server's own words, which live in this file's stub —
+        // asserting them whole here would be one string written twice, in the one place nothing
+        // could tell the copies apart. The prefix pins the stream, the order and every character
+        // of the question; the fragment pins which of the three answers came back.
+        assert!(
+            stderr.starts_with(&format!("k8rs: {question}\nk8rs: ")),
+            "{line:?} was not answered under the question it was asked: {stderr:?}"
+        );
+        assert!(
+            stderr.contains(answer),
+            "{line:?} was not answered with {answer:?}: {stderr:?}"
+        );
+        // **A probe leaves nothing behind** (NOTES § D221: the audit log records mutations, and a
+        // question is not one). Unlike the refused lines above, every row here reached the
+        // cluster — so the directory not being there is a fact about the probe and not about the
+        // line having been thrown out.
+        assert!(
+            !ran.state_dir,
+            "{line:?} made a state directory in the reader's home for a call that changed nothing"
+        );
+        assert_eq!(ran.audit, "", "{line:?} wrote an audit line for a question");
+
+        let reviews: Vec<&String> = ran
+            .asked
+            .iter()
+            .filter(|asked| asked.contains("selfsubject"))
+            .collect();
+        // "extracted nothing" and "nothing to extract" print the same line, so the filtered list
+        // says it found something before anything is asserted about its contents.
+        assert_eq!(
+            reviews.len(),
+            1,
+            "{line:?} did not send exactly one review: {:?}",
+            ran.asked
+        );
+        // **The whole `resourceAttributes` the typed line had to become**, as one literal rather
+        // than a field at a time. `src/ops_tests.rs` asserts `ops::Asking` → body; only out here
+        // is *typed string* → body asserted, which is the half NOTES § D230 ruling 1 is about — a
+        // `/` that stopped meaning the object's name, or a `--subresource` that never left the
+        // driver, would each print a plausible answer and send a different question.
+        //
+        // **The cluster-scoped row carries no `namespace` key at all**, which an equality says and
+        // a list of `contains` could not.
+        assert!(
+            reviews[0].contains(attributes),
+            "{line:?} did not become the question {attributes}: {:?}",
+            reviews[0]
+        );
+        assert!(
+            reviews[0].contains("/selfsubjectaccessreviews? "),
+            "{line:?} did not ask its one question with a SelfSubjectAccessReview, so two \
+             matchers can disagree about one login again (NOTES § D230 ruling 5): {:?}",
+            reviews[0]
+        );
+        // **The target ends at a bare `?`** — the assertion above carries the space after it, and
+        // nothing between them is what says no `dryRun` and no `fieldManager` rode out with a
+        // question. Read off the process's own bytes and not only off `Api`'s, because a parameter
+        // added anywhere between the two would be invisible from inside the crate.
+        for banned in ["dryRun", "fieldManager", "fieldValidation"] {
+            assert!(
+                !reviews[0].contains(banned),
+                "{line:?} sent {banned} with a call that changes nothing: {:?}",
+                reviews[0]
+            );
+        }
+    }
+}
+
+// --- ONE QUESTION END ---
+
+// --- THE ONE DOOR START ---
+
+/// **One row of what `k8rs ops` advertises**, read off the binary and never written down here.
+struct Advertised {
+    /// The word after `ops`.
+    verb: String,
+    /// **The whole invocation form**, placeholders and all — `scale <kind>/<name> <copies>`.
+    /// [`advertised_line`] turns it into a line the driver accepts.
+    form: String,
+    /// **Whether this row is an operation**, which the row says itself: every operation's line
+    /// ends in how it is confirmed and the one row that is not an operation ends in *changes
+    /// nothing*. Read off the text rather than matched against `may-i`, so a fourth operation
+    /// is one without anybody editing this file — and an unrecognised tail lands on the
+    /// operation side, which is the side that gets the stricter assertions.
+    mutates: bool,
+}
+
+/// **Every `ops` row the binary advertises** (NOTES § D234 ruling 2, § D236 ruling 1).
+///
+/// **Three tests read this and all three widen on their own.** `ops_usage` is built from
+/// `OPERATIONS`, so a fourth operation appears in the text this parses without anyone touching
+/// this file — the one property a literal `[SCALE, RESTART, DELETE]` cannot have.
+///
+/// **The canary is the other half of that** (CLAUDE.md § A derived list asserts it found
+/// something): *extracted nothing* and *nothing to extract* would otherwise both be a green loop
+/// over an empty vector, in three tests at once.
+fn advertised() -> Vec<Advertised> {
+    let usage = text(k8rs_with_no_kubeconfig(&["ops"]).stderr);
+    println!("--- the usage these tests read their rows off ---\n{usage}");
+    let advertised: Vec<&str> = usage
+        .lines()
+        .filter_map(|line| line.strip_prefix("  ops "))
+        .collect();
+    let rows: Vec<Advertised> = advertised
+        .iter()
+        // **The em dash is the row's own separator**, and every row has exactly one: the form is
+        // to its left and what the row promises is to its right.
+        .filter_map(|row| row.split_once(" \u{2014} "))
+        .filter_map(|(form, tail)| {
+            Some(Advertised {
+                verb: form.split_whitespace().next()?.to_string(),
+                form: form.trim().to_string(),
+                mutates: !tail.contains("changes nothing"),
+            })
+        })
+        .collect();
+    // **Every advertised row was understood, and a dropped one is louder than a missing one.**
+    // The two filters above throw away a row whose separator or first word is not where this
+    // expects it, and a fourth operation lost that way would leave all three loops green about
+    // three verbs — the same *extracted nothing* failure as an empty list, one level down and
+    // invisible to the canary below (CLAUDE.md § A derived list asserts it found something).
+    assert_eq!(
+        rows.len(),
+        advertised.len(),
+        "`k8rs ops` advertises {} rows and only {} of them parsed, so at least one operation is \
+         being vetted by nobody: {usage:?}",
+        advertised.len(),
+        rows.len()
+    );
+    for row in &rows {
+        println!(
+            "--- row derived: verb {:?} form {:?} mutates {} ---",
+            row.verb, row.form, row.mutates
+        );
+    }
+    for known in ["scale", "restart", "delete", "may-i"] {
+        assert!(
+            rows.iter().any(|row| row.verb == known),
+            "the usage no longer advertises `{known}`, so every loop over this is about to vet \
+             nothing — either `ops_usage` stopped listing an operation or the row shape moved: \
+             {usage:?}"
+        );
+    }
+    // **Which side of `mutates` each of them is on**, because the split above is a string test
+    // and a row whose wording drifted would land silently on the wrong side — the question in the
+    // strict loops, or an operation quietly excused from them.
+    let questions: Vec<&String> = rows
+        .iter()
+        .filter(|row| !row.mutates)
+        .map(|row| &row.verb)
+        .collect();
+    assert_eq!(
+        questions,
+        [&"may-i".to_string()],
+        "the rows that say they change nothing are no longer exactly the question: {usage:?}"
+    );
+    rows
+}
+
+/// **Every verb the binary advertises is refused under `--read-only` except the question, and the
+/// list of verbs is read off the binary rather than written here** (NOTES § D234 ruling 2).
+///
+/// **What was already proven and what was not.** `src/main_tests.rs` shows the guard firing for
+/// `scale`, `restart` and `delete` in both flag positions — three verbs it names in a literal
+/// `[SCALE, RESTART, DELETE]`. What no test asserted is the shape D234 names as the hazard:
+/// `--read-only`'s refusal is conditional now (`if !asking && …`), and **a fourth operation added
+/// to the same branch is refused by nothing**. Measured, in a copy of the tree: a fourth
+/// `OPERATIONS` row wired to the real delete and added to that condition left
+/// `k8rs --read-only ops purge pod/web -n payments` past every refusal in the driver — the audit
+/// log opened, `$XDG_STATE_HOME/k8rs` was made, and the only thing that stopped it was that the
+/// run had no kubeconfig to dial. **Not one test in the suite was about the flag**: 1053 stayed
+/// green, and the single unit test the plant did trip was about the shortcut it took to reach a
+/// mutation — pointing the new verb at `delete`'s arm — and not about `--read-only` at all.
+///
+/// **So the list is derived and the derivation is what makes this test widen on its own.**
+/// [`advertised`] reads it off `k8rs ops` and carries the canary that says it found something;
+/// a fourth operation joins this loop without anyone touching this file, which is the one
+/// property a literal cannot have.
+///
+/// **The carve-out is asserted as an equivalence, not as an exception.** Permitted **if and only
+/// if** the verb is `may-i` — so a change that widened the condition and a change that closed it
+/// over the question are both red, and neither can be reached by adding a row anywhere else.
+///
+/// **The negative control is the same line without the flag**, because an assertion on one exact
+/// sentence proves nothing about *what* produced it: `ops restart deploy/web -n payments` is a
+/// well-formed line that reaches for a cluster, and the only thing this test changes about it is
+/// the flag.
+///
+/// **This watches the door and not the wire.** No stub cluster is started for any row; § THE WIRE
+/// starts one and asserts nothing mutating reached it, and splitting them is deliberate
+/// (D234 ruling 3).
+#[test]
+fn read_only_permits_exactly_the_verbs_the_binary_calls_questions() {
+    const REFUSAL: &str = "k8rs: --read-only was asked for, so k8rs will not change anything — \
+                           run it without that flag to use an operation";
+
+    for row in advertised() {
+        let verb = row.verb.as_str();
+        // **Both positions**, because only one was measured when the carve-out landed and the
+        // other is where its first fix stopped working (NOTES § D230 ruling 3).
+        for line in [
+            vec!["--read-only", "ops", verb, "deploy/web", "-n", "payments"],
+            vec!["ops", verb, "deploy/web", "-n", "payments", "--read-only"],
+        ] {
+            let ran = one_ops_run(3, 3, None, &line, false, STUB_CONTEXT);
+            let stderr = text(ran.out.stderr);
+            println!(
+                "--- {line:?} → exit {:?} ---\n{stderr}",
+                ran.out.status.code()
+            );
+            // The question is the one verb `ops.rs` holds that is not a write (NOTES § D23,
+            // § D230 ruling 3); every other verb in that usage changes something.
+            if verb == "may-i" {
+                assert!(
+                    !stderr.contains("--read-only was asked for"),
+                    "{line:?} changes nothing and was refused for changing something: {stderr:?}"
+                );
+                continue;
+            }
+            assert_eq!(
+                stderr.trim_end(),
+                REFUSAL,
+                "{line:?} was answered about something other than the flag that forbids it"
+            );
+            assert_eq!(ran.out.status.code(), Some(2), "{line:?} did not exit 2");
+            assert_eq!(text(ran.out.stdout), "", "{line:?} wrote to stdout");
+            assert!(
+                !ran.state_dir,
+                "{line:?} was refused and made a state directory in the user's home anyway"
+            );
+            assert_eq!(ran.audit, "", "{line:?} wrote an audit line for nothing");
+        }
+
+        // **The control: the flag is what refused it.** Without it the same words get some other
+        // sentence — a complaint about the line, or a run that reached for a cluster and found
+        // none. Either way the refusal above is the flag's and not a spelling mistake's.
+        let allowed = vec!["ops", verb, "deploy/web", "-n", "payments"];
+        let ran = one_ops_run(3, 3, None, &allowed, false, STUB_CONTEXT);
+        let stderr = text(ran.out.stderr);
+        println!(
+            "--- control {allowed:?} → exit {:?} ---\n{stderr}",
+            ran.out.status.code()
+        );
+        assert!(
+            !stderr.contains("--read-only was asked for"),
+            "{allowed:?} carries no flag and was refused for one: {stderr:?}"
+        );
+    }
+}
+
+// --- THE ONE DOOR END ---
+
+// --- THE WIRE START ---
+//
+// **§ THE ONE DOOR proves k8rs refuses; this proves nothing got out** (NOTES § D234 ruling 3,
+// § D236 ruling 1). The two are split so that a guard wrong in a way both miss would have to fool
+// a source assertion and a socket at once, and the split only pays if this half really watches a
+// socket.
+//
+// **The stub is the API server, from the binary's side** — kube dialled it, the kubeconfig named
+// it, the bytes went over a loopback socket — and that is the whole of what these assertions
+// claim. **A kind apiserver cannot make the same claim**, which is why it is not where this is
+// asserted: `apiserver_request_total` carries `verb`, `resource`, `scope` and `code` and **no
+// client label**, so every controller in the cluster shares the counter; an audit policy needs
+// `kubeadmConfigPatches` and a recreated control plane, and the fixture cluster is the one object
+// in this repo that may not be quietly reshaped (NOTES § D53); and a read-only login proves *the
+// apiserver refused*, which is a different claim from *nothing was sent* and is the one k8rs is
+// not allowed to lean on. `Ran::asked` already holds `METHOD target body` per request, so the
+// claim is a filter over a list that exists today — and it runs on every push, which no cluster
+// leg can. `just e2e` is the cluster leg and asserts what a cluster can actually see instead:
+// the object did not change and no audit line was written.
+
+/// **The methods that can change a cluster** — the axis a socket can be read on.
+///
+/// **Method and not resource, because the method is what the apiserver itself keys on**: a `POST`
+/// is `create`, a `PATCH` is `patch`, and reading it needs no body and no agreement with any
+/// spelling k8rs chose. A predicate over paths would be this file re-deriving the request builder
+/// it is checking.
+const MUTATING: [&str; 4] = ["POST", "PUT", "PATCH", "DELETE"];
+
+/// **The one target a mutating method is allowed to carry, and it is a carve-out by target and
+/// not by method** (NOTES § D23, § D230 ruling 3).
+///
+/// **There is no method that means *ask*.** A `SelfSubjectAccessReview` is performed with
+/// `create`, which is exactly why `may_i` lives in `ops.rs` under a mechanical allowlist while
+/// mutating nothing — so at the wire it is a `POST` like any other and only its target tells it
+/// apart. `--read-only` permits the question (D230 ruling 3), so this string is what stops that
+/// carve-out being read as a hole: every other `POST` under the flag is a failure.
+const A_QUESTION: &str = "/selfsubjectaccessreviews";
+
+/// **The marker that says the cluster was asked to check a change rather than make one.**
+///
+/// It rides in the query string for both operations that send one, so it is read off the target
+/// and never off the whole line — a body-borne `"dryRun":["All"]` is a different spelling and
+/// this must not accept it as one (NOTES § D225 ruling 1, which is why `delete` sends neither).
+const DRY_RUN: &str = "dryRun=All";
+
+/// The method and the target of one recorded request, out of `Ran::asked`'s `METHOD target body`.
+fn method_and_target(asked: &str) -> (&str, &str) {
+    let mut words = asked.split_whitespace();
+    (
+        words.next().unwrap_or_default(),
+        words.next().unwrap_or_default(),
+    )
+}
+
+/// **Every request that could change the cluster**, question excepted — the predicate
+/// `--read-only` is measured against.
+///
+/// **A dry-run counts here**, and that is deliberate rather than an oversight: under this flag
+/// nothing at all should be dialled, so a preflight that went out would be a real finding. The
+/// looser predicate is [`changing`], and it is the right one for the cancel case one test down.
+fn mutating(asked: &[String]) -> Vec<&String> {
+    asked
+        .iter()
+        .filter(|line| {
+            let (method, target) = method_and_target(line);
+            MUTATING.contains(&method) && !target.contains(A_QUESTION)
+        })
+        .collect()
+}
+
+/// **Every request that would actually have changed the cluster** — [`mutating`] without the
+/// preflights, which is what *reached the API server with nothing* has to mean for an operation
+/// that checks before it asks (NOTES § D216, § D218).
+fn changing(asked: &[String]) -> Vec<&String> {
+    mutating(asked)
+        .into_iter()
+        .filter(|line| !method_and_target(line).1.contains(DRY_RUN))
+        .collect()
+}
+
+/// **What a placeholder in an advertised row is filled in with**, so a line built from the usage
+/// is one the driver accepts and dials rather than one it refuses for its shape.
+///
+/// **An unknown placeholder is a loud failure and not a skip** ([`advertised_line`]). A fourth
+/// operation taking a value nobody taught this table would otherwise be vetted as a refusal —
+/// green, and about nothing.
+const FILLED: [(&str, &str); 4] = [
+    ("<kind>/<name>", "deploy/web"),
+    ("<copies>", "3"),
+    ("<verb>", "list"),
+    ("<resource>.<group>[/<name>]", "pods."),
+];
+
+/// **One advertised row turned into a line the driver runs** — `scale <kind>/<name> <copies>`
+/// becomes `ops scale deploy/web 3 -n payments`.
+///
+/// **Built from the row and not written out per verb**, for [`advertised`]'s reason: the line a
+/// fourth operation needs comes from the text the binary printed, so this file does not hold a
+/// second copy of the argument surface that would quietly stop matching it.
+///
+/// **Optional groups are dropped and the namespace is appended.** `[--subresource <name>]` is a
+/// flag no row requires; the namespace is on the synopsis line rather than on any row, and it is
+/// required for the five namespaced kinds — so it goes on every line here, and the question
+/// answers about `payments` too, which is the namespace this file's stub has an opinion about.
+fn advertised_line(form: &str) -> Vec<String> {
+    let mut row = form.to_string();
+    for (hole, value) in FILLED {
+        row = row.replace(hole, value);
+    }
+    while let Some(open) = row.find('[') {
+        let close = row[open..].find(']').map_or(row.len() - 1, |at| open + at);
+        row.replace_range(open..=close, "");
+    }
+    assert!(
+        !row.contains('<') && !row.contains('>'),
+        "`{form}` carries a placeholder FILLED does not know, so the line built from it would be \
+         refused for its shape and this test would vet a refusal: {row:?}"
+    );
+    let mut line = vec!["ops".to_string()];
+    line.extend(row.split_whitespace().map(str::to_string));
+    line.extend(["-n".to_string(), GRANTING_NAMESPACE.to_string()]);
+    line
+}
+
+/// **Under `--read-only`, no request that could change a cluster leaves the process** — for every
+/// verb the binary advertises, in both flag positions, against a stub that would have answered
+/// one (NOTES § D236 ruling 1).
+///
+/// **Measured, the operations dial nothing at all**, which is a stronger fact than the assertion
+/// and is exactly why the assertion cannot be left alone with it: a filter over an empty list is
+/// green for the wrong reason. Two things stop that here.
+///
+/// **The question is the row that keeps this honest under the flag.** `may-i` is permitted by
+/// `--read-only` (NOTES § D230 ruling 3) and really does reach the stub — with a `POST`. So every
+/// run of this loop is not an empty list, the carve-out in [`mutating`] is load-bearing rather
+/// than decorative, and a predicate that counted methods alone would be red on the one row that
+/// must pass.
+///
+/// **The control is the same line without the flag**, built the same way from the same row: it
+/// has to reach the stub, or the refusal above was the line's shape and not the flag. And across
+/// the controls the predicate has to fire at least once — a [`mutating`] that had stopped
+/// matching anything would make every assertion in this test vacuous at once.
+#[test]
+fn read_only_puts_no_mutating_request_on_the_wire() {
+    let mut under_the_flag: Vec<String> = Vec::new();
+    let mut without_it: Vec<String> = Vec::new();
+
+    for row in advertised() {
+        let line = advertised_line(&row.form);
+        let line: Vec<&str> = line.iter().map(String::as_str).collect();
+        // **Both positions**, because only one was measured when the carve-out landed and the
+        // other is where its first fix stopped working (NOTES § D230 ruling 3).
+        for flagged in [
+            [&["--read-only"][..], &line].concat(),
+            [&line[..], &["--read-only"]].concat(),
+        ] {
+            // No stdin: nothing here may be confirmed, and a run that asked for one would hang.
+            let ran = one_ops_run(3, 3, None, &flagged, true, STUB_CONTEXT);
+            println!(
+                "--- {flagged:?} → exit {:?} ---\n{:?}",
+                ran.out.status.code(),
+                ran.asked
+            );
+            assert_eq!(
+                mutating(&ran.asked),
+                Vec::<&String>::new(),
+                "{flagged:?} put a request that can change a cluster on the wire under \
+                 --read-only"
+            );
+            under_the_flag.extend(ran.asked);
+        }
+
+        let ran = one_ops_run(3, 3, None, &line, true, STUB_CONTEXT);
+        println!(
+            "--- control {line:?} → exit {:?} ---\n{:?}",
+            ran.out.status.code(),
+            ran.asked
+        );
+        assert!(
+            !ran.asked.is_empty(),
+            "{line:?} carries no flag and still reached no cluster, so the runs above prove \
+             nothing about --read-only: {:?}",
+            text(ran.out.stderr)
+        );
+        without_it.extend(ran.asked);
+    }
+
+    // **The question really was sent under the flag**, so the emptiness above is not the whole of
+    // what was asserted and [`A_QUESTION`] excused a `POST` that genuinely went out.
+    assert!(
+        under_the_flag.iter().any(|line| {
+            let (method, target) = method_and_target(line);
+            method == "POST" && target.contains(A_QUESTION)
+        }),
+        "no permission review reached the stub under --read-only, so nothing exercised the one \
+         carve-out this predicate has: {under_the_flag:?}"
+    );
+    // **And the predicate can fire**, off the same binary, with the flag taken away.
+    assert!(
+        !mutating(&without_it).is_empty(),
+        "not one advertised verb reached for a change without the flag, so `mutating` matched \
+         nothing and every assertion above is vacuous: {without_it:?}"
+    );
+}
+
+/// **An operation nobody answered cancels, exits non-zero, and changes nothing at the API
+/// server** — the property that is the entire difference between reading a confirmation off
+/// stdin and a `--yes` flag (NOTES § D218, § D236 ruling 3).
+///
+/// **Every positive test in this file still passes if this regresses**, which is why it was
+/// carried in `backlog.md` rather than assumed: a driver that stopped reading stdin at all would
+/// confirm everything, and nothing that asserts a *confirmed* run would notice.
+///
+/// **`</dev/null` is the shape it is reached in** — a CI step, a cron entry, a pipeline — and it
+/// is the unattended default D218 says must be *no*.
+///
+/// **Every advertised operation and not only `scale`.** § ONE OPERATION proves it for a scale;
+/// the two confirmations are different mechanisms (`ops::Confirm::Press` and `::Type`), the three
+/// operations reach the prompt from different places, and `delete` sends no preflight at all — so
+/// one of them holding says nothing about the other two.
+///
+/// **[`changing`] and not [`mutating`], and the difference is the ruling.** `scale` and `restart`
+/// ask the cluster to check before the reader is asked anything (NOTES § D216), so a `dryRun=All`
+/// `PATCH` is on the wire by design and *nothing reached the API server* cannot mean literally
+/// nothing. What must not be there is a request the cluster would have acted on.
+#[test]
+fn an_operation_nobody_answered_reaches_the_cluster_with_nothing_that_changes_it() {
+    let operations: Vec<Advertised> = advertised().into_iter().filter(|row| row.mutates).collect();
+    assert!(
+        !operations.is_empty(),
+        "no advertised row says it needs confirming, so this test is a loop over nothing"
+    );
+
+    for row in operations {
+        let line = advertised_line(&row.form);
+        let line: Vec<&str> = line.iter().map(String::as_str).collect();
+        let ran = one_ops_run(3, 3, None, &line, true, STUB_CONTEXT);
+        let stderr = text(ran.out.stderr);
+        println!(
+            "--- {line:?} → exit {:?} ---\n{stderr}\n{:?}",
+            ran.out.status.code(),
+            ran.asked
+        );
+
+        assert_eq!(
+            changing(&ran.asked),
+            Vec::<&String>::new(),
+            "{line:?} was never confirmed and changed the cluster anyway"
+        );
+        assert_ne!(
+            ran.out.status.code(),
+            Some(0),
+            "{line:?} was never confirmed and exited 0, so `k8rs ops … && …` runs on: {stderr:?}"
+        );
+        assert!(
+            stderr.ends_with("k8rs: nobody confirmed it, so nothing was changed\n"),
+            "{line:?} cancelled without saying so: {stderr:?}"
+        );
+        // **The attempt is still recorded** — invariant 2's last clause: success, failure and
+        // refusal all reach the audit log, and a cancellation is the one an operator most needs
+        // to find when they are asking whether anything went out.
+        assert!(
+            !ran.audit.is_empty(),
+            "{line:?} was cancelled and left no record that it had been attempted"
+        );
+        // **The prompt really was reached**, so the cancellation is stdin's answer and not a
+        // refusal upstream of it wearing the same exit code.
+        assert!(
+            ran.asked
+                .iter()
+                .any(|asked| method_and_target(asked).0 == "GET"),
+            "{line:?} reached no cluster at all, so nothing here is about a confirmation: {:?}",
+            ran.asked
+        );
+    }
+}
+
+// --- THE WIRE END ---

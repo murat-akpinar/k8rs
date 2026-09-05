@@ -1179,7 +1179,14 @@ fn no_arguments_is_the_usage_text_and_not_a_report() {
     };
 
     assert!(problem.starts_with("usage: k8rs "), "{problem}");
-    assert!(problem.contains("cannot reach a cluster"), "{problem}");
+    // **The qualification is part of the claim** (todo.md 3749). *cannot reach a cluster* alone
+    // stayed true of this string while the sentence around it went false — `ops` reaches one now
+    // — so the substring asserted here is the whole list of what does, and
+    // `the_usage_says_ops_reaches_a_cluster_too` reads the other half of the same line.
+    assert!(
+        problem.contains("--yaml or ops this build reads files only — it cannot reach a cluster"),
+        "{problem}"
+    );
 }
 
 /// **…and it is still three lines when it gets there.** A line break is unprintable by
@@ -1261,6 +1268,102 @@ fn a_failure_names_k8rs_and_the_file_that_stopped_it() {
     assert!(
         problem.starts_with("k8rs: ") && problem.contains(&missing),
         "{problem}"
+    );
+}
+
+/// **A word of argv that is not text is refused, and the process does not panic** — the defect
+/// this replaced was `std::env::args()`'s own `unwrap`, which ended a run at exit `101` with a
+/// Rust backtrace on stderr and no sentence at all ([`crate::command_line`]).
+///
+/// **Every placement of the bad byte, at every position on the line** (NOTES § D29): the shell
+/// hands over whole words and k8rs does not get to choose where inside one the byte sits — a
+/// latin-1 filename has it in the middle, a `--` flag has it at the end, and a word can be
+/// nothing but bad bytes. The position it is named by is counted from the program name, so a
+/// word at argv index `i` after the skip is word `i + 2`.
+#[test]
+fn a_word_that_is_not_text_is_refused_by_the_position_it_was_typed_at() {
+    use std::os::unix::ffi::OsStringExt;
+
+    // `\xff` is never a byte of UTF-8 at all; `\xe9` is a lead byte with its continuations
+    // missing, which is what latin-1 `é` and a filename cut at a length limit both look like.
+    let bad: [&[u8]; 5] = [
+        b"\xff",
+        b"\xffhead",
+        b"tail\xff",
+        b"mid\xffdle",
+        b"caf\xe9.json",
+    ];
+    for bytes in bad {
+        for at in 0..3 {
+            let mut line: Vec<std::ffi::OsString> =
+                vec!["--once".into(), "--analysis".into(), "pods.json".into()];
+            line[at] = std::ffi::OsString::from_vec(bytes.to_vec());
+            let said = command_line(line.into_iter())
+                .expect_err(&format!("{bytes:?} at {at} was read as text"));
+
+            assert!(said.starts_with("k8rs: "), "{said}");
+            assert!(
+                said.contains(&format!("word {} of the command line", at + 2)),
+                "the wrong word was named for {bytes:?} at {at}: {said}"
+            );
+        }
+    }
+}
+
+/// **The bytes are the one thing the sentence may not carry**, which is [`crate::as_typed`]'s
+/// ruling one layer out (NOTES § D224): a word k8rs could not read is not offered back.
+///
+/// **`\u{FFFD}` is asserted by name because it is what the rejected design produces.**
+/// `to_string_lossy` refuses nothing at all — the run carries on over a path or a flag nobody
+/// typed — and if it were ever spelled back into a sentence, a test that only checked the
+/// sentence was printable would pass on it: `\u{FFFD}` is not a control character and
+/// [`crate::sanitize`] leaves it alone.
+///
+/// **The first bad word is the one named**, the same way [`crate::mistyped`] names the first
+/// flag it does not have: two of them is still one sentence.
+#[test]
+fn the_refusal_carries_no_part_of_the_word_and_names_the_first_bad_one() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let said = command_line(
+        [
+            std::ffi::OsString::from("--once"),
+            std::ffi::OsString::from_vec(b"first\xff".to_vec()),
+            std::ffi::OsString::from_vec(b"second\xfe".to_vec()),
+        ]
+        .into_iter(),
+    )
+    .expect_err("two words that are not text were read as text");
+
+    assert!(said.contains("word 3 of the command line"), "{said}");
+    assert!(!said.contains("word 4"), "both words were named: {said}");
+    assert!(
+        !said.contains("first") && !said.contains("second"),
+        "the word k8rs could not read was quoted back: {said}"
+    );
+    assert!(
+        !said.contains('\u{FFFD}'),
+        "the word was converted instead of refused: {said}"
+    );
+    // Nothing outside k8rs reaches this sentence, so the strip has nothing to take out of it
+    // (invariant 9, [`crate::sanitize`]).
+    assert_eq!(sanitize(&said), said, "{said}");
+}
+
+/// **The healthy half** (CLAUDE.md § Tests must not lie): a line that is text comes through word
+/// for word, in order, and nothing about it is refused.
+///
+/// **The shapes are the ones the shell really produces** (NOTES § D29): no arguments at all,
+/// an empty word — `k8rs ""` is a legal command line — a flag, a path, and a name that is
+/// multibyte UTF-8, which is text and must not be mistaken for the case above.
+#[test]
+fn a_command_line_that_is_text_comes_through_word_for_word() {
+    assert_eq!(command_line(std::iter::empty()), Ok(vec![]));
+
+    let words = ["--once", "", "-n", "ödeme", "pods.json", "--"];
+    assert_eq!(
+        command_line(words.iter().map(std::ffi::OsString::from)),
+        Ok(words.iter().map(|w| (*w).to_string()).collect::<Vec<_>>())
     );
 }
 
@@ -2987,20 +3090,20 @@ fn a_run_that_is_about_to_exit_does_not_promise_it_keeps_asking() {
 /// looks fine in every review and sends a reader to the wrong place at 3am. Two faults collapsing
 /// into one string is what fails here, whichever two.
 ///
-/// **Only five of the ten use `asked`, and that is deliberate.** The three kubeconfig faults and
-/// a login helper that answered nothing all happened before anything was asked of any cluster, so
-/// a sentence naming a verb and a resource there would be inventing one.
+/// **Only five of the eleven use `asked`, and that is deliberate.** The three kubeconfig faults,
+/// a login helper that answered nothing, and a `409` about an object rather than about a request
+/// all happened somewhere a verb and a resource would be invented rather than reported.
 ///
-/// **All ten, and it was seven of nine until 2026-08-30** — `NoContext` and `BadEntry` had never
-/// been in this list, so the one test whose whole claim is *no two collapse* could not have seen
-/// those two collapse (`dev-core`'s own second pass). `k8s::Fault::Unfinished` is the tenth, and
-/// it is the one this list matters most for: it is a hair from `Unanswered` — a server that
+/// **All eleven, and it was seven of nine until 2026-08-30** — `NoContext` and `BadEntry` had
+/// never been in this list, so the one test whose whole claim is *no two collapse* could not have
+/// seen those two collapse (`dev-core`'s own second pass). `k8s::Fault::Unfinished` is the tenth,
+/// and it is the one this list matters most for: it is a hair from `Unanswered` — a server that
 /// answered nothing against a connection that carried nothing — and the two send a reader to
-/// opposite places.
+/// opposite places. `k8s::Fault::Conflict` is the eleventh (NOTES § D213).
 #[test]
 fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
     use k8s::Fault::{
-        BadEntry, Expired, Gone, Kubeconfig, NoContext, NoCredential, Refused, Rejected,
+        BadEntry, Conflict, Expired, Gone, Kubeconfig, NoContext, NoCredential, Refused, Rejected,
         Unanswered, Unfinished,
     };
     let all = [
@@ -3012,6 +3115,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
         Expired,
         Refused,
         Gone,
+        Conflict,
         Unfinished,
         Unanswered,
     ];
@@ -3685,7 +3789,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     assert_eq!(
         unloadable,
         "k8rs: no cluster to watch — this kubeconfig has no such context — check the \
-         `--context` you gave, or the `current-context` line in the file"
+         `current-context` line in the file, and any `--context` on the command line"
     );
 
     // **An entry**: file fine, context fine, and the certificate it names is not on the disk.
@@ -7105,7 +7209,8 @@ fn session_over(client: kube::Client, namespace: Option<&str>) -> k8s::Session {
     }
 }
 
-/// The command line, as `main` sees it.
+/// The command line as the functions under [`crate::command_line`] see it — already text,
+/// because everything that was not is refused before any of them is reached.
 fn argv(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| (*word).to_string()).collect()
 }
@@ -8173,6 +8278,14 @@ async fn a_followed_stream_asks_why_it_ended_and_a_fetch_does_not() {
 /// something that looks correct (`tester`, 2026-08-30). The check runs on the raw value and has
 /// to; what may not happen is the sentence quietly naming a different string.
 ///
+/// **The clause was not enough on its own, and this test is where that shows**
+/// ([`as_typed`], 2026-09-05). *"and web (with what cannot print removed) is not one — a name is
+/// letters, digits, dashes and dots"* still names a word that satisfies every rule it goes on to
+/// state, so the refusal a reader gets no longer quotes it at all. What is left here is
+/// [`shown`]\'s own arms, plus the one live refusal that still carries the clause — a word that is
+/// *extra*, which [`as_typed`] deliberately does not reach because an extra word is extra whatever
+/// it is spelled like.
+///
 /// **Every arm is fed** (NOTES § D29): unchanged, stripped, cut, both, and nothing left.
 #[test]
 fn a_refused_value_is_echoed_as_what_was_judged_or_says_it_is_not() {
@@ -8210,17 +8323,39 @@ fn a_refused_value_is_echoed_as_what_was_judged_or_says_it_is_not() {
         );
     }
 
-    // And through the sentence a reader actually gets, so the clause reads as English.
-    let said = mistyped(&argv(&["--logs", "--object", "default/we\u{202e}b"]))
-        .expect("a bidi override is not in a name");
+    // And through a sentence a reader actually gets, so the clause reads as English. It is an
+    // extra word and not a refused name, because a refused name no longer echoes at all.
+    let said = ops(&[
+        "ops",
+        "scale",
+        "deploy/web",
+        "3",
+        "ex\u{202e}tra",
+        "-n",
+        "payments",
+    ]);
     println!("{}", said.lines().next().expect("a first line"));
     assert!(
-        said.contains("and web (with what cannot print removed) is not one"),
+        said.contains("do with extra (with what cannot print removed) — it reads"),
         "{said:?}"
     );
     assert!(
         !said.contains('\u{202e}'),
         "the override reached the terminal: {said:?}"
+    );
+
+    // **And the sentence the clause was written for no longer needs it**, which is the half a
+    // reader of this test would otherwise have to take on trust ([`as_typed`]).
+    let name = mistyped(&argv(&["--logs", "--object", "default/we\u{202e}b"]))
+        .expect("a bidi override is not in a name");
+    println!("{}", name.lines().next().expect("a first line"));
+    assert!(
+        !name.contains("web (with what cannot print removed)"),
+        "a name a cluster would accept was offered back by the sentence refusing it: {name:?}"
+    );
+    assert!(
+        name.contains("the name you typed") && name.contains("does not print"),
+        "the reader is not told which word could not be read, or why: {name:?}"
     );
 }
 
@@ -10059,4 +10194,3246 @@ async fn one_line_comes_out_of_every_emit_path_with_one_transformation_on_it() {
         format!("{AFTER_ONE_STRIP}\n"),
         "the fetched log is not the container's line with one strip and the newline that ends it"
     );
+}
+
+/// One `ops` line, as argv reaches [`main`].
+///
+/// **The audit log is `/dev/null`, opened for real** ([`ops_line`]'s `audit` parameter): a real
+/// `File`, so the driver's own arm is the one under test, and nowhere, so thirty tests do not
+/// each leave a state directory behind. The tests that care *which* file it is open it
+/// themselves.
+fn ops(line: &[&str]) -> String {
+    ops_ended(line).said
+}
+
+/// The same line, with the exit code it carries (NOTES § D220 ruling 1, [`Ended`]).
+fn ops_ended(line: &[&str]) -> Ended {
+    let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+    ops_line(&args, nowhere, unwired, unanswered)
+        .expect("a line beginning with `ops` is the operations driver's")
+}
+
+/// **The seam a test hands [`ops_line`]**, standing in for [`ops_performed`] — which builds a
+/// runtime and dials the reader's own cluster, and is the one thing in this driver no unit test
+/// may reach.
+///
+/// **It is [`not_wired`]'s own sentence.** Every assertion in this region is about the words
+/// *above* the seam, and this stands in for a call this test process must not make — one that
+/// dials the reader's own cluster and, for all three operations now, changes something on it.
+///
+/// **It stopped being *what one operation really prints* when `delete` was wired**, and it is
+/// kept because [`not_wired`] is still reachable ([`wired`]'s `None`) and because a sentence that
+/// names every parsed word is what these tests need to compare against. Nothing in this region
+/// asserts that a real operation prints it.
+fn unwired(ready: Ready<'_>) -> Ended {
+    Ended::refused(not_wired(
+        ready.operation,
+        ready.kind,
+        ready.name,
+        ready.count,
+        ready.namespace,
+    ))
+}
+
+/// An audit log that works, keeps nothing and has nothing to say — a real open, of the one path
+/// that is always there.
+/// **The same, for the one verb that is not an operation** — standing in for [`may_i_started`],
+/// which builds a runtime and dials the reader's own cluster exactly as [`ops_performed`] does.
+///
+/// **It panics rather than answering**, because every `may-i` line in this file is meant to be
+/// refused above the seam: a test that reaches here is a test that would have talked to whatever
+/// cluster the machine running it happens to have. The two tests that *want* the seam reached name
+/// their own double.
+fn unanswered(question: Question) -> Ended {
+    panic!(
+        "a unit test reached the cluster seam with `{} {}`",
+        question.verb, question.resource
+    )
+}
+
+fn nowhere() -> Result<(std::fs::File, Vec<String>), String> {
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open("/dev/null")
+        .map(|log| (log, Vec::new()))
+        .map_err(|failed| failed.to_string())
+}
+
+/// **A line that is not the subcommand is not the subcommand's to answer** — the two other ways
+/// into this driver keep working, and a namespace called `ops` is a namespace.
+///
+/// **Every flag that owns the next word gets a row, and the value in each of them is the word
+/// `ops`.** `-n ops` is an ordinary watch of a namespace an operator plausibly has, and a
+/// `position()` over argv would read that word as a subcommand and refuse the run — so a chain
+/// that stops covering one flag is a failure rather than a mutant nothing notices.
+#[test]
+fn only_a_bare_ops_word_is_the_subcommand_and_a_flags_value_is_not() {
+    for line in [
+        vec!["pod.json"],
+        vec!["--once", "--namespace", "payments"],
+        vec!["--live", "-n", "ops"],
+        vec!["--namespace", "ops", "--once"],
+        vec!["--logs", "--object", "ops"],
+        vec!["--logs", "--object", "ops/web"],
+        vec!["--logs", "--object", "default/web", "--container", "ops"],
+        vec!["--live", "--context", "ops"],
+        vec!["--yaml", "--object", "web", "--kind", "ops"],
+        vec!["ops.json"],
+        // **`--read-only` is read inside [`ops_line`] now and must not reach past it**: a
+        // read-only watch of a namespace called `ops` is a watch, and refusing it would be the
+        // B1 fix breaking the run it was not about.
+        vec!["--read-only", "--live", "-n", "ops"],
+        vec!["--read-only", "ops.json"],
+    ] {
+        let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        assert!(
+            ops_line(&args, nowhere, unwired, unanswered).is_none(),
+            "{line:?} was taken for the operations subcommand"
+        );
+    }
+}
+
+/// **`ops` anywhere but first is a sentence, not a file that does not exist.**
+///
+/// `k8rs --once ops delete pod/web` is a line somebody types, and falling through would send
+/// it to the file reader, which would come back about a file called `--once`
+/// (invariant 14 — jargon about a word nobody meant as a filename).
+///
+/// **`--read-only` is deliberately not one of these rows.** It outranks the word order now, and
+/// the test that owns it is below — the rewrite this sentence offers drops every other flag on
+/// the line, so a line that carried `--read-only` may never reach it.
+#[test]
+fn ops_after_the_first_word_says_where_it_belongs_rather_than_falling_through_to_the_files() {
+    for line in [
+        vec!["--once", "ops", "delete", "pod/web"],
+        vec!["--analysis", "ops", "scale", "deploy/web", "3"],
+        vec!["pod.json", "ops"],
+    ] {
+        let said = ops(&line);
+        println!("{line:?}\n{said}\n");
+        assert!(
+            said.starts_with("k8rs: ") && said.contains("has to be the first word"),
+            "{line:?} did not say where `ops` belongs: {said:?}"
+        );
+        assert!(
+            said.contains("usage: k8rs ops "),
+            "{line:?} was refused without the subcommand's own usage under it: {said:?}"
+        );
+    }
+}
+
+/// **`k8rs ops` with nothing after it is the usage, and the usage teaches the whole surface.**
+///
+/// **Every operation is named and every one says how it is confirmed**, because that is the one
+/// thing a script author cannot guess: there is no flag that means yes, so the line they have to
+/// pipe is the thing this text exists to tell them.
+#[test]
+fn ops_alone_prints_a_usage_that_names_every_operation_and_how_each_is_confirmed() {
+    let said = ops(&["ops"]);
+    println!("{said}");
+    assert!(said.starts_with("usage: k8rs ops "), "{said:?}");
+    for operation in &OPERATIONS {
+        let synopsis = format!("  ops {} <kind>/<name>", operation.verb);
+        assert!(
+            said.contains(&synopsis),
+            "the usage has no line of its own for {}: {said:?}",
+            operation.verb
+        );
+    }
+    assert!(
+        said.contains("type the object's own name to confirm"),
+        "the usage does not say that one operation needs the name typed: {said:?}"
+    );
+    assert!(
+        said.contains("say yes to confirm"),
+        "the usage does not say how the others are confirmed: {said:?}"
+    );
+    // **The word the usage prints is the word [`ask`] accepts.** [`Operation::confirm`] is a help
+    // string and the mechanism is `ops::Mutation::confirm` (NOTES § D225 ruling 2), so nothing in
+    // the language keeps this sentence in step with [`YES`] — a script author told to say a word
+    // the reader is not listening for cannot delete anything, and would not know why.
+    assert!(
+        said.contains(&format!("say {YES} to confirm")),
+        "the usage tells a script author to say a word `ask` does not accept: {said:?}"
+    );
+    assert!(
+        said.contains("standard input"),
+        "the usage does not say where the answer is read from: {said:?}"
+    );
+    assert!(
+        said.contains("no flag that means yes"),
+        "the usage does not rule out the flag invariant 2 refuses: {said:?}"
+    );
+    // **The namespace is not optional and the synopsis may not say it is** (`k8s-admin`,
+    // 2026-09-04): brackets mean optional, and it is required for five of the six kinds and
+    // refused for the sixth, so a bracketed `[-n <namespace>]` sat directly above a refusal
+    // saying it is required.
+    assert!(
+        !said.contains("[-n <namespace>]") && !said.contains("[--namespace <namespace>]"),
+        "the synopsis still offers the namespace as optional: {said:?}"
+    );
+    assert!(
+        said.contains("-n <namespace>"),
+        "the synopsis does not say the namespace is part of the line at all: {said:?}"
+    );
+    assert!(
+        said.contains("node"),
+        "the usage does not say which kind takes no namespace, so the one line that is not \
+         required is undocumented: {said:?}"
+    );
+}
+
+/// **Every way an `ops` line can be wrong, and the sentence it gets** — one row per refusal the
+/// box names, each derived from what the rule is rather than from what the code printed.
+///
+/// **Every one of them carries the subcommand's usage**, because a refusal that does not say what
+/// to type instead has told the reader half of what they came for (invariant 14) — and every one
+/// of them is wrong in its *form*, which is what makes the shape the answer (NOTES § D236
+/// ruling 4). Each of these readers wrote an operation, an object, a value or a flag that is not
+/// a shape `k8rs ops` has.
+///
+/// **The three exceptions are checked in their own tests**: `--read-only`, where offering the
+/// usage would be inviting a retry of the thing that was refused; the well-formed line, which is
+/// not a refusal at all; and the refusal about *meaning* — a real operation pointed at a real
+/// object it does not apply to — which
+/// `a_kind_an_operation_does_not_work_on_is_refused_before_the_audit_log_is_opened` holds and
+/// which asserts the opposite of both halves below. **It was two until this turn**, and the third
+/// is the one D236 ruling 4 carved out.
+///
+/// **What is compared is [`ops_usage`] itself and not only its first line**: a refusal that
+/// printed the header and dropped the rows would pass the older assertion.
+#[test]
+fn every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage() {
+    for (line, expected) in [
+        (
+            vec!["ops", "scal", "deploy/web", "3", "-n", "payments"],
+            "no operation called scal",
+        ),
+        (vec!["ops", "scale"], "has to be told which object"),
+        (
+            vec!["ops", "scale", "web", "3", "-n", "payments"],
+            "needs the kind as well as the name",
+        ),
+        (
+            vec!["ops", "scale", "/web", "3", "-n", "payments"],
+            "nothing before the `/`",
+        ),
+        (
+            vec!["ops", "scale", "deploy/", "3", "-n", "payments"],
+            "nothing after the `/`",
+        ),
+        (
+            vec!["ops", "scale", "widget/web", "3", "-n", "payments"],
+            "does not work on a kind called widget",
+        ),
+        (
+            vec!["ops", "scale", "deploy/a b", "3", "-n", "payments"],
+            "is not the name of an object",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "three", "-n", "payments"],
+            "has to be a whole number",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "-3", "-n", "payments"],
+            "fewer copies than Kubernetes can hold",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "3000000000", "-n", "payments"],
+            "more copies than Kubernetes can hold",
+        ),
+        (
+            vec!["ops", "scale", "sts/api", "-n", "prod"],
+            "also needs the copies",
+        ),
+        (
+            vec!["ops", "restart", "deploy/web", "3", "-n", "payments"],
+            "does not know what to do with 3",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "3"],
+            "will not guess which namespace",
+        ),
+        (
+            vec!["ops", "delete", "node/worker-1", "-n", "payments"],
+            "belongs to the whole cluster",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "3", "-n"],
+            "--namespace needs the name of a namespace",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "3", "-n", "PAYMENTS"],
+            "is not one — a namespace is lowercase",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "3", "--context", "prod"],
+            "is not a flag `k8rs ops` has",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "3", "-npayments"],
+            "is not a flag `k8rs ops` has",
+        ),
+        (
+            vec![
+                "ops",
+                "scale",
+                "deploy/web",
+                "3",
+                "-n",
+                "payments",
+                "-n",
+                "prod",
+            ],
+            "names the namespace more than once",
+        ),
+    ] {
+        let said = ops(&line);
+        println!("{line:?}\n{said}\n");
+        assert!(
+            said.starts_with("k8rs: "),
+            "{line:?} was refused without the prefix every refusal in this driver has: {said:?}"
+        );
+        assert!(
+            said.contains(expected),
+            "{line:?} did not say {expected:?}: {said:?}"
+        );
+        // **The header is a literal and the rest is compared against [`ops_usage`]**: the second
+        // half alone moves with the thing it checks, which is what `cargo mutants` caught one
+        // assertion over on the meaning side.
+        assert!(
+            said.contains("usage: k8rs ops ") && said.ends_with(&ops_usage()),
+            "{line:?} is wrong in its form and was refused without the whole synopsis under it: \
+             {said:?}"
+        );
+        // **No refusal offers a complete mutation of a different object** (`k8s-admin`,
+        // 2026-09-04). *write it as `k8rs ops scale deploy/web 3 -n payments`* is a runnable
+        // scale of another deployment in another namespace, printed at the moment a tired
+        // operator is looking for a line to copy. Every other *write it as* in this region is a
+        // fragment or a placeholder, and this asserts that stays true of all of them: no refusal
+        // names a concrete object k8rs invented.
+        for invented in ["deploy/web 3", "web 3", "-n payments"] {
+            assert!(
+                !said
+                    .lines()
+                    .next()
+                    .expect("a refusal has a first line")
+                    .contains(invented),
+                "{line:?} offered {invented:?}, a line somebody can paste at an object they did \
+                 not name: {said:?}"
+            );
+        }
+    }
+}
+
+/// **A line with nothing wrong in it says what k8rs read, and hands it to the seam.**
+///
+/// **The sentence asserted below is the test double's** ([`unwired`]), which stands in for the
+/// call that would dial the reader's own cluster. All three operations are wired now; what this
+/// test is about is every word the driver parsed *before* the seam, and the double is what makes
+/// them readable.
+///
+/// **It names the operation, the kind, the name, the namespace and the value**, because *k8rs
+/// cannot do that yet* alone would go green against a parser that had read the wrong object — and
+/// this is the one line `just e2e` can compare a well-formed invocation against while there is
+/// nothing to run. **The value is the one parsed thing it used to leave out** (`k8s-admin`,
+/// 2026-09-04), and it is the one that decides how many pods exist, so `scale …/web 3` and
+/// `scale …/web 0` printed one identical line.
+///
+/// **And it promises no later step.** Against NOTES § Operations' *Applies to* column five pairs
+/// are outside it permanently — `scale` on daemonset, pod and node, `restart` on replicaset and
+/// node — so *the operation itself is a later step* was false for every one of them. This driver
+/// deliberately does not carry that matrix (the operation holds it, and `screens/dialogs.md`
+/// rule 4 shows it is not even uniform: `restart pod/web` is a delete and does belong), so the
+/// sentence is the thing that had to stop claiming.
+///
+/// **The short spelling and the long one and the plural are one object**, which is the whole
+/// reason `deploy/web` is the form the box was written with.
+#[test]
+fn a_well_formed_line_names_everything_it_read_before_it_reaches_the_seam() {
+    for spelling in ["deploy", "deployment", "deployments", "Deployment"] {
+        let said = ops(&[
+            "ops",
+            "scale",
+            &format!("{spelling}/web"),
+            "3",
+            "-n",
+            "payments",
+        ]);
+        println!("{spelling}\n{said}\n");
+        assert_eq!(
+            said,
+            "k8rs: k8rs read this as `scale` on deployment/web in payments, 3 copies — and this \
+             build reads the line and does nothing else",
+            "{spelling} did not come back as one deployment named web in payments"
+        );
+    }
+    // **Two different counts are two different lines**, which is what `just e2e` compares. It was
+    // one line for both.
+    let three = ops(&["ops", "scale", "deploy/web", "3", "-n", "payments"]);
+    let none = ops(&["ops", "scale", "deploy/web", "0", "-n", "payments"]);
+    println!("{three}\n{none}\n");
+    assert!(
+        three.contains("3 copies") && none.contains("0 copies"),
+        "the count k8rs parsed is not in the line it printed: {three:?} / {none:?}"
+    );
+    assert_ne!(
+        three, none,
+        "scaling to three and scaling to none printed the same sentence"
+    );
+    // **No pair is promised an operation that is not coming.** `scale` on a node and `restart` on
+    // a replicaset are outside NOTES § Operations' *Applies to* for good.
+    for line in [
+        vec!["ops", "scale", "node/worker-1", "3"],
+        vec!["ops", "restart", "rs/web", "-n", "payments"],
+    ] {
+        let said = ops(&line);
+        println!("{line:?}\n{said}\n");
+        assert!(
+            !said.contains("later step") && !said.contains("yet"),
+            "{line:?} was promised an operation that is never coming: {said:?}"
+        );
+    }
+    // **Every spelling of the namespace flag is one flag** — the two words and the two attached
+    // forms — because [`ops_words`] has to take the value out of the line whichever way it was
+    // written, and a spelling it missed would leave `payments` standing as a stray word.
+    for flag in [
+        "-n payments",
+        "-n=payments",
+        "--namespace payments",
+        "--namespace=payments",
+    ] {
+        let mut line = vec!["ops", "scale", "deploy/web", "3"];
+        line.extend(flag.split(' '));
+        let said = ops(&line);
+        println!("{flag}\n{said}\n");
+        assert!(
+            said.contains("on deployment/web in payments"),
+            "{flag} did not name one namespace: {said:?}"
+        );
+    }
+    // **A kind that belongs to the whole cluster takes no namespace clause and needs no flag** —
+    // `screens/dialogs.md` rule 1 gives it the bare name.
+    let said = ops(&["ops", "delete", "node/worker-1"]);
+    println!("{said}");
+    assert_eq!(
+        said,
+        "k8rs: k8rs read this as `delete` on node/worker-1 — and this build reads the line and \
+         does nothing else"
+    );
+    // Every operation reaches it, so a verb added to the table without a wired arm says so rather
+    // than falling through to something else.
+    //
+    // **A deployment and not a pod, since todo.md 3749.** The seam is now the last thing on the
+    // line and not the only thing: `scale` reads its own kind matrix above it (NOTES § D220
+    // ruling 7), so `scale pod/web` is answered before the seam and is a different assertion —
+    // the one two tests below. A deployment is a kind all three operations accept, which is what
+    // this loop is about.
+    for operation in &OPERATIONS {
+        let mut line = vec!["ops", operation.verb, "deploy/web"];
+        if operation.value.is_some() {
+            line.push("3");
+        }
+        line.extend(["-n", "payments"]);
+        let said = ops(&line);
+        println!("{said}");
+        assert!(
+            said.contains(&format!(
+                "read this as `{}` on deployment/web in payments",
+                operation.verb
+            )),
+            "{:?} did not reach the seam an operation is wired into: {said:?}",
+            operation.verb
+        );
+    }
+}
+
+/// **`--read-only` stops an operation before anything about the line matters** (invariant 2,
+/// `screens/dialogs.md` rule 6: *under `--read-only` none of this is reachable*).
+///
+/// **It outranks every other refusal**, which is the only ordering that is not a lie: a run that
+/// was told not to write has nothing to say about a misspelled kind, and answering the spelling
+/// first would teach a reader to fix the line and try again.
+///
+/// **No usage under it**, deliberately: the thing to type instead is not an `ops` line.
+///
+/// **And it outranks the word order, which is the defect this test was widened for**
+/// (`k8s-admin`, 2026-09-04). `k8rs --read-only ops delete pod/web -n payments` used to be
+/// answered *`ops` has to be the first word — write it as `k8rs ops <operation> <kind>/<name>`*,
+/// and that rewrite drops `--read-only`: k8rs told an operator to retype the line without their
+/// safety flag. Two paths where one read the flag and one did not is the shape
+/// `PRIOR-ART § G2` tags immune, so the flag is read in one place and before the position is.
+#[test]
+fn read_only_refuses_an_operation_before_anything_else_on_the_line_is_judged() {
+    for line in [
+        vec!["ops", "delete", "pod/web", "-n", "payments", "--read-only"],
+        vec!["--read-only", "ops", "delete", "pod/web", "-n", "payments"],
+        vec!["--once", "--read-only", "ops", "scale", "deploy/web", "3"],
+        // **All three operations, because `--read-only` is read once and for all of them**
+        // (invariant 2): a row for `scale` alone proves the flag for the verb it names. The two
+        // `delete` rows are first above — the destructive one is the one it most has to hold for.
+        vec![
+            "--read-only",
+            "ops",
+            "restart",
+            "deploy/web",
+            "-n",
+            "payments",
+        ],
+        vec![
+            "ops",
+            "restart",
+            "deploy/web",
+            "-n",
+            "payments",
+            "--read-only",
+        ],
+        vec!["--read-only", "pod.json", "ops"],
+        vec![
+            "ops",
+            "--read-only",
+            "scale",
+            "deploy/web",
+            "3",
+            "-n",
+            "payments",
+        ],
+        vec!["ops", "--read-only", "widget/nonsense", "-n", "PAYMENTS"],
+        vec!["ops", "--read-only"],
+    ] {
+        let said = ops(&line);
+        println!("{line:?}\n{said}\n");
+        assert_eq!(
+            said,
+            "k8rs: --read-only was asked for, so k8rs will not change anything — run it without \
+             that flag to use an operation",
+            "{line:?} was answered about something other than the flag that forbids it"
+        );
+    }
+}
+
+/// **The count is judged as a number, and the three ways it can be wrong get three sentences**
+/// (invariant 14 — a reader told only *that is not valid* about `-1` has to guess which).
+///
+/// **`i32` is the bound because that is the type `replicas` is** on every workload and on the
+/// scale subresource, so the largest count that can be sent is `i32::MAX` and the first one that
+/// cannot is one more.
+///
+/// **Both sentences finish, and they finish the same way.** *the number of copies cannot be less
+/// than none, and -3 is* stopped mid-clause where its sibling named the bound, and *less than
+/// none* also asks a beginner to read *none* as a number (`k8s-admin` and `tester`, 2026-09-04);
+/// the two are one shape now, each naming the end of the range it is about.
+#[test]
+fn the_number_of_copies_is_refused_for_the_reason_it_is_wrong() {
+    let most = i64::from(i32::MAX);
+    // **The number comes back now, and it is the number that was typed** (todo.md 3749). While
+    // this answered `Option<String>` every accepted word was one indistinguishable `None`, so a
+    // parser that read `+7` as `7` and `3` as `0` was green — and the value is the one that
+    // decides how many pods exist.
+    for (word, count) in [
+        ("0", 0),
+        ("1", 1),
+        ("3", 3),
+        (&most.to_string(), i32::MAX),
+        ("+7", 7),
+        ("-0", 0),
+    ] {
+        assert_eq!(
+            refuse_count(word),
+            Ok(count),
+            "{word} is a count k8rs can send, as {count}"
+        );
+    }
+    for (word, expected) in [
+        (
+            "-1",
+            "fewer copies than Kubernetes can hold — the fewest it takes is 0",
+        ),
+        (
+            "-99999999999999999999999",
+            "fewer copies than Kubernetes can hold — the fewest it takes is 0",
+        ),
+        (
+            &(most + 1).to_string(),
+            "more copies than Kubernetes can hold",
+        ),
+        (
+            "99999999999999999999999",
+            "more copies than Kubernetes can hold",
+        ),
+        ("three", "has to be a whole number"),
+        ("3.0", "has to be a whole number"),
+        ("", "has to be a whole number"),
+    ] {
+        let Err(said) = refuse_count(word) else {
+            panic!("{word:?} was accepted as a count")
+        };
+        println!("{word:?}\n{said}\n");
+        assert!(said.contains(expected), "{word:?}: {said:?}");
+    }
+    // **Nothing printable left is a clause and not an empty gap** ([`shown`]) — the doubled-space
+    // defect `mistyped` already closed for `--object`.
+    let said = refuse_count("").expect_err("an empty count is refused");
+    assert!(
+        said.contains("a value with nothing printable in it"),
+        "an empty count printed an empty gap: {said:?}"
+    );
+}
+
+/// **Invariant 9 applies to argv, and an object name from the command line has been through no
+/// ingest guard.**
+///
+/// `ops.rs`'s `Record::of` strips on the way into the contract; a refusal that quotes the bad
+/// argument is written *before* any mutation exists, so [`sanitize`] is the only thing between a
+/// crafted name and the terminal. A pod named `; rm -rf ~` is boring; one carrying a bidi override
+/// must not rewrite the line the operator is reading.
+#[test]
+fn a_crafted_word_on_an_ops_line_reaches_the_terminal_with_nothing_unprintable_left() {
+    for (line, readable) in [
+        // **Six of these rows name the *kind* of word and not the word** ([`as_typed`]): where
+        // the strip changed it, quoting it back quotes a word nobody typed, so the sentence
+        // costs itself the echo and says what is wrong instead. It was three until 2026-09-05,
+        // when the sweep behind
+        // [`no_refusal_ever_names_a_word_the_same_sentence_offers_back`] found the other eight
+        // sites of the same defect — three of them on this line.
+        //
+        // **The two rows that still name the word are the two the rule does not reach**: an
+        // *extra* word is extra whatever it is spelled like, so [`ops_value`] has nothing to
+        // contradict itself about and keeps the echo [`shown`] bounds.
+        (
+            vec!["ops", "sc\u{1b}[2Jale", "deploy/web", "3", "-n", "payments"],
+            "the operation you typed",
+        ),
+        (
+            vec!["ops", "scale", "wid\u{202e}get/web", "3", "-n", "payments"],
+            "the kind you typed",
+        ),
+        (
+            vec!["ops", "scale", "deploy/we\u{202e}b", "3", "-n", "payments"],
+            "the name you typed",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "th\u{7}ree", "-n", "payments"],
+            "the number of copies you typed",
+        ),
+        (
+            vec![
+                "ops",
+                "restart",
+                "deploy/web",
+                "ex\u{1b}[31mtra",
+                "-n",
+                "payments",
+            ],
+            "ex[31mtra",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "3", "-n", "pay\u{202e}ments"],
+            "the namespace you typed",
+        ),
+        (
+            vec!["ops", "scale", "deploy/web", "3", "--con\u{1b}text"],
+            "the flag you typed",
+        ),
+        (
+            vec!["--rea\u{202e}d", "ops", "scale", "deploy/web"],
+            "has to be the first word",
+        ),
+        (
+            // A pod named `; rm -rf ~` is boring: the command log is display text and nothing
+            // here is fed back into a process (the security gate's own row).
+            vec!["ops", "delete", "; rm -rf ~/web"],
+            "; rm -rf ~",
+        ),
+    ] {
+        let said = ops(&line);
+        println!("{line:?}\n{said}\n");
+        // The refusal's own line breaks are the driver's and are stripped before the sweep, the
+        // way every other invariant-9 test in this file does it ([`survivors`]); a `\n` inside a
+        // *value* is what would forge a second line, and `shown` removed it before it got here.
+        let survivors = survivors(&said.replace('\n', ""));
+        assert!(
+            survivors.is_empty(),
+            "{line:?} put something with no printed form on the terminal: {survivors:?}\n{said:?}"
+        );
+        // **Both halves.** A strip that returned nothing would pass the sweep and leave the
+        // reader a sentence that names no word (CLAUDE.md § A derived list asserts it found
+        // something) — which is the word itself where the strip left it alone, and the kind of
+        // word it was where it did not ([`as_typed`]).
+        assert!(
+            said.contains(readable),
+            "{line:?} was stripped down past the word it is about: {said:?}"
+        );
+    }
+}
+
+/// **A flag this driver does not have is echoed as the word that was typed, and bounded**
+/// ([`shown`], not [`sanitize`]) — the two records may not lie about which string they mean
+/// (invariant 4), and a word refused for being eight kilobytes long may not be printed at eight
+/// kilobytes to say so (the security gate's *sizes are bounded* row).
+///
+/// **The word a strip changed is not echoed at all, and that rule has its own test**
+/// ([`no_refusal_ever_names_a_word_the_same_sentence_offers_back`]). What is left here is the
+/// echo of a word the strip left alone and the cut that bounds it — the half [`shown`] still owns.
+#[test]
+fn a_flag_this_driver_does_not_have_is_echoed_as_typed_and_cut_to_a_length() {
+    // Bounded, and the cut is said out loud. `NAME_MAX` characters plus the clause, never the
+    // 9000 the reader typed.
+    let long = format!("-{}", "a".repeat(9000));
+    let said = ops(&["ops", "scale", "deploy/web", "3", &long]);
+    println!("{}", &said[..said.find('\n').unwrap_or(said.len())]);
+    let first = said.lines().next().expect("a refusal has a first line");
+    assert!(
+        first.len() < 500,
+        "a 9000-character flag word came back whole, at {} bytes: {first:?}",
+        first.len()
+    );
+    assert!(
+        first.contains("(shortened by k8rs)"),
+        "the cut was silent: {first:?}"
+    );
+    // `-` and then `NAME_MAX - 1` of the 9000 `a`s: the cut is at `NAME_MAX` characters, which is
+    // where every sibling refusal on this line already cuts, and not one character either side.
+    assert!(
+        first.contains(&"a".repeat(k8s::NAME_MAX - 1))
+            && !first.contains(&"a".repeat(k8s::NAME_MAX)),
+        "the echo was cut somewhere other than the length every sibling refusal on this line \
+         cuts at: {first:?}"
+    );
+}
+
+/// **No refusal names a word that the same sentence then offers back** ([`as_typed`], invariant
+/// 9, invariant 14).
+///
+/// **Eleven sites, one rule, and argv reaches every one** (`k8s-admin`, 2026-09-05, for the first
+/// three; the rest from the sweep the PM asked for, `dev-core`, 2026-09-05). `ops.rs`'s `a_kind`
+/// settled it one layer down (NOTES § D224) in the copy no command line can reach, while these
+/// went on quoting the stripped word: `dep<U+200B>loyment/web` came back as *k8rs does not work
+/// on a kind called deployment — the ones an operation can be pointed at are deployment, …*, one
+/// sentence contradicting its own second clause. The operator then retypes a line that looks
+/// identical and is refused identically, with nothing in the sentence to break the loop.
+///
+/// **The sweep is what says eleven, and it was measured against the built binary** — the same
+/// zero-width space fed to every refusal in `main.rs` that names a word out of argv, read off
+/// what it printed rather than off the source. It is also why this test is no longer about `ops`:
+/// five of the sites are on the read path, and a name saying otherwise would be the second copy
+/// of a claim that had already gone wrong once.
+///
+/// **What deliberately does not route through [`as_typed`], with why for each** — the other half
+/// of the sweep, because a site nobody named is a site the next reader re-derives:
+///
+/// - *`--context --li<U+200B>ve`* — *"and `--live` is a flag"* stays true of the cleaned word, so
+///   there is no contradiction to fix.
+/// - *a word after a complete line* ([`ops_value`], [`may_i_question`]) — *"does not know what to
+///   do with `foo`"* is about there being an extra word, which its spelling does not change.
+/// - *a file beside a mode* — *"`--once` reads a cluster, so k8rs cannot also read `pod.json`"*,
+///   same shape.
+/// - *`in_namespace`* — measured, not reasoned: `k8s::drawable` has already stripped the
+///   kubeconfig's `namespace:` before it arrives, and [`mistyped`] refuses the argv one above it,
+///   so no word this refusal can name was changed on the way in.
+/// - *[`which_kind`]'s ambiguous arm, and a kind whose own words cannot build a URL* — both are
+///   reached only by a word that **matched** something the cluster serves, which a word with a
+///   character that does not print cannot do; it takes the arm below instead.
+/// - *[`refuse_count`]'s two range sentences* — reached only by a word that parsed as a number or
+///   is all ASCII digits, which is the same door closed.
+///
+/// **What is asserted is the contradiction and not the wording.** Each row names the fragment that
+/// would put the cleaned word where the sentence says k8rs does not have it, and the row passes by
+/// that fragment being absent — so a reworded sentence that quotes the word again is still red.
+///
+/// **The other half is that the sentence still names something** (CLAUDE.md § A derived list
+/// asserts it found something): the kind of word, and what is wrong with it.
+///
+/// **Every row is reported, and the loop does not stop at the first** — it collected its
+/// assertions into one failure until 2026-09-05 and did not, which is how rows 2 and 3 were never
+/// once seen red (PM, 2026-09-05). A per-row panic makes the second row's evidence cost a second
+/// run, and eleven rows make that eleven.
+///
+/// **A word the strip left alone is still quoted, and the tests for that are already here** —
+/// `every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage`'s `scal`, `widget` and
+/// `--context` rows, and
+/// [`a_flag_this_driver_does_not_have_is_echoed_as_typed_and_cut_to_a_length`], which is why this
+/// test does not repeat them.
+#[test]
+fn no_refusal_ever_names_a_word_the_same_sentence_offers_back() {
+    // A zero-width space, because it is the shape with no tell at all: every one of these words
+    // prints exactly as the word k8rs does take.
+    let kinds = vec![browsable("", "Node", "nodes", false)];
+    let refusals = [
+        // --- the `ops` line ---
+        (
+            "ops <operation>",
+            ops(&["ops", "sca\u{200b}le", "deploy/web", "3", "-n", "payments"]),
+            "called scale",
+            "the operation you typed",
+        ),
+        (
+            "ops <kind>/…",
+            ops(&["ops", "restart", "dep\u{200b}loyment/web", "-n", "payments"]),
+            "called deployment",
+            "the kind you typed",
+        ),
+        (
+            "ops …/<name>",
+            ops(&["ops", "scale", "deploy/we\u{200b}b", "3", "-n", "payments"]),
+            "web (with what cannot print removed)",
+            "the name you typed",
+        ),
+        (
+            "ops <copies>",
+            ops(&["ops", "scale", "deploy/web", "\u{200b}3", "-n", "payments"]),
+            "3 (with what cannot print removed)",
+            "the number of copies you typed",
+        ),
+        (
+            "ops --flag",
+            ops(&[
+                "ops",
+                "scale",
+                "deploy/web",
+                "3",
+                "--names\u{200b}pace=payments",
+            ]),
+            "--namespace=payments (with what cannot print removed)",
+            "the flag you typed",
+        ),
+        (
+            "ops -n <namespace>",
+            ops(&["ops", "scale", "deploy/web", "3", "-n", "pay\u{200b}ments"]),
+            "payments (with what cannot print removed)",
+            "the namespace you typed",
+        ),
+        // The second caller of the same helper, because one shared sentence with two usages is
+        // the shape where a fix lands on one of them.
+        (
+            "ops may-i -n <namespace>",
+            ops(&["ops", "may-i", "get", "pods.", "-n", "pay\u{200b}ments"]),
+            "payments (with what cannot print removed)",
+            "the namespace you typed",
+        ),
+        // --- the read path, which `mistyped` answers before anything connects ---
+        (
+            "--object …/<name>",
+            mistyped(&argv(&["--logs", "--object", "default/we\u{200b}b"]))
+                .expect("a name with a character that does not print is refused"),
+            "web (with what cannot print removed)",
+            "the name you typed",
+        ),
+        (
+            "--object <namespace>/…",
+            mistyped(&argv(&["--logs", "--object", "pay\u{200b}ments/web"]))
+                .expect("a namespace with a character that does not print is refused"),
+            "payments (with what cannot print removed)",
+            "the namespace you typed",
+        ),
+        (
+            "--namespace",
+            mistyped(&argv(&["--once", "--namespace", "pay\u{200b}ments"]))
+                .expect("a namespace with a character that does not print is refused"),
+            "payments (with what cannot print removed)",
+            "the namespace you typed",
+        ),
+        (
+            "--container",
+            mistyped(&argv(&[
+                "--logs",
+                "--object",
+                "default/web",
+                "--container",
+                "ap\u{200b}p",
+            ]))
+            .expect("a container name with a character that does not print is refused"),
+            "app (with what cannot print removed)",
+            "the container name you typed",
+        ),
+        (
+            "an unknown --flag",
+            mistyped(&argv(&["--once", "--name\u{200b}space=payments"]))
+                .expect("a flag with a character that does not print is refused"),
+            "--namespace=payments (with what cannot print removed) is not a flag",
+            "the flag you typed",
+        ),
+        // The one-dash arm is a *different* branch of the same sentence — `-n` never reaches the
+        // `--` check above it — and `-n` is a flag k8rs very much has.
+        (
+            "an unknown -flag",
+            mistyped(&argv(&["--once", "-\u{200b}n", "payments"]))
+                .expect("a flag with a character that does not print is refused"),
+            "-n (with what cannot print removed) is not a flag",
+            "the flag you typed",
+        ),
+        // --- the one refusal a cluster's own answer produces ---
+        (
+            "--kind",
+            which_kind(&kinds, "no\u{200b}de")
+                .expect_err("nothing serves a kind spelled with a gap"),
+            "kind named node",
+            "the kind you typed",
+        ),
+    ];
+    let mut wrong: Vec<String> = Vec::new();
+    for (site, said, quoted, noun) in &refusals {
+        println!("{site}\n{said}\n");
+        if said.contains(quoted) {
+            wrong.push(format!(
+                "{site}: named a word k8rs does take as one it does not have ({quoted:?}) — \
+                 {said:?}"
+            ));
+        }
+        if !said.contains(noun) || !said.contains("does not print") {
+            wrong.push(format!(
+                "{site}: the reader is not told which word could not be read, or why \
+                 ({noun:?}) — {said:?}"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// **The namespace may be named once and no more, and `k8rs ops` refuses rather than picking
+/// one** (`k8s-admin` and `tester`, 2026-09-04; PM ruling).
+///
+/// **[`value_of`]'s first-wins is right for the read path and cannot be carried onto a write.**
+/// `kubectl` is last-wins — measured here on `kubectl` v1.36.3, client-side and against no
+/// cluster: `kubectl create deployment web --image=nginx --dry-run=client -o yaml -n payments -n
+/// prod` prints `namespace: prod`, and so does the same line with `--namespace payments -n prod`.
+/// So first-wins here would send a mutation to a namespace the reader's own habit says is the
+/// other one. It is also the
+/// contradiction two doc comments in this region already rule out: [`ops_words`]' *a word
+/// silently skipped is a run doing something other than what was typed*, and [`ops_namespace`]'s
+/// refusal to guess a namespace nobody typed. Refusing to guess when none was typed and then
+/// guessing when two were is not one rule.
+///
+/// **Every spelling combination**, because the four spellings are two branches in [`ops_words`]
+/// and a count that only saw one of them would take `-n x --namespace=y` silently.
+#[test]
+fn a_namespace_named_twice_on_an_ops_line_is_refused_rather_than_guessed() {
+    for tail in [
+        vec!["-n", "payments", "-n", "prod"],
+        vec!["--namespace", "payments", "-n", "prod"],
+        vec!["-n", "payments", "--namespace=prod"],
+        vec!["-n=payments", "--namespace", "prod"],
+        vec!["--namespace=payments", "--namespace=prod"],
+        vec!["-n", "payments", "-n", "payments"],
+    ] {
+        let mut line = vec!["ops", "scale", "deploy/web", "3"];
+        line.extend(tail.iter().copied());
+        let said = ops(&line);
+        println!("{tail:?}\n{said}\n");
+        assert!(
+            said.starts_with("k8rs: ") && said.contains("names the namespace more than once"),
+            "{tail:?} was not refused for naming the namespace twice: {said:?}"
+        );
+        assert!(
+            said.contains("usage: k8rs ops "),
+            "{tail:?} was refused without the subcommand's own usage under it: {said:?}"
+        );
+    }
+    // One namespace, however it is spelled, is not two — the guard must not fire on the line it
+    // is not about.
+    for tail in [
+        vec!["-n", "payments"],
+        vec!["--namespace=payments"],
+        vec!["-n=payments"],
+    ] {
+        let mut line = vec!["ops", "scale", "deploy/web", "3"];
+        line.extend(tail.iter().copied());
+        let said = ops(&line);
+        assert!(
+            said.contains("on deployment/web in payments"),
+            "{tail:?} named one namespace and was refused for naming two: {said:?}"
+        );
+    }
+}
+
+/// **The dialog `screens/dialogs.md` draws, printed instead** — the identity, the consequence,
+/// then the equivalent kubectl command under it.
+///
+/// **The consequence is above the command and never instead of it** (`screens/dialogs.md`, first
+/// line), and the `$` line is display text: k8rs does not execute it.
+///
+/// **The verdict is not here**, because [`show`] runs before the check goes out — that ordering is
+/// the whole reason `ops::perform` has two callbacks (NOTES § D214).
+#[test]
+fn the_headless_dialog_prints_the_consequence_above_the_command_and_no_verdict() {
+    let shown = ops::Shown {
+        object: "deployment/web",
+        namespace: Some("payments"),
+        consequence: "This starts 1 more copy of your app. Right now: 2 copies.  After: 3 copies.",
+        kubectl: "kubectl scale deploy/web --replicas=3 -n payments",
+    };
+    let mut out = Vec::new();
+    show(&shown, &mut out).expect("a Vec takes every write");
+    let printed = String::from_utf8(out).expect("the dialog is text");
+    print!("{printed}");
+    assert_eq!(
+        printed,
+        "deployment/web in payments\n\
+         This starts 1 more copy of your app. Right now: 2 copies.  After: 3 copies.\n\
+         $ kubectl scale deploy/web --replicas=3 -n payments\n"
+    );
+    let lines: Vec<&str> = printed.lines().collect();
+    assert!(
+        lines[1] == shown.consequence && lines[2].starts_with("$ "),
+        "the command is not under the consequence: {printed:?}"
+    );
+    assert!(
+        !printed.contains("checked it first"),
+        "the dialog printed a verdict it cannot have yet: {printed:?}"
+    );
+
+    // **A kind that belongs to the whole cluster gets the bare identity** (rule 1).
+    let mut out = Vec::new();
+    show(
+        &ops::Shown {
+            object: "node/worker-1",
+            namespace: None,
+            consequence: "This removes the node from the cluster.",
+            kubectl: "kubectl delete node worker-1",
+        },
+        &mut out,
+    )
+    .expect("a Vec takes every write");
+    let printed = String::from_utf8(out).expect("the dialog is text");
+    print!("{printed}");
+    assert!(
+        printed.starts_with("node/worker-1\n"),
+        "a cluster-scoped object was given a namespace clause: {printed:?}"
+    );
+
+    // A stream that refuses every write is a failure the caller is told about, not one it has to
+    // notice — nothing may be confirmed on the strength of a dialog nobody saw.
+    assert!(
+        show(&shown, &mut Closed).is_err(),
+        "a dialog that could not be printed came back as though it had been"
+    );
+}
+
+/// **A writer that refuses every write** — the stream is closed.
+struct Closed;
+
+impl std::io::Write for Closed {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+    }
+}
+
+/// **What one headless confirmation did, driven through the real contract** — the outcome, and
+/// what the reader was shown on the way to it.
+///
+/// **`ops::Checked` can be built nowhere but `ops.rs`, which is the whole point of it and of
+/// `ops::Agreed` beside it** (NOTES § D225 ruling 2). So a test of [`ask`] cannot hand it one and
+/// has to make `ops::perform` build it — which is what these tests did not have to do while `ask`
+/// took three loose values.
+///
+/// **Nothing dials anything.** The call closure answers `Ok(())` for both passes, the audit log
+/// is a `Vec`, and the mutation is `checkable: false`, so this is the delete path's own shape:
+/// `show`, then the prompt, then the answer.
+///
+/// **`Outcome::Done` is a confirmation and `Outcome::Cancelled` is everything else**, which is a
+/// stronger claim than the `ops::Answer` these tests used to compare: it says the real call went
+/// out, and not merely that a value came back.
+async fn confirmation(
+    confirm: ops::Confirm<'_>,
+    typed: &[u8],
+    out: &mut impl std::io::Write,
+) -> Option<ops::Outcome> {
+    let mutation = ops::Mutation {
+        context: "kind-k8rs",
+        // A reserved host: `scripts/security-guard.py` reads a loopback URL in this tree as a
+        // second outbound path and is right to.
+        server: "https://k8rs-tests.invalid:41751",
+        namespace: Some("payments"),
+        object: "pod/web-7d9f4",
+        uid: None,
+        uid_sent: false,
+        consequence: "This removes the pod. Whatever created it will normally replace it — k8rs \
+                      has not checked whether anything did.",
+        kubectl: "kubectl delete pod/web-7d9f4 -n payments",
+        verb: "DELETE",
+        path: "/api/v1/namespaces/payments/pods/web-7d9f4",
+        version: None,
+        checkable: false,
+        confirm,
+    };
+    // **Bytes and not a `&str`**, because one of the rows this drives is input that is not text
+    // at all: `read_line` refuses it, and a `&str` parameter could not carry it.
+    let mut input = typed;
+    ops::perform(
+        &mutation,
+        || {
+            k8s_openapi::jiff::Timestamp::from_second(1_788_438_896)
+                .expect("a timestamp inside jiff's range")
+        },
+        &mut Vec::new(),
+        |_| {},
+        |checked| std::future::ready(ask(&checked, &mut input, out)),
+        |_| std::future::ready(Ok::<(), kube::Error>(())),
+        // A `PATCH`'s shape: the cluster's answer says the change is finished. What the other
+        // arm looks like is `ops_tests.rs`'s, over the one operation that can produce it.
+        |_| ops::Landing::Finished,
+    )
+    .await
+    .outcome
+}
+
+/// **One mutation driven through the real contract, with a dialog of the caller's choosing** —
+/// the shape [`confirmation`] has, without the headless [`ask`] in the middle.
+///
+/// **It exists so the replay attack can be written from outside `ops.rs`**, which is where every
+/// dialog in this program lives and where the first draft of `ops::Agreed` was breakable.
+async fn one_mutation(
+    confirm: ops::Confirm<'_>,
+    dialog: impl FnOnce(&ops::Checked<()>) -> ops::Answer,
+    calls: &std::cell::Cell<usize>,
+) -> Option<ops::Outcome> {
+    let mutation = ops::Mutation {
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+        namespace: Some("payments"),
+        object: "pod/web-7d9f4",
+        uid: None,
+        uid_sent: false,
+        consequence: "This removes the pod.",
+        kubectl: "kubectl delete pod/web-7d9f4 -n payments",
+        verb: "DELETE",
+        path: "/api/v1/namespaces/payments/pods/web-7d9f4",
+        version: None,
+        checkable: false,
+        confirm,
+    };
+    ops::perform(
+        &mutation,
+        || {
+            k8s_openapi::jiff::Timestamp::from_second(1_788_438_896)
+                .expect("a timestamp inside jiff's range")
+        },
+        &mut Vec::new(),
+        |_| {},
+        |checked| std::future::ready(dialog(&checked)),
+        |_| {
+            calls.set(calls.get() + 1);
+            std::future::ready(Ok::<(), kube::Error>(()))
+        },
+        |_| ops::Landing::Finished,
+    )
+    .await
+    .outcome
+}
+
+/// **A yes kept from one mutation cannot confirm another** (NOTES § D225 ruling 2, invariant 2) —
+/// the attack the first draft of `ops::Agreed` was open to, written from the file every dialog
+/// lives in.
+///
+/// **An enum variant's fields are as public as the enum**, whatever the token struct's own field
+/// says, so a `Copy` token with no contents could be destructured out of one `Answer::Confirmed`
+/// and re-wrapped for any later mutation: press-confirm one scale, keep what falls out, and every
+/// delete after it proceeds with no name typed. `tester` measured a `DELETE` on the wire from
+/// exactly this code. Not reachable through today's driver — one operation per process — and
+/// reachable at Phase 12, where the console is one process with many dialogs.
+///
+/// **`ops::Agreed` carries `ops::perform`'s ticket now**, so a token from any other call — even
+/// one with the identical `ops::Confirm` — is refused before the real call.
+///
+/// **A panic and not a `Cancelled`, in a debug build.** A replayed confirmation is the author's
+/// error, and the contract reports one the way `ops::Record::of` and `ops::Checked::pressed`
+/// already do: `debug_assert` where it can be loud, and the safe direction where it cannot. In
+/// release the same path is `Outcome::Cancelled` and nothing is sent; either way the delete does
+/// not happen, which is what this test is about.
+#[tokio::test]
+#[should_panic(expected = "replayed")]
+async fn a_confirmation_kept_from_one_mutation_cannot_confirm_another() {
+    let stolen = std::cell::RefCell::new(None);
+    let calls = std::cell::Cell::new(0);
+
+    // A first mutation a press confirms. The dialog keeps the token and then cancels, so nothing
+    // about this call is a change — only the yes survives it.
+    let first = one_mutation(
+        ops::Confirm::Press,
+        |checked| {
+            if let ops::Answer::Confirmed(token) = checked.pressed() {
+                *stolen.borrow_mut() = Some(token);
+            }
+            ops::Answer::Cancelled
+        },
+        &calls,
+    )
+    .await;
+    println!("first: {first:?} · calls {}", calls.get());
+    assert_eq!(first, Some(ops::Outcome::Cancelled));
+    assert_eq!(calls.get(), 0, "a cancelled mutation sent the change");
+    assert!(
+        stolen.borrow().is_some(),
+        "the probe kept nothing, so it proves nothing: `ops::Answer::Confirmed` no longer yields \
+         a token to keep, and this test has to be rewritten rather than deleted"
+    );
+
+    // The same yes, returned at a delete that asked for a typed name and was given none.
+    let second = one_mutation(
+        ops::Confirm::Type("web-7d9f4"),
+        |_| ops::Answer::Confirmed(stolen.borrow_mut().take().expect("the kept token")),
+        &calls,
+    )
+    .await;
+    println!("second: {second:?} · calls {}", calls.get());
+    assert_eq!(
+        calls.get(),
+        0,
+        "a dialog outside ops.rs deleted an object without typing its name"
+    );
+    assert_eq!(second, Some(ops::Outcome::Cancelled));
+}
+
+/// **The confirmation is one line the caller had to supply, and everything else is `Cancelled`**
+/// (invariant 2 — there is no flag that means yes, and no default that means yes either).
+#[tokio::test]
+async fn the_headless_confirmation_takes_yes_and_nothing_else() {
+    for (typed, expected) in [
+        ("yes\n", ops::Outcome::Done),
+        ("yes", ops::Outcome::Done),
+        ("yes\r\n", ops::Outcome::Done),
+        ("  yes  \n", ops::Outcome::Done),
+        ("y\n", ops::Outcome::Cancelled),
+        ("YES\n", ops::Outcome::Cancelled),
+        ("no\n", ops::Outcome::Cancelled),
+        ("\n", ops::Outcome::Cancelled),
+        ("", ops::Outcome::Cancelled),
+        ("web\n", ops::Outcome::Cancelled),
+    ] {
+        let mut out = Vec::new();
+        let outcome = confirmation(ops::Confirm::Press, typed.as_bytes(), &mut out).await;
+        println!("{typed:?} -> {outcome:?}");
+        assert!(
+            outcome.as_ref() == Some(&expected),
+            "{typed:?} was not read as {expected:?}"
+        );
+    }
+}
+
+/// **The destructive half needs the object's own name and nothing else will do** (invariant 2,
+/// `screens/dialogs.md` § Delete — the ctrl-key-slip guard).
+///
+/// **`yes` does not confirm a delete**: a script that says yes to everything cannot delete
+/// anything. Which of the two a mutation wants is `ops::Mutation::confirm`'s now and not this
+/// driver's, so what these rows drive is the real requirement (NOTES § D225 ruling 2).
+///
+/// **An empty name confirms nothing, which is the last two rows** (`k8s-admin`, 2026-09-04).
+/// `typed.trim() == wanted` held for `("", "")`, so end of input against an object with no name
+/// was invariant 2's *typing the object name* satisfied by typing nothing. No argv reaches it —
+/// `k8s::object_name("")` is false — but `ops::Record::of`'s strip can empty a name that argv
+/// could not. **The guard moved into `ops::Checked::typed` with the mechanism**, which is the one
+/// function every dialog routes through rather than the one every dialog has to remember; these
+/// rows drive it from the outside, and `ops_tests.rs` asserts it on the method.
+#[tokio::test]
+async fn a_typed_name_confirmation_takes_the_name_and_not_yes() {
+    for (typed, name, expected) in [
+        ("web-7d9f4\n", "web-7d9f4", ops::Outcome::Done),
+        ("web-7d9f4", "web-7d9f4", ops::Outcome::Done),
+        ("yes\n", "web-7d9f4", ops::Outcome::Cancelled),
+        ("web\n", "web-7d9f4", ops::Outcome::Cancelled),
+        ("web-7d9f5\n", "web-7d9f4", ops::Outcome::Cancelled),
+        ("", "web-7d9f4", ops::Outcome::Cancelled),
+        ("", "", ops::Outcome::Cancelled),
+        ("\n", "", ops::Outcome::Cancelled),
+        ("  \n", "", ops::Outcome::Cancelled),
+    ] {
+        let mut out = Vec::new();
+        let outcome = confirmation(ops::Confirm::Type(name), typed.as_bytes(), &mut out).await;
+        println!("PROBE {outcome:?} <- typed {typed:?} name {name:?}");
+        assert!(
+            outcome.as_ref() == Some(&expected),
+            "{typed:?} against the name {name:?} was not read as {expected:?}"
+        );
+    }
+}
+
+/// **The verdict reaches the reader before the answer is read**, which is `screens/dialogs.md`
+/// rule 3 — the check's verdict is shown *before* the button is live — and it is why `ops::Checked`
+/// exists at all.
+///
+/// **The prompt says how to confirm**, off `ops::Checked::asks` and no longer off a table in this
+/// file, because a script author who cannot guess the word cannot write the script.
+///
+/// **The verdict is the uncheckable one here**, because [`confirmation`] drives a
+/// `checkable: false` mutation — which is `delete`'s own shape (NOTES § D225 ruling 1) and is the
+/// sentence `screens/dialogs.md` § Delete puts in every box on that page.
+#[tokio::test]
+async fn the_confirmation_prints_the_verdict_and_says_what_to_type_before_it_reads_anything() {
+    for (confirm, expected) in [
+        (ops::Confirm::Press, "type yes and press enter"),
+        (
+            ops::Confirm::Type("web"),
+            "type the object's own name and press enter",
+        ),
+    ] {
+        let mut out = Vec::new();
+        confirmation(confirm, b"yes\n", &mut out).await;
+        let printed = String::from_utf8(out).expect("the prompt is text");
+        println!("{printed}");
+        assert!(
+            printed.starts_with("k8rs did not check this one with the cluster first\n"),
+            "the verdict did not reach the reader before the prompt: {printed:?}"
+        );
+        assert!(printed.contains(expected), "{printed:?}");
+        assert!(
+            printed.contains("anything else stops it"),
+            "the prompt did not say what not answering does: {printed:?}"
+        );
+        // **The prompt ends its own line** (`k8s-admin`, 2026-09-04). Under `echo yes | k8rs ops
+        // …` — NOTES § D218's documented and only scripted form — stdin echoes nothing, so a
+        // prompt that leaves the cursor on its line glues [`ending`]'s closing sentence to the
+        // back of it: *…anything else stops it: k8rs: the change was made*, measured. That
+        // sentence is the only place `recorded: false` is ever reported (NOTES § D220 ruling 1
+        // keeps it out of the exit code), so a script grepping stderr for `k8rs: ` was the one
+        // reader that could not find it.
+        assert!(
+            printed.ends_with("anything else stops it:\n"),
+            "whatever is printed next lands on the prompt's own line: {printed:?}"
+        );
+    }
+}
+
+/// **Every failure is `Cancelled`, because nobody confirmed anything** — a prompt that could not
+/// be printed, and input that is not text.
+///
+/// **The safe direction is the only one invariant 2 leaves**: a confirmation that defaults to yes
+/// when the terminal is gone is the implicit write the invariant exists to prevent.
+#[tokio::test]
+async fn a_confirmation_that_could_not_be_asked_or_read_is_a_no() {
+    // The prompt could not be printed: the reader never saw what they would be agreeing to, and
+    // the answer waiting on the pipe is not an answer to a question that was asked.
+    assert_eq!(
+        confirmation(ops::Confirm::Press, b"yes\n", &mut Closed).await,
+        Some(ops::Outcome::Cancelled),
+        "a confirmation nobody could read was taken as a yes"
+    );
+    // Input that is not text — `read_line` refuses it rather than answering with a shorter line.
+    let mut out = Vec::new();
+    assert_eq!(
+        confirmation(
+            ops::Confirm::Press,
+            &[b'y', b'e', b's', 0xff, b'\n'],
+            &mut out
+        )
+        .await,
+        Some(ops::Outcome::Cancelled),
+        "input that is not text was read as a yes"
+    );
+}
+
+/// **The kind table answers for the spellings an operator's hands type**, and for nothing else.
+#[test]
+fn a_kind_is_known_by_its_own_word_by_kubectls_short_one_or_by_its_plural() {
+    for kind in &KINDS {
+        for spelling in [
+            kind.singular.to_string(),
+            kind.short.to_string(),
+            format!("{}s", kind.singular),
+            kind.singular.to_uppercase(),
+        ] {
+            let found = known_kind(&spelling)
+                .unwrap_or_else(|| panic!("{spelling} names no kind this driver knows"));
+            assert_eq!(
+                found.singular, kind.singular,
+                "{spelling} resolved to the wrong kind"
+            );
+            assert_eq!(found.namespaced, kind.namespaced);
+        }
+    }
+    for word in ["", "widget", "deployment.apps", "pods/web", "n", "podss"] {
+        assert!(
+            known_kind(word).is_none(),
+            "{word} was accepted as a kind this driver works on"
+        );
+    }
+    // **The one kind in the table that belongs to the whole cluster**, which is what makes both
+    // namespace refusals reachable.
+    assert!(
+        KINDS.iter().any(|kind| !kind.namespaced),
+        "no kind in the table is cluster-scoped, so one of the two namespace rules is unreachable"
+    );
+}
+
+/// **A word with a leading `-` is a flag unless it is a number**, so a count typed with a sign is
+/// answered as a count.
+#[test]
+fn a_signed_number_is_not_read_as_a_flag() {
+    for word in ["-3", "-0", "-", "-999999999999999999999999"] {
+        assert!(!flag_word(word), "{word} was read as a flag");
+    }
+    for word in ["-n", "-nginx", "--context", "--read-only", "-o", "-3a"] {
+        assert!(flag_word(word), "{word} was not read as a flag");
+    }
+    for word in ["3", "web", "deploy/web", ""] {
+        assert!(!flag_word(word), "{word} was read as a flag");
+    }
+}
+
+/// **A line k8rs is going to refuse never asks for an audit log** (todo.md 3696).
+///
+/// `k8rs ops bogus` must not leave a state directory behind: nothing was going to be changed, so
+/// nothing needs recording, and a mistyped word is not a reason to write into somebody's `$HOME`.
+/// The `FnOnce` is what makes this assertable — the count is of *asks*, not of files.
+///
+/// **The rows are one per refusal [`ops_run`] can reach**, in its own order, so a check that
+/// moves above the parse would be caught here rather than by a directory appearing.
+#[test]
+fn a_line_k8rs_refuses_never_asks_for_an_audit_log() {
+    for line in [
+        vec!["ops"],
+        vec!["ops", "--wat", "scale", "deploy/web", "3"],
+        vec!["ops", "scale", "deploy/web", "3", "-n", "a", "-n", "b"],
+        vec!["ops", "bogus", "deploy/web"],
+        vec!["ops", "scale"],
+        vec!["ops", "scale", "web", "3"],
+        vec!["ops", "scale", "widget/web", "3"],
+        vec!["ops", "scale", "deploy/web"],
+        vec!["ops", "scale", "deploy/web", "three"],
+        vec!["ops", "scale", "deploy/web", "3", "4"],
+        vec!["ops", "scale", "deploy/web", "3"],
+        vec!["ops", "delete", "node/k8rs-worker2", "-n", "payments"],
+        // **`--read-only` is deliberately not a row here, and it was one for a round.** It reads
+        // as the row that matters most and it is a row that cannot fail: [`ops_line`] refuses the
+        // flag above [`ops_run`], and no single move makes it red — with the refusal deleted the
+        // flag is still refused as an unknown one by [`ops_words`], and `FnOnce` makes a second
+        // open a compile error rather than a failing test. The flag's own tests are above; this
+        // list is the lines that reach [`ops_run`] (my own second pass, 2026-09-04).
+    ] {
+        let asked = std::cell::Cell::new(0u32);
+        let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let sentence = ops_line(
+            &args,
+            || {
+                asked.set(asked.get() + 1);
+                nowhere()
+            },
+            unwired,
+            unanswered,
+        )
+        .expect("a line beginning with `ops` is the operations driver's")
+        .said;
+        println!("--- {line:?} ---\n{sentence}");
+        assert_eq!(
+            asked.get(),
+            0,
+            "{line:?} is refused and asked for an audit log anyway"
+        );
+    }
+}
+
+/// **A line with nothing wrong in it opens the log, once, before it reaches the seam**
+/// (NOTES § D21 — a mutation that cannot be recorded does not happen, so the trail is answered
+/// for before an operation is).
+#[test]
+fn a_well_formed_line_opens_the_audit_log_once_before_it_reaches_the_seam() {
+    for line in [
+        vec!["ops", "scale", "deploy/web", "3", "-n", "payments"],
+        vec!["ops", "restart", "sts/db", "-n", "payments"],
+        vec!["ops", "delete", "node/k8rs-worker2"],
+    ] {
+        let asked = std::cell::Cell::new(0u32);
+        let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let sentence = ops_line(
+            &args,
+            || {
+                asked.set(asked.get() + 1);
+                nowhere()
+            },
+            unwired,
+            unanswered,
+        )
+        .expect("a line beginning with `ops` is the operations driver's")
+        .said;
+        println!("--- {line:?} ---\n{sentence}");
+        assert_eq!(
+            asked.get(),
+            1,
+            "{line:?} did not open an audit log exactly once"
+        );
+        assert!(
+            sentence.ends_with("and this build reads the line and does nothing else"),
+            "{line:?} did not reach the seam: {sentence}"
+        );
+    }
+}
+
+/// **Something worth saying about the audit log is said, above the sentence about the run**
+/// (`ops::audit_log`'s notes — an ignored `$XDG_STATE_HOME`, a log other people can write to).
+///
+/// **Above and not instead of**, which is the opposite of the refusal below it: a note is a thing
+/// that is true *and* the run went on, so the sentence about what k8rs did has to still be there.
+/// A note that replaced it would read as though nothing happened, and one printed after it would
+/// be read as part of the outcome.
+///
+/// **Two notes and not one**, because both of `audit_log`'s can be true at once — a relative
+/// `$XDG_STATE_HOME` and a `0666` log under `$HOME` — and a driver that joined them onto one line
+/// would bury the second.
+#[test]
+fn something_worth_saying_about_the_audit_log_is_said_above_the_seams_own_sentence() {
+    let args: Vec<String> = ["ops", "scale", "deploy/web", "3", "-n", "payments"]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+    let sentence = ops_line(
+        &args,
+        || {
+            nowhere().map(|(log, _)| {
+                (
+                    log,
+                    vec![
+                        "k8rs is not keeping its audit log where $XDG_STATE_HOME points"
+                            .to_string(),
+                        "the audit log at /home/ops/.local/state/k8rs/audit.log can be written to \
+                         by other people on this machine"
+                            .to_string(),
+                    ],
+                )
+            })
+        },
+        unwired,
+        unanswered,
+    )
+    .expect("a line beginning with `ops` is the operations driver's")
+    .said;
+    println!("{sentence}");
+    assert_eq!(
+        sentence,
+        "k8rs: k8rs is not keeping its audit log where $XDG_STATE_HOME points\n\
+         k8rs: the audit log at /home/ops/.local/state/k8rs/audit.log can be written to by \
+         other people on this machine\n\
+         k8rs: k8rs read this as `scale` on deployment/web in payments, 3 copies — and this \
+         build reads the line and does nothing else",
+        "a note about the audit log was dropped, printed after the outcome, or printed instead \
+         of it"
+    );
+}
+
+/// **A machine that cannot hold the audit log refuses the operation and says why**
+/// ([NOTES § D21](../NOTES.md) — k8rs says so and continues read-only; it does not exit and it
+/// does not quietly drop the trail).
+///
+/// **The refusal replaces the seam's sentence rather than being printed beside it.** A run that
+/// says both *k8rs could not open its audit log* and *k8rs read this as scale on deployment/web*
+/// reads as though the second happened anyway, and the whole point of D21 is that it did not.
+///
+/// **The sentence is `ops::audit_log`'s own words**, prefixed the way every other refusal on this
+/// line is — the two records may not disagree about which one is speaking (invariant 4).
+#[test]
+fn a_machine_that_cannot_hold_the_audit_log_refuses_the_operation_and_says_why() {
+    let args: Vec<String> = ["ops", "scale", "deploy/web", "3", "-n", "payments"]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+    let sentence = ops_line(
+        &args,
+        || {
+            Err(
+                "k8rs could not open its audit log at /nope/audit.log: it is not there — every \
+                 change k8rs makes is written to that log before it is sent, so k8rs will not \
+                 change anything until that is fixed, and reading your cluster still works"
+                    .to_string(),
+            )
+        },
+        unwired,
+        unanswered,
+    )
+    .expect("a line beginning with `ops` is the operations driver's")
+    .said;
+    println!("{sentence}");
+    assert_eq!(
+        sentence,
+        "k8rs: k8rs could not open its audit log at /nope/audit.log: it is not there — every \
+         change k8rs makes is written to that log before it is sent, so k8rs will not change \
+         anything until that is fixed, and reading your cluster still works",
+        "a run that cannot record what it is about to do did not say so, or said it beside the \
+         seam's own sentence as though the operation had gone ahead"
+    );
+}
+
+// --- WHAT AN OPERATION ENDS AS ---
+//
+// **The driver's half of `scale`** (todo.md 3749): the exit code, the cluster the record names,
+// the sentence a connection that never happened gets, and the three lines the headless surface
+// prints instead of `screens/dialogs.md`'s box.
+//
+// **Everything here is a function over values except [`scale_connected`]**, which reads the
+// reader's own kubeconfig and dials it. That one is glue and is deliberately eight lines: what it
+// calls above and below is tested here, and what it does itself is proven by running the binary.
+
+/// **Exit `0` iff the cluster changed, and `2` for every other ending** (NOTES § D220 ruling 1).
+///
+/// **The hazard is `echo no | k8rs ops delete … && kubectl get pod`.** Every ops line exited `2`
+/// before this box, which read a cancellation as a failure and — the moment an arm was wired —
+/// would have read a success as one too.
+#[test]
+fn only_a_cluster_that_changed_exits_zero() {
+    let changed = ending(&ops::Performed {
+        outcome: Some(ops::Outcome::Done),
+        recorded: true,
+    });
+    println!("{} · exit {}", changed.said, changed.code);
+    assert_eq!(changed.code, 0, "a change that happened did not exit 0");
+    assert_eq!(changed.said, "k8rs: the change was made");
+    for outcome in [
+        Some(ops::Outcome::Cancelled),
+        Some(ops::Outcome::Gone),
+        Some(ops::Outcome::Changed),
+        Some(ops::Outcome::NotSent {
+            fault: k8s::Fault::Refused,
+            said: None,
+        }),
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Refused,
+            said: None,
+        }),
+        // NOTES § D21's fourth ending: the attempt could not be recorded, so nothing was sent.
+        None,
+    ] {
+        let ended = ending(&ops::Performed {
+            outcome,
+            recorded: true,
+        });
+        println!("{} · exit {}", ended.said, ended.code);
+        assert_eq!(
+            ended.code, 2,
+            "an ending that changed nothing exited 0: {:?}",
+            ended.said
+        );
+        assert!(
+            ended.said.starts_with("k8rs: "),
+            "an ops sentence lost its prefix: {:?}",
+            ended.said
+        );
+    }
+}
+
+/// **A change k8rs could not write down still exits `0`, and says so out loud**
+/// (NOTES § D220 ruling 1, § D214's fourth lie).
+///
+/// **Nothing read `ops::Performed::recorded` until this box** — `#[must_use]` is on the struct and
+/// not on the field — so *the change was made and k8rs could not write it to the audit log*
+/// reached nobody. It is a sentence on stderr and never an exit code: the code answers *did it
+/// happen*, and a `2` here makes a script re-run a mutation that already landed.
+#[test]
+fn a_change_the_log_missed_exits_zero_and_says_the_trail_is_short() {
+    let ended = ending(&ops::Performed {
+        outcome: Some(ops::Outcome::Done),
+        recorded: false,
+    });
+    println!("{} · exit {}", ended.said, ended.code);
+    assert_eq!(ended.code, 0, "a change that happened did not exit 0");
+    assert!(
+        ended.said.contains("the change was made")
+            && ended.said.contains("could not write that to the audit log"),
+        "the operator was not told the trail is incomplete: {:?}",
+        ended.said
+    );
+}
+
+/// **A paused deployment is said out loud above the prompt, and nothing else is**
+/// (NOTES § D224, invariant 4, invariant 14).
+///
+/// **The three things it has to say** are that this deployment is paused, that nothing moves until
+/// somebody resumes it, and that the `kubectl rollout restart` line k8rs printed one line above
+/// will refuse until then — measured: it exits `1` with *can't restart paused deployment (run
+/// rollout resume first)* while k8rs printed *the change was made* and exited `0`.
+///
+/// **`Some(false)` and `None` say nothing at all.** `None` is a check that was never run;
+/// `Some(false)` is every kind that has no pause, which is a StatefulSet, a DaemonSet, and the
+/// Deployment nobody paused. A line printed for those would be a warning about a state the object
+/// is not in, on the surface invariant 2 exists to keep readable.
+///
+/// **No jargon, and no second copy of the kubectl line k8rs already printed** — the object and the
+/// namespace are on screen twice by the time this lands, and a second spelling of a command in
+/// this file is the copy that drifts from the one `ops.rs` builds.
+#[test]
+fn a_paused_deployment_is_named_above_the_prompt_and_nothing_else_is() {
+    let paused = while_paused("deployment", Some(&true)).expect("a paused deployment says so");
+    println!("{paused}");
+    for owed in [
+        "This deployment is paused",
+        "nothing will be replaced until somebody resumes it",
+        "kubectl rollout resume",
+        "the command above will refuse to run until then",
+    ] {
+        assert!(paused.contains(owed), "{owed:?} is not in {paused:?}");
+    }
+    // **Plain language is the rule and not a preference** (invariant 14): the words a beginner has
+    // not met are the ones this sentence exists to avoid.
+    for jargon in [
+        "spec",
+        "annotation",
+        "patch",
+        "replica",
+        "rollout restart",
+        "pod",
+    ] {
+        assert!(
+            !paused.to_lowercase().contains(jargon),
+            "the paused line uses {jargon:?}: {paused:?}"
+        );
+    }
+    // **The kind is the one the driver resolved**, so nothing here hard-codes the only kind that
+    // can currently be paused.
+    assert!(
+        while_paused("statefulset", Some(&true))
+            .expect("the caller decides which kinds can answer true")
+            .starts_with("This statefulset is paused"),
+        "the sentence hard-codes a kind it was handed"
+    );
+    // **Nothing is said where nothing is wrong.**
+    for checked in [Some(&false), None] {
+        assert_eq!(
+            while_paused("deployment", checked),
+            None,
+            "a deployment nobody paused was warned about anyway: {checked:?}"
+        );
+    }
+}
+
+/// One kubeconfig with one context and one cluster, as text kube parses.
+fn one_context(server: Option<&str>) -> kube::config::Kubeconfig {
+    let cluster = server.map_or(String::new(), |server| format!("\n    server: {server}"));
+    serde_yaml_ng::from_str(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: kind-k8rs\n\
+         contexts:\n\
+         - name: kind-k8rs\n  \
+           context:\n    \
+             cluster: k8rs\n    \
+             user: k8rs\n\
+         clusters:\n\
+         - name: k8rs\n  \
+           cluster:{cluster}\n\
+         users:\n\
+         - name: k8rs\n  \
+           user: {{}}\n"
+    ))
+    .expect("a kubeconfig this test wrote itself")
+}
+
+/// **Which cluster the audit line names comes off the kubeconfig, not off a field on a frozen
+/// `k8s::Session`** (NOTES § D220 ruling 5).
+///
+/// **The three `k8s::Address` states become two answers here**, because a log line has one job:
+/// an address it can state, or the gap `ops::Record::attempt_line` already spells. Telling
+/// *undefined* from *unreadable* apart is a screen's work, on a row somebody is looking at.
+///
+/// **The userinfo strip is on this path for free** (NOTES § D173), which is the whole reason the
+/// server comes from here rather than being remembered a second time on the way into a file that
+/// is kept.
+#[test]
+fn the_server_the_record_names_is_the_one_the_current_context_points_at() {
+    // **A reserved host and not the `127.0.0.1` a real kind writes**, because
+    // `scripts/security-guard.py` reads a loopback URL in this tree as a second outbound path and
+    // is right to; the port is what carries the point, and `ops_tests.rs`'s own fixture already
+    // pays this price for the same reason.
+    assert_eq!(
+        current_server(&one_context(Some("https://k8rs-tests.invalid:41751"))),
+        "https://k8rs-tests.invalid:41751"
+    );
+    // **A password in the URL never reaches the log** — `k8s::Address` dropped it before this
+    // function saw it, and a second spelling of that strip is what would go stale.
+    //
+    // **Built rather than written**, the way `k8s_tests.rs` builds its own: a URL with userinfo
+    // in it does not match `scripts/security-guard.py`'s reserved-host rule, because the guard
+    // reads the whole authority — so the credential half is a separate literal.
+    let with_password = format!("https://{}@{}", "root:hunter2", "prod.invalid:6443");
+    assert_eq!(
+        current_server(&one_context(Some(&with_password))),
+        "https://prod.invalid:6443",
+        "a kubeconfig password reached the audit log"
+    );
+    // An entry that names no cluster, and one whose address k8rs will not state: both are the gap.
+    assert_eq!(current_server(&one_context(None)), "");
+    assert_eq!(current_server(&one_context(Some("https://[oops"))), "");
+    // No current context at all — nothing to name, and nothing to invent.
+    let empty: kube::config::Kubeconfig =
+        serde_yaml_ng::from_str("apiVersion: v1\nkind: Config\n").expect("an empty kubeconfig");
+    assert_eq!(current_server(&empty), "");
+}
+
+/// **A run that never reached a cluster says nothing was changed, and then says why**
+/// ([`because`], `PRIOR-ART § C1`).
+///
+/// **The lead clause is what [`live`]'s sibling has no need for.** A watch that cannot connect has
+/// changed nothing by definition; an operation is a line somebody typed in order to change
+/// something, and the first thing they need is that it did not happen.
+#[test]
+fn a_scale_that_never_connected_says_nothing_was_changed_and_names_the_reason() {
+    let said = no_cluster(&k8s::NotConnected::Client {
+        failure: kube::Error::Service(Box::new(
+            kube::client::AuthError::UnrefreshableTokenResponse,
+        )),
+        renewal: Some("aws-iam-authenticator".to_string()),
+    });
+    println!("{said}");
+    assert!(
+        said.starts_with("k8rs: nothing was changed — "),
+        "an operation that never connected did not say so first: {said:?}"
+    );
+    assert!(
+        said.contains("aws-iam-authenticator"),
+        "the login program the kubeconfig names was dropped: {said:?}"
+    );
+}
+
+/// **All three operations are wired, and each gets what its own line carried** — todo.md
+/// § Phase 7's `scale`, `restart` and `delete` boxes.
+///
+/// **A verb added to [`OPERATIONS`] without an arm answers `None`** rather than falling into
+/// somebody else's, which is what stops a fourth operation being performed as a scale — the row
+/// below the loop is the one that still exercises it, since none of the three is unwired now.
+///
+/// **This is [`ops_performed`]'s whole decision**, held apart from it because everything past the
+/// decision dials a cluster: the function itself is one call, and what can be wrong about it is
+/// the rows below.
+#[test]
+fn every_operation_in_the_table_gets_its_own_arm_and_a_verb_with_none_gets_nothing() {
+    for operation in &OPERATIONS {
+        let chosen = wired(operation, Some(3));
+        println!("{} → {chosen:?}", operation.verb);
+        assert_eq!(
+            chosen,
+            match operation.verb {
+                SCALE => Some(Wired::Scale(3)),
+                RESTART => Some(Wired::Restart),
+                DELETE => Some(Wired::Delete),
+                _ => None,
+            },
+            "{} is wired to the wrong arm of the seam",
+            operation.verb
+        );
+    }
+    // **A verb this build cannot perform reaches [`not_wired`] and never somebody else's arm** —
+    // the safety net the loop above can no longer exercise, now that every row of [`OPERATIONS`]
+    // is wired. A fourth operation added to the table without an arm here is the case.
+    let unknown = Operation {
+        verb: "evict",
+        value: None,
+        confirm: TYPE_THE_NAME,
+    };
+    assert_eq!(
+        wired(&unknown, Some(3)),
+        None,
+        "an operation with no arm was performed as one that has one"
+    );
+    // **The derived list says what it found**: a table that stopped holding these three verbs
+    // would satisfy every row above by matching none of them.
+    assert_eq!(
+        OPERATIONS
+            .iter()
+            .map(|operation| operation.verb)
+            .collect::<Vec<_>>(),
+        vec![SCALE, RESTART, DELETE],
+        "the operations table is no longer the three this phase wires"
+    );
+    // **The count comes back and is not invented**, which is what stops a scale-to-three being
+    // performed as a scale to anything else.
+    let scale = operation_named(SCALE).expect("scale is in the table");
+    assert_eq!(wired(scale, Some(0)), Some(Wired::Scale(0)));
+    // `ops_value` refuses this above the seam, so it cannot arrive from a command line — and if
+    // it ever did, it is `not_wired`'s sentence and never a guessed count.
+    assert_eq!(wired(scale, None), None);
+    // **A delete takes no value either**, so a count on the line changes nothing about it — the
+    // driver refuses the extra word above this.
+    let delete = operation_named(DELETE).expect("delete is in the table");
+    assert_eq!(wired(delete, None), Some(Wired::Delete));
+    assert_eq!(wired(delete, Some(3)), Some(Wired::Delete));
+    // **A restart takes no value, so a count on the line changes nothing about it** — the driver
+    // refuses the extra word above this, and the seam does not carry one either way.
+    let restart = operation_named(RESTART).expect("restart is in the table");
+    assert_eq!(wired(restart, None), Some(Wired::Restart));
+    assert_eq!(wired(restart, Some(3)), Some(Wired::Restart));
+}
+
+/// **A kind an operation does not work on is refused before the audit log is opened**
+/// (NOTES § D220 ruling 7) — the same rule `k8rs ops bogus` already had, reached through the one
+/// door that was not a spelling mistake.
+///
+/// **What it asserts is that the opener was never called**, and it used to be named for the state
+/// directory that opener would have created (`k8s-admin`, 2026-09-04). The two are the same fact
+/// today only because `audit_log` is the only thing that makes the directory; the name now says
+/// what the assertion can see, and the filesystem half lives in
+/// `a_machine_that_cannot_hold_the_audit_log_refuses_the_operation_and_says_why`.
+///
+/// **And it is the one refusal in this driver that prints no synopsis** (NOTES § D236 ruling 4).
+/// Every row below names a real operation and a real object and is told *k8rs does not do that to
+/// that kind* — a reader who already has the shape right, so eight lines of it under a complete
+/// answer bury the answer (invariant 14). What they get instead is one line saying where the
+/// usage is. The form side is
+/// `every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage`, which asserts the opposite of
+/// both halves.
+#[test]
+fn a_kind_an_operation_does_not_work_on_is_refused_before_the_audit_log_is_opened() {
+    // **The two matrices are genuinely different and the rows say so** (NOTES § Operations): a
+    // replicaset scales and does not restart, a daemonset restarts and does not scale. A driver
+    // holding one copy of *which kinds* would have to be wrong about one of them.
+    for (line, owed) in [
+        (
+            vec!["ops", "scale", "pod/web", "3", "-n", "payments"],
+            "cannot scale a pod",
+        ),
+        (
+            vec!["ops", "scale", "ds/fluentd", "3", "-n", "payments"],
+            "cannot scale a daemonset",
+        ),
+        (
+            vec!["ops", "scale", "node/worker-1", "3"],
+            "cannot scale a node",
+        ),
+        (
+            vec!["ops", "restart", "rs/web-abc", "-n", "payments"],
+            // **And it says what to restart instead** (NOTES § D224) — a replicaset is the one
+            // refused kind whose copies an operator would actually want replaced.
+            "restarting that deployment is what replaces its copies",
+        ),
+        (
+            vec!["ops", "restart", "node/worker-1"],
+            "cannot restart a node",
+        ),
+        (
+            vec!["ops", "restart", "pod/web", "-n", "payments"],
+            "if this pod belongs to one, restart that instead",
+        ),
+    ] {
+        let asked = std::cell::Cell::new(0u32);
+        let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let ended = ops_line(
+            &args,
+            || {
+                asked.set(asked.get() + 1);
+                nowhere()
+            },
+            unwired,
+            unanswered,
+        )
+        .expect("a line beginning with `ops` is the operations driver's");
+        println!("--- {line:?} ---\n{}", ended.said);
+        assert_eq!(
+            asked.get(),
+            0,
+            "{line:?} is refused and asked for an audit log anyway"
+        );
+        assert_eq!(ended.code, 2, "{line:?} did not exit 2");
+        assert!(
+            ended.said.contains(owed),
+            "{line:?} was refused for something other than its kind: {:?}",
+            ended.said
+        );
+        // **The refusal names what the verb *can* be pointed at** (invariant 14), and the two
+        // lists are not the same one.
+        let names = if line[1] == "scale" {
+            "a deployment, a statefulset and a replicaset"
+        } else {
+            "a deployment, a statefulset and a daemonset"
+        };
+        assert!(
+            ended.said.contains(names),
+            "{line:?} did not say what its verb works on: {:?}",
+            ended.said
+        );
+        // **The answer is not buried** (NOTES § D236 ruling 4). Two claims, because dropping the
+        // synopsis and pointing at it are two separate mistakes to make: no line of the eight is
+        // printed, and the one line that replaces them is.
+        assert!(
+            !ended.said.contains("usage: k8rs ops "),
+            "{line:?} knew the shape and was handed the synopsis anyway: {:?}",
+            ended.said
+        );
+        assert_eq!(
+            ended.said.lines().count(),
+            2,
+            "{line:?} is a sentence and a pointer, and it is neither: {:?}",
+            ended.said
+        );
+        // **The sentence is spelled out and not read back off [`see_usage`]** (`cargo mutants`,
+        // this turn): `ends_with(&see_usage())` moves with the thing it is checking, and a
+        // `see_usage` replaced by `"xyzzy"` survived it.
+        assert!(
+            ended
+                .said
+                .ends_with("Run `k8rs ops` on its own to see everything it can do."),
+            "{line:?} dropped the synopsis without saying where it is: {:?}",
+            ended.said
+        );
+    }
+    // **`delete` refuses no kind at all** (NOTES § D225 ruling 3): there is no `ops::deletable`,
+    // so every kind the driver can name reaches the seam. It is the opposite claim from the rows
+    // above, and a `deletable()` added later to refuse one of them turns this red.
+    for kind in &KINDS {
+        let object = format!("{}/web", kind.singular);
+        let mut line = vec!["ops", DELETE, object.as_str()];
+        if kind.namespaced {
+            line.extend(["-n", "payments"]);
+        }
+        let ended = ops_ended(&line);
+        println!("{}", ended.said);
+        assert!(
+            ended.said.contains("read this as `delete`"),
+            "{} was refused by a matrix `delete` does not have: {:?}",
+            kind.singular,
+            ended.said
+        );
+    }
+    // **The kinds each one does work on still reach the seam**, so a refusal that widened by one
+    // word is a red build rather than a quieter driver.
+    for (verb, kind) in [
+        ("scale", "deploy"),
+        ("scale", "sts"),
+        ("scale", "rs"),
+        ("restart", "deploy"),
+        ("restart", "sts"),
+        ("restart", "ds"),
+    ] {
+        let object = format!("{kind}/web");
+        // `restart` takes no value, and a word after the object is its own refusal.
+        let mut line = vec!["ops", verb, &object];
+        if verb == SCALE {
+            line.push("3");
+        }
+        line.extend(["-n", "payments"]);
+        let ended = ops_ended(&line);
+        println!("{}", ended.said);
+        assert!(
+            ended.said.contains(&format!("read this as `{verb}`")),
+            "{verb} {kind} was refused by its own matrix: {:?}",
+            ended.said
+        );
+    }
+}
+
+/// **A well-formed line carries an exit code out of the seam and never falls through**
+/// (NOTES § D220 ruling 2).
+///
+/// **The seam's own answer is what decides it**, which is what the double proves: `ops_line`
+/// hands back whatever the operation ended as rather than a constant, so a `scale` that succeeds
+/// cannot come back as *this was not an ops line* and start a watch on a cluster it just changed.
+#[test]
+fn the_seams_own_ending_is_what_an_ops_line_comes_back_with() {
+    let args: Vec<String> = ["ops", "scale", "deploy/web", "3", "-n", "payments"]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+    let landed = ops_line(
+        &args,
+        nowhere,
+        |_| Ended {
+            said: "k8rs: the change was made".to_string(),
+            code: 0,
+        },
+        unanswered,
+    )
+    .expect("a line beginning with `ops` is the operations driver's");
+    println!("{} · exit {}", landed.said, landed.code);
+    assert_eq!(landed.code, 0, "a seam that changed the cluster exited 2");
+    assert_eq!(landed.said, "k8rs: the change was made");
+    // **A note about the audit log is worth saying and is not worth a `2`** — it goes above the
+    // seam's sentence and leaves the code alone.
+    let noted = ops_line(
+        &args,
+        || nowhere().map(|(log, _)| (log, vec!["the audit log is 0666".to_string()])),
+        |_| Ended {
+            said: "k8rs: the change was made".to_string(),
+            code: 0,
+        },
+        unanswered,
+    )
+    .expect("a line beginning with `ops` is the operations driver's");
+    println!("{} · exit {}", noted.said, noted.code);
+    assert_eq!(
+        noted.code, 0,
+        "an audit-log note turned a change into a failure"
+    );
+    assert_eq!(
+        noted.said,
+        "k8rs: the audit log is 0666\nk8rs: the change was made"
+    );
+}
+
+/// **Every other ops line exits `2`**, whatever it was refused for — the whole of [`Ended`]'s
+/// second half, over one row per refusal the driver can reach.
+#[test]
+fn every_refusal_of_an_ops_line_exits_two() {
+    for line in [
+        vec!["ops"],
+        vec!["ops", "--wat", "scale", "deploy/web", "3"],
+        vec!["ops", "bogus", "deploy/web"],
+        vec!["ops", "scale", "web", "3"],
+        vec!["ops", "scale", "deploy/web", "three", "-n", "payments"],
+        vec!["ops", "scale", "deploy/web", "3"],
+        vec!["ops", "scale", "pod/web", "3", "-n", "payments"],
+        vec![
+            "--read-only",
+            "ops",
+            "scale",
+            "deploy/web",
+            "3",
+            "-n",
+            "payments",
+        ],
+        vec!["--once", "ops", "scale", "deploy/web", "3"],
+        // A kind the verb does not serve, which is the operation's own refusal and not the
+        // driver's (NOTES § D220 ruling 7) — `restart` is wired now, so `deploy/web` is a
+        // well-formed line and no longer belongs on this list.
+        vec!["ops", "restart", "pod/web", "-n", "payments"],
+        vec!["ops", "restart", "deploy/web"],
+        // The seam's own refusal: `delete` is not written yet.
+        vec!["ops", "delete", "pod/web", "-n", "payments"],
+    ] {
+        let ended = ops_ended(&line);
+        println!("--- {line:?} ---\n{}", ended.said);
+        assert_eq!(ended.code, 2, "{line:?} did not exit 2");
+    }
+}
+
+/// **The usage stops saying this build cannot reach a cluster without qualifying it**
+/// (todo.md 3749). It was true until the first operation landed, and it is the sentence a reader
+/// checks before deciding whether it is safe to experiment against production.
+#[test]
+fn the_usage_says_ops_reaches_a_cluster_too() {
+    let Err(problem) = run(&[]) else {
+        panic!("no arguments is not a report")
+    };
+    println!("{problem}");
+    let synopsis = problem.lines().next().expect("the usage has a first line");
+    // **`ops <operation>` and not `k8rs ops <operation>`**: `--read-only` sits between them since
+    // 2026-09-05 (NOTES § D234), and what this row is about is the subcommand being offered at
+    // all, not what may precede it.
+    assert!(
+        synopsis.contains("ops <operation>"),
+        "the synopsis offers no way to reach the one subcommand this build has: {synopsis:?}"
+    );
+    // **That the synopsis offers `--read-only` at all is pinned in `tests/binary.rs`, not here**
+    // (NOTES § D234, `tester`, 2026-09-05). This assertion was here for one round and its failure
+    // set is a strict *subset* of that one's: it calls [`run`] directly and never sees the
+    // process, so a `main` that stops printing what `run` returns leaves it green — measured, the
+    // planted `main` passed here and failed there. Two of the three ways the flag can go
+    // undiscoverable are invisible from inside the crate, and the e2e test already spawns the
+    // binary, so the pin costs one `contains` on an invocation that is paid for either way.
+    let last = problem.lines().last().expect("the usage has a last line");
+    assert!(
+        last.contains("--yaml or ops this build reads files only"),
+        "the line that says what cannot reach a cluster still leaves `ops` out of it: {last:?}"
+    );
+    // **Offered *and* explained.** A bracketed flag on a mutating form reads as *and then it
+    // scales*; what it does is refuse, and the prose is where that fits without a fourth line
+    // (`tests/binary.rs` counts three).
+    assert!(
+        last.contains("refuses every operation"),
+        "the synopsis offers a flag it never says the effect of: {last:?}"
+    );
+}
+
+/// **A scratch directory that takes itself away again — in `Drop`, so a panicking assertion still
+/// cleans up** (NOTES § D185; `ops_tests.rs`'s `Dir` is the same shape one file over, and cannot
+/// be shared with it without the `lib.rs` D50 refuses).
+///
+/// **The process id separates two `cargo test` runs and the thread id separates two callers
+/// inside one**, which is the rule [`emptied_list`] already keeps in this file.
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    fn named(what: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "k8rs-{what}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&path).expect("a scratch directory this test owns");
+        Scratch(path)
+    }
+
+    /// A file under it, opened the way `ops::audit_log` opens the real one.
+    fn file(&self, name: &str) -> std::fs::File {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.0.join(name))
+            .expect("a scratch file this test owns")
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A stub API server for one operation: it logs `METHOD target body` and answers every request
+/// with `answer`. The address is built from whatever `:0` gave us, so there is no loopback URL
+/// written down anywhere.
+async fn ops_stub(
+    answer: impl Fn(&str) -> (String, String) + Send + Sync + 'static,
+) -> (kube::Client, Requests) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let asked: Requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = std::sync::Arc::clone(&asked);
+    let answer = std::sync::Arc::new(answer);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let log = std::sync::Arc::clone(&log);
+            let answer = std::sync::Arc::clone(&answer);
+            tokio::spawn(async move {
+                let mut pending: Vec<u8> = Vec::new();
+                loop {
+                    let mut chunk = [0_u8; 4096];
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => pending.extend_from_slice(&chunk[..read]),
+                    }
+                    // A PATCH has a body, so a request does not end at the blank line: the header
+                    // says how much more there is.
+                    while let Some(end) =
+                        pending.windows(4).position(|window| window == b"\r\n\r\n")
+                    {
+                        let head = String::from_utf8_lossy(&pending[..end]).to_string();
+                        let length: usize = head
+                            .lines()
+                            .find_map(|line| {
+                                line.split_once(':')
+                                    .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                                    .and_then(|(_, value)| value.trim().parse().ok())
+                            })
+                            .unwrap_or(0);
+                        if pending.len() < end + 4 + length {
+                            break;
+                        }
+                        let body = String::from_utf8_lossy(&pending[end + 4..end + 4 + length])
+                            .to_string();
+                        pending.drain(..end + 4 + length);
+                        let mut words = head.split_whitespace();
+                        let asked = format!(
+                            "{} {} {body}",
+                            words.next().unwrap_or_default(),
+                            words.next().unwrap_or_default()
+                        )
+                        .trim_end()
+                        .to_string();
+                        let (status, reply) = answer(&asked);
+                        log.lock().expect("the log is never poisoned").push(asked);
+                        let sent = format!(
+                            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n\
+                             content-length: {}\r\n\r\n{reply}",
+                            reply.len()
+                        );
+                        if socket.write_all(sent.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    let client = kube::Client::try_from(kube::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing");
+    (client, asked)
+}
+
+/// The `Scale` a cluster hands back for `deployment/web` in `payments`.
+fn scale_answer(replicas: i32) -> String {
+    format!(
+        r#"{{"kind":"Scale","apiVersion":"autoscaling/v1","metadata":{{"name":"web",
+           "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+           "resourceVersion":"41751"}},"spec":{{"replicas":{replicas}}},
+           "status":{{"replicas":{replicas}}}}}"#
+    )
+}
+
+/// **One `k8rs ops scale`, from a client to an exit code** — [`scaled`] over a real socket, a
+/// scripted confirmation and a real audit file.
+///
+/// **The three printed lines are `screens/dialogs.md` § *Printed instead of drawn*'s** — object
+/// and namespace, the consequence, the `$` line, in that order, with the dialog's box removed and
+/// nothing reworded for the terminal.
+///
+/// **The scale is to zero on purpose**, which is the relation that file prints in full: it is the
+/// one that stops the app, and it gets no stricter a guard than any other scale.
+#[tokio::test]
+async fn a_headless_scale_prints_the_dialog_as_three_lines_and_exits_zero() {
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), scale_answer(3))).await;
+    let log = Scratch::named("headless-scale");
+    let path = log.0.join("audit.log");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(SCALE).expect("scale is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: Some(0),
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = scaled(
+        &reached,
+        &mut ready,
+        0,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "yes\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    let printed = String::from_utf8(out).expect("everything k8rs writes is a string");
+    println!("{printed}\n--- exit {} ---\n{}", ended.code, ended.said);
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(
+        lines[..3],
+        [
+            "deployment/web in payments",
+            "This stops all 3 copies of your app — nothing will be left running. Right now: 3 \
+             copies. After: 0 copies.",
+            "$ kubectl scale deployment/web --replicas=0 -n payments",
+        ],
+        "the headless dialog is not the three lines screens/dialogs.md prints"
+    );
+    assert!(
+        printed.contains("the cluster checked it first and accepted it")
+            && printed.contains("type yes and press enter to go ahead"),
+        "the verdict and the prompt did not reach the operator: {printed:?}"
+    );
+    // **`ended.said` is printed after this, and it has a line to land on.** Piped input echoes
+    // nothing, so everything on stderr is what [`show`] and [`ask`] wrote — and until 2026-09-04
+    // the last of it left the cursor mid-line and the closing sentence arrived glued to the prompt
+    // (`k8s-admin`).
+    assert!(
+        printed.ends_with("anything else stops it:\n"),
+        "the closing sentence lands on the back of the prompt: {printed:?}"
+    );
+    assert_eq!(ended.code, 0, "a scale that landed did not exit 0");
+    assert_eq!(ended.said, "k8rs: the change was made");
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    assert_eq!(
+        requests.len(),
+        3,
+        "a confirmed scale is a read, a check and a change: {requests:?}"
+    );
+    let written = std::fs::read_to_string(&path).expect("the audit log this run opened");
+    println!("{written}");
+    assert_eq!(
+        written.lines().count(),
+        2,
+        "one mutation is one attempt line and one result line: {written:?}"
+    );
+    assert!(
+        written.contains("attempt · deployment/web · context kind-k8rs")
+            && written.contains("· the change was made"),
+        "the audit log does not hold what happened: {written:?}"
+    );
+}
+
+/// **Anything but the word `yes` stops it, and the exit code says so** — invariant 2 through the
+/// driver, with no flag anywhere that means yes.
+#[tokio::test]
+async fn a_headless_scale_nobody_confirmed_changes_nothing_and_exits_two() {
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), scale_answer(2))).await;
+    let log = Scratch::named("cancelled-scale");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(SCALE).expect("scale is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: Some(3),
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = scaled(
+        &reached,
+        &mut ready,
+        3,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "no\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    println!(
+        "{}\n--- exit {} ---\n{}",
+        String::from_utf8_lossy(&out),
+        ended.code,
+        ended.said
+    );
+    assert_eq!(ended.code, 2, "a scale nobody confirmed exited 0");
+    assert_eq!(
+        ended.said,
+        "k8rs: nobody confirmed it, so nothing was changed"
+    );
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        2,
+        "a cancelled scale sent the change anyway"
+    );
+}
+
+/// **A cluster that will not answer the read is a refusal with an exit `2`, and the operator is
+/// told which of their two problems it is** — the RBAC or the network (`PRIOR-ART § C1`).
+#[tokio::test]
+async fn a_headless_scale_the_cluster_refused_says_which_refusal_it_was_and_exits_two() {
+    let (client, _) = ops_stub(|_| {
+        (
+            "403 Forbidden".to_string(),
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","code":403,
+               "reason":"Forbidden","message":"deployments.apps \"web\" is forbidden"}"#
+                .to_string(),
+        )
+    })
+    .await;
+    let log = Scratch::named("refused-scale");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(SCALE).expect("scale is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: Some(3),
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "",
+    };
+    let mut out = Vec::new();
+
+    let ended = scaled(
+        &reached,
+        &mut ready,
+        3,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "yes\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    println!("--- exit {} ---\n{}", ended.code, ended.said);
+    assert_eq!(ended.code, 2);
+    assert!(
+        ended
+            .said
+            .starts_with("k8rs: k8rs could not read how many copies of deployment/web"),
+        "{:?}",
+        ended.said
+    );
+    assert!(
+        ended.said.contains("the cluster would not allow it"),
+        "a 403 was not told apart from a dead socket: {:?}",
+        ended.said
+    );
+    assert!(
+        out.is_empty(),
+        "a scale that never had a consequence to state printed one anyway: {:?}",
+        String::from_utf8_lossy(&out)
+    );
+}
+
+/// **What a cluster hands back from a patched Deployment** — enough of one for `DynamicObject` to
+/// deserialise, and nothing the driver reads.
+fn restart_answer() -> String {
+    r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web",
+       "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+       "resourceVersion":"41752"},"spec":{},"status":{}}"#
+        .to_string()
+}
+
+/// **One `k8rs ops restart`, from a client to an exit code** — [`restarted`] over a real socket, a
+/// scripted confirmation and a real audit file (todo.md 3777).
+///
+/// **The three printed lines are `screens/dialogs.md` § *Printed instead of drawn*'s** — object
+/// and namespace, the consequence, the `$` line, in that order, with the dialog's box removed and
+/// nothing reworded for the terminal.
+///
+/// **The `$` line carries no dry-run flag**, because `kubectl rollout restart` has none
+/// (NOTES § D223 ruling 4) — so the verdict above it says k8rs checked this, and the line under it
+/// never claims the operator's own command could.
+///
+/// **Two requests and no third**, which is the driver's half of *nothing is read before the patch*
+/// (NOTES § D223 ruling 3): a scale opens with a `GET` and this does not.
+#[tokio::test]
+async fn a_headless_restart_prints_the_dialog_as_three_lines_and_exits_zero() {
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), restart_answer())).await;
+    let log = Scratch::named("headless-restart");
+    let path = log.0.join("audit.log");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(RESTART).expect("restart is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: None,
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = restarted(
+        &reached,
+        &mut ready,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "yes\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    let printed = String::from_utf8(out).expect("everything k8rs writes is a string");
+    println!("{printed}\n--- exit {} ---\n{}", ended.code, ended.said);
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(
+        lines[..3],
+        [
+            "deployment/web in payments",
+            "This asks Kubernetes to replace every copy of your app with a new one. How many \
+             stop at the same time is a setting on this deployment — it can be a few, or all of \
+             them at once. A paused deployment will not start until you resume it.",
+            "$ kubectl rollout restart deployment/web -n payments",
+        ],
+        "the headless dialog is not the three lines screens/dialogs.md prints"
+    );
+    // **A deployment nobody paused is not warned about one** (NOTES § D224) — the line below is
+    // the check's answer and not a hedge printed every time.
+    assert!(
+        !printed.contains("is paused, so nothing will be replaced"),
+        "a deployment the cluster said nothing about was called paused: {printed:?}"
+    );
+    assert!(
+        !printed.contains("dry-run"),
+        "the taught line offers a flag `kubectl rollout restart` does not have: {printed:?}"
+    );
+    assert!(
+        printed.contains("the cluster checked it first and accepted it")
+            && printed.contains("type yes and press enter to go ahead"),
+        "the verdict and the prompt did not reach the operator: {printed:?}"
+    );
+    assert_eq!(ended.code, 0, "a restart that landed did not exit 0");
+    assert_eq!(ended.said, "k8rs: the change was made");
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests.len(),
+        2,
+        "a confirmed restart is a check and a change, and reads nothing first: {requests:?}"
+    );
+    assert!(
+        requests.iter().all(
+            |request| request.contains("kubectl.kubernetes.io/restartedAt")
+                && !request.contains("kube.kubernetes.io/restartedAt")
+        ),
+        "the patch carries kube's own annotation key rather than kubectl's: {requests:?}"
+    );
+    let written = std::fs::read_to_string(&path).expect("the audit log this run opened");
+    println!("{written}");
+    assert_eq!(
+        written.lines().count(),
+        2,
+        "one mutation is one attempt line and one result line: {written:?}"
+    );
+    assert!(
+        written.contains(
+            "kubectl: kubectl rollout restart deployment/web -n payments · call: PATCH \
+             /apis/apps/v1/namespaces/payments/deployments/web · resourceVersion not sent"
+        ) && written.contains("· no uid was read ·")
+            && written.contains("· the change was made"),
+        "the audit log does not hold the call that was made: {written:?}"
+    );
+}
+
+/// **The same Deployment after `kubectl rollout pause`** — [`restart_answer`] with the one field
+/// the check's answer is read for (NOTES § D224).
+fn paused_answer() -> String {
+    r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web",
+       "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+       "resourceVersion":"41752"},"spec":{"paused":true},"status":{}}"#
+        .to_string()
+}
+
+/// **A paused deployment is said out loud above the prompt, and the operator still decides**
+/// (NOTES § D224) — [`while_paused`] wired, over a real socket, which is the half a test of the
+/// sentence alone cannot see.
+///
+/// **The blocker this closes made three records lie at once.** On a real cluster the apiserver
+/// accepts this patch, so the consequence promised every copy replaced, the dry-run passed, k8rs
+/// printed *the change was made* and exited `0`, and the three pods still had the same names
+/// twelve seconds later — while the `kubectl rollout restart` line k8rs had just taught exits `1`.
+///
+/// **It is a line and not a refusal.** Both requests still go out, the prompt is still asked and
+/// the exit code is still `0`: the annotation is written on resume, and what was wrong was the
+/// record and not the write.
+#[tokio::test]
+async fn a_headless_restart_of_a_paused_deployment_says_so_above_the_prompt_and_still_asks() {
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), paused_answer())).await;
+    let log = Scratch::named("paused-restart");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(RESTART).expect("restart is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: None,
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = restarted(
+        &reached,
+        &mut ready,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "yes\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    let printed = String::from_utf8(out).expect("everything k8rs writes is a string");
+    println!("{printed}\n--- exit {} ---\n{}", ended.code, ended.said);
+    let lines: Vec<&str> = printed.lines().collect();
+    // **Above the prompt, and under the command it is about** — a reader meets the `$` line and
+    // then the reason it will not work.
+    assert_eq!(
+        lines[3],
+        "This deployment is paused, so nothing will be replaced until somebody resumes it with \
+         kubectl rollout resume — and the command above will refuse to run until then.",
+        "the paused line is not the one under the taught command: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "$ kubectl rollout restart deployment/web -n payments",
+        "the paused line moved above the command it is about: {lines:?}"
+    );
+    assert!(
+        lines[4..]
+            .iter()
+            .any(|line| line.contains("type yes and press enter")),
+        "the prompt did not follow the warning: {lines:?}"
+    );
+    // **The operator still decides and the exit code does not move.**
+    assert_eq!(
+        ended.code, 0,
+        "a paused deployment turned a restart into an exit 2"
+    );
+    assert_eq!(ended.said, "k8rs: the change was made");
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        2,
+        "reading the check's answer changed how many requests a restart makes"
+    );
+}
+
+/// **Anything but the word `yes` stops it, and the exit code says so** — invariant 2 through the
+/// driver, over the second operation as well as the first.
+#[tokio::test]
+async fn a_headless_restart_nobody_confirmed_changes_nothing_and_exits_two() {
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), restart_answer())).await;
+    let log = Scratch::named("cancelled-restart");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(RESTART).expect("restart is in the table"),
+        kind: known_kind("ds").expect("ds is a kind the driver knows"),
+        name: "fluentd",
+        count: None,
+        namespace: Some("logging"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = restarted(
+        &reached,
+        &mut ready,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "no\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    let printed = String::from_utf8(out).expect("everything k8rs writes is a string");
+    println!("{printed}\n--- exit {} ---\n{}", ended.code, ended.said);
+    // **A daemonset's consequence is not a deployment's**, and the driver hands the kind over
+    // rather than deciding this itself (NOTES § D220 ruling 4).
+    assert!(
+        printed.contains(
+            "This asks Kubernetes to replace the copy of your app on each node it runs on."
+        ),
+        "a daemonset was described as a deployment: {printed:?}"
+    );
+    assert_eq!(ended.code, 2, "a restart nobody confirmed exited 0");
+    assert_eq!(
+        ended.said,
+        "k8rs: nobody confirmed it, so nothing was changed"
+    );
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        1,
+        "a cancelled restart sent the change anyway"
+    );
+}
+
+// --- WHAT A QUESTION READS AS ---
+//
+// **`ops may-i` is the one `ops` line that changes nothing** (NOTES § D23, § D229), so what it
+// owes is a different list from the three above it: no confirmation, no audit line, no state
+// directory, and an exit code that tells a yes from a no from *k8rs could not find out*.
+//
+// **Everything here is a function over values except [`may_i_connected`]**, which is the same
+// eight lines of glue [`ops_connected`] is and is proven by running the binary.
+//
+// **The whole of what the operator review sent back was in this half of the box**
+// (NOTES § D230): the matcher one file down was measured correct and every defect was in how
+// this driver reads a typed string. So the rows below are the review's own measurements turned
+// into assertions — what `/` means, what a missing group means, what a `no` exits with, and
+// which review a single question goes to.
+
+/// **`/` is the object's own name and the subresource is a flag** — `kubectl auth can-i`'s
+/// meaning of both (NOTES § D230 ruling 1).
+///
+/// **The first two rows are the measurement that reversed this.** Under a rule with
+/// `resourceNames: [only-this-pod]`, `kubectl auth can-i delete pods/only-this-pod` is **yes** and
+/// k8rs answered **no**, because the `/` was read as a subresource — one string, two questions,
+/// two answers, in two tools this file's own comment claimed shared a spelling
+/// (`reports/2026-09-05-may-i-against-a-real-cluster.md` § 3c).
+///
+/// **Each row changes one part**, so a parse that dropped the group, read the `/` as a
+/// subresource again, or took the `.` before the `/` says which.
+#[test]
+fn a_may_i_line_reads_the_slash_as_the_object_name_and_the_subresource_as_a_flag() {
+    for (line, expected) in [
+        (
+            vec!["may-i", "delete", "pods."],
+            ("delete", "", "pods", None, None),
+        ),
+        (
+            vec!["may-i", "delete", "pods./only-this-pod"],
+            ("delete", "", "pods", None, Some("only-this-pod")),
+        ),
+        (
+            vec!["may-i", "patch", "deployments.apps"],
+            ("patch", "apps", "deployments", None, None),
+        ),
+        (
+            vec!["may-i", "patch", "deployments.apps", "--subresource=scale"],
+            ("patch", "apps", "deployments", Some("scale"), None),
+        ),
+        (
+            vec![
+                "may-i",
+                "patch",
+                "deployments.apps/web",
+                "--subresource",
+                "scale",
+            ],
+            ("patch", "apps", "deployments", Some("scale"), Some("web")),
+        ),
+        // The group can carry dots of its own, so the split is on the **first** one.
+        (
+            vec!["may-i", "create", "pods.something.invented"],
+            ("create", "something.invented", "pods", None, None),
+        ),
+    ] {
+        let rest: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let words = ops_words(&rest).unwrap_or_else(|refusal| panic!("{refusal}"));
+        let question = may_i_question(&words, &rest).unwrap_or_else(|refusal| panic!("{refusal}"));
+        println!("{line:?} → {}", may_i_asked(&question));
+        assert_eq!(
+            (
+                question.verb.as_str(),
+                question.group.as_str(),
+                question.resource.as_str(),
+                question.subresource.as_deref(),
+                question.name.as_deref(),
+            ),
+            expected,
+            "{line:?} was read as a different question"
+        );
+    }
+}
+
+/// **A resource with no API group on it is refused and never answered `no`**
+/// (NOTES § D230 ruling 2).
+///
+/// **Measured wrong, not reasoned wrong.** `patch deployments` defaulted the group to `""`,
+/// matched nothing in the core group and printed *no* under a login that `kubectl auth can-i`
+/// said **yes** for — for `deployments`, `deployment`, `deploy`, `pod` and `po` alike
+/// (`reports/2026-09-05-may-i-against-a-real-cluster.md` § 3e). The cluster said no such thing.
+///
+/// **The trailing dot is the core group and the negative row is what makes this a test.** Without
+/// `pods.` passing, an implementation that refused every resource word would satisfy the refusals
+/// and answer nothing.
+#[test]
+fn a_resource_with_no_group_is_refused_and_the_core_group_is_a_trailing_dot() {
+    for word in ["deployments", "deployment", "deploy", "pods", "pod", "po"] {
+        let line = vec!["may-i".to_string(), "patch".to_string(), word.to_string()];
+        let words: Vec<&str> = line.iter().map(String::as_str).collect();
+        let refusal = may_i_question(&words, &line)
+            .err()
+            .unwrap_or_else(|| panic!("{word} was answered rather than refused"));
+        println!("{word}\n{refusal}");
+        assert!(
+            refusal.contains("needs the API group as well as the resource"),
+            "{word} was refused for the wrong reason: {refusal:?}"
+        );
+        // **It names the fix**, which is the half that makes a refusal usable at 3am.
+        assert!(
+            refusal.contains("deployments.apps") && refusal.contains("pods."),
+            "{word}'s refusal does not say how to write it: {refusal:?}"
+        );
+        // **And it is a refusal and not a verdict** — no `no` anywhere in it, which is the
+        // measured defect this row closes.
+        assert!(
+            !refusal.contains("is not allowed to do that"),
+            "{word} was still answered as a refusal by the cluster: {refusal:?}"
+        );
+    }
+    let line = vec![
+        "may-i".to_string(),
+        "patch".to_string(),
+        "pods.".to_string(),
+    ];
+    let words: Vec<&str> = line.iter().map(String::as_str).collect();
+    let core = may_i_question(&words, &line).expect("`pods.` names the core group");
+    assert_eq!((core.resource.as_str(), core.group.as_str()), ("pods", ""));
+}
+
+/// **The question is printed back before the answer is** — so an answer is never read against a
+/// question k8rs did not ask.
+///
+/// **The group, the name and the subresource appear only when the line carried them**, because a
+/// printed `deployments.` or `nodes/` is a question nobody asked — and the core group's own
+/// trailing dot is a spelling the line requires rather than something a reader means, so it is not
+/// echoed either.
+#[test]
+fn a_question_is_printed_back_in_the_words_it_was_asked_in() {
+    for (line, expected) in [
+        (
+            vec!["may-i", "delete", "nodes."],
+            "may this login delete nodes?",
+        ),
+        (
+            vec!["may-i", "delete", "pods./only-this-pod", "-n", "payments"],
+            "may this login delete pods/only-this-pod in payments?",
+        ),
+        (
+            vec![
+                "may-i",
+                "patch",
+                "deployments.apps",
+                "--subresource=scale",
+                "-n",
+                "payments",
+            ],
+            "may this login patch deployments.apps (subresource: scale) in payments?",
+        ),
+    ] {
+        let rest: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let words = ops_words(&rest).unwrap_or_else(|refusal| panic!("{refusal}"));
+        let question = may_i_question(&words, &rest).unwrap_or_else(|refusal| panic!("{refusal}"));
+        let asked = may_i_asked(&question);
+        println!("{asked}");
+        assert_eq!(asked, expected);
+    }
+}
+
+/// **A word out of argv is echoed as it printed and never as it was typed** (invariant 9,
+/// invariant 4) — [`shown`]'s rule, on the one line in this region that echoes five values.
+///
+/// A verb with a bidi override in it must not come back looking like a verb somebody typed.
+#[test]
+fn a_question_says_when_the_words_it_echoes_are_not_the_words_that_were_typed() {
+    let line = vec!["may-i", "de\u{202e}lete", "nodes."];
+    let rest: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+    let question = may_i_question(&line, &rest).expect("a verb is not checked against a name rule");
+    let asked = may_i_asked(&question);
+    println!("{asked}");
+    assert!(
+        !asked.contains('\u{202e}'),
+        "a control character reached the screen: {asked:?}"
+    );
+    assert!(
+        asked.contains("(with what cannot print removed)"),
+        "the echo is not the word that was judged and does not say so: {asked:?}"
+    );
+}
+
+/// **Every way a `may-i` line is refused**, each naming what is wrong with it.
+///
+/// **`-n` and `--subresource` are both checked here.** A namespace narrows the question and a
+/// subresource is a different question entirely (NOTES § D230 ruling 1), so a line whose value for
+/// either is missing is a question about nothing.
+#[test]
+fn a_may_i_line_that_is_not_a_question_is_refused_and_says_which_part() {
+    for (line, expected) in [
+        (vec!["may-i"], "needs a verb and a resource"),
+        (vec!["may-i", "delete"], "needs a verb and a resource"),
+        (
+            vec!["may-i", "delete", "nodes.", "extra"],
+            "does not know what to do with",
+        ),
+        (
+            vec!["may-i", "delete", ".apps"],
+            "empty verb, resource or object name",
+        ),
+        (
+            vec!["may-i", "delete", "pods./"],
+            "empty verb, resource or object name",
+        ),
+        (vec!["may-i", "", "pods."], "empty verb, resource or object"),
+        (vec!["may-i", "delete", "pods.", "-n", "NOPE"], "is not one"),
+        (
+            vec!["may-i", "delete", "pods.", "-n"],
+            "needs the name of a namespace",
+        ),
+        (
+            vec!["may-i", "delete", "pods.", "--subresource"],
+            "needs the name of a subresource",
+        ),
+        (
+            vec!["may-i", "delete", "pods.", "--subresource="],
+            "needs the name of a subresource",
+        ),
+    ] {
+        let rest: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let words = ops_words(&rest).unwrap_or_else(|refusal| panic!("{line:?}: {refusal}"));
+        let refusal = may_i_question(&words, &rest)
+            .err()
+            .unwrap_or_else(|| panic!("{line:?} was read as a question"));
+        println!("{line:?}\n{refusal}");
+        assert!(
+            refusal.contains(expected),
+            "{line:?} was refused for the wrong reason: {refusal:?}"
+        );
+        // Every refusal on an `ops` line carries the usage under it, and this one is no exception.
+        assert!(refusal.contains("ops may-i <verb>"));
+    }
+}
+
+/// **`0` yes · `1` no · `2` k8rs could not find out** (NOTES § D230 ruling 4) — `kubectl auth
+/// can-i`'s vocabulary, so a script reads the answer off the code instead of grepping an English
+/// sentence invariant 14 will keep rewriting.
+///
+/// **The `CouldNotTell` row is the one this box exists for** (D229 ruling 4). A refused probe
+/// exiting `1` would be a script reading *k8rs could not find out* as the cluster's no, which is
+/// why the sentence is asserted beside the code.
+#[test]
+fn a_question_exits_zero_for_yes_one_for_no_and_two_when_k8rs_could_not_find_out() {
+    let question = Question {
+        verb: "delete".to_string(),
+        group: String::new(),
+        resource: "nodes".to_string(),
+        subresource: None,
+        name: None,
+        namespace: None,
+    };
+    for (verdict, code) in [
+        (ops::Verdict::Yes, 0),
+        (ops::Verdict::No, 1),
+        (
+            ops::Verdict::CouldNotTell("the cluster said nothing".to_string()),
+            2,
+        ),
+    ] {
+        let ended = may_i_ended(&question, &verdict);
+        println!("--- exit {} ---\n{}", ended.code, ended.said);
+        assert_eq!(ended.code, code, "{verdict:?} exited the wrong way");
+        assert!(
+            ended
+                .said
+                .starts_with("k8rs: may this login delete nodes?\nk8rs: "),
+            "the answer is not printed under the question it answers: {:?}",
+            ended.said
+        );
+    }
+    // **Neither answer claims the cluster's authority** (NOTES § D230 ruling 6): `Permits::may`
+    // over-reports on `resourceNames` by design, and *"the cluster says"* over that was measured
+    // against a `kubectl auth can-i` saying the opposite.
+    for verdict in [ops::Verdict::Yes, ops::Verdict::No] {
+        let said = may_i_ended(&question, &verdict).said;
+        assert!(
+            !said.contains("the cluster says"),
+            "an answer claimed the cluster said something it may not have: {said:?}"
+        );
+    }
+    // **The sentence is the other half of the ruling**: a script reads the code, a person reads
+    // this, and neither may take a probe that could not run for the cluster saying no.
+    let unsure = may_i_ended(
+        &question,
+        &ops::Verdict::CouldNotTell("the cluster said nothing".to_string()),
+    );
+    assert!(
+        unsure.said.contains("That is not a no"),
+        "a refused probe does not say it is not a refusal: {:?}",
+        unsure.said
+    );
+    assert!(
+        may_i_ended(&question, &ops::Verdict::No)
+            .said
+            .contains("is not allowed to do that"),
+        "a cluster that said no was not reported as one"
+    );
+}
+
+/// **`k8rs ops may-i` opens no state directory and never reaches an operation** — the branch is
+/// taken above [`operation_named`], so nothing below it runs.
+///
+/// **The audit double asserts it was never called**, which is what says a probe writes no audit
+/// line (NOTES § D221: the log records mutations, and a question is not one).
+#[test]
+fn a_may_i_line_opens_no_audit_log_and_performs_no_operation() {
+    let line: Vec<String> = ["ops", "may-i", "delete", "nodes.", "extra"]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+    let opened = std::cell::Cell::new(false);
+    let performed = std::cell::Cell::new(false);
+    let ended = ops_line(
+        &line,
+        || {
+            opened.set(true);
+            Err("the log should never have been opened".to_string())
+        },
+        |_| {
+            performed.set(true);
+            Ended::refused("an operation should never have been reached".to_string())
+        },
+        unanswered,
+    )
+    .expect("a line with `ops` first is this function's");
+    println!("--- exit {} ---\n{}", ended.code, ended.said);
+    assert!(!opened.get(), "a question opened the audit log");
+    assert!(!performed.get(), "a question was performed as an operation");
+    assert!(
+        ended.said.contains("does not know what to do with"),
+        "the refusal is not the question's own: {:?}",
+        ended.said
+    );
+}
+
+/// **`--read-only` permits a question and still refuses every operation** (NOTES § D230
+/// ruling 3).
+///
+/// **Measured backwards before this ruling**: the reader most likely to ask what they are allowed
+/// to do was told *"--read-only was asked for, so k8rs will not change anything"*. Invariant 2's
+/// subject is the write path, and `ops::may_i` is the first thing in `ops.rs` that is not one —
+/// put there for NOTES § D23's mechanical reason, which is exactly the price D23 said it was
+/// paying.
+///
+/// **The three operations are the negative and they are not decoration**: a carve-out that let
+/// every `ops` line past would be the flag doing nothing at all.
+#[test]
+fn read_only_permits_a_question_and_still_refuses_every_operation() {
+    // The question reaches the seam, which is where a test with no cluster stops — so what is
+    // asserted is that the refusal is *gone*, not that an answer arrived.
+    //
+    // **Both positions of the flag**, because only one was measured and the other is where the
+    // first fix stopped working: `--read-only` before `ops` is the shape the review ran, and after
+    // it is the shape [`ops_words`] refuses as an unknown flag unless the carve-out takes it out
+    // of the slice first.
+    for asking in [
+        vec!["--read-only", "ops", "may-i", "delete", "nodes.", "extra"],
+        vec!["ops", "may-i", "delete", "nodes.", "extra", "--read-only"],
+    ] {
+        let asking: Vec<String> = asking.iter().map(|word| (*word).to_string()).collect();
+        let ended = ops_line(
+            &asking,
+            || panic!("a question opens no audit log"),
+            |_| panic!("a question performs nothing"),
+            unanswered,
+        )
+        .expect("a line with `ops` on it is this function's");
+        println!("--- {asking:?} → exit {} ---\n{}", ended.code, ended.said);
+        assert!(
+            !ended.said.contains("will not change anything"),
+            "a question that changes nothing was refused for not changing anything: {:?}",
+            ended.said
+        );
+        assert!(
+            ended.said.contains("does not know what to do with"),
+            "the question was not read as one: {:?}",
+            ended.said
+        );
+    }
+
+    for verb in [SCALE, RESTART, DELETE] {
+        let line: Vec<String> = [READ_ONLY, "ops", verb, "deploy/web", "3", "-n", "payments"]
+            .iter()
+            .map(|word| (*word).to_string())
+            .collect();
+        let ended = ops_line(
+            &line,
+            || panic!("a refused line opens no audit log"),
+            |_| panic!("a refused line performs nothing"),
+            unanswered,
+        )
+        .expect("a line with `ops` on it is this function's");
+        println!("--- {verb} → exit {} ---\n{}", ended.code, ended.said);
+        assert_eq!(ended.code, 2);
+        assert!(
+            ended.said.contains("--read-only was asked for"),
+            "{verb} was not refused under --read-only: {:?}",
+            ended.said
+        );
+    }
+}
+
+/// **`--subresource` belongs to the question and to nothing else** (NOTES § D230 ruling 1).
+///
+/// [`ops_words`] consumes the flag for every line, because it runs before the verb is known — so
+/// without this refusal a mutation carrying it would be performed with a flag silently dropped,
+/// which is the shape that function refuses for every other unknown flag.
+#[test]
+fn only_a_question_takes_the_subresource_flag() {
+    for verb in [SCALE, RESTART, DELETE] {
+        let line: Vec<String> = [
+            "ops",
+            verb,
+            "deploy/web",
+            "3",
+            "-n",
+            "payments",
+            "--subresource=scale",
+        ]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+        let ended = ops_line(
+            &line,
+            || panic!("a refused line opens no audit log"),
+            |_| panic!("a refused line performs nothing"),
+            unanswered,
+        )
+        .expect("a line with `ops` on it is this function's");
+        println!("--- {verb} → exit {} ---\n{}", ended.code, ended.said);
+        assert_eq!(ended.code, 2);
+        assert!(
+            ended.said.contains("does not take --subresource"),
+            "{verb} accepted a flag it does not read: {:?}",
+            ended.said
+        );
+    }
+    // **Named twice is refused for the namespace's own reason** — `value_of` is first-wins and
+    // `kubectl` is last-wins, so guessing asks a different question from the one that was typed.
+    //
+    // **Both spellings, because they are counted on two different lines** (my own second pass,
+    // found by `just mutants-diff`): a row with only the attached form left `replace += with *=`
+    // surviving on the separate-value branch, and a counter stuck at zero is a flag that can be
+    // named as often as you like.
+    for tail in [
+        vec!["--subresource=scale", "--subresource=status"],
+        vec!["--subresource", "scale", "--subresource", "status"],
+        vec!["--subresource=scale", "--subresource", "status"],
+    ] {
+        let mut line = vec!["ops", "may-i", "patch", "deployments.apps"];
+        line.extend(tail.iter().copied());
+        let line: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let ended = ops_line(
+            &line,
+            || panic!("a refused line opens no audit log"),
+            |_| panic!("a refused line performs nothing"),
+            unanswered,
+        )
+        .expect("a line with `ops` on it is this function's");
+        println!("{tail:?}\n{}", ended.said);
+        assert!(
+            ended.said.contains("names the subresource more than once"),
+            "{tail:?}: two subresources were guessed between: {:?}",
+            ended.said
+        );
+    }
+}
+
+/// **The usage says the question exists, in both places a reader can find it** — the top-level
+/// synopsis, which is the only place a reader learns a mode exists, and `k8rs ops`'s own rows.
+///
+/// **`may-i`'s shape is not the operations' shape**, and the synopsis showed only theirs
+/// (`k8s-admin`, 2026-09-05): a reader who followed `ops <operation> <kind>/<name>` for a question
+/// would write `may-i delete/nodes`.
+#[test]
+fn the_usage_offers_the_question_in_the_synopsis_and_in_the_ops_rows() {
+    println!("{USAGE}");
+    assert!(
+        USAGE.contains("k8rs ops may-i <verb> <resource>.<group>[/<name>]"),
+        "the top-level usage does not say a question exists"
+    );
+    let usage = ops_usage();
+    println!("{usage}");
+    assert!(
+        usage.contains("ops may-i <verb> <resource>.<group>[/<name>] [--subresource <name>]"),
+        "the ops usage does not say how to ask a question"
+    );
+    // **The two rules that are the question's alone**, in the prose under the rows rather than
+    // inside one 250-character row (NOTES § D230 rulings 1 and 2).
+    for said in [
+        "Spell the API group",
+        "pods.",
+        "the object's own name",
+        "it asks about the whole cluster",
+    ] {
+        assert!(
+            usage.contains(said),
+            "the usage does not say {said:?}: {usage}"
+        );
+    }
+    // **Every row is a row.** The one this box added was 250 characters beside five one-liners.
+    for line in usage.lines().filter(|line| line.starts_with("  ")) {
+        assert!(
+            line.chars().count() <= 100,
+            "a usage row is a paragraph: {line:?}"
+        );
+    }
 }
