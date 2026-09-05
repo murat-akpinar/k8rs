@@ -262,6 +262,9 @@ its line moving with it.
 - [D238](#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05) — the spike cannot import the product, and the TUI crate does not go in the shipped artifact to learn a loop
 - [D239](#d239--the-kubeconfig-parse-error-carries-a-snippet-of-the-kubeconfig-and-the-fault-enum-that-has-no-string-is-what-saved-the-product-2026-09-05) — the kubeconfig parse error carries a snippet of the kubeconfig, and the `Fault` enum that has no string is what saved the product
 - [D240](#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05) — what Phase 8 cost and what it bought: the three comments that taught the wrong lesson, and the five facts Phase 12 is built on
+- [D241](#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05) — the two rulings Phase 9 could not be briefed without: `theme.rs` names no ratatui type, and declaring a module is part of writing it
+- [D242](#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05) — the Phase 9 review round: a test that accepted one letter, an `include_str!` that only breaks in the downloader's hands, and a comment that measured false
+- [D243](#d243--the-phase-9-close-the-constant-is-the-carrier-and-not-the-sentence-the-pairing-that-would-have-been-written-twice-and-a-comment-three-files-had-already-copied-2026-09-06) — the Phase 9 close: the constant is the carrier and not the sentence, the pairing that would have been written twice, and a comment three files had already copied
 
 ## Why it exists — where the gap is
 
@@ -21004,3 +21007,267 @@ unify onto the same package `ratatui-crossterm` already resolves. **The risk is
 drift, not naming** — two independently-written version specifiers that later
 diverge — and two crossterms is drift's consequence rather than naming's. The
 ruling is unchanged; the sentence was doing more work than the evidence.
+
+### D241 — the two rulings Phase 9 could not be briefed without: `theme.rs` names no ratatui type, and declaring a module is part of writing it (2026-09-05)
+
+Phase 9 creates the first product file `dev-ui` owns. Two things blocked the
+brief, and neither is a `theme.rs` design question — both are about what the file
+is allowed to *touch*.
+
+**Ruling 1 — `theme.rs` names no `ratatui` type, and `ratatui` stays in
+`[dev-dependencies]` until Phase 11.** The obvious shape is for the palette to be
+`ratatui::style::Color` and `Style`, which would move the crate up to
+`[dependencies]` now. It is refused, and the reason that decides it is the
+**freeze**, not the dependency:
+
+- `todo.md` freezes `theme.rs` at Phase 9's close. If the palette speaks
+  `ratatui::style::Color`, that is fine forever; but the file also has to serve a
+  consumer that has no ratatui in it at all. `screens/once.md § The rule that
+  matters most here` is explicit that on the `--once` path there is **no ratatui
+  between the findings and the terminal**, and `§ Colour and symbols` promises
+  ANSI colour there on a tty with `NO_COLOR` unset. A palette that can only be
+  spoken as a ratatui type cannot serve the path that ships first, and the file
+  is frozen before that path is built.
+- So `theme.rs` is **data**: each of the ten roles from
+  [§ Design](#design) carries its Catppuccin RGB *and* the 16-colour ANSI
+  identity it degrades to, plus the one `COLORTERM` check that picks between
+  them. The knowledge that `peach` falls back to a particular one of sixteen is
+  palette knowledge and stays here; turning a role into
+  `Color::Rgb` or `Color::Indexed` is a mechanical mapping and lands in Phase
+  11's `ui.rs`, which is not frozen and does not exist yet. Both later consumers
+  read the same constants, which is what "single point of change" was asking for.
+- **This costs a conversion that the other shape would not need, and that is the
+  price of the freeze**, paid deliberately. It is a few lines in one unfrozen
+  file, against a frozen file that could not answer half its callers.
+- **`Cargo.toml` said *Phase 11 moves this line up, in the change that first draws
+  a real screen*, and that sentence survives** — this ruling is why, rather than
+  in spite of it. [D238](#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)
+  kept the TUI crate out of the shipped artifact to learn a loop; nothing here
+  puts it back. No reversal of invariant 10 is needed and none is taken.
+- **`screens/widgets.md § 9` routes *"Colours, styles, the 16-colour fallback"* to
+  `theme.rs`, and the word *styles* is now doing slightly more work than this
+  ruling leaves it.** It is not wrong today — `theme.rs` is still the only place
+  that decides what a colour *is* — and it is `tui-designer`'s file, so it is
+  recorded in [`backlog.md`](backlog.md) for Phase 11 rather than edited mid-phase.
+
+**Ruling 2 — adding `mod <name>;` for a file you own is part of creating that
+file, and it is the one edit its author may make to `main.rs` while `main.rs`
+belongs to someone else.** `main.rs` is `dev-core`'s until Phase 12
+([D34](#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)),
+and a module that is not declared is not compiled — so without this, creating
+`theme.rs` would need a second dispatch to a second agent for one line. The
+ruling is general on purpose: it applies again at Phase 10 for `views.rs` and
+Phase 11 for `ui.rs`, and stating it once is cheaper than three exceptions.
+**The bound is the whole of it — the declaration line and nothing else in that
+file.** Any other change to `main.rs` before Phase 12 is still `dev-core`'s.
+
+**What is deliberately left open for the author to measure and report.** The gate
+exports `RUSTFLAGS := "-D warnings"` job-wide and clippy runs `--all-targets`,
+while `theme.rs` has no *product* consumer until Phase 11 — a `#[cfg(test)]` use
+does not count for the non-test build. Whether that is a red build, and if so
+whether the answer is a file-level `#![allow(dead_code)]` carrying a comment that
+cites this entry and dies at Phase 11, is **measured by the author and reported**,
+not asserted here. The PM tried to measure it first and the sandbox refused the
+probe; guessing it into the brief would have been exactly the *reasoned from a
+definition instead of measured against the object* failure
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+names.
+
+### D242 — the Phase 9 review round: a test that accepted one letter, an `include_str!` that only breaks in the downloader's hands, and a comment that measured false (2026-09-05)
+
+`theme.rs` landed clean and passed `just check` on its first turn. The review round
+found six surviving plantings, one defect no gate in this repo can see, and one doc
+comment that was false in the direction that matters. All three are the same class:
+**a check that reads as a check and is satisfied by something that did not happen.**
+
+**1. `contains` accepts a truncation, and three of the eight carriers had nothing
+else holding them.** `every_mark_is_the_one_the_screen_file_promises` asserted
+`screen.contains(mark)`. A substring of the screen's own text passes, so
+`⚠ disconnected, retrying` could ship as `e`, `read-only` as `r`, `changing…` as
+`c` — six plantings, all green at 13 passed. The three *glyph* marks survived only
+by luck, pinned by unrelated assertions. The fix is the file's own existing
+pattern: `PALETTE` already carried a second transcription of the ten hexes for
+exactly this reason and `SIGNALS` carried none, so `SIGNALS` grew a third column
+holding the literal, compared with `assert_eq!`. **The direction is the whole
+point** — `contains` checks that the screen contains the code, which stays true as
+the code shrinks.
+
+**2. The published crate could not compile its own tests, and `cargo publish`
+cannot see it.** The tests `include_str!`d four files out of `screens/`, which
+`Cargo.toml`'s `exclude` drops from the package
+([D193](#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
+`cargo publish` verifies with a **build**, and a build never compiles a
+`#[cfg(test)]` module — so this ships green and fails in the downloader's hands,
+falsifying `Cargo.toml`'s own *"`tests/` stays in deliberately, so a consumer can
+run the suite"*. Measured on the unpacked real `.crate`: `cargo build` exit 0,
+`cargo test --no-run` exit 101 with four `couldn't read src/../screens/*.md`.
+Phase 5's open box is the crates.io release, so this was one turn from being a
+published defect. **`just check` has no `cargo package` step, so by *`just check` is
+the whole of CI, or it is a lie* this class is invisible to the gate** — boxed in
+Phase 10, not fixed here.
+
+**3. The screen-file link had to survive losing `include_str!`, and it moved to a
+place the package never sees.** `scripts/signal-guard.py` reads `src/theme.rs` and
+the four screen files off disk, where they always are. **The two halves are not
+redundant and the split is the point**: the *test* pins the constant against a
+hand-copy in its own file — code drift; the *guard* pins that mark to a screen file
+still drawing it — screen drift, which is
+[D190](#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)'s
+class and the one this repo keeps paying for. The guard matches a **whole token**,
+not a substring, which is what makes `read-only → r` fail: `r` occurs only inside
+`or`, `ran`, `run`. It names `FOCUS` as unchecked on every green run, because
+`Signal::Reverse` is a fill and no drawing in `screens/` fixes it — an
+unchecked item that announces itself rather than being skipped in silence.
+
+**The prose-sensitivity ceiling this entry first recorded was closed at the phase
+close, and it was wider than measured here.** The original text said a coordinated
+edit to both transcriptions leaves only the guard, and the guard passes if the
+screen file uses that word in *prose* — measured for `disconnected`
+(`screens/states.md` has a "While disconnected…" heading). `tui-designer` then found
+`read-only` has the same property (`states.md:711`, `:747`), and `tester`, told to
+close it or say it could not, **closed it**: `cells()` now reads **fenced blocks
+only**, reusing `screens-check.py`'s own `blocks()` rather than growing a second
+fence parser. Proved by deleting every mockup from a screen file and keeping the
+prose — `states.md`, `context.md` and `once.md` were all **green** under the
+shipped guard and are all red under the fixed one, and `once.md` had the hole
+nobody had named. `dialogs.md` was the healthy counter-case throughout: `changing…`
+occurs once, in a real drawing.
+
+**What is left, and it is a different shape.** The guard enforces *"the file it was
+pointed at draws this mark"*, which is not the same as *"this is the right file"* —
+`tester` measured it: pointing `SELECTION` back at `alerts.md` is green against the
+real tree, because `alerts.md` does draw `▸`, just in the sidebar. So the
+attributions are **rulings recorded in the script's comments with their evidence**,
+not facts a script can check. A fenced block that is not a mockup would also pin;
+no such block exists today.
+
+**4. A comment that said the gate would expire itself, measured false with a
+control.** `theme.rs`'s `#![cfg_attr(not(test), expect(dead_code, …))]` claimed it
+*"expires by itself — the moment Phase 11 reads every item this line goes red"*.
+With all eighteen items read from `fn main()` outside `#[cfg(test)]`, under
+`RUSTFLAGS=-D warnings` and `CARGO_INCREMENTAL=0`, `cargo check`, `clippy`,
+`clippy --all-targets` and `cargo test --bin k8rs` **all exit 0 with no unfulfilled
+expectation**. The control is the same attribute in the same position with only the
+lint swapped — `expect(unused_mut, …)` *is* reported unfulfilled and exits 101 — so
+the position, the `cfg_attr` wrapper and `-D warnings` all work, and `dead_code`
+specifically does not report an unfulfilled expectation in this crate. **The root
+cause was not chased and the comment now says so.** It matters beyond tidiness:
+that sentence was the only thing scheduled to tell Phase 11 the tests had stopped
+covering this file, and what actually does it is the pair of count assertions
+`theme_tests.rs` grew for finding 5.
+
+**5. The arrays were hand-maintained, and the hole opens exactly when the file
+freezes.** `PALETTE` (10) and `SIGNALS` (8) are hand-written, so a constant not
+added to them escapes every assertion. Today `dead_code` catches it *by accident*;
+with a Phase 11 reader present, both a `HEADER` carrying a **bright** fallback —
+the one thing the palette comment forbids — and a `STALE = Signal::Mark("")` — the
+"colour alone" box 2 exists to forbid — compile and ship clean. Closed by two
+count assertions over `include_str!("theme.rs")`, which is legal because `src/`
+ships; the technique is already in `k8s_tests.rs`.
+
+**6. `trim()` does not mean visible.** `no_meaning_is_left_to_colour_alone` used
+`!mark.trim().is_empty()`, and Rust's `trim` removes only `White_Space` — U+200B is
+not. `Signal::Mark("\u{200b}")` passed both the emptiness and the font check and
+was caught only by the *weak* `contains` test being replaced. Now checked against
+an explicit invisible set (U+00AD, 200B, 200C, 200D, 2060, FEFF).
+
+**What the author decided that no document had settled**, all now facts of the
+file: the ten 16-colour fallbacks are the **basic** eight and never the bright ones
+(bright is tuned for a dark background, and it is what Windows Terminal renders
+"intense" as — k9s#3598's mechanism); `BACKGROUND`, `PANEL` and `TEXT` degrade to
+the **terminal's own** colour rather than to any index, because
+[PRIOR-ART § D2](PRIOR-ART.md#d2--do-not-fight-the-users-terminal) forbids assuming
+the background is dark and none of the sixteen means *whatever the user picked* —
+which is why `Ink` has a third variant; `FOCUS` is reverse video and not a mark,
+because both panes already mark their own selected row; and `depth()` takes
+`Option<&str>` rather than reading the environment, for
+[invariant 5](CLAUDE.md)'s reason — a `set_var` is unsafe under parallel tests in
+edition 2024, so an environment read would have shipped as a surviving mutant.
+
+**One claim in a frozen file was softened rather than defended.** The comment said
+index 8 *"is the only grey below white that every scheme — light and dark — keeps
+readable"*, which is a survey nobody ran; `tester` believed Solarized Dark maps
+color8 to its own background but flagged it **from recall, with nothing on the
+machine to measure against**, and correctly did not assert it. The comment now
+makes the arithmetic claim it can stand behind — of the sixteen, 8 is the only
+index conventionally rendered as a grey, since 0 is black, 7 white and 15 bright
+white — and says plainly that readability is unverified in either scheme, naming
+the fix if it is ever measured failing (`BORDER`/`DIM` → `None`, never a bright
+index).
+
+### D243 — the Phase 9 close: the constant is the carrier and not the sentence, the pairing that would have been written twice, and a comment three files had already copied (2026-09-06)
+
+`theme.rs` freezes at Phase 9's close, so the close review is the last moment
+anything in it is cheap. `tui-designer` reviewed it as the domain owner —
+`k8s-admin` is not blocking for a file with no cluster surface — and four of its
+findings were taken **because "box it in Phase 10" and "unfreeze `theme.rs`" are
+the same sentence**, which CLAUDE.md answers with *stop and fix the plan*. The
+other three were boxed.
+
+**1. `DISCONNECTED` held a sentence, and the file calls itself the single point of
+change for every mark k8rs draws.** `Signal::Mark("⚠ disconnected, retrying")` is
+one member of a family `screens/once.md` names in its own words; measured over
+`screens/`, the family is `⚠ login expired`, `⚠ your clock is behind`/`ahead`,
+`⚠ Not connected to the cluster right now.`, `⚠ TLS not verified`, `⚠ not allowed`,
+`⚠ cluster undefined`, `⚠ duplicate name` and more. Freezing the carrier for **one**
+of them means `ui.rs` and the `--once` printer hardcode the rest. Replaced with
+`pub const ALARM: Signal = Signal::Mark("⚠")` — named for the mark, not for the
+first meaning that needed one. **This satisfies box 2 better than the sentence
+did**: the box asks the disconnected banner to *carry a symbol*, and `⚠` is the
+symbol; the sentence is content and belongs where content lives. The brief that
+ordered this said "five members" and `dev-ui` measured more — the ruling was more
+right than its own evidence, which is worth recording as the shape rather than the
+number.
+
+**2. The severity pairing had no home, and two renderers would each have written
+it.** `rules::Severity` has three variants matching the three colours and the three
+marks, and nothing mapped one to the other — so *critical ↔ red ↔ `●`* would be
+transcribed in `ui.rs` and again in `--once`, with no gate comparing them: the
+guard checks a mark against a screen, the tests check a constant against a hand
+copy, and **nothing checked that `●` is drawn in `CRITICAL` rather than `WARN`**.
+Two places reading one thing and disagreeing is this repo's most expensive defect
+class. Closed by `pub const fn band(Severity) -> (Colour, Signal)`. Reading
+`rules.rs` is the direction the pyramid allows — it sits *below* `theme.rs` — so
+this does not become a freeze violation later. **Two screen files already assumed
+it existed**: `screens/analysis.md` says *"`theme.rs` draws the glyph from
+`severity`"* and `screens/widgets.md` names a `Badge::severity`; neither had
+anything to point at. No `Badge` type was added — nothing asks for one.
+**cargo-mutants generates no mutant it can build for `band`** (a tuple of two
+non-`Default` types), so the tool is silent here and the proof is two hand-crossed
+pairings, run separately because crossing both at once leaves the colour assertion
+unable to fail.
+
+**3. A sentence that was false as drawn, and three files had copied it.**
+`theme.rs` justified `FOCUS = Reverse` with *"Both panes mark their own selected
+row, so focus cannot be a mark as well."* Measured over `screens/`: the only `▸` in
+`alerts.md` (2) and `analysis.md` (8) are the **sidebar** nav row, no finding card
+or report row in any mockup carries a marker, and the string `focus` appears **zero
+times in all eleven files**. It is true only of `resources.md` and the two pickers.
+The same sentence had been copied into `theme_tests.rs` and into
+`signal-guard.py`'s reason for leaving `FOCUS` unpinned — **the second copy is the
+one that goes stale, and here it went stale before the first was even committed.**
+The real reason is stated now: focus is a property of a *pane*, and a pane-level
+carrier cannot be a per-row mark — there is no row to hang it on when the pane is
+empty. `FOCUS` also carries a second meaning `screens/` already draws, the live
+confirm button, and the doc names it so Phase 11 does not rediscover it.
+
+**4. PRIOR-ART § D2's hazard reappears on the truecolor path, where the file's own
+care does not reach.** On `Ansi16`, `BACKGROUND` and `TEXT` both return
+`Ink::Default` and the user's scheme wins. On `TrueColor` they are `#1e1e2e` and
+near-white `#cdd6f4` — so a Phase 11 `ui.rs` that sets foregrounds and leaves the
+background alone, which is the minimal implementation *and* the one *"the
+terminal's own colour wins"* reads like, puts near-white text on a light terminal's
+white background. Emulators export `COLORTERM=truecolor` regardless of scheme.
+Recorded in the frozen comment block as an all-or-nothing pair, and **carried as
+reasoned off `depth()` and the two constants, not measured on a light terminal** —
+the same honesty the index-8 claim got in
+[D242](#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05).
+
+**What the PM's own second pass found, and did not fix.** `OK` (green) is the one
+palette role with no `Signal` beside it, and the one line that would draw it —
+`○ nothing is broken` — uses `○`, which is `INFO_SIGNAL` and pairs with blue. That
+is **not** a missing constant: adding an `OK_SIGNAL` holding the same glyph would
+be the second copy this entry's finding 3 is about, and `INFO_SIGNAL`'s doc already
+names both meanings it serves. What is genuinely open is which *colour* the healthy
+line takes, and `band` cannot answer it because the healthy line has no `Severity`
+at all. Boxed for Phase 11, where the renderer exists to make the choice.

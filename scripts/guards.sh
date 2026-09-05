@@ -66,6 +66,15 @@ python3 scripts/todo-guard.py --self-test
 python3 scripts/todo-guard.py
 python3 scripts/screens-check.py --self-test
 python3 scripts/screens-check.py
+# The screen-file half of `theme.rs`'s carriers: the mark the code ships is the
+# one the drawing promises, compared whole. `theme_tests.rs` pins each mark
+# against a hand-copy in its own file and may never read `screens/` —
+# `Cargo.toml`'s `exclude` drops that directory from the package (NOTES § D193),
+# and `cargo publish` verifies with a build, which never compiles a test module,
+# so an `include_str!` there ships green and fails in the downloader's hands.
+# Here the file is always on disk.
+python3 scripts/signal-guard.py --self-test
+python3 scripts/signal-guard.py
 # Green tests are not the same as tests that ran (NOTES § D26).
 python3 scripts/test-guard.py --self-test
 python3 scripts/test-guard.py
