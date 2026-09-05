@@ -1271,6 +1271,102 @@ fn a_failure_names_k8rs_and_the_file_that_stopped_it() {
     );
 }
 
+/// **A word of argv that is not text is refused, and the process does not panic** — the defect
+/// this replaced was `std::env::args()`'s own `unwrap`, which ended a run at exit `101` with a
+/// Rust backtrace on stderr and no sentence at all ([`crate::command_line`]).
+///
+/// **Every placement of the bad byte, at every position on the line** (NOTES § D29): the shell
+/// hands over whole words and k8rs does not get to choose where inside one the byte sits — a
+/// latin-1 filename has it in the middle, a `--` flag has it at the end, and a word can be
+/// nothing but bad bytes. The position it is named by is counted from the program name, so a
+/// word at argv index `i` after the skip is word `i + 2`.
+#[test]
+fn a_word_that_is_not_text_is_refused_by_the_position_it_was_typed_at() {
+    use std::os::unix::ffi::OsStringExt;
+
+    // `\xff` is never a byte of UTF-8 at all; `\xe9` is a lead byte with its continuations
+    // missing, which is what latin-1 `é` and a filename cut at a length limit both look like.
+    let bad: [&[u8]; 5] = [
+        b"\xff",
+        b"\xffhead",
+        b"tail\xff",
+        b"mid\xffdle",
+        b"caf\xe9.json",
+    ];
+    for bytes in bad {
+        for at in 0..3 {
+            let mut line: Vec<std::ffi::OsString> =
+                vec!["--once".into(), "--analysis".into(), "pods.json".into()];
+            line[at] = std::ffi::OsString::from_vec(bytes.to_vec());
+            let said = command_line(line.into_iter())
+                .expect_err(&format!("{bytes:?} at {at} was read as text"));
+
+            assert!(said.starts_with("k8rs: "), "{said}");
+            assert!(
+                said.contains(&format!("word {} of the command line", at + 2)),
+                "the wrong word was named for {bytes:?} at {at}: {said}"
+            );
+        }
+    }
+}
+
+/// **The bytes are the one thing the sentence may not carry**, which is [`crate::as_typed`]'s
+/// ruling one layer out (NOTES § D224): a word k8rs could not read is not offered back.
+///
+/// **`\u{FFFD}` is asserted by name because it is what the rejected design produces.**
+/// `to_string_lossy` refuses nothing at all — the run carries on over a path or a flag nobody
+/// typed — and if it were ever spelled back into a sentence, a test that only checked the
+/// sentence was printable would pass on it: `\u{FFFD}` is not a control character and
+/// [`crate::sanitize`] leaves it alone.
+///
+/// **The first bad word is the one named**, the same way [`crate::mistyped`] names the first
+/// flag it does not have: two of them is still one sentence.
+#[test]
+fn the_refusal_carries_no_part_of_the_word_and_names_the_first_bad_one() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let said = command_line(
+        [
+            std::ffi::OsString::from("--once"),
+            std::ffi::OsString::from_vec(b"first\xff".to_vec()),
+            std::ffi::OsString::from_vec(b"second\xfe".to_vec()),
+        ]
+        .into_iter(),
+    )
+    .expect_err("two words that are not text were read as text");
+
+    assert!(said.contains("word 3 of the command line"), "{said}");
+    assert!(!said.contains("word 4"), "both words were named: {said}");
+    assert!(
+        !said.contains("first") && !said.contains("second"),
+        "the word k8rs could not read was quoted back: {said}"
+    );
+    assert!(
+        !said.contains('\u{FFFD}'),
+        "the word was converted instead of refused: {said}"
+    );
+    // Nothing outside k8rs reaches this sentence, so the strip has nothing to take out of it
+    // (invariant 9, [`crate::sanitize`]).
+    assert_eq!(sanitize(&said), said, "{said}");
+}
+
+/// **The healthy half** (CLAUDE.md § Tests must not lie): a line that is text comes through word
+/// for word, in order, and nothing about it is refused.
+///
+/// **The shapes are the ones the shell really produces** (NOTES § D29): no arguments at all,
+/// an empty word — `k8rs ""` is a legal command line — a flag, a path, and a name that is
+/// multibyte UTF-8, which is text and must not be mistaken for the case above.
+#[test]
+fn a_command_line_that_is_text_comes_through_word_for_word() {
+    assert_eq!(command_line(std::iter::empty()), Ok(vec![]));
+
+    let words = ["--once", "", "-n", "ödeme", "pods.json", "--"];
+    assert_eq!(
+        command_line(words.iter().map(std::ffi::OsString::from)),
+        Ok(words.iter().map(|w| (*w).to_string()).collect::<Vec<_>>())
+    );
+}
+
 // --- WATCHING A CLUSTER ---
 //
 // **The cluster is the one thing not synthesised here, because there is none.** What these feed
@@ -7113,7 +7209,8 @@ fn session_over(client: kube::Client, namespace: Option<&str>) -> k8s::Session {
     }
 }
 
-/// The command line, as `main` sees it.
+/// The command line as the functions under [`crate::command_line`] see it — already text,
+/// because everything that was not is refused before any of them is reached.
 fn argv(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| (*word).to_string()).collect()
 }
@@ -8181,6 +8278,14 @@ async fn a_followed_stream_asks_why_it_ended_and_a_fetch_does_not() {
 /// something that looks correct (`tester`, 2026-08-30). The check runs on the raw value and has
 /// to; what may not happen is the sentence quietly naming a different string.
 ///
+/// **The clause was not enough on its own, and this test is where that shows**
+/// ([`as_typed`], 2026-09-05). *"and web (with what cannot print removed) is not one — a name is
+/// letters, digits, dashes and dots"* still names a word that satisfies every rule it goes on to
+/// state, so the refusal a reader gets no longer quotes it at all. What is left here is
+/// [`shown`]\'s own arms, plus the one live refusal that still carries the clause — a word that is
+/// *extra*, which [`as_typed`] deliberately does not reach because an extra word is extra whatever
+/// it is spelled like.
+///
 /// **Every arm is fed** (NOTES § D29): unchanged, stripped, cut, both, and nothing left.
 #[test]
 fn a_refused_value_is_echoed_as_what_was_judged_or_says_it_is_not() {
@@ -8218,17 +8323,39 @@ fn a_refused_value_is_echoed_as_what_was_judged_or_says_it_is_not() {
         );
     }
 
-    // And through the sentence a reader actually gets, so the clause reads as English.
-    let said = mistyped(&argv(&["--logs", "--object", "default/we\u{202e}b"]))
-        .expect("a bidi override is not in a name");
+    // And through a sentence a reader actually gets, so the clause reads as English. It is an
+    // extra word and not a refused name, because a refused name no longer echoes at all.
+    let said = ops(&[
+        "ops",
+        "scale",
+        "deploy/web",
+        "3",
+        "ex\u{202e}tra",
+        "-n",
+        "payments",
+    ]);
     println!("{}", said.lines().next().expect("a first line"));
     assert!(
-        said.contains("and web (with what cannot print removed) is not one"),
+        said.contains("do with extra (with what cannot print removed) — it reads"),
         "{said:?}"
     );
     assert!(
         !said.contains('\u{202e}'),
         "the override reached the terminal: {said:?}"
+    );
+
+    // **And the sentence the clause was written for no longer needs it**, which is the half a
+    // reader of this test would otherwise have to take on trust ([`as_typed`]).
+    let name = mistyped(&argv(&["--logs", "--object", "default/we\u{202e}b"]))
+        .expect("a bidi override is not in a name");
+    println!("{}", name.lines().next().expect("a first line"));
+    assert!(
+        !name.contains("web (with what cannot print removed)"),
+        "a name a cluster would accept was offered back by the sentence refusing it: {name:?}"
+    );
+    assert!(
+        name.contains("the name you typed") && name.contains("does not print"),
+        "the reader is not told which word could not be read, or why: {name:?}"
     );
 }
 
@@ -10260,10 +10387,21 @@ fn ops_alone_prints_a_usage_that_names_every_operation_and_how_each_is_confirmed
 /// box names, each derived from what the rule is rather than from what the code printed.
 ///
 /// **Every one of them carries the subcommand's usage**, because a refusal that does not say what
-/// to type instead has told the reader half of what they came for (invariant 14). The two
-/// exceptions are checked in their own tests below: `--read-only`, where offering the usage would
-/// be inviting a retry of the thing that was refused, and the well-formed line, which is not a
-/// refusal at all.
+/// to type instead has told the reader half of what they came for (invariant 14) — and every one
+/// of them is wrong in its *form*, which is what makes the shape the answer (NOTES § D236
+/// ruling 4). Each of these readers wrote an operation, an object, a value or a flag that is not
+/// a shape `k8rs ops` has.
+///
+/// **The three exceptions are checked in their own tests**: `--read-only`, where offering the
+/// usage would be inviting a retry of the thing that was refused; the well-formed line, which is
+/// not a refusal at all; and the refusal about *meaning* — a real operation pointed at a real
+/// object it does not apply to — which
+/// `a_kind_an_operation_does_not_work_on_is_refused_before_the_audit_log_is_opened` holds and
+/// which asserts the opposite of both halves below. **It was two until this turn**, and the third
+/// is the one D236 ruling 4 carved out.
+///
+/// **What is compared is [`ops_usage`] itself and not only its first line**: a refusal that
+/// printed the header and dropped the rows would pass the older assertion.
 #[test]
 fn every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage() {
     for (line, expected) in [
@@ -10360,9 +10498,13 @@ fn every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage() {
             said.contains(expected),
             "{line:?} did not say {expected:?}: {said:?}"
         );
+        // **The header is a literal and the rest is compared against [`ops_usage`]**: the second
+        // half alone moves with the thing it checks, which is what `cargo mutants` caught one
+        // assertion over on the meaning side.
         assert!(
-            said.contains("usage: k8rs ops "),
-            "{line:?} was refused without the subcommand's own usage under it: {said:?}"
+            said.contains("usage: k8rs ops ") && said.ends_with(&ops_usage()),
+            "{line:?} is wrong in its form and was refused without the whole synopsis under it: \
+             {said:?}"
         );
         // **No refusal offers a complete mutation of a different object** (`k8s-admin`,
         // 2026-09-04). *write it as `k8rs ops scale deploy/web 3 -n payments`* is a runnable
@@ -10648,21 +10790,31 @@ fn the_number_of_copies_is_refused_for_the_reason_it_is_wrong() {
 #[test]
 fn a_crafted_word_on_an_ops_line_reaches_the_terminal_with_nothing_unprintable_left() {
     for (line, readable) in [
+        // **Six of these rows name the *kind* of word and not the word** ([`as_typed`]): where
+        // the strip changed it, quoting it back quotes a word nobody typed, so the sentence
+        // costs itself the echo and says what is wrong instead. It was three until 2026-09-05,
+        // when the sweep behind
+        // [`no_refusal_ever_names_a_word_the_same_sentence_offers_back`] found the other eight
+        // sites of the same defect — three of them on this line.
+        //
+        // **The two rows that still name the word are the two the rule does not reach**: an
+        // *extra* word is extra whatever it is spelled like, so [`ops_value`] has nothing to
+        // contradict itself about and keeps the echo [`shown`] bounds.
         (
             vec!["ops", "sc\u{1b}[2Jale", "deploy/web", "3", "-n", "payments"],
-            "sc[2Jale",
+            "the operation you typed",
         ),
         (
             vec!["ops", "scale", "wid\u{202e}get/web", "3", "-n", "payments"],
-            "widget",
+            "the kind you typed",
         ),
         (
             vec!["ops", "scale", "deploy/we\u{202e}b", "3", "-n", "payments"],
-            "web",
+            "the name you typed",
         ),
         (
             vec!["ops", "scale", "deploy/web", "th\u{7}ree", "-n", "payments"],
-            "three",
+            "the number of copies you typed",
         ),
         (
             vec![
@@ -10677,11 +10829,11 @@ fn a_crafted_word_on_an_ops_line_reaches_the_terminal_with_nothing_unprintable_l
         ),
         (
             vec!["ops", "scale", "deploy/web", "3", "-n", "pay\u{202e}ments"],
-            "payments",
+            "the namespace you typed",
         ),
         (
             vec!["ops", "scale", "deploy/web", "3", "--con\u{1b}text"],
-            "--context",
+            "the flag you typed",
         ),
         (
             vec!["--rea\u{202e}d", "ops", "scale", "deploy/web"],
@@ -10706,7 +10858,8 @@ fn a_crafted_word_on_an_ops_line_reaches_the_terminal_with_nothing_unprintable_l
         );
         // **Both halves.** A strip that returned nothing would pass the sweep and leave the
         // reader a sentence that names no word (CLAUDE.md § A derived list asserts it found
-        // something).
+        // something) — which is the word itself where the strip left it alone, and the kind of
+        // word it was where it did not ([`as_typed`]).
         assert!(
             said.contains(readable),
             "{line:?} was stripped down past the word it is about: {said:?}"
@@ -10719,33 +10872,11 @@ fn a_crafted_word_on_an_ops_line_reaches_the_terminal_with_nothing_unprintable_l
 /// (invariant 4), and a word refused for being eight kilobytes long may not be printed at eight
 /// kilobytes to say so (the security gate's *sizes are bounded* row).
 ///
-/// **The defect this closes printed one sentence that contradicted itself** (`k8s-admin`,
-/// 2026-09-04): `--names<U+200B>pace` came back as *`--namespace` is not a flag `k8rs ops` has —
-/// the only one it takes is `-n` or `--namespace`*, which sends the reader to fix a line that
-/// looks correct. It is the same class `mistyped` closed for `--object web/` on 2026-08-30, and
-/// worse, because the word printed is the word recommended.
+/// **The word a strip changed is not echoed at all, and that rule has its own test**
+/// ([`no_refusal_ever_names_a_word_the_same_sentence_offers_back`]). What is left here is the
+/// echo of a word the strip left alone and the cut that bounds it — the half [`shown`] still owns.
 #[test]
 fn a_flag_this_driver_does_not_have_is_echoed_as_typed_and_cut_to_a_length() {
-    // The word is `--namespace` with a zero-width space inside it, which is a flag k8rs does not
-    // have and prints identically to one it does.
-    let said = ops(&[
-        "ops",
-        "scale",
-        "deploy/web",
-        "3",
-        "--names\u{200b}pace",
-        "payments",
-    ]);
-    println!("{said}");
-    assert!(
-        said.contains("is not a flag `k8rs ops` has"),
-        "the invisible character was not refused as a flag: {said:?}"
-    );
-    assert!(
-        said.contains("--namespace (with what cannot print removed) is not a flag"),
-        "the refusal named `--namespace` as both the word it refuses and the word it \
-         recommends, with nothing to tell them apart: {said:?}"
-    );
     // Bounded, and the cut is said out loud. `NAME_MAX` characters plus the clause, never the
     // 9000 the reader typed.
     let long = format!("-{}", "a".repeat(9000));
@@ -10769,6 +10900,194 @@ fn a_flag_this_driver_does_not_have_is_echoed_as_typed_and_cut_to_a_length() {
         "the echo was cut somewhere other than the length every sibling refusal on this line \
          cuts at: {first:?}"
     );
+}
+
+/// **No refusal names a word that the same sentence then offers back** ([`as_typed`], invariant
+/// 9, invariant 14).
+///
+/// **Eleven sites, one rule, and argv reaches every one** (`k8s-admin`, 2026-09-05, for the first
+/// three; the rest from the sweep the PM asked for, `dev-core`, 2026-09-05). `ops.rs`'s `a_kind`
+/// settled it one layer down (NOTES § D224) in the copy no command line can reach, while these
+/// went on quoting the stripped word: `dep<U+200B>loyment/web` came back as *k8rs does not work
+/// on a kind called deployment — the ones an operation can be pointed at are deployment, …*, one
+/// sentence contradicting its own second clause. The operator then retypes a line that looks
+/// identical and is refused identically, with nothing in the sentence to break the loop.
+///
+/// **The sweep is what says eleven, and it was measured against the built binary** — the same
+/// zero-width space fed to every refusal in `main.rs` that names a word out of argv, read off
+/// what it printed rather than off the source. It is also why this test is no longer about `ops`:
+/// five of the sites are on the read path, and a name saying otherwise would be the second copy
+/// of a claim that had already gone wrong once.
+///
+/// **What deliberately does not route through [`as_typed`], with why for each** — the other half
+/// of the sweep, because a site nobody named is a site the next reader re-derives:
+///
+/// - *`--context --li<U+200B>ve`* — *"and `--live` is a flag"* stays true of the cleaned word, so
+///   there is no contradiction to fix.
+/// - *a word after a complete line* ([`ops_value`], [`may_i_question`]) — *"does not know what to
+///   do with `foo`"* is about there being an extra word, which its spelling does not change.
+/// - *a file beside a mode* — *"`--once` reads a cluster, so k8rs cannot also read `pod.json`"*,
+///   same shape.
+/// - *`in_namespace`* — measured, not reasoned: `k8s::drawable` has already stripped the
+///   kubeconfig's `namespace:` before it arrives, and [`mistyped`] refuses the argv one above it,
+///   so no word this refusal can name was changed on the way in.
+/// - *[`which_kind`]'s ambiguous arm, and a kind whose own words cannot build a URL* — both are
+///   reached only by a word that **matched** something the cluster serves, which a word with a
+///   character that does not print cannot do; it takes the arm below instead.
+/// - *[`refuse_count`]'s two range sentences* — reached only by a word that parsed as a number or
+///   is all ASCII digits, which is the same door closed.
+///
+/// **What is asserted is the contradiction and not the wording.** Each row names the fragment that
+/// would put the cleaned word where the sentence says k8rs does not have it, and the row passes by
+/// that fragment being absent — so a reworded sentence that quotes the word again is still red.
+///
+/// **The other half is that the sentence still names something** (CLAUDE.md § A derived list
+/// asserts it found something): the kind of word, and what is wrong with it.
+///
+/// **Every row is reported, and the loop does not stop at the first** — it collected its
+/// assertions into one failure until 2026-09-05 and did not, which is how rows 2 and 3 were never
+/// once seen red (PM, 2026-09-05). A per-row panic makes the second row's evidence cost a second
+/// run, and eleven rows make that eleven.
+///
+/// **A word the strip left alone is still quoted, and the tests for that are already here** —
+/// `every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage`'s `scal`, `widget` and
+/// `--context` rows, and
+/// [`a_flag_this_driver_does_not_have_is_echoed_as_typed_and_cut_to_a_length`], which is why this
+/// test does not repeat them.
+#[test]
+fn no_refusal_ever_names_a_word_the_same_sentence_offers_back() {
+    // A zero-width space, because it is the shape with no tell at all: every one of these words
+    // prints exactly as the word k8rs does take.
+    let kinds = vec![browsable("", "Node", "nodes", false)];
+    let refusals = [
+        // --- the `ops` line ---
+        (
+            "ops <operation>",
+            ops(&["ops", "sca\u{200b}le", "deploy/web", "3", "-n", "payments"]),
+            "called scale",
+            "the operation you typed",
+        ),
+        (
+            "ops <kind>/…",
+            ops(&["ops", "restart", "dep\u{200b}loyment/web", "-n", "payments"]),
+            "called deployment",
+            "the kind you typed",
+        ),
+        (
+            "ops …/<name>",
+            ops(&["ops", "scale", "deploy/we\u{200b}b", "3", "-n", "payments"]),
+            "web (with what cannot print removed)",
+            "the name you typed",
+        ),
+        (
+            "ops <copies>",
+            ops(&["ops", "scale", "deploy/web", "\u{200b}3", "-n", "payments"]),
+            "3 (with what cannot print removed)",
+            "the number of copies you typed",
+        ),
+        (
+            "ops --flag",
+            ops(&[
+                "ops",
+                "scale",
+                "deploy/web",
+                "3",
+                "--names\u{200b}pace=payments",
+            ]),
+            "--namespace=payments (with what cannot print removed)",
+            "the flag you typed",
+        ),
+        (
+            "ops -n <namespace>",
+            ops(&["ops", "scale", "deploy/web", "3", "-n", "pay\u{200b}ments"]),
+            "payments (with what cannot print removed)",
+            "the namespace you typed",
+        ),
+        // The second caller of the same helper, because one shared sentence with two usages is
+        // the shape where a fix lands on one of them.
+        (
+            "ops may-i -n <namespace>",
+            ops(&["ops", "may-i", "get", "pods.", "-n", "pay\u{200b}ments"]),
+            "payments (with what cannot print removed)",
+            "the namespace you typed",
+        ),
+        // --- the read path, which `mistyped` answers before anything connects ---
+        (
+            "--object …/<name>",
+            mistyped(&argv(&["--logs", "--object", "default/we\u{200b}b"]))
+                .expect("a name with a character that does not print is refused"),
+            "web (with what cannot print removed)",
+            "the name you typed",
+        ),
+        (
+            "--object <namespace>/…",
+            mistyped(&argv(&["--logs", "--object", "pay\u{200b}ments/web"]))
+                .expect("a namespace with a character that does not print is refused"),
+            "payments (with what cannot print removed)",
+            "the namespace you typed",
+        ),
+        (
+            "--namespace",
+            mistyped(&argv(&["--once", "--namespace", "pay\u{200b}ments"]))
+                .expect("a namespace with a character that does not print is refused"),
+            "payments (with what cannot print removed)",
+            "the namespace you typed",
+        ),
+        (
+            "--container",
+            mistyped(&argv(&[
+                "--logs",
+                "--object",
+                "default/web",
+                "--container",
+                "ap\u{200b}p",
+            ]))
+            .expect("a container name with a character that does not print is refused"),
+            "app (with what cannot print removed)",
+            "the container name you typed",
+        ),
+        (
+            "an unknown --flag",
+            mistyped(&argv(&["--once", "--name\u{200b}space=payments"]))
+                .expect("a flag with a character that does not print is refused"),
+            "--namespace=payments (with what cannot print removed) is not a flag",
+            "the flag you typed",
+        ),
+        // The one-dash arm is a *different* branch of the same sentence — `-n` never reaches the
+        // `--` check above it — and `-n` is a flag k8rs very much has.
+        (
+            "an unknown -flag",
+            mistyped(&argv(&["--once", "-\u{200b}n", "payments"]))
+                .expect("a flag with a character that does not print is refused"),
+            "-n (with what cannot print removed) is not a flag",
+            "the flag you typed",
+        ),
+        // --- the one refusal a cluster's own answer produces ---
+        (
+            "--kind",
+            which_kind(&kinds, "no\u{200b}de")
+                .expect_err("nothing serves a kind spelled with a gap"),
+            "kind named node",
+            "the kind you typed",
+        ),
+    ];
+    let mut wrong: Vec<String> = Vec::new();
+    for (site, said, quoted, noun) in &refusals {
+        println!("{site}\n{said}\n");
+        if said.contains(quoted) {
+            wrong.push(format!(
+                "{site}: named a word k8rs does take as one it does not have ({quoted:?}) — \
+                 {said:?}"
+            ));
+        }
+        if !said.contains(noun) || !said.contains("does not print") {
+            wrong.push(format!(
+                "{site}: the reader is not told which word could not be read, or why \
+                 ({noun:?}) — {said:?}"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// **The namespace may be named once and no more, and `k8rs ops` refuses rather than picking
@@ -11741,6 +12060,14 @@ fn every_operation_in_the_table_gets_its_own_arm_and_a_verb_with_none_gets_nothi
 /// today only because `audit_log` is the only thing that makes the directory; the name now says
 /// what the assertion can see, and the filesystem half lives in
 /// `a_machine_that_cannot_hold_the_audit_log_refuses_the_operation_and_says_why`.
+///
+/// **And it is the one refusal in this driver that prints no synopsis** (NOTES § D236 ruling 4).
+/// Every row below names a real operation and a real object and is told *k8rs does not do that to
+/// that kind* — a reader who already has the shape right, so eight lines of it under a complete
+/// answer bury the answer (invariant 14). What they get instead is one line saying where the
+/// usage is. The form side is
+/// `every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage`, which asserts the opposite of
+/// both halves.
 #[test]
 fn a_kind_an_operation_does_not_work_on_is_refused_before_the_audit_log_is_opened() {
     // **The two matrices are genuinely different and the rows say so** (NOTES § Operations): a
@@ -11808,6 +12135,30 @@ fn a_kind_an_operation_does_not_work_on_is_refused_before_the_audit_log_is_opene
         assert!(
             ended.said.contains(names),
             "{line:?} did not say what its verb works on: {:?}",
+            ended.said
+        );
+        // **The answer is not buried** (NOTES § D236 ruling 4). Two claims, because dropping the
+        // synopsis and pointing at it are two separate mistakes to make: no line of the eight is
+        // printed, and the one line that replaces them is.
+        assert!(
+            !ended.said.contains("usage: k8rs ops "),
+            "{line:?} knew the shape and was handed the synopsis anyway: {:?}",
+            ended.said
+        );
+        assert_eq!(
+            ended.said.lines().count(),
+            2,
+            "{line:?} is a sentence and a pointer, and it is neither: {:?}",
+            ended.said
+        );
+        // **The sentence is spelled out and not read back off [`see_usage`]** (`cargo mutants`,
+        // this turn): `ends_with(&see_usage())` moves with the thing it is checking, and a
+        // `see_usage` replaced by `"xyzzy"` survived it.
+        assert!(
+            ended
+                .said
+                .ends_with("Run `k8rs ops` on its own to see everything it can do."),
+            "{line:?} dropped the synopsis without saying where it is: {:?}",
             ended.said
         );
     }

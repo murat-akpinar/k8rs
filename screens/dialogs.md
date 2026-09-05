@@ -264,6 +264,7 @@ $ k8rs ops restart pod/web-7d9f4-x8k2p -n payments
 k8rs: k8rs will not restart a pod: restarting a pod means deleting it and lettin
 g the thing that created it start a replacement. k8rs restarts a deployment, a s
 tatefulset and a daemonset — if this pod belongs to one, restart that instead
+Run `k8rs ops` on its own to see everything it can do.
 ```
 
 ```
@@ -271,15 +272,37 @@ $ k8rs ops restart replicaset/web-7d9f4 -n payments
 k8rs: k8rs cannot restart a replicaset: a replicaset is normally made by a deplo
 yment, and restarting that deployment is what replaces its copies. k8rs restarts
  a deployment, a statefulset and a daemonset
+Run `k8rs ops` on its own to see everything it can do.
 ```
 
-Every other kind — a Service, a ConfigMap, anything restart was never meant
-for — gets the same shape of answer, naming the kind that was actually
-asked for: `k8rs: k8rs cannot restart a service — restarting replaces the
-copies an object is running, and k8rs does that for a deployment, a
-statefulset and a daemonset`. The doubled `k8rs: k8rs …` opening is not a
-typo; every headless refusal reads that way on this build (compare
-`screens/context.md`'s own refusals).
+Among the six kinds an operation can be pointed at, `restart` refuses pod,
+replicaset and node this same way — the two drawn above, and node, which this
+page does not draw. A kind outside those six — a Service, a ConfigMap — never
+reaches this arm at all: `known_kind` refuses it before `restartable` is ever
+asked, so it gets the unknown-shape refusal described next, full synopsis and
+all, not this sentence-plus-pointer shape.
+
+The doubled `k8rs: k8rs …` opening is not a typo; every headless refusal
+reads that way on this build (compare `screens/context.md`'s own refusals).
+
+**The pointer line is new, and it is not on every refusal.** A refusal here
+is either the reader naming a shape k8rs does not recognise — a bad
+operation word, a missing `-n`, missing replica count, an unknown kind — or
+naming a real operation and a real object and being told k8rs does not do
+that to that kind. The first group does not know the shape yet and keeps
+the eight-line `ops_usage()` synopsis; the second already named a real
+operation and object correctly, so the synopsis would bury the one-sentence
+answer under a menu they do not need — they get the sentence and this
+one-line pointer back to it instead
+([NOTES § D236](../NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)
+ruling 4). Both refusals on this page — pod and replicaset — are the second
+kind: `restart` is a real operation and both are real objects, restart
+simply does not apply to either. The split is general over every operation
+that exists and reaches more than one kind, not particular to `restart` —
+pod and replicaset are this page's two drawn examples, not its only two.
+An operation added later lands on this same side only if it refuses a kind
+through this same call; nothing here is drawn or promised for a verb that
+has not shipped.
 
 ### The unhappy paths this page already draws
 

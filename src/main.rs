@@ -79,7 +79,10 @@ use std::collections::BTreeMap;
 /// `_` while the line beside it named one (`tester`).
 fn main() {
     use std::io::Write;
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // **argv is read first and as `OsString`, because a word that is not text is neither a
+    // flag nor a path — and `std::env::args()` *panics* on one rather than refusing it**
+    // ([`command_line`]).
+    //
     // **Before the mode is chosen, because a mistyped flag is wrong in both of them** — and
     // [`ops_line`] before *that*, because a subcommand's words are bare and every one of them
     // would come back out of [`mistyped`] as a stray path (§ THE OPERATIONS DRIVER).
@@ -89,44 +92,47 @@ fn main() {
     // answered `Option<String>`, a `scale` that *succeeded* would have come back `None` and
     // k8rs would have gone on to watch a cluster it had just changed. [`Ended`] carries the
     // ending and the exit code together, so the two cannot come apart again.
-    let ended = match ops_line(&args, ops::audit_log, ops_performed, may_i_started) {
-        Some(ended) => ended,
-        None => Ended::refused(match mistyped(&args) {
-            Some(sentence) => sentence,
-            None => match live_context(&args) {
-                // **`--live` has no happy ending to return** — it prints as it goes and comes
-                // back only with the sentence that says why it stopped — but **`--once` does**,
-                // and it is the only path in this driver that reaches exit `0` off a cluster
-                // (§ WATCHING A CLUSTER, NOTES § D17).
-                Some(context) => match tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(runtime) => match runtime.block_on(on_cluster(&args, context)) {
-                        Some(sentence) => sentence,
-                        None => return,
-                    },
-                    Err(failed) => runtime_failure(&failed),
-                },
-                None => match run(&args) {
-                    // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!`
-                    // *panics* when the write fails, and a reader that closed the pipe is
-                    // `head` doing its job. That printed a backtrace and exited 101 — a code
-                    // D17's table does not have ([`stdout_failure`]).
-                    Ok(report) => match writeln!(std::io::stdout(), "{report}") {
-                        Ok(()) => return,
-                        Err(failed) => match stdout_failure(&failed) {
+    let ended = match command_line(std::env::args_os().skip(1)) {
+        Err(said) => Ended::refused(said),
+        Ok(args) => match ops_line(&args, ops::audit_log, ops_performed, may_i_started) {
+            Some(ended) => ended,
+            None => Ended::refused(match mistyped(&args) {
+                Some(sentence) => sentence,
+                None => match live_context(&args) {
+                    // **`--live` has no happy ending to return** — it prints as it goes and comes
+                    // back only with the sentence that says why it stopped — but **`--once` does**,
+                    // and it is the only path in this driver that reaches exit `0` off a cluster
+                    // (§ WATCHING A CLUSTER, NOTES § D17).
+                    Some(context) => match tokio::runtime::Builder::new_multi_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(runtime) => match runtime.block_on(on_cluster(&args, context)) {
                             Some(sentence) => sentence,
                             None => return,
                         },
+                        Err(failed) => runtime_failure(&failed),
                     },
-                    // Printed as it was handed over. Everything in it that came from outside was
-                    // stripped where it entered the sentence, and everything else is ours
-                    // ([`sanitize`]).
-                    Err(problem) => problem,
+                    None => match run(&args) {
+                        // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!`
+                        // *panics* when the write fails, and a reader that closed the pipe is
+                        // `head` doing its job. That printed a backtrace and exited 101 — a code
+                        // D17's table does not have ([`stdout_failure`]).
+                        Ok(report) => match writeln!(std::io::stdout(), "{report}") {
+                            Ok(()) => return,
+                            Err(failed) => match stdout_failure(&failed) {
+                                Some(sentence) => sentence,
+                                None => return,
+                            },
+                        },
+                        // Printed as it was handed over. Everything in it that came from
+                        // outside was stripped where it entered the sentence, and everything
+                        // else is ours ([`sanitize`]).
+                        Err(problem) => problem,
+                    },
                 },
-            },
-        }),
+            }),
+        },
     };
     // **A write to stderr that fails is dropped, here and nowhere else**: there is no third
     // stream to report it on, and a program that panics while saying why it is unhappy has
@@ -163,6 +169,54 @@ impl Ended {
     fn refused(said: String) -> Self {
         Ended { said, code: 2 }
     }
+}
+
+/// **The command line, or the sentence a word that is not text costs** — `main`'s
+/// `std::env::args_os()` is the only place this process reads its own argv, and this is the only
+/// thing that turns it into the `String`s every function below takes.
+///
+/// **`std::env::args()` panics on a word that is not valid UTF-8** — `Result::unwrap()` on an
+/// `Err`, a Rust backtrace and exit `101`, which is not a code NOTES § D17's table has and is not
+/// a sentence anyone can read. It is reachable without the reader typing anything wrong: `k8rs
+/// *.json` in a directory holding one latin-1 filename hands the shell's expansion straight to
+/// it, and the *whole* run dies on a word nobody chose. `args_os` hands back `OsString`, which
+/// has no such branch.
+///
+/// **Refused and not converted, which is [`as_typed`]'s ruling one layer out** (NOTES § D224).
+/// There a word the strip *changed* is not the word that was typed, so it is not echoed back; a
+/// word that is not text at all is the same class before any strip can run. `to_string_lossy`
+/// makes a word nobody typed — measured, `first\xff second\xfe` comes back as
+/// `["first\u{FFFD}", "second\u{FFFD}"]` — and k8rs would then go looking for that filename, or
+/// refuse it while quoting it back. So it is not converted, not echoed, and not guessed at.
+///
+/// **It names the word by position, because the bytes are the one thing it may not print.**
+/// Counting starts at the program name, so `k8rs --once <bad>` says *word 3* and the reader can
+/// count along the line they actually typed — whatever argv\[0\] happened to be. The first bad
+/// word is the one named, the same way [`mistyped`] names the first flag it does not have.
+///
+/// **No usage line under it**, unlike every other refusal in this file. The two synopses answer
+/// *how is this line spelled* ([`USAGE`], [`ops_usage`]) and this run's line may not even be
+/// decodable far enough to know which of them applies; the reader's fix is a filename, not a
+/// flag. That is the same argument [`not_a_namespace`] makes for taking its synopsis as a
+/// parameter, reaching the other answer because the question is different.
+///
+/// **Nothing outside k8rs reaches the sentence, so no [`sanitize`] is needed** — a number is all
+/// that comes from the line, and invariant 9's whole subject is text that gets printed back.
+fn command_line(words: impl Iterator<Item = std::ffi::OsString>) -> Result<Vec<String>, String> {
+    words
+        .enumerate()
+        .map(|(at, word)| {
+            word.into_string().map_err(|_| {
+                format!(
+                    "k8rs: word {} of the command line is not text — it holds bytes that are \
+                     not characters, so k8rs cannot tell what it says and will not guess. If a \
+                     wildcard like *.json put it there, it is a file whose name was saved in an \
+                     older encoding: rename the file and run k8rs again.",
+                    at + 2
+                )
+            })
+        })
+        .collect()
 }
 
 /// The sentence a failed write to **stdout** costs, or `None` when it costs nothing.
@@ -1825,12 +1879,73 @@ fn shown(value: &str, most: usize) -> String {
     said
 }
 
+/// **A refusal that names a word out of argv: the word itself, or what is wrong with it where
+/// quoting it back would quote a word nobody typed** (invariant 9, invariant 14).
+///
+/// **`ops.rs`'s `a_kind` ruled this class one layer down and the ruling landed in the copy argv
+/// cannot reach** (NOTES § D224). A word the strip *changed* is not the word that was typed, so
+/// echoing it makes a sentence that contradicts its own second clause: `dep<U+200B>loyment/web`
+/// came back as *k8rs does not work on a kind called deployment — the ones an operation can be
+/// pointed at are deployment, …*, and the reader retypes a line that looks identical and is
+/// refused identically (`k8s-admin`, 2026-09-05). [`shown`]'s *(with what cannot print removed)*
+/// says the echo was cleaned; it does not stop the sentence offering back the word it has just
+/// said k8rs does not have.
+///
+/// **The rule is the strip and not the list**, which is `a_kind`'s own: a word k8rs was not given
+/// is not quoted, whether or not the cleaned version happens to be one k8rs takes. It costs the
+/// echo on a word like `sc<ESC>[2Jale`, which could have been quoted without contradicting
+/// anything — and two rules, a broad one there and a narrow one here, is the second copy of a
+/// shared decision this repo pays most for. The sentence after it still names every word the
+/// reader may type instead, so nothing they need is lost.
+///
+/// **The frame is the caller's and so is the cap.** The cut belongs to the rule the word was
+/// judged against — [`k8s::NAMESPACE_MAX`] where a namespace was asked for, [`k8s::NAME_MAX`]
+/// everywhere else — because a value refused *for* being too long may not be printed back at the
+/// length that refused it (the security gate's *sizes are bounded* row), and 63 characters is
+/// what a namespace could have been. A parameter and not a constant, for the reason the noun is
+/// one too: what is shared here is the decision, not the string.
+///
+/// **The noun names the kind of word and never the flag it was typed under**, so
+/// `--namespace PAY<U+200B>MENTS` answers *the namespace you typed …* and not *the --namespace
+/// you typed …*. The three sentences this arrived as already worked that way — a flag that is
+/// itself the broken word cannot name its own position — and the alternative is a second wording
+/// per subject, which is the narrow-rule-beside-a-broad-one this function exists to stop. What is
+/// lost is the position on a line that names a namespace twice, and the usage line under every
+/// one of these refusals names both places (`dev-core`, 2026-09-05; the brief left the noun open).
+///
+/// **Eleven call sites, and the sweep that found them is the deliverable rather than the count**
+/// (`dev-core`, 2026-09-05). The first three were the `ops` line's; a measured sweep of every
+/// refusal in this file that names a word out of argv — the same zero-width space fed to each,
+/// read off the built binary and not off the source — found eight more, on both the `ops` path
+/// and the read path. `grep -c 'as_typed(["]' src/main.rs` counts them — the call sites, and
+/// neither this sentence nor the signature — which is the check a recalled number does not get.
+/// What deliberately does **not** route through here is listed in
+/// `no_refusal_ever_names_a_word_the_same_sentence_offers_back`'s doc, with why for each — plain
+/// backticks and not a link, because the test is `#[cfg(test)]` and rustdoc resolves no link into
+/// it.
+fn as_typed(noun: &str, word: &str, most: usize, quoted: impl FnOnce(&str) -> String) -> String {
+    if sanitize(word) == word {
+        quoted(&shown(word, most))
+    } else {
+        format!(
+            "the {noun} you typed has a character in it that does not print, so it is not the \
+             word it looks like"
+        )
+    }
+}
+
 /// **The sentence a word that was supposed to be a namespace and is not gets**, wherever on the
 /// line it was typed — [`NAMESPACE`]'s value, or the left half of [`OBJECT`]'s.
 ///
 /// **One sentence and not two**, because there is one rule (`k8s::namespace_name`) and a second
 /// wording of it is a second thing that can drift from the check. `subject` is what the reader
-/// typed it under, so the sentence still names the flag they have to fix.
+/// typed it under, so the sentence names the flag they have to fix.
+///
+/// **`subject` reaches the reader on the clean branch only** — a word the strip *changed* is
+/// refused without being quoted, and [`as_typed`]'s sentence has no slot for where on the line it
+/// was. That is a cost and not an oversight; the argument is in [`as_typed`]'s own doc and is not
+/// repeated here. Four call sites reach this one function, which is why it is the wrong place to
+/// grow a fifth wording.
 ///
 /// **`usage` is a parameter because there are two synopses and only one rule.** The flag line has
 /// [`USAGE`] and the subcommand has [`ops_usage`], and a refusal that printed the file-driven
@@ -1838,9 +1953,11 @@ fn shown(value: &str, most: usize) -> String {
 /// reader did not ask. The sentence above it stays one sentence, which is the point.
 fn not_a_namespace(subject: &str, value: &str, usage: &str) -> String {
     format!(
-        "k8rs: {subject} needs the name of a namespace, and {} is not one — a namespace is \
-         lowercase letters, digits and dashes, up to {} characters\n{usage}",
-        shown(value, k8s::NAMESPACE_MAX),
+        "k8rs: {} — a namespace is lowercase letters, digits and dashes, up to {} characters\n\
+         {usage}",
+        as_typed("namespace", value, k8s::NAMESPACE_MAX, |word| format!(
+            "{subject} needs the name of a namespace, and {word} is not one"
+        )),
         k8s::NAMESPACE_MAX
     )
 }
@@ -2023,11 +2140,13 @@ fn mistyped(args: &[String]) -> Option<String> {
             }
             if !k8s::object_name(name) {
                 return Some(format!(
-                    "k8rs: {OBJECT} names one {}, written as `<namespace>/<name>` or just \
-                     `<name>`, and {} is not one — a name is letters, digits, dashes and dots, \
-                     up to {} characters\n{USAGE}",
-                    named_thing(args),
-                    shown(name, k8s::NAME_MAX),
+                    "k8rs: {} — a name is letters, digits, dashes and dots, up to {} \
+                     characters\n{USAGE}",
+                    as_typed("name", name, k8s::NAME_MAX, |word| format!(
+                        "{OBJECT} names one {}, written as `<namespace>/<name>` or just \
+                         `<name>`, and {word} is not one",
+                        named_thing(args)
+                    )),
                     k8s::NAME_MAX
                 ));
             }
@@ -2045,8 +2164,10 @@ fn mistyped(args: &[String]) -> Option<String> {
         }
         Some(Some(value)) if !k8s::object_name(value) => {
             return Some(format!(
-                "k8rs: {CONTAINER} needs the name of a container, and {} is not one\n{USAGE}",
-                shown(value, k8s::NAME_MAX)
+                "k8rs: {}\n{USAGE}",
+                as_typed("container name", value, k8s::NAME_MAX, |word| format!(
+                    "{CONTAINER} needs the name of a container, and {word} is not one"
+                ))
             ));
         }
         Some(Some(_)) | None => {}
@@ -2100,8 +2221,10 @@ fn mistyped(args: &[String]) -> Option<String> {
     };
     if let Some(unknown) = args.iter().find(|arg| arg.starts_with(FLAG) && !known(arg)) {
         return Some(format!(
-            "k8rs: {} is not a flag k8rs has\n{USAGE}",
-            sanitize(unknown)
+            "k8rs: {}\n{USAGE}",
+            as_typed("flag", unknown, k8s::NAME_MAX, |word| format!(
+                "{word} is not a flag k8rs has"
+            ))
         ));
     }
     // **After the unknown-flag check and not before it**, for the reason the path check below is
@@ -2208,8 +2331,10 @@ fn mistyped(args: &[String]) -> Option<String> {
                     continue;
                 }
                 return Some(format!(
-                    "k8rs: {} is not a flag k8rs has\n{USAGE}",
-                    sanitize(arg)
+                    "k8rs: {}\n{USAGE}",
+                    as_typed("flag", arg, k8s::NAME_MAX, |word| format!(
+                        "{word} is not a flag k8rs has"
+                    ))
                 ));
             }
             // **The sentence names the mode that is on the line and not the two it used to
@@ -5407,8 +5532,10 @@ fn which_kind<'a>(kinds: &'a [k8s::Browsable], word: &str) -> Result<&'a k8s::Br
     let [only] = matched[..] else {
         if matched.is_empty() {
             return Err(format!(
-                "k8rs: this cluster does not serve a kind named {} — check the spelling",
-                shown(word, k8s::NAME_MAX)
+                "k8rs: {} — check the spelling",
+                as_typed("kind", word, k8s::NAME_MAX, |word| format!(
+                    "this cluster does not serve a kind named {word}"
+                ))
             ));
         }
         let says = |kind: &k8s::Browsable| match kind.group.is_empty() {
@@ -5877,6 +6004,8 @@ fn known_kind(word: &str) -> Option<&'static Kind> {
 /// saying an operation will not guess one — required for five of the six kinds in [`KINDS`] and
 /// refused for the sixth. The per-operation lines below already correct `[<value>]`; nothing
 /// corrected this one, so the synopsis says it and names the exception.
+///
+/// **It is not under every refusal, and [`see_usage`] is the other half** (NOTES § D236 ruling 4).
 fn ops_usage() -> String {
     let mut lines = vec![format!(
         "usage: k8rs {OPS} <operation> <kind>/<name> [<value>] {NAMESPACE_SHORT} <namespace>"
@@ -5931,6 +6060,22 @@ fn ops_usage() -> String {
          the whole cluster."
     ));
     lines.join("\n")
+}
+
+/// **The one line a refusal ends with when the reader already has the shape right**
+/// (NOTES § D236 ruling 4).
+///
+/// **The split is by what the reader is missing, and it is mechanical**: a refusal made by
+/// *parsing the line* prints [`ops_usage`] whole, because the shape is the thing that reader does
+/// not have. The one made by *asking the operation* — [`applies`], a real operation pointed at a
+/// real object it does not work on — prints this instead: that reader was handed a complete answer
+/// and needs eight lines of shape under it least of all.
+///
+/// **[`READ_ONLY`] is neither, and prints no usage at all.** That is [`ops_line`]'s own ruling and
+/// not this split's — nothing about the line was wrong, so offering the shape would be inviting a
+/// retry of the thing that was refused.
+fn see_usage() -> String {
+    format!("Run `k8rs {OPS}` on its own to see everything it can do.")
 }
 
 /// **Where [`OPS`] is on this line**, skipping the value of any flag that takes one — so a run
@@ -6145,10 +6290,12 @@ fn ops_words(rest: &[String]) -> Result<Vec<&str>, String> {
         }
         if flag_word(arg) {
             return Err(format!(
-                "k8rs: {} is not a flag `k8rs {OPS}` has — the ones it takes are \
-                 {NAMESPACE_SHORT} or {NAMESPACE}, which says which namespace this line is \
-                 about, and {SUBRESOURCE}, which `{OPS} {MAY_I}` alone reads\n{}",
-                shown(arg, k8s::NAME_MAX),
+                "k8rs: {} — the ones it takes are {NAMESPACE_SHORT} or {NAMESPACE}, which says \
+                 which namespace this line is about, and {SUBRESOURCE}, which `{OPS} {MAY_I}` \
+                 alone reads\n{}",
+                as_typed("flag", arg, k8s::NAME_MAX, |word| format!(
+                    "{word} is not a flag `k8rs {OPS}` has"
+                )),
                 ops_usage()
             ));
         }
@@ -6240,10 +6387,9 @@ fn refuse_count(word: &str) -> Result<i32, String> {
         Ok(count) => Ok(count as i32),
         Err(_) if digits && word.starts_with('-') => below_none(),
         Err(_) if digits => too_many(),
-        Err(_) => refusal(format!(
-            "the number of copies has to be a whole number, and {} is not one",
-            shown(word, k8s::NAME_MAX)
-        )),
+        Err(_) => refusal(as_typed("number of copies", word, k8s::NAME_MAX, |word| {
+            format!("the number of copies has to be a whole number, and {word} is not one")
+        })),
     }
 }
 
@@ -6358,8 +6504,10 @@ fn ops_run(
     }
     let Some(operation) = operation_named(verb) else {
         return refused(format!(
-            "k8rs: k8rs has no operation called {} — the ones it has are {}\n{}",
-            shown(verb, k8s::NAME_MAX),
+            "k8rs: {} — the ones it has are {}\n{}",
+            as_typed("operation", verb, k8s::NAME_MAX, |word| format!(
+                "k8rs has no operation called {word}"
+            )),
             joined(
                 &OPERATIONS
                     .iter()
@@ -6393,8 +6541,13 @@ fn ops_run(
     // This driver holds no copy of which kinds each verb applies to; it asks, and it asks here so
     // that `k8rs ops scale pod/web 3` is answered before a state directory is made for a run that
     // is not going to happen.
+    //
+    // **And it is the one refusal here that is about *meaning* rather than *form*, so it prints
+    // [`see_usage`] and not the synopsis** (NOTES § D236 ruling 4). Every other sentence above
+    // came out of parsing the line and is answered by the shape; this one came out of asking the
+    // operation, and its reader had the shape right.
     if let Err(refusal) = applies(operation, kind) {
-        return refused(format!("k8rs: {refusal}\n{}", ops_usage()));
+        return refused(format!("k8rs: {refusal}\n{}", see_usage()));
     }
     // **Opened before the seam and after every complaint about the line** (NOTES § D21): a
     // mutation that cannot be recorded does not happen, so *this machine cannot hold the trail*
@@ -6507,9 +6660,10 @@ fn ops_object<'a>(
     }
     let Some(kind) = known_kind(kind) else {
         return refusal(format!(
-            "k8rs does not work on a kind called {} — the ones an operation can be pointed at \
-             are {}",
-            shown(kind, k8s::NAME_MAX),
+            "{} — the ones an operation can be pointed at are {}",
+            as_typed("kind", kind, k8s::NAME_MAX, |word| format!(
+                "k8rs does not work on a kind called {word}"
+            )),
             joined(
                 &KINDS.iter().map(|kind| kind.singular).collect::<Vec<_>>(),
                 " and "
@@ -6518,9 +6672,10 @@ fn ops_object<'a>(
     };
     if !k8s::object_name(name) {
         return refusal(format!(
-            "{} is not the name of an object — a name is letters, digits, dashes and dots, up to \
-             {} characters",
-            shown(name, k8s::NAME_MAX),
+            "{} — a name is letters, digits, dashes and dots, up to {} characters",
+            as_typed("name", name, k8s::NAME_MAX, |word| format!(
+                "{word} is not the name of an object"
+            )),
             k8s::NAME_MAX
         ));
     }

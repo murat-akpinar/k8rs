@@ -298,25 +298,86 @@ fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
     }
 }
 
-/// **Invariant 9 at the process boundary for the newest thing argv can put on screen.**
+/// **A namespace the strip would change never reaches the terminal at all** (NOTES § D237,
+/// invariant 9).
 ///
-/// A namespace is echoed back when it is not a name — and *not a name* is exactly the class a
-/// control character lands in, so this sentence is a terminal sink for a value nobody has
-/// stripped before. `sanitize` runs at the interpolation; nothing until now watched what left
-/// the process through it.
+/// **This test's subject was replaced rather than reworded, and that is worth saying.** It read
+/// *the readable part of the value still survives into the sentence* — true while the refusal
+/// quoted the namespace back, and the half that made the control-character sweep beside it mean
+/// anything. `as_typed` closed that echo: a word the strip changes is now described and not
+/// quoted. The readable-part claim was retired because the sink it watched stopped existing, not
+/// because it became inconvenient to keep.
 ///
-/// **Both halves, for the reason the path test beside it gives**: nothing controlling survives,
-/// **and** the readable part of the value still does. A `sanitize` that returned nothing would
-/// pass the first assertion and leave the reader a sentence naming no namespace at all
-/// (CLAUDE.md § A derived list asserts it found something).
+/// **So the control-character sweep is gone from here rather than demoted, and what it took to
+/// see that is worth the sentence.** With nothing out of argv left in the refusal, a filter over
+/// it cannot fail — and a filter that cannot fail is not a test (CLAUDE.md § Tests must not lie).
+/// The obvious counter-argument, that a broken `sanitize` would still redden it, was **measured
+/// and is false in the way that matters**: planting `sanitize(text) -> text` does redden this
+/// test, but at the assertion below, because `sanitize` is also `as_typed`'s own predicate — the
+/// crafted word goes back to being quoted and the sentence stops naming the noun. It never
+/// reddens at a surviving control character. The property moved one test down, to
+/// [`a_crafted_extra_word_leaves_the_process_with_no_control_character_on_stderr`] — a refusal
+/// `as_typed` deliberately does not route — so this file still asserts invariant 9 over a value
+/// that does reach the terminal.
+///
+/// **What is asserted instead is the guarantee that replaced it**: no fragment of the word
+/// reaches stderr, on any line. `src/main_tests.rs` proves that of the string `mistyped` returns;
+/// only a process can say the usage under it does not print the word again.
 #[test]
-fn a_crafted_namespace_leaves_the_process_with_no_control_character_on_stderr() {
+fn a_crafted_namespace_never_reaches_the_terminal_at_all() {
     // `ESC`, `CR` and a C1 control — three framings of the class, inside the value rather than
-    // as the whole of one (NOTES § D31). `/` keeps it out of `path_safe` whatever the strip
-    // does, so the arm under test is reached for the same reason on every platform.
+    // as the whole of one (NOTES § D31). The `/` keeps it out of `path_safe` whatever the strip
+    // does, so a refusal is reached for the same reason on every platform even if the strip
+    // branch is ever the one that moves.
     let crafted = "pay\u{1b}[2J\rments\u{9b}/x";
 
     let out = k8rs_with_no_kubeconfig(&["--live", "--namespace", crafted]);
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let stderr = text(out.stderr);
+    let first = stderr.lines().next().expect("the refusal has a first line");
+    // The refusal still names the kind of word it is about. Without this, a binary that printed
+    // an empty line would pass every absence below (CLAUDE.md § A derived list asserts it found
+    // something).
+    assert!(
+        first.contains("the namespace you typed"),
+        "a namespace the strip changes was not refused as one: {stderr:?}"
+    );
+    // Two framings of the one word, because either surviving alone is the leak: what the strip
+    // leaves of it, and the readable tail of the escape sequence itself (NOTES § D31).
+    for fragment in ["ments", "[2J"] {
+        assert!(
+            !stderr.contains(fragment),
+            "{fragment:?}, out of a namespace k8rs said it would not repeat, reached the \
+             terminal: {stderr:?}"
+        );
+    }
+}
+
+/// **Invariant 9 at the process boundary, over a refusal that still quotes what was typed.**
+///
+/// **The sink invariant 9 needs is a sentence that echoes, and `as_typed` closed most of them**
+/// (NOTES § D237): a word the strip changes is described rather than quoted, so no `as_typed`
+/// site can carry a control character to a terminal any more. **Six** classes of refusal
+/// deliberately do not route through it — counted off the list in `src/main_tests.rs` §
+/// `no_refusal_ever_names_a_word_the_same_sentence_offers_back`, which is where the ruling
+/// lives, and not recalled — and this is the second of them: *a word after a complete line*
+/// quotes the extra word through `shown` whatever its spelling, because *there is an extra word
+/// here* stays true of the cleaned one. So this subject is not one about to be closed underneath
+/// the test.
+///
+/// **Both halves, for the reason the path test above gives**: nothing controlling survives,
+/// **and** the readable part of the word still does. A `sanitize` that returned nothing would
+/// pass the first assertion and leave the reader a sentence naming no word at all (CLAUDE.md § A
+/// derived list asserts it found something).
+#[test]
+fn a_crafted_extra_word_leaves_the_process_with_no_control_character_on_stderr() {
+    // `ESC`, `CR` and a C1 control — three framings of the class, inside the value rather than
+    // as the whole of one (NOTES § D31). No name rule runs on this word, so unlike the two tests
+    // around it nothing has to be added to keep it off a happier path.
+    let crafted = "ex\u{1b}[2J\rtra\u{9b}x";
+
+    let out = k8rs_with_no_kubeconfig(&["ops", "scale", "deploy/web", "3", crafted]);
 
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let stderr = text(out.stderr);
@@ -327,9 +388,121 @@ fn a_crafted_namespace_leaves_the_process_with_no_control_character_on_stderr() 
         "control characters left the process: {survivors:?}\n{stderr:?}"
     );
     assert!(
-        first.contains("pay[2Jments/x"),
-        "the namespace was stripped away along with the escape: {stderr:?}"
+        first.contains("ex[2Jtrax"),
+        "the extra word was stripped away along with the escape: {stderr:?}"
     );
+}
+
+/// **An argv word too long to print is cut before it leaves the process** — the security gate's
+/// *sizes are bounded* row, which had no assertion at this boundary until now.
+///
+/// **It was live until 2026-09-05, and the change that closed it was aimed at something else.**
+/// The two unknown-flag refusals interpolated `sanitize` and not `shown`, so they carried no cut
+/// at all and `k8rs --once --<9000 a's>` printed all nine thousand characters back. Routing them
+/// through `as_typed` (NOTES § D237) gave them `shown`'s bound as a side effect. `tests/binary.rs`
+/// bounded a response body and nothing out of argv, so the gap outlived the fix by a turn.
+///
+/// **The cut is asserted as a property and not as a number.** `src/main_tests.rs` pins it at
+/// `k8s::NAME_MAX` and can see the constant; an integration test cannot (no `lib.rs`,
+/// NOTES § D50), and a hand-copied `253` here is the second copy that goes stale. What this
+/// boundary owes is that the answer is a sentence rather than a page, that the cut is not silent,
+/// and that something of the word survives it.
+#[test]
+fn an_over_long_argv_word_is_cut_before_it_leaves_the_process() {
+    let typed = format!("--{}", "a".repeat(9000));
+
+    let out = k8rs_with_no_kubeconfig(&["--once", &typed]);
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let stderr = text(out.stderr);
+    let first = stderr.lines().next().expect("the refusal has a first line");
+    println!("{first}");
+    // A ceiling and not the cut — the same one the unit sibling holds a refusal to. A refusal is
+    // one sentence, and nine thousand characters of `a` is not one.
+    assert!(
+        first.len() < 500,
+        "a {}-character flag word came back at {} bytes, so nothing bounded it: {first:?}",
+        typed.len(),
+        first.len()
+    );
+    assert!(
+        first.contains("(shortened by k8rs)"),
+        "the cut was silent, so the reader is left comparing their line against a flag k8rs \
+         never showed them whole: {first:?}"
+    );
+    // Cut short, not cut away (CLAUDE.md § A derived list asserts it found something): a bound
+    // that printed nothing at all would pass both assertions above.
+    assert!(
+        first.starts_with("k8rs: --aaaa"),
+        "the word was cut away instead of cut short: {stderr:?}"
+    );
+}
+
+/// **A word of argv that is not text is refused with exit `2`, and does not panic**
+/// (NOTES § D237 item 10, `src/main.rs` § [`command_line`]). What `std::env::args()` did with one
+/// was `Result::unwrap()` on an `Err`: a Rust backtrace and exit `101`, a code NOTES § D17's
+/// table does not have, on a line the reader never typed — `k8rs *.json` in a directory holding
+/// one latin-1 filename hands the shell's expansion straight in.
+///
+/// **Only this file can see it, which is why the fix arrived with no test.** No unit test can
+/// watch a process exit, and the panic *is* the process: `src/main_tests.rs` can prove
+/// `command_line` refuses an `OsString` it is handed, and cannot prove that nothing upstream of
+/// it dies before it is called.
+///
+/// **Two byte shapes, because they are two branches of the validator and not two spellings of
+/// one** (CLAUDE.md § A check is proven only for the input shapes it was fed). `\xff` is a byte
+/// that is never valid in any position; `caf\xe9.json` is a lead byte whose continuation bytes
+/// are missing, which is what a latin-1 filename and a truncated one both look like — and it is
+/// the shape that actually reaches a terminal.
+///
+/// **The second one is also the second word**, so the position in the sentence is arithmetic and
+/// not a constant: a refusal that always says *word 2* is wrong for every line but the first.
+#[test]
+fn an_argv_word_that_is_not_text_is_refused_and_does_not_panic() {
+    use std::os::unix::ffi::OsStrExt;
+
+    for (before, bytes, word) in [
+        (&[][..], &b"\xff"[..], "word 2"),
+        (&["--once"][..], &b"caf\xe9.json"[..], "word 3"),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_k8rs"))
+            .args(before)
+            .arg(std::ffi::OsStr::from_bytes(bytes))
+            .env(
+                "KUBECONFIG",
+                "/nonexistent/k8rs-tests/there-is-no-kubeconfig-here",
+            )
+            .output()
+            .expect("the built binary runs");
+
+        let code = out.status.code();
+        // The bytes themselves need no assertion here and deliberately have none: nothing
+        // between them and stderr is a byte, so `text`'s own `expect` is the red for that
+        // framing, and an assertion no defect can reach is the thing this file exists to catch
+        // (CLAUDE.md § Tests must not lie).
+        let stderr = text(out.stderr);
+        println!("{stderr}");
+        // The re-encoded framing of the same rule (CLAUDE.md § D31): `to_string_lossy` is the
+        // conversion `command_line`'s doc names and refuses, and it does not echo the word — it
+        // invents one. `k8rs` would then go looking for that filename, or quote it back at a
+        // reader who cannot match it against anything on their disk.
+        assert!(
+            !stderr.contains('\u{FFFD}'),
+            "the word came back re-encoded, which is a filename nobody has: {stderr:?}"
+        );
+        // Separately from the exit code, and first: a process that dies some other way has no
+        // code at all to compare, and `thread 'main' panicked` is the line that must never
+        // appear whatever the code says.
+        assert!(
+            !stderr.contains("panicked"),
+            "argv killed the process instead of being refused by it: {stderr:?}"
+        );
+        assert_eq!(code, Some(2), "{stderr:?}");
+        assert!(
+            stderr.contains(word),
+            "the refusal does not name which word of the line to go and rename: {stderr:?}"
+        );
+    }
 }
 
 // --- THE EXIT CODE OF A FAILED WRITE START ---
@@ -2234,6 +2407,93 @@ fn a_may_i_line_is_answered_on_stderr_and_leaves_nothing_behind() {
 
 // --- THE ONE DOOR START ---
 
+/// **One row of what `k8rs ops` advertises**, read off the binary and never written down here.
+struct Advertised {
+    /// The word after `ops`.
+    verb: String,
+    /// **The whole invocation form**, placeholders and all — `scale <kind>/<name> <copies>`.
+    /// [`advertised_line`] turns it into a line the driver accepts.
+    form: String,
+    /// **Whether this row is an operation**, which the row says itself: every operation's line
+    /// ends in how it is confirmed and the one row that is not an operation ends in *changes
+    /// nothing*. Read off the text rather than matched against `may-i`, so a fourth operation
+    /// is one without anybody editing this file — and an unrecognised tail lands on the
+    /// operation side, which is the side that gets the stricter assertions.
+    mutates: bool,
+}
+
+/// **Every `ops` row the binary advertises** (NOTES § D234 ruling 2, § D236 ruling 1).
+///
+/// **Three tests read this and all three widen on their own.** `ops_usage` is built from
+/// `OPERATIONS`, so a fourth operation appears in the text this parses without anyone touching
+/// this file — the one property a literal `[SCALE, RESTART, DELETE]` cannot have.
+///
+/// **The canary is the other half of that** (CLAUDE.md § A derived list asserts it found
+/// something): *extracted nothing* and *nothing to extract* would otherwise both be a green loop
+/// over an empty vector, in three tests at once.
+fn advertised() -> Vec<Advertised> {
+    let usage = text(k8rs_with_no_kubeconfig(&["ops"]).stderr);
+    println!("--- the usage these tests read their rows off ---\n{usage}");
+    let advertised: Vec<&str> = usage
+        .lines()
+        .filter_map(|line| line.strip_prefix("  ops "))
+        .collect();
+    let rows: Vec<Advertised> = advertised
+        .iter()
+        // **The em dash is the row's own separator**, and every row has exactly one: the form is
+        // to its left and what the row promises is to its right.
+        .filter_map(|row| row.split_once(" \u{2014} "))
+        .filter_map(|(form, tail)| {
+            Some(Advertised {
+                verb: form.split_whitespace().next()?.to_string(),
+                form: form.trim().to_string(),
+                mutates: !tail.contains("changes nothing"),
+            })
+        })
+        .collect();
+    // **Every advertised row was understood, and a dropped one is louder than a missing one.**
+    // The two filters above throw away a row whose separator or first word is not where this
+    // expects it, and a fourth operation lost that way would leave all three loops green about
+    // three verbs — the same *extracted nothing* failure as an empty list, one level down and
+    // invisible to the canary below (CLAUDE.md § A derived list asserts it found something).
+    assert_eq!(
+        rows.len(),
+        advertised.len(),
+        "`k8rs ops` advertises {} rows and only {} of them parsed, so at least one operation is \
+         being vetted by nobody: {usage:?}",
+        advertised.len(),
+        rows.len()
+    );
+    for row in &rows {
+        println!(
+            "--- row derived: verb {:?} form {:?} mutates {} ---",
+            row.verb, row.form, row.mutates
+        );
+    }
+    for known in ["scale", "restart", "delete", "may-i"] {
+        assert!(
+            rows.iter().any(|row| row.verb == known),
+            "the usage no longer advertises `{known}`, so every loop over this is about to vet \
+             nothing — either `ops_usage` stopped listing an operation or the row shape moved: \
+             {usage:?}"
+        );
+    }
+    // **Which side of `mutates` each of them is on**, because the split above is a string test
+    // and a row whose wording drifted would land silently on the wrong side — the question in the
+    // strict loops, or an operation quietly excused from them.
+    let questions: Vec<&String> = rows
+        .iter()
+        .filter(|row| !row.mutates)
+        .map(|row| &row.verb)
+        .collect();
+    assert_eq!(
+        questions,
+        [&"may-i".to_string()],
+        "the rows that say they change nothing are no longer exactly the question: {usage:?}"
+    );
+    rows
+}
+
 /// **Every verb the binary advertises is refused under `--read-only` except the question, and the
 /// list of verbs is read off the binary rather than written here** (NOTES § D234 ruling 2).
 ///
@@ -2250,11 +2510,9 @@ fn a_may_i_line_is_answered_on_stderr_and_leaves_nothing_behind() {
 /// mutation — pointing the new verb at `delete`'s arm — and not about `--read-only` at all.
 ///
 /// **So the list is derived and the derivation is what makes this test widen on its own.**
-/// `ops_usage` is built from `OPERATIONS`, so a fourth operation appears in the text this reads
-/// without anyone touching this file — which is the one property a literal cannot have. The
-/// canary below is the other half of that (CLAUDE.md § A derived list asserts it found
-/// something): *extracted nothing* and *nothing to extract* would otherwise both be a green loop
-/// over an empty vector.
+/// [`advertised`] reads it off `k8rs ops` and carries the canary that says it found something;
+/// a fourth operation joins this loop without anyone touching this file, which is the one
+/// property a literal cannot have.
 ///
 /// **The carve-out is asserted as an equivalence, not as an exception.** Permitted **if and only
 /// if** the verb is `may-i` — so a change that widened the condition and a change that closed it
@@ -2265,31 +2523,16 @@ fn a_may_i_line_is_answered_on_stderr_and_leaves_nothing_behind() {
 /// well-formed line that reaches for a cluster, and the only thing this test changes about it is
 /// the flag.
 ///
-/// **This watches the door and not the wire.** No stub cluster is started for any row — todo.md's
-/// next box is the one that asserts no mutating request left the process, and splitting them is
-/// deliberate (D234 ruling 3).
+/// **This watches the door and not the wire.** No stub cluster is started for any row; § THE WIRE
+/// starts one and asserts nothing mutating reached it, and splitting them is deliberate
+/// (D234 ruling 3).
 #[test]
 fn read_only_permits_exactly_the_verbs_the_binary_calls_questions() {
     const REFUSAL: &str = "k8rs: --read-only was asked for, so k8rs will not change anything — \
                            run it without that flag to use an operation";
 
-    let usage = text(k8rs_with_no_kubeconfig(&["ops"]).stderr);
-    println!("--- the usage this test reads its verbs off ---\n{usage}");
-    let verbs: Vec<&str> = usage
-        .lines()
-        .filter_map(|line| line.strip_prefix("  ops "))
-        .filter_map(|row| row.split_whitespace().next())
-        .collect();
-    println!("--- verbs derived: {verbs:?} ---");
-    for known in ["scale", "restart", "delete", "may-i"] {
-        assert!(
-            verbs.contains(&known),
-            "the usage no longer advertises `{known}`, so this loop is about to vet nothing — \
-             either `ops_usage` stopped listing an operation or the row shape moved: {usage:?}"
-        );
-    }
-
-    for verb in verbs {
+    for row in advertised() {
+        let verb = row.verb.as_str();
         // **Both positions**, because only one was measured when the carve-out landed and the
         // other is where its first fix stopped working (NOTES § D230 ruling 3).
         for line in [
@@ -2343,3 +2586,282 @@ fn read_only_permits_exactly_the_verbs_the_binary_calls_questions() {
 }
 
 // --- THE ONE DOOR END ---
+
+// --- THE WIRE START ---
+//
+// **§ THE ONE DOOR proves k8rs refuses; this proves nothing got out** (NOTES § D234 ruling 3,
+// § D236 ruling 1). The two are split so that a guard wrong in a way both miss would have to fool
+// a source assertion and a socket at once, and the split only pays if this half really watches a
+// socket.
+//
+// **The stub is the API server, from the binary's side** — kube dialled it, the kubeconfig named
+// it, the bytes went over a loopback socket — and that is the whole of what these assertions
+// claim. **A kind apiserver cannot make the same claim**, which is why it is not where this is
+// asserted: `apiserver_request_total` carries `verb`, `resource`, `scope` and `code` and **no
+// client label**, so every controller in the cluster shares the counter; an audit policy needs
+// `kubeadmConfigPatches` and a recreated control plane, and the fixture cluster is the one object
+// in this repo that may not be quietly reshaped (NOTES § D53); and a read-only login proves *the
+// apiserver refused*, which is a different claim from *nothing was sent* and is the one k8rs is
+// not allowed to lean on. `Ran::asked` already holds `METHOD target body` per request, so the
+// claim is a filter over a list that exists today — and it runs on every push, which no cluster
+// leg can. `just e2e` is the cluster leg and asserts what a cluster can actually see instead:
+// the object did not change and no audit line was written.
+
+/// **The methods that can change a cluster** — the axis a socket can be read on.
+///
+/// **Method and not resource, because the method is what the apiserver itself keys on**: a `POST`
+/// is `create`, a `PATCH` is `patch`, and reading it needs no body and no agreement with any
+/// spelling k8rs chose. A predicate over paths would be this file re-deriving the request builder
+/// it is checking.
+const MUTATING: [&str; 4] = ["POST", "PUT", "PATCH", "DELETE"];
+
+/// **The one target a mutating method is allowed to carry, and it is a carve-out by target and
+/// not by method** (NOTES § D23, § D230 ruling 3).
+///
+/// **There is no method that means *ask*.** A `SelfSubjectAccessReview` is performed with
+/// `create`, which is exactly why `may_i` lives in `ops.rs` under a mechanical allowlist while
+/// mutating nothing — so at the wire it is a `POST` like any other and only its target tells it
+/// apart. `--read-only` permits the question (D230 ruling 3), so this string is what stops that
+/// carve-out being read as a hole: every other `POST` under the flag is a failure.
+const A_QUESTION: &str = "/selfsubjectaccessreviews";
+
+/// **The marker that says the cluster was asked to check a change rather than make one.**
+///
+/// It rides in the query string for both operations that send one, so it is read off the target
+/// and never off the whole line — a body-borne `"dryRun":["All"]` is a different spelling and
+/// this must not accept it as one (NOTES § D225 ruling 1, which is why `delete` sends neither).
+const DRY_RUN: &str = "dryRun=All";
+
+/// The method and the target of one recorded request, out of `Ran::asked`'s `METHOD target body`.
+fn method_and_target(asked: &str) -> (&str, &str) {
+    let mut words = asked.split_whitespace();
+    (
+        words.next().unwrap_or_default(),
+        words.next().unwrap_or_default(),
+    )
+}
+
+/// **Every request that could change the cluster**, question excepted — the predicate
+/// `--read-only` is measured against.
+///
+/// **A dry-run counts here**, and that is deliberate rather than an oversight: under this flag
+/// nothing at all should be dialled, so a preflight that went out would be a real finding. The
+/// looser predicate is [`changing`], and it is the right one for the cancel case one test down.
+fn mutating(asked: &[String]) -> Vec<&String> {
+    asked
+        .iter()
+        .filter(|line| {
+            let (method, target) = method_and_target(line);
+            MUTATING.contains(&method) && !target.contains(A_QUESTION)
+        })
+        .collect()
+}
+
+/// **Every request that would actually have changed the cluster** — [`mutating`] without the
+/// preflights, which is what *reached the API server with nothing* has to mean for an operation
+/// that checks before it asks (NOTES § D216, § D218).
+fn changing(asked: &[String]) -> Vec<&String> {
+    mutating(asked)
+        .into_iter()
+        .filter(|line| !method_and_target(line).1.contains(DRY_RUN))
+        .collect()
+}
+
+/// **What a placeholder in an advertised row is filled in with**, so a line built from the usage
+/// is one the driver accepts and dials rather than one it refuses for its shape.
+///
+/// **An unknown placeholder is a loud failure and not a skip** ([`advertised_line`]). A fourth
+/// operation taking a value nobody taught this table would otherwise be vetted as a refusal —
+/// green, and about nothing.
+const FILLED: [(&str, &str); 4] = [
+    ("<kind>/<name>", "deploy/web"),
+    ("<copies>", "3"),
+    ("<verb>", "list"),
+    ("<resource>.<group>[/<name>]", "pods."),
+];
+
+/// **One advertised row turned into a line the driver runs** — `scale <kind>/<name> <copies>`
+/// becomes `ops scale deploy/web 3 -n payments`.
+///
+/// **Built from the row and not written out per verb**, for [`advertised`]'s reason: the line a
+/// fourth operation needs comes from the text the binary printed, so this file does not hold a
+/// second copy of the argument surface that would quietly stop matching it.
+///
+/// **Optional groups are dropped and the namespace is appended.** `[--subresource <name>]` is a
+/// flag no row requires; the namespace is on the synopsis line rather than on any row, and it is
+/// required for the five namespaced kinds — so it goes on every line here, and the question
+/// answers about `payments` too, which is the namespace this file's stub has an opinion about.
+fn advertised_line(form: &str) -> Vec<String> {
+    let mut row = form.to_string();
+    for (hole, value) in FILLED {
+        row = row.replace(hole, value);
+    }
+    while let Some(open) = row.find('[') {
+        let close = row[open..].find(']').map_or(row.len() - 1, |at| open + at);
+        row.replace_range(open..=close, "");
+    }
+    assert!(
+        !row.contains('<') && !row.contains('>'),
+        "`{form}` carries a placeholder FILLED does not know, so the line built from it would be \
+         refused for its shape and this test would vet a refusal: {row:?}"
+    );
+    let mut line = vec!["ops".to_string()];
+    line.extend(row.split_whitespace().map(str::to_string));
+    line.extend(["-n".to_string(), GRANTING_NAMESPACE.to_string()]);
+    line
+}
+
+/// **Under `--read-only`, no request that could change a cluster leaves the process** — for every
+/// verb the binary advertises, in both flag positions, against a stub that would have answered
+/// one (NOTES § D236 ruling 1).
+///
+/// **Measured, the operations dial nothing at all**, which is a stronger fact than the assertion
+/// and is exactly why the assertion cannot be left alone with it: a filter over an empty list is
+/// green for the wrong reason. Two things stop that here.
+///
+/// **The question is the row that keeps this honest under the flag.** `may-i` is permitted by
+/// `--read-only` (NOTES § D230 ruling 3) and really does reach the stub — with a `POST`. So every
+/// run of this loop is not an empty list, the carve-out in [`mutating`] is load-bearing rather
+/// than decorative, and a predicate that counted methods alone would be red on the one row that
+/// must pass.
+///
+/// **The control is the same line without the flag**, built the same way from the same row: it
+/// has to reach the stub, or the refusal above was the line's shape and not the flag. And across
+/// the controls the predicate has to fire at least once — a [`mutating`] that had stopped
+/// matching anything would make every assertion in this test vacuous at once.
+#[test]
+fn read_only_puts_no_mutating_request_on_the_wire() {
+    let mut under_the_flag: Vec<String> = Vec::new();
+    let mut without_it: Vec<String> = Vec::new();
+
+    for row in advertised() {
+        let line = advertised_line(&row.form);
+        let line: Vec<&str> = line.iter().map(String::as_str).collect();
+        // **Both positions**, because only one was measured when the carve-out landed and the
+        // other is where its first fix stopped working (NOTES § D230 ruling 3).
+        for flagged in [
+            [&["--read-only"][..], &line].concat(),
+            [&line[..], &["--read-only"]].concat(),
+        ] {
+            // No stdin: nothing here may be confirmed, and a run that asked for one would hang.
+            let ran = one_ops_run(3, 3, None, &flagged, true, STUB_CONTEXT);
+            println!(
+                "--- {flagged:?} → exit {:?} ---\n{:?}",
+                ran.out.status.code(),
+                ran.asked
+            );
+            assert_eq!(
+                mutating(&ran.asked),
+                Vec::<&String>::new(),
+                "{flagged:?} put a request that can change a cluster on the wire under \
+                 --read-only"
+            );
+            under_the_flag.extend(ran.asked);
+        }
+
+        let ran = one_ops_run(3, 3, None, &line, true, STUB_CONTEXT);
+        println!(
+            "--- control {line:?} → exit {:?} ---\n{:?}",
+            ran.out.status.code(),
+            ran.asked
+        );
+        assert!(
+            !ran.asked.is_empty(),
+            "{line:?} carries no flag and still reached no cluster, so the runs above prove \
+             nothing about --read-only: {:?}",
+            text(ran.out.stderr)
+        );
+        without_it.extend(ran.asked);
+    }
+
+    // **The question really was sent under the flag**, so the emptiness above is not the whole of
+    // what was asserted and [`A_QUESTION`] excused a `POST` that genuinely went out.
+    assert!(
+        under_the_flag.iter().any(|line| {
+            let (method, target) = method_and_target(line);
+            method == "POST" && target.contains(A_QUESTION)
+        }),
+        "no permission review reached the stub under --read-only, so nothing exercised the one \
+         carve-out this predicate has: {under_the_flag:?}"
+    );
+    // **And the predicate can fire**, off the same binary, with the flag taken away.
+    assert!(
+        !mutating(&without_it).is_empty(),
+        "not one advertised verb reached for a change without the flag, so `mutating` matched \
+         nothing and every assertion above is vacuous: {without_it:?}"
+    );
+}
+
+/// **An operation nobody answered cancels, exits non-zero, and changes nothing at the API
+/// server** — the property that is the entire difference between reading a confirmation off
+/// stdin and a `--yes` flag (NOTES § D218, § D236 ruling 3).
+///
+/// **Every positive test in this file still passes if this regresses**, which is why it was
+/// carried in `backlog.md` rather than assumed: a driver that stopped reading stdin at all would
+/// confirm everything, and nothing that asserts a *confirmed* run would notice.
+///
+/// **`</dev/null` is the shape it is reached in** — a CI step, a cron entry, a pipeline — and it
+/// is the unattended default D218 says must be *no*.
+///
+/// **Every advertised operation and not only `scale`.** § ONE OPERATION proves it for a scale;
+/// the two confirmations are different mechanisms (`ops::Confirm::Press` and `::Type`), the three
+/// operations reach the prompt from different places, and `delete` sends no preflight at all — so
+/// one of them holding says nothing about the other two.
+///
+/// **[`changing`] and not [`mutating`], and the difference is the ruling.** `scale` and `restart`
+/// ask the cluster to check before the reader is asked anything (NOTES § D216), so a `dryRun=All`
+/// `PATCH` is on the wire by design and *nothing reached the API server* cannot mean literally
+/// nothing. What must not be there is a request the cluster would have acted on.
+#[test]
+fn an_operation_nobody_answered_reaches_the_cluster_with_nothing_that_changes_it() {
+    let operations: Vec<Advertised> = advertised().into_iter().filter(|row| row.mutates).collect();
+    assert!(
+        !operations.is_empty(),
+        "no advertised row says it needs confirming, so this test is a loop over nothing"
+    );
+
+    for row in operations {
+        let line = advertised_line(&row.form);
+        let line: Vec<&str> = line.iter().map(String::as_str).collect();
+        let ran = one_ops_run(3, 3, None, &line, true, STUB_CONTEXT);
+        let stderr = text(ran.out.stderr);
+        println!(
+            "--- {line:?} → exit {:?} ---\n{stderr}\n{:?}",
+            ran.out.status.code(),
+            ran.asked
+        );
+
+        assert_eq!(
+            changing(&ran.asked),
+            Vec::<&String>::new(),
+            "{line:?} was never confirmed and changed the cluster anyway"
+        );
+        assert_ne!(
+            ran.out.status.code(),
+            Some(0),
+            "{line:?} was never confirmed and exited 0, so `k8rs ops … && …` runs on: {stderr:?}"
+        );
+        assert!(
+            stderr.ends_with("k8rs: nobody confirmed it, so nothing was changed\n"),
+            "{line:?} cancelled without saying so: {stderr:?}"
+        );
+        // **The attempt is still recorded** — invariant 2's last clause: success, failure and
+        // refusal all reach the audit log, and a cancellation is the one an operator most needs
+        // to find when they are asking whether anything went out.
+        assert!(
+            !ran.audit.is_empty(),
+            "{line:?} was cancelled and left no record that it had been attempted"
+        );
+        // **The prompt really was reached**, so the cancellation is stdin's answer and not a
+        // refusal upstream of it wearing the same exit code.
+        assert!(
+            ran.asked
+                .iter()
+                .any(|asked| method_and_target(asked).0 == "GET"),
+            "{line:?} reached no cluster at all, so nothing here is about a confirmation: {:?}",
+            ran.asked
+        );
+    }
+}
+
+// --- THE WIRE END ---
