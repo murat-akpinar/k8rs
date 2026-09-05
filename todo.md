@@ -4129,10 +4129,16 @@ Goal: learn the ratatui event loop without touching product files.
 
 ## Phase 9 — Theme
 
-> **Closed 2026-09-05.** `theme.rs` is frozen. What the review round found — a
-> test that accepted a mark truncated to one letter, an `include_str!` that only
-> breaks in the downloader's hands, and a comment that measured false — is
-> [D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05).
+> **Closed 2026-09-06.** `theme.rs` is frozen, and it names no `ratatui` type —
+> the ruling that made the freeze survivable
+> ([D241](NOTES.md#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05)).
+> The review round found a test that accepted a mark truncated to one letter, an
+> `include_str!` that only breaks in the downloader's hands, and a comment that
+> measured false
+> ([D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05));
+> the close took four more, **because "box it in Phase 10" and "unfreeze
+> `theme.rs`" are the same sentence**
+> ([D243](NOTES.md#d243--the-phase-9-close-the-constant-is-the-carrier-and-not-the-sentence-the-pairing-that-would-have-been-written-twice-and-a-comment-three-files-had-already-copied-2026-09-06)).
 
 *Also read: [PRIOR-ART § D2](PRIOR-ART.md#d2--do-not-fight-the-users-terminal) (the user's own 16 colours win; bold is a per-emulator setting) and [§ K](PRIOR-ART.md#k-accessibility) (colour is never the only carrier of meaning — every state, not just severity).*
 
@@ -4170,7 +4176,7 @@ looking broken.
 > ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
 > It is the first unchecked box in this file, so a cold session lands on it. This
 > note moves forward with whichever phase is open and **has now moved four
-> times** — from Phase 6, Phase 7, Phase 8, and Phase 9, which closed 2026-09-05.
+> times** — from Phase 6, Phase 7, Phase 8, and Phase 9, which closed 2026-09-06.
 > Running a later phase over a deliberately open earlier one is
 > [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
 > [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
