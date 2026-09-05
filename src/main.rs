@@ -89,7 +89,7 @@ fn main() {
     // answered `Option<String>`, a `scale` that *succeeded* would have come back `None` and
     // k8rs would have gone on to watch a cluster it had just changed. [`Ended`] carries the
     // ending and the exit code together, so the two cannot come apart again.
-    let ended = match ops_line(&args, ops::audit_log, ops_performed) {
+    let ended = match ops_line(&args, ops::audit_log, ops_performed, may_i_started) {
         Some(ended) => ended,
         None => Ended::refused(match mistyped(&args) {
             Some(sentence) => sentence,
@@ -230,7 +230,9 @@ const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   \
      [--context <name>] [--namespace <name>]   |   \
      k8rs --describe|--yaml --object <[namespace/]name> [--kind <kind>] [--context <name>] \
      [--namespace <name>]   |   \
-     k8rs ops <operation> <kind>/<name> [<value>] --namespace <name>\n\
+     k8rs ops <operation> <kind>/<name> [<value>] --namespace <name>   |   \
+     k8rs ops may-i <verb> <resource>.<group>[/<name>] [--subresource <name>] \
+     [--namespace <name>]\n\
      Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
      Without --once, --live, --logs, --describe, --yaml or ops this build reads files only — it \
      cannot reach a cluster.";
@@ -1742,6 +1744,15 @@ fn namespace_arg(args: &[String]) -> Option<Option<&str>> {
     value_of(args, &[NAMESPACE, NAMESPACE_SHORT])
 }
 
+/// **Which subresource an `ops may-i` line names**, or `None` when [`SUBRESOURCE`] is not on it
+/// ([`value_of`], NOTES § D230 ruling 1).
+///
+/// **Read in two places and spelled once**: [`may_i_question`] takes the value, and [`ops_run`]
+/// asks only whether the flag is there at all, because the three operations do not take it.
+fn subresource_arg(args: &[String]) -> Option<Option<&str>> {
+    value_of(args, &[SUBRESOURCE])
+}
+
 /// **Which namespace this run watches, or `None` for every namespace it is allowed to see**
 /// (NOTES § D5).
 ///
@@ -2425,8 +2436,8 @@ fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>, said: Option<&
                 .to_string()
         }
         k8s::Fault::NoContext => {
-            "this kubeconfig has no such context — check the `--context` you gave, or the \
-             `current-context` line in the file"
+            "this kubeconfig has no such context — check the `current-context` line in the \
+             file, and any `--context` on the command line"
                 .to_string()
         }
         // **It does not say *which* entry, and that is the honest limit of a `Fault`.** The
@@ -5693,6 +5704,18 @@ const RESTART: &str = "restart";
 /// The third and last one this phase wires, spelled once for [`applies`] and [`wired`].
 const DELETE: &str = "delete";
 
+/// **The subresource a question is about**, spelled `kubectl auth can-i`'s way and not with a `/`
+/// (NOTES § D230 ruling 1). A flag that takes a value is not invariant 10's `clap` threshold —
+/// that is subcommands, generated help, or a mutual-exclusion table (NOTES § D194) — and this is
+/// the fifth on this driver's line that takes one.
+const SUBRESOURCE: &str = "--subresource";
+
+/// **The word that asks instead of changing** — deliberately not an [`OPERATIONS`] row, because
+/// it is not one (NOTES § D23, § D229). It takes no confirmation, writes no audit line and opens
+/// no state directory: `ops::may_i` sends a question and receives an opinion, and every part of
+/// [`Operation`] is about a mutation.
+const MAY_I: &str = "may-i";
+
 /// **The headless word that means yes** — [`ask`]'s own spelling of invariant 2's keypress, and
 /// the only thing that confirms an operation `ops::Confirm::Press` covers.
 const YES: &str = "yes";
@@ -5856,6 +5879,17 @@ fn ops_usage() -> String {
             operation.confirm
         ));
     }
+    // **With the invocation forms and not under the prose after them**, because it is one
+    // (NOTES § D229). The two sentences below say *an operation* and *every operation*, and this
+    // is not one — *changes nothing* is what says so before either of them is read.
+    //
+    // **A row and not a paragraph** (`k8s-admin`, 2026-09-05). It was one 250-character line
+    // beside five one-liners; what it was carrying is a rule about the namespace and the group,
+    // and a rule belongs in the prose under the rows, where every other rule on this line is.
+    lines.push(format!(
+        "  {OPS} {MAY_I} <verb> <resource>.<group>[/<name>] [{SUBRESOURCE} <name>] — \
+         changes nothing"
+    ));
     lines.push(format!(
         "The namespace is required — an operation will not guess which object it is about. A {} \
          belongs to the whole cluster and takes none.",
@@ -5873,6 +5907,17 @@ fn ops_usage() -> String {
          type — one line, on standard input, every time. There is no flag that means yes."
             .to_string(),
     );
+    // **The question's own two rules, under the rows rather than inside one** (NOTES § D230
+    // rulings 1 and 2). The namespace sentence above says a namespace is *required*, which is
+    // true of an operation and not of a question; and the group is required here for a reason no
+    // other row has — this driver resolves nothing against the cluster, so a word it cannot
+    // resolve is refused rather than answered.
+    lines.push(format!(
+        "`{OPS} {MAY_I}` asks the cluster what this login is allowed to do and sends no change. \
+         Spell the API group — `deployments.apps`, or `pods.` for the core group. The `/` is the \
+         object's own name, as in `kubectl auth can-i`. Without {NAMESPACE_SHORT} it asks about \
+         the whole cluster."
+    ));
     lines.join("\n")
 }
 
@@ -5916,6 +5961,11 @@ fn ops_at(args: &[String]) -> Option<usize> {
 /// is jargon about a word the reader did not mean as a filename (invariant 14). The cost is a
 /// second file named `ops` on a file-driven line, which `./ops` still reads.
 ///
+/// **[`READ_ONLY`] refuses every `ops` line but a question** (NOTES § D230 ruling 3): `may_i`
+/// changes nothing and lives in `ops.rs` for invariant 1's mechanical reason, so the flag that
+/// says *do not change this cluster* has nothing to say to it. Every other verb is still refused
+/// here, and still before the position is read.
+///
 /// **[`READ_ONLY`] is read here, before the position is, and in exactly one place**
 /// (`k8s-admin`, 2026-09-04). It used to be [`ops_run`]'s first line, which only a line with
 /// `ops` *first* ever reached — so `k8rs --read-only ops delete pod/web -n payments` was answered
@@ -5948,22 +5998,56 @@ fn ops_at(args: &[String]) -> Option<usize> {
 /// double, the way it already hands over an audit log that is `/dev/null`. Everything above it —
 /// which is every refusal this driver makes — stays provable with no cluster and no terminal.
 ///
+/// **`asked` is the same seam for the one verb that is not an operation** — [`may_i_started`],
+/// which builds a runtime and dials the reader's cluster exactly as [`ops_performed`] does. It was
+/// called directly for one round and no test *reached* it, because every `may-i` line in the suite
+/// is refused above it; then a mutation plant made one well-formed and the unit test talked to
+/// whatever cluster the developer had (my own second pass, 2026-09-05). *No unit test reaches a
+/// cluster* is now the same structural fact for both verbs rather than one of them plus a habit.
+///
 /// **The answer carries the exit code** (NOTES § D220 rulings 1 and 2, [`Ended`]): a line that
 /// got this far never falls through into [`mistyped`] or [`live_context`], whatever it did here.
 fn ops_line(
     args: &[String],
     audit: impl FnOnce() -> Result<(std::fs::File, Vec<String>), String>,
     run: impl FnOnce(Ready<'_>) -> Ended,
+    asked: impl FnOnce(Question) -> Ended,
 ) -> Option<Ended> {
-    let at = ops_at(args)?;
-    if args.iter().any(|arg| arg == READ_ONLY) {
+    // **[`READ_ONLY`] is taken out of the line before anything else reads it** (NOTES § D230
+    // ruling 3), and that one filter is what makes the ruling reachable from both spellings.
+    // `ops` still has to be the first word, and the reader who aliases `k8rs {READ_ONLY}` types
+    // the flag *before* it; [`ops_words`] refuses every flag that is not its own, so the reader
+    // who types it after would meet *`--read-only` is not a flag `k8rs ops` has*. Left in, the
+    // carve-out below would tell one of the two to retype their line without their safety
+    // flag — which is the hazard this function already documents for `delete`.
+    let line: Vec<String> = args
+        .iter()
+        .filter(|arg| *arg != READ_ONLY)
+        .cloned()
+        .collect();
+    let at = ops_at(&line)?;
+    // **A question is not a mutation, so [`READ_ONLY`] does not refuse it** (D230 ruling 3).
+    // Invariant 2's subject is the write path; the security gate row spelled it *`ops.rs`
+    // unreachable*, and `ops::may_i` is the first thing in that file that is not a write — put
+    // there for NOTES § D23's *mechanical* reason, which is exactly the price D23 said it was
+    // paying. Measured, the old order told the read-only reader that k8rs *will not change
+    // anything* when all they had asked was what they are allowed to do.
+    //
+    // **The verb is read through [`ops_words`] and not off `line[at + 1]`**, so a flag between
+    // `ops` and the verb cannot smuggle a mutation past this; a line [`ops_words`] cannot parse
+    // is not a question, which is the safe direction and the one this falls to.
+    let asking = ops_words(&line[at + 1..])
+        .ok()
+        .and_then(|words| words.first().copied())
+        == Some(MAY_I);
+    if !asking && args.iter().any(|arg| arg == READ_ONLY) {
         return Some(Ended::refused(format!(
             "k8rs: {READ_ONLY} was asked for, so k8rs will not change anything — run it without \
              that flag to use an operation"
         )));
     }
     if at == 0 {
-        return Some(ops_run(&args[1..], audit, run));
+        return Some(ops_run(&line[1..], audit, run, asked));
     }
     Some(Ended::refused(format!(
         "k8rs: `{OPS}` has to be the first word on the line — write it as \
@@ -6009,7 +6093,7 @@ fn flag_word(word: &str) -> bool {
 /// typed and guessing when two were is not one rule.
 fn ops_words(rest: &[String]) -> Result<Vec<&str>, String> {
     let mut words = Vec::new();
-    let mut namespaces = 0usize;
+    let (mut namespaces, mut subresources) = (0usize, 0usize);
     let mut value_follows = false;
     for arg in rest {
         if std::mem::take(&mut value_follows) {
@@ -6020,32 +6104,72 @@ fn ops_words(rest: &[String]) -> Result<Vec<&str>, String> {
             value_follows = true;
             continue;
         }
-        if [NAMESPACE, NAMESPACE_SHORT]
-            .iter()
-            .any(|flag| arg.strip_prefix(flag).is_some_and(|r| r.starts_with('=')))
-        {
+        // **[`SUBRESOURCE`] is read here and used by one verb** (NOTES § D230 ruling 1). It is
+        // consumed for every line, because this function runs before the verb is known; a line
+        // that is not `may-i` is refused for carrying it in [`ops_run`], one step down, rather
+        // than accepted and ignored.
+        if arg == SUBRESOURCE {
+            subresources += 1;
+            value_follows = true;
+            continue;
+        }
+        if attached(arg, &[NAMESPACE, NAMESPACE_SHORT]) {
             namespaces += 1;
+            continue;
+        }
+        if attached(arg, &[SUBRESOURCE]) {
+            subresources += 1;
             continue;
         }
         if flag_word(arg) {
             return Err(format!(
-                "k8rs: {} is not a flag `k8rs {OPS}` has — the only one it takes is \
-                 {NAMESPACE_SHORT} or {NAMESPACE}, which says which namespace the object is \
-                 in\n{}",
+                "k8rs: {} is not a flag `k8rs {OPS}` has — the ones it takes are \
+                 {NAMESPACE_SHORT} or {NAMESPACE}, which says which namespace this line is \
+                 about, and {SUBRESOURCE}, which `{OPS} {MAY_I}` alone reads\n{}",
                 shown(arg, k8s::NAME_MAX),
                 ops_usage()
             ));
         }
         words.push(arg.as_str());
     }
-    if namespaces > 1 {
-        return Err(format!(
-            "k8rs: this line names the namespace more than once, and `k8rs {OPS}` will not guess \
-             which of them you meant — name it once\n{}",
-            ops_usage()
-        ));
+    for (count, thing) in [
+        (namespaces, "the namespace"),
+        (subresources, "the subresource"),
+    ] {
+        if count > 1 {
+            return Err(twice(thing));
+        }
     }
     Ok(words)
+}
+
+/// **`--flag=value`, for the flags [`ops_words`] counts without [`value_of`]** — one spelling of
+/// the strip, so each flag is named once in this file.
+fn attached(arg: &str, flags: &[&str]) -> bool {
+    flags.iter().any(|flag| {
+        arg.strip_prefix(flag)
+            .is_some_and(|rest| rest.starts_with('='))
+    })
+}
+
+/// **A thing an `ops` line may name once, named twice** — one sentence for both, because the
+/// reason is one (PM ruling, 2026-09-04, extended to [`SUBRESOURCE`] by NOTES § D230 ruling 1).
+///
+/// [`value_of`]'s documented first-wins is right for the read path and cannot be carried onto a
+/// write or onto a question: `kubectl` is last-wins, so guessing sends the mutation — or the
+/// question — to whichever of the two the reader's own habit says is the other one. It is also
+/// the contradiction this driver rules out twice, here and in [`ops_namespace`]'s refusal to
+/// guess one nobody typed.
+///
+/// **It names *the namespace* and not `--namespace`**, which is the sentence this replaced and is
+/// the one to keep: the namespace has two spellings and a reader who typed `-n` twice would be
+/// sent looking for a long flag they never wrote (invariant 14, my own second pass).
+fn twice(thing: &str) -> String {
+    format!(
+        "k8rs: this line names {thing} more than once, and `k8rs {OPS}` will not guess which of \
+         them you meant — name it once\n{}",
+        ops_usage()
+    )
 }
 
 /// **Whether the number of copies is one k8rs will send**, as the sentence that refuses it.
@@ -6179,6 +6303,7 @@ fn ops_run(
     rest: &[String],
     audit: impl FnOnce() -> Result<(std::fs::File, Vec<String>), String>,
     run: impl FnOnce(Ready<'_>) -> Ended,
+    asked: impl FnOnce(Question) -> Ended,
 ) -> Ended {
     let refused = Ended::refused;
     let words = match ops_words(rest) {
@@ -6188,6 +6313,27 @@ fn ops_run(
     let Some(verb) = words.first() else {
         return refused(ops_usage());
     };
+    // **The one word on this line that is not an operation, taken before the table is read**
+    // (NOTES § D229 ruling 3). It confirms nothing, records nothing and changes nothing, so none
+    // of the steps below it apply — including `audit`, which is never called and therefore leaves
+    // no state directory behind, the rule `k8rs ops bogus` already had.
+    if *verb == MAY_I {
+        return match may_i_question(&words, rest) {
+            Ok(question) => asked(question),
+            Err(refusal) => refused(refusal),
+        };
+    }
+    // **[`SUBRESOURCE`] belongs to the question and to nothing else** (NOTES § D230 ruling 1).
+    // [`ops_words`] consumes it for every line, because it runs before the verb is known, so a
+    // mutation carrying it would otherwise be performed with a flag silently dropped — the shape
+    // that function refuses for every other unknown flag.
+    if subresource_arg(rest).is_some() {
+        return refused(format!(
+            "k8rs: `{OPS} {verb}` does not take {SUBRESOURCE} — only `{OPS} {MAY_I}` reads it, \
+             and it changes nothing\n{}",
+            ops_usage()
+        ));
+    }
     let Some(operation) = operation_named(verb) else {
         return refused(format!(
             "k8rs: k8rs has no operation called {} — the ones it has are {}\n{}",
@@ -6444,6 +6590,251 @@ fn ops_namespace<'a>(
         )),
         None => Ok(None),
     }
+}
+
+/// **One permission question, as an `ops may-i` line spelled it** — owned, because everything
+/// after it is a function over values and a borrow of `argv` buys nothing here.
+struct Question {
+    /// The API verb, as typed: `patch`, `delete`, `list`.
+    verb: String,
+    /// The API group, `""` for the core one — the part after the `.`, or nothing.
+    group: String,
+    /// The resource in the plural: `deployments`, `nodes`.
+    resource: String,
+    /// The subresource named with [`SUBRESOURCE`] — `scale`, and never the part after the `/`
+    /// (NOTES § D230 ruling 1).
+    subresource: Option<String>,
+    /// The object's own name, the part after the `/` — `kubectl auth can-i`'s meaning of it.
+    name: Option<String>,
+    /// The namespace named with `-n`, or `None` for a question about the whole cluster.
+    namespace: Option<String>,
+}
+
+/// **What an `ops may-i` line has to say, or the sentence that refuses it** — the whole of this
+/// subcommand that can be checked without a cluster.
+///
+/// **`<resource>.<group>[/<name>]` plus `--subresource=<name>`, which is `kubectl auth can-i`'s
+/// meaning of every one of those** (NOTES § D230 ruling 1). The first draft read the `/` as the
+/// subresource and said in a comment that the spelling was shared; measured against a real
+/// cluster, `kubectl auth can-i delete pods/only-this-pod` is **yes** under a rule with
+/// `resourceNames: [only-this-pod]` and k8rs answered **no** — one string, two questions, two
+/// answers, in two tools whose syntax this file claimed was one. Borrowing a spelling and changing
+/// what it means is worse than not borrowing it, so the `/` is the object's name and the
+/// subresource moved to a flag.
+///
+/// **The group is required, and that is a refusal where there used to be an answer**
+/// (D230 ruling 2). `patch deployments` defaulted the group to `""`, matched nothing in the core
+/// group, and printed *"no — this login is not allowed to do that"* under a login that was
+/// allowed — measured wrong for `deployments`, `deployment`, `deploy`, `pod` and `po`. **The
+/// cluster said no such thing.** This driver cannot resolve a word without discovery, and
+/// discovery-backed resolution is Phase 11's, where the resource and the group come off the
+/// cluster and never off a typed word — so a word it cannot resolve is refused, which is what
+/// [`ops_run`] already does with every other one.
+///
+/// **The core group is a trailing dot, and nothing else could be**: `""` is the group's real
+/// name, `kubectl` spells the fully-qualified form `pods.v1.` with the same empty tail, and a word
+/// with no dot at all is exactly the shape that has no answer. `pods.` is ugly and it is
+/// unambiguous, which is the trade this refusal is.
+///
+/// **Nothing here checks the words against a name rule, and that is a difference from the
+/// operations rather than an omission.** A verb and a resource on this line become fields of a
+/// JSON body posted to a fixed path (`ops::may_i`), never a path segment — so the guards `delete`
+/// makes at the point it builds a URL have nothing to guard here. What they still get is
+/// [`shown`], because they are echoed back.
+fn may_i_question(words: &[&str], rest: &[String]) -> Result<Question, String> {
+    let refusal = |sentence: String| Err(format!("k8rs: {sentence}\n{}", ops_usage()));
+    let (Some(verb), Some(asked)) = (words.get(1), words.get(2)) else {
+        return refusal(format!(
+            "`{OPS} {MAY_I}` needs a verb and a resource, written as \
+             `{OPS} {MAY_I} <verb> <resource>.<group>`"
+        ));
+    };
+    if let Some(extra) = words.get(3) {
+        return refusal(format!(
+            "`{OPS} {MAY_I}` does not know what to do with {} — it reads a verb and a resource \
+             and nothing else",
+            shown(extra, k8s::NAME_MAX)
+        ));
+    }
+    // **The `/` is the object's name** — `kubectl auth can-i`'s meaning (D230 ruling 1), and split
+    // before the `.` so that `deployments.apps/web` means what it looks like.
+    let (asked, name) = match asked.split_once('/') {
+        Some((asked, name)) => (asked, Some(name)),
+        None => (*asked, None),
+    };
+    let Some((resource, group)) = asked.split_once('.') else {
+        return refusal(format!(
+            "`{OPS} {MAY_I}` needs the API group as well as the resource, because it cannot look \
+             one up — write `deployments.apps`, or `pods.` with nothing after the dot for the \
+             core group that `pods`, `nodes` and `services` are in"
+        ));
+    };
+    // **One sentence for the three empty halves**, because they are one mistake — a separator with
+    // nothing on the side of it that matters — and each is named in the form the sentence shows.
+    //
+    // **Before the flag is read**, which is this driver's order everywhere: the more specific
+    // complaint about the same line first, and a line whose verb is empty has a worse problem than
+    // its subresource.
+    if verb.is_empty() || resource.is_empty() || name.is_some_and(str::is_empty) {
+        return refusal(format!(
+            "`{OPS} {MAY_I}` was given an empty verb, resource or object name — write it as \
+             `{OPS} {MAY_I} <verb> <resource>.<group>[/<name>]`"
+        ));
+    }
+    let subresource = match subresource_arg(rest) {
+        Some(None) | Some(Some("")) => {
+            return refusal(format!("{SUBRESOURCE} needs the name of a subresource"));
+        }
+        Some(Some(value)) => Some(value.to_string()),
+        None => None,
+    };
+    let namespace = match namespace_arg(rest) {
+        Some(None) | Some(Some("")) => {
+            return refusal(format!("{NAMESPACE} needs the name of a namespace"));
+        }
+        Some(Some(value)) if !k8s::namespace_name(value) => {
+            return Err(not_a_namespace(NAMESPACE, value, &ops_usage()));
+        }
+        Some(Some(value)) => Some(value.to_string()),
+        None => None,
+    };
+    Ok(Question {
+        verb: (*verb).to_string(),
+        group: group.to_string(),
+        resource: resource.to_string(),
+        subresource,
+        name: name.map(str::to_string),
+        namespace,
+    })
+}
+
+/// **The question, printed back in the words it was asked in** — so an answer is never read
+/// against a question k8rs did not ask.
+///
+/// **Echoed through [`shown`] and not written out raw**, for every other refusal on this line's
+/// reason: a value with characters that have no printed form is printed with them gone and *says*
+/// they are gone (invariant 9, invariant 4).
+///
+/// **The trailing dot of the core group is not echoed back.** `pods.` is a spelling the line
+/// requires ([`may_i_question`]) and not a thing anybody means; the question is about `pods`, and
+/// printing a separator with nothing after it is the dangling label
+/// `ops::Record::attempt_line` already refuses one file over.
+///
+/// **The subresource is a parenthetical and not the flag**, because the sentence is English and
+/// `--subresource=scale` inside it reads as part of what was asked rather than as how it was
+/// spelled.
+fn may_i_asked(question: &Question) -> String {
+    let group = match question.group.as_str() {
+        "" => String::new(),
+        group => format!(".{}", shown(group, k8s::NAME_MAX)),
+    };
+    let name = question.name.as_deref().map_or(String::new(), |name| {
+        format!("/{}", shown(name, k8s::NAME_MAX))
+    });
+    let subresource = question
+        .subresource
+        .as_deref()
+        .map_or(String::new(), |subresource| {
+            format!(" (subresource: {})", shown(subresource, k8s::NAME_MAX))
+        });
+    format!(
+        "may this login {} {}{group}{name}{subresource}{}?",
+        shown(&question.verb, k8s::NAME_MAX),
+        shown(&question.resource, k8s::NAME_MAX),
+        within(question.namespace.as_deref())
+    )
+}
+
+/// **What an answered question ends as** — the question, the answer, and an exit code that says
+/// whether k8rs found out rather than what the answer was.
+///
+/// **`0` yes · `1` no · `2` k8rs could not find out** (NOTES § D230 ruling 4) — `kubectl auth
+/// can-i`'s own vocabulary, deliberately borrowing its muscle memory.
+///
+/// **It is not NOTES § D220 ruling 1's.** That one turns on *did the cluster change*, and a probe
+/// never changes anything, so every `may-i` line would be a `2` under it.
+///
+/// **And it does not spend NOTES § D17's reservation** — checked against the entry rather than
+/// recalled (D230 ruling 4). D17 keeps `1` free of **findings**, so `--once` can grow an
+/// `--exit-code` without redefining `0`; a probe's answer is not a finding, it is the entire
+/// output of a different subcommand, so `--exit-code` still has exactly the room D17 saved it.
+/// The first draft of this file exited `0` for a yes *and* a no, which left a script grepping an
+/// English sentence invariant 14 will keep rewriting.
+///
+/// **A refused probe is a `2` and never a `1`** (NOTES § D229 ruling 4): k8rs did not find out, and
+/// a script reading *could not tell* as a no would be the probe deciding something, which is the
+/// one thing it may never do.
+fn may_i_ended(question: &Question, verdict: &ops::Verdict) -> Ended {
+    Ended {
+        said: format!(
+            "k8rs: {}\nk8rs: {}",
+            may_i_asked(question),
+            verdict.plainly()
+        ),
+        code: match verdict {
+            ops::Verdict::Yes => 0,
+            ops::Verdict::No => 1,
+            ops::Verdict::CouldNotTell(_) => 2,
+        },
+    }
+}
+
+/// **The runtime an `ops may-i` line needs** — [`ops_started`]'s shape without the clock, because
+/// nothing here is recorded and nothing here is stamped.
+fn may_i_started(question: Question) -> Ended {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(failed) => return Ended::refused(runtime_failure(&failed)),
+    };
+    runtime.block_on(may_i_connected(&question))
+}
+
+/// **The connection a `may-i` line opens, and the one part of it a test cannot reach** —
+/// [`ops_connected`]'s shape, without the audit log and without the `server:` that names a record
+/// nothing here writes.
+///
+/// **One question is always a `SelfSubjectAccessReview`, whether or not a namespace was named**
+/// (NOTES § D230 ruling 5). The first draft branched on the namespace, and measured on a real
+/// cluster the same login was told **yes** to `may-i delete pods -n default` and **no** to
+/// `may-i delete pods` — because `-n` selected `ops::may_i_in`'s local matcher and its absence let
+/// the server answer. That is NOTES § D103's class, two readers of one model disagreeing, and it
+/// is invisible from inside either function. The server's answer is the exact one, so a single
+/// question goes to `ops::may_i` and the namespace rides on `ops::Asking` instead of choosing the
+/// call.
+///
+/// **`ops::may_i_in` keeps its reason for existing and loses its only caller here**: D23's *one
+/// call answers everything in this namespace* is the bulk path Phase 11 needs to dim a whole key
+/// map without a request per key, and `src/ops_tests.rs` § MAY I drives it directly rather than
+/// through this line.
+///
+/// **A cluster that cannot be reached is a refusal of the line and not a verdict**, because there
+/// is no question that was asked: [`no_cluster`] leads with *nothing was changed*, which is as
+/// true of a probe as of an operation and is the first thing the reader needs either way.
+async fn may_i_connected(question: &Question) -> Ended {
+    let kubeconfig = match k8s::kubeconfig() {
+        Ok(kubeconfig) => kubeconfig,
+        Err(problem) => return Ended::refused(no_cluster(&problem)),
+    };
+    let session = match k8s::connect_with(kubeconfig, None, question.namespace.as_deref()).await {
+        Ok(session) => session,
+        Err(problem) => return Ended::refused(no_cluster(&problem)),
+    };
+    let verdict = ops::may_i(
+        &session.client,
+        &ops::Asking {
+            verb: &question.verb,
+            group: &question.group,
+            resource: &question.resource,
+            subresource: question.subresource.as_deref(),
+            name: question.name.as_deref(),
+            namespace: question.namespace.as_deref(),
+        },
+    )
+    .await;
+    may_i_ended(question, &verdict)
 }
 
 /// **`ops::perform`'s first callback, headless** — the dialog `screens/dialogs.md` draws, printed

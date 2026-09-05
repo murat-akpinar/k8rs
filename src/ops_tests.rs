@@ -5785,3 +5785,742 @@ async fn one_whole_mutation_lands_in_the_file_this_box_opens_and_nothing_else_do
         "the log holding a record of what somebody changed can be read by somebody else"
     );
 }
+
+// --- MAY I ---
+//
+// **The wire again, because a probe that asks the wrong question answers it confidently**
+// (NOTES § D23, § D229). Two shapes go out and each has a body this file builds by hand: a
+// `SelfSubjectRulesReview` carrying one namespace, and a `SelfSubjectAccessReview` carrying the
+// verb, the group, the resource and — where the question has them — a subresource, a name and a
+// namespace. A double over `Api` could satisfy every matching test below while sending something
+// else, so the request assertions are made against a socket, as [`stub`]'s own region already
+// requires.
+//
+// **The negatives here are not decoration and one of them is the box's own ruling.** A refused
+// probe that came back [`Verdict::No`] would dim a key over an operation the reader is allowed to
+// perform — `PRIOR-ART § B4`, and the shape NOTES § D229 ruling 4 forbids by name — so *every*
+// failure path is asserted to be [`Verdict::CouldNotTell`] and asserted **not** to be
+// [`Verdict::No`], which is the assertion that goes red if that ever changes.
+//
+// **Exact bodies and not a `contains`.** § WHAT THE PASS PUTS ON THE WIRE asserts one parameter
+// at a time because it is about [`Pass`], which every later box adds a field to; these two bodies
+// are entirely this file's own construction with no params on them at all, so a field appearing in
+// one is a change to the question k8rs asks and *should* be red.
+//
+// **The target ends in a bare `?`, which is measured and not a typo in the literal.**
+// `PostParams::populate_qp` is called with nothing to append, and `Request::create` builds the
+// query string either way (`kube-core-4.2.0/src/request.rs`), so an empty one is what a
+// `PostParams::default()` puts on the wire. It is worth keeping in the assertion rather than
+// trimming: *nothing after the `?`* is exactly what says no `dryRun` and no `fieldManager` went
+// out with the question.
+
+/// **A `SelfSubjectRulesReview` as an apiserver answers one** — the request echoed back with the
+/// `status` the server filled in, which is what these virtual resources do.
+fn rules_reply(status: &str) -> String {
+    format!(
+        r#"{{"kind":"SelfSubjectRulesReview","apiVersion":"authorization.k8s.io/v1",
+           "metadata":{{"creationTimestamp":null}},"spec":{{"namespace":"payments"}},
+           "status":{status}}}"#
+    )
+}
+
+/// The same for a `SelfSubjectAccessReview`.
+///
+/// **The echoed `spec` is a fixed literal and nothing reads it.** These endpoints answer with the
+/// request plus a `status`, and [`may_i`] reads the `status` alone — a `spec` that tracked each
+/// question would be a second copy of the claim the wire tests above already make, in the one
+/// place nothing could check it.
+fn access_reply(status: &str) -> String {
+    format!(
+        r#"{{"kind":"SelfSubjectAccessReview","apiVersion":"authorization.k8s.io/v1",
+           "metadata":{{"creationTimestamp":null}},
+           "spec":{{"resourceAttributes":{{"resource":"nodes","verb":"delete"}}}},
+           "status":{status}}}"#
+    )
+}
+
+/// **One namespace's answer, driven through the stub** — so the [`ResourceRule`]s the matcher
+/// reads are the ones kube deserialised off a wire, not ones this file assembled by hand.
+async fn permits(status: &str) -> Permits {
+    let body = rules_reply(status);
+    let (client, _) = stub(move |_| ("201 Created".to_string(), body.clone())).await;
+    may_i_in(&client, "payments").await
+}
+
+/// One question about a namespaced resource, every field spelled out.
+///
+/// **The namespace is `payments`, which is [`permits`]'s own**, because [`Permits::may`] answers
+/// only about the namespace it was asked for — `None` is the cluster-scoped question and gets
+/// [`Verdict::CouldNotTell`] from a namespace's rules (NOTES § D230 ruling 7).
+fn about_deployments<'a>(verb: &'a str, subresource: Option<&'a str>) -> Asking<'a> {
+    Asking {
+        verb,
+        group: "apps",
+        resource: "deployments",
+        subresource,
+        name: None,
+        namespace: Some("payments"),
+    }
+}
+
+/// **The rules review names one namespace and asks for nothing else** — one request, no
+/// `dryRun`, and a body this file wrote rather than one kube filled in.
+#[tokio::test]
+async fn the_rules_review_asks_about_one_namespace_and_sends_one_request() {
+    let (client, asked) = stub(|_| {
+        (
+            "201 Created".to_string(),
+            rules_reply(r#"{"incomplete":false,"nonResourceRules":[],"resourceRules":[]}"#),
+        )
+    })
+    .await;
+    let permits = may_i_in(&client, "payments").await;
+    let asked = asked.lock().expect("the log is never poisoned").clone();
+    println!("{asked:#?}");
+    assert_eq!(
+        asked,
+        vec![concat!(
+            r#"POST /apis/authorization.k8s.io/v1/selfsubjectrulesreviews? "#,
+            r#"{"apiVersion":"authorization.k8s.io/v1","#,
+            r#""kind":"SelfSubjectRulesReview","metadata":{},"#,
+            r#""spec":{"namespace":"payments"}}"#,
+        )],
+        "the rules review is not the one call this asks the cluster to answer"
+    );
+    // **A probe that changed something would be a probe nobody may run**, so the absence of a
+    // `dryRun` is asserted rather than assumed: there is nothing to rehearse here, and a dry run
+    // of a question is a question the server is asked not to answer.
+    assert!(
+        !asked[0].contains("dryRun"),
+        "the review carries a dryRun, so k8rs is rehearsing a call that changes nothing"
+    );
+    assert_eq!(
+        permits.may(&about_deployments("patch", None)),
+        Verdict::No,
+        "an empty rule list answered something other than no"
+    );
+}
+
+/// **The access review carries the whole of one cluster-scoped question** — verb, group,
+/// resource and the object's own name, and **no namespace**, because a node is in none
+/// (NOTES § D229 ruling 1).
+#[tokio::test]
+async fn the_access_review_asks_one_cluster_scoped_question_by_name() {
+    let (client, asked) = stub(|_| {
+        (
+            "201 Created".to_string(),
+            access_reply(r#"{"allowed":true}"#),
+        )
+    })
+    .await;
+    let verdict = may_i(
+        &client,
+        &Asking {
+            verb: "delete",
+            group: "",
+            resource: "nodes",
+            subresource: None,
+            name: Some("k8rs-worker"),
+            namespace: None,
+        },
+    )
+    .await;
+    let asked = asked.lock().expect("the log is never poisoned").clone();
+    println!("{asked:#?}");
+    assert_eq!(
+        asked,
+        vec![concat!(
+            r#"POST /apis/authorization.k8s.io/v1/selfsubjectaccessreviews? "#,
+            r#"{"apiVersion":"authorization.k8s.io/v1","#,
+            r#""kind":"SelfSubjectAccessReview","metadata":{},"spec":{"resourceAttributes":"#,
+            r#"{"group":"","name":"k8rs-worker","resource":"nodes","verb":"delete"}}}"#,
+        )],
+        "the question k8rs asked about a node is not `delete nodes/k8rs-worker`"
+    );
+    assert_eq!(verdict, Verdict::Yes);
+}
+
+/// **A subresource and a namespace ride on the same question when it has them** — the two fields
+/// the node question above leaves off, so neither can quietly stop being sent.
+///
+/// **`deployments/scale` is what `scale` needs permission on and not `deployments`**, which is the
+/// thing a reader guesses wrong: a login that may patch a Deployment may still not patch its
+/// scale.
+#[tokio::test]
+async fn a_namespaced_question_about_a_subresource_carries_both() {
+    let (client, asked) = stub(|_| {
+        (
+            "201 Created".to_string(),
+            access_reply(r#"{"allowed":false}"#),
+        )
+    })
+    .await;
+    let verdict = may_i(
+        &client,
+        &Asking {
+            namespace: Some("payments"),
+            ..about_deployments("patch", Some("scale"))
+        },
+    )
+    .await;
+    let asked = asked.lock().expect("the log is never poisoned").clone();
+    println!("{asked:#?}");
+    assert_eq!(
+        asked,
+        vec![concat!(
+            r#"POST /apis/authorization.k8s.io/v1/selfsubjectaccessreviews? "#,
+            r#"{"apiVersion":"authorization.k8s.io/v1","#,
+            r#""kind":"SelfSubjectAccessReview","metadata":{},"spec":{"resourceAttributes":"#,
+            r#"{"group":"apps","namespace":"payments","resource":"deployments","#,
+            r#""subresource":"scale","verb":"patch"}}}"#,
+        )],
+        "the question k8rs asked is not `patch deployments/scale in payments`"
+    );
+    assert_eq!(
+        verdict,
+        Verdict::No,
+        "a cluster that said no was not reported as one"
+    );
+}
+
+/// **A rule the cluster listed is a yes and one it did not is a no** — the matcher's two ordinary
+/// answers, over rules kube deserialised.
+///
+/// **The wildcards are here because RBAC's own matcher has them** and a rule set built from
+/// `apiGroups: ["*"]` is what a cluster-admin binding looks like: reading those as literal `*`
+/// resources would report *no* to somebody who may do everything.
+#[tokio::test]
+async fn a_listed_rule_answers_yes_and_an_unlisted_one_answers_no() {
+    let permits = permits(
+        r#"{"incomplete":false,"nonResourceRules":[],"resourceRules":[
+           {"verbs":["get","list","patch"],"apiGroups":["apps"],"resources":["deployments"]},
+           {"verbs":["*"],"apiGroups":["*"],"resources":["configmaps"]}]}"#,
+    )
+    .await;
+    // **Neither answer claims the cluster's authority** (NOTES § D230 ruling 6): this function
+    // over-reports on `resourceNames` by design, and *"the cluster says"* over that was measured
+    // against a `kubectl auth can-i` answering the opposite.
+    assert_eq!(
+        Verdict::Yes.plainly(),
+        "yes — this login is allowed to do that",
+        "the words a yes is reported in are not the ones a reader gets"
+    );
+    assert_eq!(
+        Verdict::No.plainly(),
+        "no — this login is not allowed to do that",
+        "the words a no is reported in are not the ones a reader gets"
+    );
+    for (asking, expected) in [
+        (about_deployments("patch", None), Verdict::Yes),
+        (about_deployments("delete", None), Verdict::No),
+        (
+            Asking {
+                group: "",
+                resource: "configmaps",
+                ..about_deployments("delete", None)
+            },
+            Verdict::Yes,
+        ),
+        (
+            Asking {
+                group: "",
+                resource: "secrets",
+                ..about_deployments("get", None)
+            },
+            Verdict::No,
+        ),
+    ] {
+        let verdict = permits.may(&asking);
+        println!(
+            "{} {}/{} → {}",
+            asking.verb,
+            asking.group,
+            asking.resource,
+            verdict.plainly()
+        );
+        assert_eq!(
+            verdict, expected,
+            "{} {}/{} was answered wrongly",
+            asking.verb, asking.group, asking.resource
+        );
+    }
+}
+
+/// **A rule naming the parent resource does not grant its subresource, and three spellings do** —
+/// RBAC's `ResourceMatches`, which is `*`, the exact `deployments/scale`, and `*/scale`.
+///
+/// **The negative is the load-bearing row.** A matcher that let `deployments` cover
+/// `deployments/scale` would report *yes* to a login that cannot scale anything, which is the
+/// over-report direction — safe for a key map and wrong for a reader who is told they may.
+#[tokio::test]
+async fn only_the_three_spellings_rbac_matches_grant_a_subresource() {
+    for (listed, granted) in [
+        (r#"["deployments"]"#, false),
+        (r#"["deployments/scale"]"#, true),
+        (r#"["*/scale"]"#, true),
+        (r#"["*"]"#, true),
+        (r#"["*/status"]"#, false),
+    ] {
+        let permits = permits(&format!(
+            r#"{{"incomplete":false,"nonResourceRules":[],"resourceRules":[
+               {{"verbs":["patch"],"apiGroups":["apps"],"resources":{listed}}}]}}"#
+        ))
+        .await;
+        let verdict = permits.may(&about_deployments("patch", Some("scale")));
+        println!("resources: {listed} → {verdict:?}");
+        assert_eq!(
+            verdict,
+            if granted { Verdict::Yes } else { Verdict::No },
+            "a rule listing {listed} answered the wrong thing about deployments/scale"
+        );
+    }
+}
+
+/// **A rule limited to named objects still answers a question that names none** — the one place
+/// this file knowingly over-reports, and the direction NOTES § D229 ruling 4 requires.
+///
+/// A login that may delete `web` may delete *something*, and answering *no* to *may I delete pods
+/// here* would dim the key over the row that is `web`. Naming the object gets the exact answer,
+/// which is the other two rows.
+#[tokio::test]
+async fn a_rule_limited_to_named_objects_answers_yes_to_a_question_that_names_none() {
+    let permits = permits(
+        r#"{"incomplete":false,"nonResourceRules":[],"resourceRules":[
+           {"verbs":["delete"],"apiGroups":[""],"resources":["pods"],
+            "resourceNames":["web"]}]}"#,
+    )
+    .await;
+    let pods = |name| Asking {
+        group: "",
+        resource: "pods",
+        name,
+        ..about_deployments("delete", None)
+    };
+    assert_eq!(
+        permits.may(&pods(None)),
+        Verdict::Yes,
+        "a question that named no object was refused by a rule that grants one"
+    );
+    assert_eq!(
+        permits.may(&pods(Some("web"))),
+        Verdict::Yes,
+        "the object the rule names was refused"
+    );
+    assert_eq!(
+        permits.may(&pods(Some("db"))),
+        Verdict::No,
+        "an object the rule does not name was allowed"
+    );
+}
+
+/// **An empty `resourceNames` is every object, and a rule that lists names answers only those** —
+/// [`about`]'s two halves, each held by a row that fails without it (`tester`, 2026-09-05).
+///
+/// **The short-circuit was untested and dropping it survived everything.** Nothing fed a rule with
+/// *no* `resourceNames` beside a question that **names an object**, and since NOTES § D230
+/// ruling 1 made the `/` the object's name that is the driver's main path, with a false `No` as
+/// its failure — a login allowed to delete every pod told it may not delete `web`.
+///
+/// **`*` is read as *every object*, and two sources disagree about that** ([`about`]). The API's
+/// own description of this field on a `SelfSubjectRulesReview` says *"`*` means all"*; RBAC's
+/// `ResourceNameMatches` compares literally and has no wildcard. This pins the first, which is
+/// also the over-reporting direction NOTES § D229 ruling 4 requires — and the row is here because
+/// reading it literally survived the whole suite.
+#[tokio::test]
+async fn a_rule_that_lists_no_names_covers_every_object_and_one_that_does_covers_only_those() {
+    for (names, web, other) in [
+        ("", Verdict::Yes, Verdict::Yes),
+        (r#","resourceNames":[]"#, Verdict::Yes, Verdict::Yes),
+        (r#","resourceNames":["web"]"#, Verdict::Yes, Verdict::No),
+        (r#","resourceNames":["*"]"#, Verdict::Yes, Verdict::Yes),
+    ] {
+        let permits = permits(&format!(
+            r#"{{"incomplete":false,"nonResourceRules":[],"resourceRules":[
+               {{"verbs":["delete"],"apiGroups":[""],"resources":["pods"]{names}}}]}}"#
+        ))
+        .await;
+        let pods = |name| Asking {
+            group: "",
+            resource: "pods",
+            name,
+            ..about_deployments("delete", None)
+        };
+        println!(
+            "{names:?} → web {:?} · db {:?} · unnamed {:?}",
+            permits.may(&pods(Some("web"))),
+            permits.may(&pods(Some("db"))),
+            permits.may(&pods(None))
+        );
+        assert_eq!(
+            permits.may(&pods(Some("web"))),
+            web,
+            "{names:?} answered the wrong thing about the object it names"
+        );
+        assert_eq!(
+            permits.may(&pods(Some("db"))),
+            other,
+            "{names:?} answered the wrong thing about an object it does not name"
+        );
+        // **A question that names nothing is always a yes here**, which is the deliberate
+        // over-report (NOTES § D229 ruling 4) and is asserted so a fix to the rows above cannot
+        // quietly take it away.
+        assert_eq!(permits.may(&pods(None)), Verdict::Yes);
+    }
+}
+
+/// **A rule that lists no groups, or no resources, grants nothing** — [`grants`]'s *"an absent list
+/// grants nothing"*, which was prose and nothing held it (`tester`, 2026-09-05).
+///
+/// `apiGroups` and `resources` are `Option` on the wire and a rule with neither is a rule about
+/// nothing. Over-reporting is the safe direction, so this errs the *unsafe* way if it breaks — a
+/// login told it may patch what no rule mentions — which is why the claim needed a row.
+///
+/// **The last row is the negative**: the same rule with both lists present is a `Yes`, so a
+/// matcher that answered `No` to everything would not pass this.
+#[tokio::test]
+async fn a_rule_that_names_no_group_or_no_resource_grants_nothing() {
+    for (rule, expected) in [
+        (
+            r#"{"verbs":["patch"],"resources":["deployments"]}"#,
+            Verdict::No,
+        ),
+        (r#"{"verbs":["patch"],"apiGroups":["apps"]}"#, Verdict::No),
+        (r#"{"verbs":["patch"]}"#, Verdict::No),
+        (
+            r#"{"verbs":["patch"],"apiGroups":["apps"],"resources":["deployments"]}"#,
+            Verdict::Yes,
+        ),
+    ] {
+        let permits = permits(&format!(
+            r#"{{"incomplete":false,"nonResourceRules":[],"resourceRules":[{rule}]}}"#
+        ))
+        .await;
+        let verdict = permits.may(&about_deployments("patch", None));
+        println!("{rule} → {verdict:?}");
+        assert_eq!(verdict, expected, "{rule} granted the wrong thing");
+    }
+}
+
+/// **A refused review is *could not tell* and is never a no** (NOTES § D229 ruling 4,
+/// `PRIOR-ART § B4`) — the assertion this whole box exists to make, over both shapes.
+///
+/// **`assert_ne!` against [`Verdict::No`] is not redundant beside the equality above it.** The
+/// equality says what today's code returns; this says what no future edit may make it return, and
+/// it is the row that goes red the day a probe starts refusing the operation it was only asked
+/// about.
+///
+/// **The server's own words travel with it**, because *k8rs could not find out* alone sends a
+/// reader nowhere: a `403` on the review names a missing verb and resource, and a dead socket does
+/// not (`PRIOR-ART § C1`, the security gate's *a 403 … names the missing verb + resource* row).
+#[tokio::test]
+async fn a_review_the_cluster_refused_is_could_not_tell_and_never_a_no() {
+    // **A real apiserver's own sentence for this refusal**, built through `json!` rather than
+    // written as one literal: the message carries quotes around every name in it, and a hand-typed
+    // JSON string is where an escape goes wrong and the test then measures a body kube could not
+    // parse.
+    let said = "selfsubjectrulesreviews.authorization.k8s.io is forbidden: User \"probe\" \
+                cannot create resource \"selfsubjectrulesreviews\" in API group \
+                \"authorization.k8s.io\" at the cluster scope";
+    let refusal = json!({
+        "kind": "Status",
+        "apiVersion": "v1",
+        "status": "Failure",
+        "message": said,
+        "reason": "Forbidden",
+        "code": 403,
+    })
+    .to_string();
+    let (client, _) = stub(move |_| ("403 Forbidden".to_string(), refusal.clone())).await;
+
+    let verdict = may_i_in(&client, "payments")
+        .await
+        .may(&about_deployments("patch", None));
+    println!("{}", verdict.plainly());
+    assert_ne!(
+        verdict,
+        Verdict::No,
+        "a refused probe was reported as the cluster refusing the operation"
+    );
+    assert_ne!(
+        verdict,
+        Verdict::Yes,
+        "a refused probe was reported as a yes"
+    );
+    let Verdict::CouldNotTell(why) = &verdict else {
+        panic!("a refused rules review is not could-not-tell: {verdict:?}");
+    };
+    assert!(
+        why.contains("not allowed to ask what it is allowed to do")
+            && why.contains("cannot create resource \"selfsubjectrulesreviews\""),
+        "the refusal does not carry the fault and the server's own words: {why}"
+    );
+    // **Said out loud, because this is the sentence somebody reads at 3am**: a probe that could
+    // not be run may not read as a refusal of what it was asked about.
+    assert!(
+        verdict.plainly().contains("That is not a no"),
+        "the sentence a reader gets does not say the probe's failure is not a refusal"
+    );
+
+    let verdict = may_i(
+        &client,
+        &Asking {
+            verb: "delete",
+            group: "",
+            resource: "nodes",
+            subresource: None,
+            name: None,
+            namespace: None,
+        },
+    )
+    .await;
+    println!("{}", verdict.plainly());
+    assert_ne!(
+        verdict,
+        Verdict::No,
+        "a refused access review was reported as the cluster refusing the delete"
+    );
+    assert!(matches!(verdict, Verdict::CouldNotTell(_)));
+}
+
+/// **A cluster that could not be reached at all is *could not tell* too**, and the sentence names
+/// the machine's own failure rather than the cluster's — [`in_words`]'s vocabulary, selected off
+/// the [`Fault`] and never off which call raised it (`PRIOR-ART § C1`).
+#[tokio::test]
+async fn a_cluster_that_never_answered_is_could_not_tell_and_says_so() {
+    let client = dead_port().await;
+    let verdict = may_i_in(&client, "payments")
+        .await
+        .may(&about_deployments("patch", None));
+    println!("{}", verdict.plainly());
+    assert_ne!(
+        verdict,
+        Verdict::No,
+        "a dead socket was reported as a refusal"
+    );
+    let Verdict::CouldNotTell(why) = &verdict else {
+        panic!("a cluster that never answered is not could-not-tell: {verdict:?}");
+    };
+    assert!(
+        why.contains("k8rs could not reach the cluster"),
+        "the sentence blames the cluster's answer for a call that never got one: {why}"
+    );
+}
+
+/// **An answer the cluster could not finish leaves a yes alone and turns a no into *could not
+/// tell*** — `incomplete` and `evaluationError`, which an authorizer that cannot enumerate its own
+/// rules sets (NOTES § D229 ruling 4).
+///
+/// **The yes half is what keeps a half answer useful.** A grant that is listed is a grant, whatever
+/// else the status said; what cannot be trusted is the *absence* of one.
+#[tokio::test]
+async fn an_answer_the_cluster_could_not_finish_keeps_its_yes_and_loses_its_no() {
+    for status in [
+        r#"{"incomplete":true,"nonResourceRules":[],"resourceRules":[
+           {"verbs":["patch"],"apiGroups":["apps"],"resources":["deployments"]}]}"#,
+        r#"{"incomplete":false,"evaluationError":"webhook authorizer did not answer",
+           "nonResourceRules":[],"resourceRules":[
+           {"verbs":["patch"],"apiGroups":["apps"],"resources":["deployments"]}]}"#,
+    ] {
+        let permits = permits(status).await;
+        assert_eq!(
+            permits.may(&about_deployments("patch", None)),
+            Verdict::Yes,
+            "a rule that is listed stopped being a grant because the list is short"
+        );
+        let verdict = permits.may(&about_deployments("delete", None));
+        println!("{}", verdict.plainly());
+        assert_ne!(
+            verdict,
+            Verdict::No,
+            "a rule missing from an admittedly incomplete list was read as a refusal"
+        );
+        assert!(matches!(verdict, Verdict::CouldNotTell(_)));
+    }
+    // **The whole answer still says no**, or the two rows above prove nothing: an implementation
+    // that answered could-not-tell to everything would pass every assertion in this test.
+    let whole = permits(r#"{"incomplete":false,"nonResourceRules":[],"resourceRules":[]}"#).await;
+    assert_eq!(
+        whole.may(&about_deployments("delete", None)),
+        Verdict::No,
+        "a complete answer with no matching rule stopped being a no"
+    );
+}
+
+/// **A rules review that came back with no `status` on it is *could not tell* for every question
+/// about that namespace** — the fail-closed arm a green suite did not hold (`tester`,
+/// 2026-09-05).
+///
+/// **Planting `None => (Vec::new(), None)` in [`may_i_in`] left all 1047 tests passing.** A 2xx
+/// with no status then reads as *a complete answer listing nothing*, so every question about that
+/// namespace comes back `No` — NOTES § D229 ruling 4's forbidden direction, from the one shape no
+/// error and no flag announces. The sibling test below feeds it to [`may_i`], which is a different
+/// function and was the only one covered.
+///
+/// **The second row is what stops this being vacuous**: a review that *does* carry a status still
+/// answers `No`, so an implementation that returned `CouldNotTell` for everything fails here.
+#[tokio::test]
+async fn a_rules_review_with_no_answer_on_it_is_could_not_tell_for_every_question() {
+    let (client, _) = stub(|_| {
+        (
+            "201 Created".to_string(),
+            r#"{"kind":"SelfSubjectRulesReview","apiVersion":"authorization.k8s.io/v1",
+               "metadata":{},"spec":{"namespace":"payments"}}"#
+                .to_string(),
+        )
+    })
+    .await;
+    let unanswered = may_i_in(&client, "payments").await;
+    for verb in ["patch", "delete", "get", "frobnicate"] {
+        let verdict = unanswered.may(&about_deployments(verb, None));
+        println!("{verb} → {}", verdict.plainly());
+        assert_ne!(
+            verdict,
+            Verdict::No,
+            "{verb} was refused off a review that carried no answer at all"
+        );
+        assert!(matches!(verdict, Verdict::CouldNotTell(_)));
+    }
+    let whole = permits(r#"{"incomplete":false,"nonResourceRules":[],"resourceRules":[]}"#).await;
+    assert_eq!(
+        whole.may(&about_deployments("patch", None)),
+        Verdict::No,
+        "a review that did carry an answer stopped being able to say no"
+    );
+}
+
+/// **A status the server left off entirely is *could not tell*** — the third failure shape, and
+/// the one no error and no flag announces.
+#[tokio::test]
+async fn a_review_that_came_back_with_no_answer_on_it_is_could_not_tell() {
+    let (client, _) = stub(|_| {
+        (
+            "201 Created".to_string(),
+            r#"{"kind":"SelfSubjectAccessReview","apiVersion":"authorization.k8s.io/v1",
+               "metadata":{},"spec":{"resourceAttributes":{"resource":"nodes","verb":"delete"}}}"#
+                .to_string(),
+        )
+    })
+    .await;
+    let verdict = may_i(
+        &client,
+        &Asking {
+            verb: "delete",
+            group: "",
+            resource: "nodes",
+            subresource: None,
+            name: None,
+            namespace: None,
+        },
+    )
+    .await;
+    println!("{}", verdict.plainly());
+    assert_ne!(
+        verdict,
+        Verdict::No,
+        "a missing answer was read as a refusal"
+    );
+    assert!(matches!(verdict, Verdict::CouldNotTell(_)));
+}
+
+/// **The access review's own three answers**, off the one field that decides each.
+///
+/// **`allowed: false` with `denied: false` is a no.** That is *no authorizer had an opinion*, and
+/// an unmatched request is refused by the API server — so what would happen is a refusal, which is
+/// what the reader is told. **An `evaluationError` beside a `false` is not**, for the rules
+/// review's reason.
+#[tokio::test]
+async fn the_access_review_answers_yes_no_and_could_not_tell() {
+    for (status, expected) in [
+        (r#"{"allowed":true}"#, Verdict::Yes),
+        (r#"{"allowed":false,"denied":false}"#, Verdict::No),
+        (
+            r#"{"allowed":false,"denied":true,"reason":"a webhook said no"}"#,
+            Verdict::No,
+        ),
+        (
+            r#"{"allowed":false,"evaluationError":"the webhook authorizer timed out"}"#,
+            Verdict::CouldNotTell(
+                "this cluster could not work the whole answer out: the webhook authorizer \
+                 timed out"
+                    .to_string(),
+            ),
+        ),
+    ] {
+        let body = access_reply(status);
+        let (client, _) = stub(move |_| ("201 Created".to_string(), body.clone())).await;
+        let verdict = may_i(
+            &client,
+            &Asking {
+                verb: "delete",
+                group: "",
+                resource: "nodes",
+                subresource: None,
+                name: None,
+                namespace: None,
+            },
+        )
+        .await;
+        println!("{status} → {}", verdict.plainly());
+        assert_eq!(verdict, expected, "{status} was answered wrongly");
+    }
+}
+
+/// **A question about another namespace is not answered from this one's rules** — the wrong-object
+/// class, in the one place a permission answer could quietly be about somewhere else.
+///
+/// **The granting row is what makes this a test rather than a tautology.** These rules *do* grant
+/// the verb, so a matcher that ignored the namespace would answer `Yes` to the `staging` question
+/// and this would be the only assertion that saw it — which is exactly what
+/// `replace != with ==` mutates the guard into.
+///
+/// **It was a `#[should_panic]` over a `debug_assert!` and that could not fail** ([`Permits::may`],
+/// measured with `just mutants-diff`): the assertion fired before the branch, so the guard it was
+/// decorating was unreachable from any test.
+#[tokio::test]
+async fn a_question_about_another_namespace_is_not_answered_from_this_ones_rules() {
+    let permits = permits(
+        r#"{"incomplete":false,"nonResourceRules":[],"resourceRules":[
+           {"verbs":["patch"],"apiGroups":["apps"],"resources":["deployments"]}]}"#,
+    )
+    .await;
+    assert_eq!(
+        permits.may(&about_deployments("patch", None)),
+        Verdict::Yes,
+        "the namespace this answer is about was refused its own question"
+    );
+    assert_eq!(
+        permits.may(&Asking {
+            namespace: Some("payments"),
+            ..about_deployments("patch", None)
+        }),
+        Verdict::Yes,
+        "naming the namespace this answer is about changed the answer"
+    );
+    // **A cluster-scoped question is the other half, and it is NOTES § D230 ruling 7's one
+    // character** (`k8s-admin`, 2026-09-05). `is_some_and` guarded only a *mismatch*, so `None` —
+    // `delete nodes`, the question [`Asking`]'s own doc names — fell straight into the rule match
+    // and would have been answered out of one namespace's rules.
+    for (asking, which) in [
+        (
+            Asking {
+                namespace: Some("staging"),
+                ..about_deployments("patch", None)
+            },
+            "another namespace",
+        ),
+        (
+            Asking {
+                namespace: None,
+                ..about_deployments("patch", None)
+            },
+            "the whole cluster",
+        ),
+    ] {
+        let elsewhere = permits.may(&asking);
+        println!("{which} → {}", elsewhere.plainly());
+        assert!(
+            matches!(elsewhere, Verdict::CouldNotTell(_)),
+            "one namespace's rules answered a question about {which}: {elsewhere:?}"
+        );
+    }
+}

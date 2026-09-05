@@ -2413,6 +2413,22 @@ recorded reversal and a later box rather than a dev round
   one. Belongs to a later phase with `tests/` and `scripts/` as its files — a box
   is never added to a running phase. Recommended by `tester`, 2026-09-04
 
+- **A body k8rs cannot decode wears a dead socket's sentence.** `k8s::fault`'s
+  catch-all sends `kube::Error::SerdeError` to `Fault::Unanswered`, so a `201`
+  carrying the wrong kind — an aggregated apiserver or a proxy answering oddly —
+  prints *"k8rs could not reach the cluster"* for a cluster that answered.
+  Reported independently by `dev-core` and `tester` while `may_i` was built
+  (2026-09-05); pre-existing, and `k8s.rs` is frozen.
+  **Deliberately not fixed, and the reasoning is the entry.** Telling the two
+  apart inside `may_i` means a second classifier beside the one `k8s.rs` owns —
+  the [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+  shape this file has been corrected for twice — and reopening a frozen file for
+  a wording is worse than the wording. The reader's next step is identical in
+  both cases (the cluster gave no usable answer, and nothing was hidden), and
+  `Fault::Unanswered` is already the honest *k8rs does not know*. Worth revisiting
+  only if a real cluster is ever seen producing it, which none has been. `dev-core`
+  and `tester`, 2026-09-05
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

@@ -3858,12 +3858,36 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       comment. `just check` green (**1027 + 28**), `just mutants-diff` 3 mutants
       0 missed, and the strip's own coverage proven by planting its removal —
       three tests red, the same three as at `HEAD`
-- [ ] **`may_i(...)`** — `SelfSubjectRulesReview` per namespace, plus a
+- [x] **`may_i(...)`** — `SelfSubjectRulesReview` per namespace, plus a
       `SelfSubjectAccessReview` for the two cluster-scoped operations. It lives
       in `ops.rs` although it mutates nothing, because it is performed with
       `create` and widening the allowlist would turn a mechanical guard into a
       judgement call
-      ([NOTES § D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards))
+      ([NOTES § D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards) ·
+      [D229](NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05) ·
+      [D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)).
+      **"The two cluster-scoped operations" were cordon and drain, and neither is
+      built** — the one that exists is `delete node/<name>`, so it is one shape
+      (D229 ruling 1). It **fails open**: a probe k8rs cannot run reports *could
+      not tell*, hides nothing and refuses nothing, and the real call still
+      decides — measured against kind's Node authorizer, which sets
+      `incomplete: true` and made every non-matching question `CouldNotTell`
+      rather than `No`.
+      **Done when:** measured against a real cluster and against `kubectl auth
+      can-i`, which is the same matcher — the two agree on every wildcard shape,
+      and the API server's own `SubjectAccessReview` confirms `patch deployments`
+      does **not** grant `patch deployments/scale`. The review round moved the
+      driver's syntax to kubectl's meaning (`/` is the object name,
+      `--subresource=` the subresource), refused a group-less resource instead of
+      answering `no` to it, made `--read-only` permit a question while still
+      refusing every operation, and put one question through the access review so
+      `-n` cannot change the answer. `just check` green (**1052 + 29**),
+      `just mutants-diff` 88 mutants 0 missed over product code, and the fail-open
+      arm that had survived every one of 1047 tests is now killed from both the
+      unit and the binary.
+      **`may_i_in`/`Permits` enter the freeze with no product caller, on purpose**
+      — D23's one-call bulk path is what Phase 11's key map needs, and nine tests
+      drive it directly
 - [ ] **The audit line is written and flushed before the call**, the result
       appended after. If the log cannot be written, the mutation is refused —
       [invariant 4](CLAUDE.md) leaves no other answer. If it cannot be opened

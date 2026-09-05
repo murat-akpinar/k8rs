@@ -262,7 +262,28 @@ rules:
     resources:
       ["deployments/scale", "statefulsets/scale", "replicasets/scale"]
     verbs: ["get", "patch"]          # scale
+  # `may_i` asks the cluster what this login may do, so keys the user cannot use
+  # can be dim from the start instead of failing after the object's name has been
+  # typed (NOTES § D23). A `SelfSubject*Review` can only ask about its own caller,
+  # reads no object and cannot escalate — the cheapest grant in RBAC.
+  #
+  # **On an ordinary cluster this rule changes nothing**: the default
+  # `system:basic-user` ClusterRole already grants both to every authenticated
+  # user. It matters only on a cluster that dropped that binding, which is
+  # exactly the condition that hid the `nonResourceURLs` gap above until one was
+  # tried (NOTES § D160) — measured needed *and* sufficient there, 2026-09-05.
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectrulesreviews", "selfsubjectaccessreviews"]
+    verbs: ["create"]
 ```
+
+**`k8rs-readonly` deliberately does not carry that last rule.** No read-only code
+path calls `may_i` today, and this file holds itself to *every rule is reachable
+by code that exists* — [D187](../NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
+removed two grants on that test. It arrives with the browser row that reads it
+([NOTES § D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)).
+The probe **fails open**, so a read-only login without the grant is told k8rs
+could not find out — never that it may not.
 
 **The `/scale` rule is separate on purpose, and `get` is not a typo.** RBAC
 matches `resource/subresource` as one string, so a grant on `deployments` does

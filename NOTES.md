@@ -250,6 +250,8 @@ its line moving with it.
 - [D226](#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04) — the `delete` review round: a token that could be replayed, a removal that had not happened, and the sandbox that was not one
 - [D227](#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05) — the resourceVersion goes only where a read already happened, and the metadata read that leaks what a `GET` was refused for
 - [D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05) — the review round that reversed the box: a precondition on a field that moves when nothing changed, and the dry-run window that was 0.2% of what it claimed
+- [D229](#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05) — the four rulings `may_i` could not be briefed without, and the box's arithmetic that went stale under it
+- [D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) — the `may_i` review round: a spelling that answers the opposite of `kubectl`, and the read-only user who could not ask what they may do
 
 ## Why it exists — where the gap is
 
@@ -19783,3 +19785,213 @@ D227 opened had a wrong premise and is retired. And `removal` serves
 **`replicaset`**, which invariant 6 fetches on demand and never watches — so
 Phase 11's *`uid` off the watch* has no watch for that one kind, boxed there
 rather than discovered in it.
+
+### D229 — the four rulings `may_i` could not be briefed without, and the box's arithmetic that went stale under it (2026-09-05)
+
+todo.md's `may_i` box and [D23](#d23--permissions-are-discovered-by-failing-and-that-is-backwards)
+were written on 2026-08-11, before any operation existed. Read at HEAD, three of
+their premises have moved.
+
+**1. "The two cluster-scoped operations" are not built, and the one that exists
+is `delete`.** D23 names **cordon and drain**; both are v0.2 and neither is
+written. The cluster-scoped mutation k8rs performs today is `delete node/<name>`
+([D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 3, the first one). So the box's *plus a `SelfSubjectAccessReview` for the
+two cluster-scoped operations* is one shape and not two, and it is `delete` on a
+Node. The count is not the point; briefing an agent to build two reviews for
+operations that do not exist is.
+
+**2. The gap D23 describes is live for exactly one operation, and this file
+opened it.** D23's case is *the user types a pod name in full, presses `⏎`, and
+only then learns they were never allowed*. For `scale` and `restart` that has
+been false since they landed: both are `checkable: true`, so the `dryRun=All`
+goes out **before** [`perform`] calls `ask`, and a `403` lands as
+`Outcome::NotSent { fault: Refused }` with nobody having typed anything.
+`delete` is the only `checkable: false` mutation
+([D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1 declined its preflight, for reasons that still hold) — so it sends
+nothing at all before asking for the object's name typed in full. **D225 ruling 1
+is what made D23's scenario real, and `may_i` is what closes it.** That is worth
+writing down because the two entries were reasoned a month apart and neither
+knew it.
+
+**3. `may_i` is built now and wired to a key later, and the reason is the
+freeze.** D23's stated payoff — *keys the user cannot use are dim from the start
+and the footer says why* — needs a key map, which is Phase 11. But `ops.rs`
+freezes at the end of Phase 7, and `may_i` must live in `ops.rs` because both
+reviews are performed with `create` (D23's own invariant-1 ruling, unchanged and
+still right). So the function is written and proven here with the headless driver
+as its first caller, and **the dimming is Phase 11's**. What this box does *not*
+do is put a permission check inside [`perform`]: that changes the behaviour of
+three landed operations and belongs beside the dialog that would show its result.
+Phase 11's box carries the `delete` connection from ruling 2.
+
+**4. It fails open, and a refusal of the review is not a refusal of the
+operation.** A cluster can refuse the `SelfSubjectRulesReview` itself. When the
+answer cannot be had, k8rs **assumes the operation is permitted** and lets the
+real call decide — which is exactly today's behaviour, so a failed probe costs
+nothing and changes nothing. Failing *closed* would hide an operation the user is
+in fact allowed to perform, turning a diagnostic into an outage, and it is the
+[PRIOR-ART § B4](PRIOR-ART.md) shape this repo has now met twice: k9s 0.50.12
+gating a shell on a node read the user could not do, and
+[D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)'s
+own precondition. **A probe may never be the reason a permitted action is
+refused.** The security gate's *a 403 degrades that one feature and names the
+missing verb + resource; it never crashes and never retries in a loop* is the
+rule, applied to the probe rather than to the operation.
+
+**What is owed to the documented roles and is not assumed.** Both reviews are
+`create` on `selfsubjectrulesreviews` / `selfsubjectaccessreviews` in
+`authorization.k8s.io`. The default `system:basic-user` ClusterRole grants these
+to every authenticated user on an ordinary cluster, which is exactly the
+condition that hid the `nonResourceURLs` gap until a cluster without the default
+binding was tried
+([D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+So the grant is **measured against a role with no default bindings** before
+[docs/security.md](docs/security.md) claims either role runs it, rather than
+inferred from a cluster that would answer yes regardless.
+
+### D230 — the `may_i` review round: a spelling that answers the opposite of `kubectl`, and the read-only user who could not ask what they may do (2026-09-05)
+
+The operator review measured `may_i` against a real cluster and against
+`kubectl auth can-i`, which is the reference implementation of the same matcher
+([reports/2026-09-05-may-i-against-a-real-cluster.md](reports/2026-09-05-may-i-against-a-real-cluster.md)).
+**The matcher is right and the line is wrong** — every defect is in how the
+driver reads a typed string, and two of them make k8rs state the opposite of the
+truth.
+
+**First, what held.** `dev-core`'s one reasoned claim — that a rule granting
+`patch deployments` does **not** grant `patch deployments/scale` — is correct,
+measured off the API server's own `SubjectAccessReview` rather than off kubectl:
+`subresource=''` allowed, `subresource='scale'` refused, same rule. `addresses()`
+implements `ResourceMatches` and agreed on every wildcard shape fed to it. The
+fail-open half of [D229](#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)
+ruling 4 also held against a real second authorizer: kind's Node authorizer sets
+`incomplete: true` with *"node authorizer does not support user rule
+resolution"*, and every non-matching question under that identity came back
+`CouldNotTell`, never `No`.
+
+**1. `/` means the object's name in `kubectl auth can-i`, not the subresource,
+and k8rs claimed otherwise in a doc and in a test.** Measured: under a rule
+granting `delete pods` with `resourceNames: [only-this-pod]`, `kubectl auth
+can-i delete pods/only-this-pod` is **yes** and k8rs's `may-i delete
+pods/only-this-pod` is **no**; the subresource in kubectl is `--subresource=`.
+So one string is two different questions with two different answers in two tools
+whose syntax k8rs's own comment claims is shared. **The ruling is to take
+`kubectl`'s meaning, not to correct the comment**: `/` after the resource is the
+**object name**, and the subresource moves to `--subresource=<name>`. Both map
+onto fields [`Asking`] already has — `name`, which had no caller, and
+`subresource` — so nothing in the frozen type changes. A flag that takes a value
+is not [D17](#d17--the---once-output)'s threshold
+([D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
+and borrowing a spelling while changing what it means is worse than not
+borrowing it.
+
+**2. A group-less resource is refused, never answered `no`.** The driver
+defaults the group to `""`, so `patch deployments` asks about the *core* group,
+finds nothing, and prints *"no — the cluster says this login is not allowed to do
+that"* — of the everyday spelling, under a login that is in fact allowed.
+Measured wrong for `deployments`, `deployment`, `deploy`, `pod` and `po`, all
+against a `kubectl auth can-i` that says yes. **The cluster said no such thing**;
+it said no rule matches that resource in the core group. k8rs refuses the line
+and names the fix (`deployments.apps`) rather than answering, which is how the
+rest of `ops_run` already handles a word it cannot resolve. Discovery-backed
+resolution is Phase 11's, where the resource and group come off discovery and
+never off a typed word.
+
+**3. `--read-only` permits `may-i`, and this narrows a gate row rather than an
+invariant.** Measured: `k8rs --read-only ops may-i list pods` is refused with
+*"--read-only was asked for, so k8rs will not change anything"*, which is exactly
+backwards for the user most likely to ask what they are allowed to do.
+[Invariant 2](CLAUDE.md)'s subject is **mutation** — *"`--read-only` makes the
+whole path unreachable"* is about the write path — but the security gate row
+spells it *`ops.rs` unreachable*, and `may_i` is the first thing in `ops.rs` that
+is not a write. **D23 predicted this exactly** by putting it there for a
+*mechanical* reason: the allowlist stays mechanical, and the price is that
+`ops.rs` is no longer synonymous with *changes the cluster*. The row now reads
+*no mutation is reachable*. **Ruled now rather than in Phase 11 because `ops.rs`
+freezes at the end of this phase** and `k8s.rs` § THE BROWSER'S ROWS already
+points at `ops::may_i` for *may this kubeconfig list this kind* — a read-only
+feature that `--read-only` would otherwise have killed before it was written.
+
+**4. A `no` exits `1`, and D17 is not spent by it — checked, not recalled.**
+[D17](#d17--the---once-output) rules *findings do not change the exit code — k8rs
+is a report, not a linter*, and keeps `1` unused **so a `--exit-code` flag has
+somewhere to go**. That reservation is about `--once`'s findings, and a probe's
+answer is not a finding — it is the entire output of a different subcommand, so
+`may-i` taking `1` for *no* leaves `--exit-code` exactly the room D17 saved it.
+(The first draft of this ruling said *this is the case D17 reserved `1` for*,
+which is not what D17 says; the anchor it cited was wrong too, and both came from
+recalling the entry instead of opening it.) Today `0` means yes *and* no while `2` means could-not-tell, a malformed
+line and a missing kubeconfig, so a script cannot get the answer out of the exit
+code at all and must grep an English sentence invariant 14 will keep rewriting.
+`kubectl auth can-i` exits `1` on a no, and this subcommand deliberately borrows
+its muscle memory. `0` yes · `1` no · `2` k8rs could not find out.
+
+**5. One question is asked with a `SelfSubjectAccessReview`, always — which is
+what stops two readers of one permission model disagreeing.** Measured, same
+login and same question: `may-i delete pods -n default` answered **yes** and
+`may-i delete pods` answered **no**, because `-n` selected the rules review and
+its local matcher while its absence selected the access review and let the server
+answer. That is [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+class — two rules reading one object and disagreeing — and it is invisible from
+inside either function. The server's answer is the exact one, so a *single*
+question goes to `may_i`. **[`may_i_in`] and [`Permits`] keep their reason for
+existing**: D23's *one call answers everything in this namespace* is the bulk
+path Phase 11 needs to dim a whole key map without a request per key, and it is
+tested directly rather than through the driver.
+
+**6. `Verdict::Yes` may not attribute to the cluster an answer the cluster did
+not give.** `Permits::may` over-reports on `resourceNames` deliberately —
+ruling 4's direction, and right — but the sentence it produces is *"yes — the
+cluster says this login is allowed to do that"*, measured against a `kubectl auth
+can-i` that says **no** for the same question. The over-report stays; the claim
+of the cluster's authority for it goes. A key staying lit is fail-open working
+as designed; a record asserting the cluster said so is invariant 4's *neither
+record may lie*.
+
+**7. Two more, small and both measured.** [`Permits::may`] guards a namespace
+*mismatch* but lets `namespace: None` fall through into the rule match — so the
+cluster-scoped question [`Asking`]'s own doc names, `delete nodes`, would be
+answered from one namespace's rules. Unreachable from today's driver, a trap for
+Phase 11, and one character of guard. And [`unasked`] opens a refused *probe*
+with `in_words(Fault::Refused)` — *"the cluster would not allow it"* — which is
+the same eight words a refused **delete** prints, so the reader meets a denial
+and the *"That is not a no"* disclaimer 180 characters later. Selecting off the
+`Fault` is right; the subject of the sentence is not, and a refused question
+needs its own words.
+
+**What the roles get, and it is not both.** Measured needed *and* sufficient
+under an identity without `system:basic-user`: adding `create` on
+`selfsubjectrulesreviews` / `selfsubjectaccessreviews` turns *could not tell*
+into a real answer. **`k8rs-admin` gets the rule; `k8rs-readonly` does not, yet**
+— no read-only code path calls `may_i` today, and
+[docs/security.md](docs/security.md) holds itself to *every rule is reachable by
+code that exists* ([D187](#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
+removed two grants on that test). It arrives with the browser row that reads it.
+**And a technique in an older report has stopped working:** on v1.36.1 an
+explicit `as-groups` no longer drops the auto-added `system:authenticated`, so
+`reports/2026-08-30-the-read-only-clusterrole-under-itself.md` § 2's
+impersonation no longer reaches the no-default-bindings condition — naming
+`system:unauthenticated` does. Anyone reusing that method measures the wrong
+thing and gets a green.
+
+**A hand-off summary is a second copy, and it lost the thing the ruling was
+about.** The PM sent `tester` a row-by-row table of what each `tests/binary.rs`
+case must become. It never said what the **object name** has to look like on the
+wire — so a rewrite built from the table left `name: None` in `may_i_connected`
+**surviving**, which is the measured defect ruling 1 exists for. `tester` read
+this entry instead, asserted the whole `resourceAttributes` per row, and the
+plant died; the same assertion caught a `namespace` leaking onto the
+cluster-scoped question. **The rule is already in [CLAUDE.md](CLAUDE.md)** — *a
+decision is written once and cited, the second copy is the one that goes stale* —
+and a brief's convenience table is a second copy like any other. Cite the ruling
+and name the file; do not restate it as a list of edits.
+
+**The one that is reasoned and stays open.** An authorizer outside the
+rule-resolver chain — a webhook, cloud IAM — would leave `incomplete` false and
+the rules review silently short, and `Permits::may` would answer a clean `No` for
+a login that is allowed. kind's Node authorizer does the honest thing; no
+evidence either way about GKE/EKS/OpenShift, and no cluster with one was
+buildable in that run. **It is the bulk path's problem, not the single
+question's** (ruling 5), so it is boxed with the Phase 11 dimming and not here.

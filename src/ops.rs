@@ -38,13 +38,17 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::authorization::v1::{
+    ResourceAttributes, ResourceRule, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
+    SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
+};
 use k8s_openapi::api::autoscaling::v1::Scale;
 use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::jiff::Timestamp;
 use k8s_openapi::serde_json::{Value, json};
 use kube::api::{
-    Api, ApiResource, DeleteParams, DynamicObject, Patch, PatchParams, PropagationPolicy,
-    ValidationDirective,
+    Api, ApiResource, DeleteParams, DynamicObject, Patch, PatchParams, PostParams,
+    PropagationPolicy, ValidationDirective,
 };
 use kube::{Client, Resource};
 
@@ -2438,6 +2442,412 @@ where
 }
 
 // --- DELETE END ---
+
+// --- MAY I START ---
+//
+// **The one thing in this file that changes nothing, and the reason it is in this file anyway**
+// (NOTES § D23). Both reviews are performed with `create`, which `clippy.toml` bans crate-wide, so
+// the choice was to widen invariant 1's allowlist with a *but this create is harmless* clause or
+// to put a read-only function in the file called "every write". The allowlist stays mechanical
+// and this is what that costs: two calls that send a question and receive an opinion.
+//
+// **What it is for is D23's own case, and D229 ruling 2 narrowed it to one operation.** `scale`
+// and `restart` are `checkable: true`, so their `dryRun=All` goes out before [`perform`] calls
+// `ask` and a `403` lands with nobody having typed anything. `delete` is the only
+// `checkable: false` mutation (NOTES § D225 ruling 1), so it asks for the object's name typed in
+// full before it sends anything at all — and *the user types a pod name and only then learns they
+// were never allowed* is now `delete`'s alone. **Nothing here is wired into that path**
+// (D229 ruling 3): a permission check inside [`perform`] would change three landed operations,
+// and the dimming this answer is for is Phase 11's. `ops.rs` freezes at the end of Phase 7 and
+// these calls must live in it, so the function lands now and the key map reads it later.
+//
+// **It fails open, and that is the whole ruling rather than a fallback** (D229 ruling 4,
+// `PRIOR-ART § B4`). A cluster can refuse the review itself, answer half of it, or not answer at
+// all; every one of those is [`Verdict::CouldNotTell`], and **nothing about k8rs's behaviour may
+// turn on it**. A probe that became the reason a permitted action was hidden is k9s 0.50.12
+// gating a node shell on a read the user could not do — a diagnostic turned into an outage. So
+// this file gives a caller three values and never two, and the third is not an error variant to
+// be unwrapped into one of the others.
+//
+// **Two shapes, because they answer two differently sized questions.** [`may_i_in`] sends one
+// `SelfSubjectRulesReview` and gets back everything the subject may do in one namespace, which is
+// what makes a screenful of keys one round trip rather than one each; [`may_i`] sends a
+// `SelfSubjectAccessReview` and gets one answer, which is what a cluster-scoped question has —
+// `delete node/<name>` being the only cluster-scoped mutation k8rs performs (D229 ruling 1). The
+// browser's own note points here (`k8s.rs` § THE BROWSER'S ROWS: *the only call that answers that
+// is a `SelfSubjectAccessReview`, which is performed with `create` and therefore lives in
+// `ops.rs`*), and [`may_i`] is that call.
+//
+// **Nothing here writes an audit line and nothing here calls [`perform`].** The audit log records
+// mutations (NOTES § D221), a probe is not one, and a log with a line per dimmed key in it is a
+// log nobody reads. What a probe leaves behind is its answer.
+//
+// **The rules are read and never shown.** A `ResourceRule` is compared against words k8rs wrote
+// itself, so nothing in [`Permits`] reaches a screen — the two strings that *do*, an
+// `evaluationError` and whatever the server said about a refusal, are stripped where they enter
+// (invariant 9, [`cleaned`], [`crate::k8s::said`]).
+
+/// **What a rule means by "all of them"** — RBAC's wildcard, in `verbs`, `apiGroups`, `resources`
+/// and `resourceNames` alike.
+const ALL: &str = "*";
+
+/// **The answer to one permission question — and the third value is the point** (NOTES § D229
+/// ruling 4).
+///
+/// [`Self::CouldNotTell`] is not a failure to be collapsed into [`Self::No`]. It is what k8rs
+/// knows when the review was refused, half answered, or never came back, and the sentence it
+/// carries is why. **A caller may not dim a key on it, refuse an operation on it, or report it as
+/// a refusal**: the operation stays available and the real call decides, which is exactly what
+/// happens today with no probe at all.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// **This login is allowed to do it**, and the answer is not always the cluster's own
+    /// (NOTES § D230 ruling 6). [`may_i`] gets it from the server; [`Permits::may`] reads it off
+    /// one namespace's listed rules and deliberately over-reports on `resourceNames` — measured
+    /// against a `kubectl auth can-i` answering **no** to the same question. The over-report is
+    /// D229 ruling 4's direction and stays; what may not is a record claiming the cluster said so.
+    ///
+    /// **This paragraph is the second copy the ruling had already fixed once.** [`Self::plainly`]
+    /// lost *"the cluster says"* on 2026-09-05 and this doc kept it, which is CLAUDE.md's own
+    /// *the second copy is the one that goes stale, and it is never the one that gets fixed*.
+    Yes,
+    /// **This login is not allowed to do it** — the server's answer through [`may_i`], or no
+    /// listed rule granting it through [`Permits::may`], which only reports one where the answer
+    /// it read was whole. [`Self::Yes`]'s note about whose answer this is applies here too
+    /// (NOTES § D230 ruling 6).
+    No,
+    /// **k8rs could not find out**, and the sentence saying why — already stripped and bounded.
+    CouldNotTell(String),
+}
+
+impl Verdict {
+    /// **One answer in words somebody in their first month reads without a glossary**
+    /// (invariant 14) — the clause a caller prints after the question it asked.
+    ///
+    /// **[`Self::CouldNotTell`]'s sentence says out loud that it is not a no**, because that is
+    /// the confusion NOTES § D229 ruling 4 exists to prevent and the reader is the person most
+    /// likely to make it.
+    ///
+    /// **The reason is a whole clause and this adds no lead-in to it.** A `k8rs could not find
+    /// out — ` in front of [`unasked`]'s own *k8rs tried to ask* said the same thing twice, which
+    /// is what the first draft printed.
+    ///
+    /// **Neither answer says *the cluster says*, and that is a correction rather than a trim**
+    /// (NOTES § D230 ruling 6). [`Permits::may`] over-reports on `resourceNames` on purpose —
+    /// D229 ruling 4's direction, and right — so *"yes — the cluster says this login is allowed"*
+    /// was measured against a `kubectl auth can-i` answering **no** to the same question. The
+    /// over-report stays; a record claiming the cluster's authority for it is invariant 4's
+    /// *neither record may lie*. `No` drops the clause with it: one of the two keeping an
+    /// attribution the other cannot have is a distinction no reader would read as one.
+    pub fn plainly(&self) -> String {
+        match self {
+            Self::Yes => "yes — this login is allowed to do that".to_string(),
+            Self::No => "no — this login is not allowed to do that".to_string(),
+            Self::CouldNotTell(why) => format!(
+                "{why}. That is not a no — k8rs hides nothing and refuses nothing because of it, \
+                 and the operation is still there to run"
+            ),
+        }
+    }
+}
+
+/// **One permission question, in the words the API asks it in.**
+///
+/// **The verb and the resource are the *API's* and not k8rs's** — `patch` and `deployments`, not
+/// *scale* and *deployment* — because that is what a `ResourceRule` and a `ResourceAttributes`
+/// are written in, and a translation table between the two would be the second copy NOTES § D103
+/// is named for. What owns the translation is the caller that knows which call it is about to
+/// make.
+pub struct Asking<'a> {
+    /// The API verb: `get`, `list`, `watch`, `patch`, `create`, `delete`.
+    pub verb: &'a str,
+    /// The API group, `apps` — and `""` for the core group, which is what the API calls it too.
+    pub group: &'a str,
+    /// The resource in the plural the API spells: `deployments`, `pods`, `nodes`.
+    pub resource: &'a str,
+    /// The subresource where the question is about one — `scale`, which is the path `scale`
+    /// patches and therefore the thing it needs permission on.
+    ///
+    /// **A rule granting the parent does not grant this, and that is measured off the API
+    /// server's own `SubjectAccessReview` rather than off `kubectl`** (NOTES § D230,
+    /// `reports/2026-09-05-may-i-against-a-real-cluster.md` § 3a): under one rule granting
+    /// `patch deployments`, `subresource: ""` is allowed and `subresource: "scale"` is refused.
+    /// It is the one reasoned claim this file shipped, and the operator review is what turned it
+    /// into a measured one.
+    ///
+    /// **The driver spells it `--subresource=<name>` and not with a `/`** (D230 ruling 1) —
+    /// `kubectl auth can-i`'s own spelling, where the `/` means something else entirely.
+    pub subresource: Option<&'a str>,
+    /// **The object's own name, where the question is about one object.** `None` asks about the
+    /// resource in general, which is what a key map wants before a row is selected.
+    ///
+    /// **The driver's `/` fills it in** (NOTES § D230 ruling 1): `may-i delete pods/web` asks about
+    /// `web`, which is what `kubectl auth can-i` reads the same string as — and the opposite of
+    /// what this file first read it as. It is also what makes [`Permits::may`]'s `resourceNames`
+    /// over-report answerable exactly, rather than only in the reader's favour.
+    pub name: Option<&'a str>,
+    /// The namespace, or `None` for a cluster-scoped question — [`may_i`]'s `delete nodes`.
+    pub namespace: Option<&'a str>,
+}
+
+/// **Everything one login may do in one namespace, from one call** — D23's own reason for the
+/// rules review: a screenful of keys is one round trip and not one each.
+///
+/// **A `No` off this is only a `No` where the answer was whole.** `SubjectRulesReviewStatus`
+/// carries `incomplete` and an `evaluationError` for an authorizer that cannot enumerate its own
+/// rules, and a rule that is missing from the list is indistinguishable from a rule that does not
+/// exist. So [`Self::may`] answers [`Verdict::Yes`] off a matching rule whatever the status said —
+/// a grant that is *there* is a grant — and turns what would have been a `No` into
+/// [`Verdict::CouldNotTell`] (NOTES § D229 ruling 4).
+pub struct Permits {
+    /// The namespace this was asked about — kept so a question about a different one cannot be
+    /// answered from it by accident.
+    namespace: String,
+    /// What the cluster listed. Compared, never displayed.
+    rules: Vec<ResourceRule>,
+    /// **Why a `No` off [`Self::rules`] would not be one**, or `None` where the answer is whole.
+    unsure: Option<String>,
+}
+
+impl Permits {
+    /// **What this namespace's rules say about one question** — no call, because the call already
+    /// happened.
+    ///
+    /// **A question about another namespace is answered by nobody.** Silently answering it from
+    /// *this* namespace's rules is the wrong-object class the write path refuses five other ways
+    /// round, and the answer here is [`Verdict::CouldNotTell`] because that is what it is: these
+    /// rules genuinely say nothing about somewhere else.
+    ///
+    /// **And it is not a `debug_assert!`, unlike [`Checked::pressed`]'s neighbour — measured, not
+    /// argued.** The first draft had one, on that function's *loud where it can be* reasoning, and
+    /// `just mutants-diff` reported `replace != with ==` **surviving**: the assertion fires before
+    /// the branch in every build a test runs in, so the guard underneath it could not be reached by
+    /// any test and could not fail. The two cases are also not alike. [`Checked::pressed`]'s
+    /// release behaviour is *safe but wrong* — an operator confirmed and is recorded as not having
+    /// — and it needs the noise. This one's is simply **right**, so an assertion buys nothing and
+    /// costs the only test that could hold the guard.
+    pub fn may(&self, asking: &Asking<'_>) -> Verdict {
+        // **`is_none_or` and not `is_some_and`, which is NOTES § D230 ruling 7's one character**
+        // (`k8s-admin`, 2026-09-05). The first draft guarded a *mismatch* and let `None` fall
+        // through, so the cluster-scoped question [`Asking`]'s own doc names — `delete nodes` —
+        // would have been answered out of one namespace's rules. Unreachable from the driver,
+        // because NOTES § D230 ruling 5 sends every single question to [`may_i`]; a trap for
+        // Phase 11's key map, which is the caller this whole type exists for.
+        if asking.namespace.is_none_or(|named| named != self.namespace) {
+            return Verdict::CouldNotTell(format!(
+                "this answer is only about the namespace {}, and this question is not",
+                cleaned(&self.namespace, IDENTIFIER)
+            ));
+        }
+        // **A grant that is listed is a grant, whatever else the status said** — the half of
+        // NOTES § D229 ruling 4 that keeps an incomplete answer useful instead of useless.
+        if self.rules.iter().any(|rule| grants(rule, asking)) {
+            return Verdict::Yes;
+        }
+        match &self.unsure {
+            Some(why) => Verdict::CouldNotTell(why.clone()),
+            None => Verdict::No,
+        }
+    }
+}
+
+/// **One namespace's rules, in one `SelfSubjectRulesReview`** (NOTES § D23).
+///
+/// **Performed with `create` and therefore here** — invariant 1, mechanically. Nothing is created:
+/// the API's review resources are questions posted to an endpoint that answers them, and no object
+/// exists afterwards.
+///
+/// **`PostParams::default()`, with no `dryRun`.** A dry run of a question is a question the server
+/// is asked not to answer, and there is nothing to rehearse: this sends nothing that could change
+/// anything, which is the whole of why the function is documented rather than guarded.
+///
+/// **The namespace is not put through [`crate::k8s::namespace_name`], and that is a difference
+/// from [`delete`] rather than an omission.** The reviews are cluster-scoped resources, so the
+/// namespace rides in the request *body* and never becomes a path segment — the guards in the
+/// operations are at the point a path is built, and there is no path here to build.
+///
+/// **Every failure is [`Verdict::CouldNotTell`] and none is an `Err`** (NOTES § D229 ruling 4).
+/// A `Result` here would be a caller deciding what to do about a refused probe, and there is
+/// exactly one thing to do about one: nothing.
+pub async fn may_i_in(client: &Client, namespace: &str) -> Permits {
+    let review = SelfSubjectRulesReview {
+        spec: SelfSubjectRulesReviewSpec {
+            namespace: Some(namespace.to_string()),
+        },
+        ..SelfSubjectRulesReview::default()
+    };
+    let api: Api<SelfSubjectRulesReview> = Api::all(client.clone());
+    let (rules, unsure) = match api.create(&PostParams::default(), &review).await {
+        Err(error) => (Vec::new(), Some(unasked(&error))),
+        Ok(answered) => match answered.status {
+            None => (Vec::new(), Some(half_answered(None))),
+            Some(status) => (
+                status.resource_rules,
+                (status.incomplete || status.evaluation_error.is_some())
+                    .then(|| half_answered(status.evaluation_error.as_deref())),
+            ),
+        },
+    };
+    Permits {
+        namespace: namespace.to_string(),
+        rules,
+        unsure,
+    }
+}
+
+/// **One question the cluster answers by itself, in a `SelfSubjectAccessReview`** — what a
+/// cluster-scoped question has, since [`may_i_in`]'s review takes a namespace and a node is in
+/// none (NOTES § D229 ruling 1).
+///
+/// **It answers a namespaced question too**, through [`Asking::namespace`], and is the wrong tool
+/// for a screenful of them: one call per key is what the rules review exists not to do. It is the
+/// right tool for one — and it is the call `k8s.rs` § THE BROWSER'S ROWS points at for *may this
+/// kubeconfig list this kind*.
+///
+/// **`allowed` is the only yes**, and an `evaluationError` outranks every kind of no. A `false`
+/// that carried *no opinion* is a `No` — the API server treats an unmatched request as refused, so
+/// a refusal is what would happen — and so is an explicit `denied: true`. But a `false` of either
+/// kind **beside an `evaluationError`** is [`Verdict::CouldNotTell`], for [`Permits`]'s reason: the
+/// authorizer has said it could not work the whole thing out, and a `No` off a half-run check is
+/// the one answer this file may not report. `denied` is therefore never read — it distinguishes
+/// two things that both mean *no*, and the field that changes the answer is the error beside them.
+pub async fn may_i(client: &Client, asking: &Asking<'_>) -> Verdict {
+    let review = SelfSubjectAccessReview {
+        spec: SelfSubjectAccessReviewSpec {
+            resource_attributes: Some(ResourceAttributes {
+                group: Some(asking.group.to_string()),
+                resource: Some(asking.resource.to_string()),
+                subresource: asking.subresource.map(str::to_string),
+                name: asking.name.map(str::to_string),
+                namespace: asking.namespace.map(str::to_string),
+                verb: Some(asking.verb.to_string()),
+                ..ResourceAttributes::default()
+            }),
+            non_resource_attributes: None,
+        },
+        ..SelfSubjectAccessReview::default()
+    };
+    let api: Api<SelfSubjectAccessReview> = Api::all(client.clone());
+    match api.create(&PostParams::default(), &review).await {
+        Err(error) => Verdict::CouldNotTell(unasked(&error)),
+        Ok(answered) => match answered.status {
+            None => Verdict::CouldNotTell(half_answered(None)),
+            Some(status) if status.allowed => Verdict::Yes,
+            Some(status) => match status.evaluation_error.as_deref() {
+                Some(problem) => Verdict::CouldNotTell(half_answered(Some(problem))),
+                None => Verdict::No,
+            },
+        },
+    }
+}
+
+/// **The sentence for a review that never came back** — the fault named, and the server's own
+/// words after it where there were any.
+///
+/// **Selected off the [`Fault`] and never off which call raised it**, which is `PRIOR-ART § C1`'s
+/// rule and [`in_words`]'s existing vocabulary rather than a second one: a `403` on the review, a
+/// dead socket and an expired login are three different things to go and fix, and one flat *the
+/// probe failed* is the fallback message that may never replace a typed error.
+///
+/// **[`Fault::Refused`] is the one arm that needs words of its own** (NOTES § D230 ruling 7).
+/// [`in_words`] spells it *"the cluster would not allow it"*, which is word for word what a refused
+/// `delete` prints — so a reader whose *question* was refused met a denial, and the *"That is not a
+/// no"* clause that corrects it 180 characters later. Selecting off the `Fault` is right; the
+/// **subject** of that one sentence is the operation, and here it has to be the question. Every
+/// other fault is about this machine or the connection and reads correctly either way.
+fn unasked(error: &kube::Error) -> String {
+    let said = said(error);
+    let why = match fault(error) {
+        Fault::Refused => "this login is not allowed to ask what it is allowed to do",
+        other => in_words(other),
+    };
+    and_said(
+        format!("k8rs could not put the question to this cluster — {why}"),
+        said.as_deref(),
+    )
+}
+
+/// **The sentence for a review that came back and says it is not the whole answer** — an
+/// authorizer that cannot enumerate its own rules, or a status the server left off entirely.
+///
+/// The `evaluationError` is free text the API sent, so it goes through [`cleaned`] at
+/// [`FREE_TEXT`] like every other one (invariant 9).
+fn half_answered(problem: Option<&str>) -> String {
+    let explained = problem.map(|value| cleaned(value, FREE_TEXT));
+    and_said(
+        "this cluster could not work the whole answer out".to_string(),
+        explained.as_deref(),
+    )
+}
+
+/// **Whether one listed rule answers this question yes** — RBAC's own four-part match, and no
+/// more of it than a `ResourceRule` carries.
+///
+/// **An absent list grants nothing.** `apiGroups` and `resources` are `Option` on the wire and a
+/// rule with neither is a rule about nothing, so `None` reads as the empty list, which matches
+/// nothing at all.
+///
+/// **`nonResourceRules` is not read, and that is what [`Asking`] is.** A `nonResourceURL` — the
+/// `/apis` grant NOTES § D160 found missing from the documented role — is a different question
+/// with a different shape, and there is no caller for it; a resource matcher that quietly
+/// answered one would be answering something it was not asked.
+fn grants(rule: &ResourceRule, asking: &Asking<'_>) -> bool {
+    covers(&rule.verbs, asking.verb)
+        && covers(rule.api_groups.as_deref().unwrap_or_default(), asking.group)
+        && addresses(rule.resources.as_deref().unwrap_or_default(), asking)
+        && about(
+            rule.resource_names.as_deref().unwrap_or_default(),
+            asking.name,
+        )
+}
+
+/// **Whether a list of rule words covers one word the question named** — the exact word, or
+/// [`ALL`].
+fn covers(listed: &[String], wanted: &str) -> bool {
+    listed.iter().any(|entry| entry == ALL || entry == wanted)
+}
+
+/// **Whether a rule's `resources` covers the resource this question is about** — which is not
+/// [`covers`], because a subresource is spelled into the same list.
+///
+/// **Three spellings answer a subresource question and a rule naming the parent is not one of
+/// them**: `*`, the exact `deployments/scale`, and `*/scale` for the subresource across every
+/// resource. `deployments` alone does **not** grant `deployments/scale`, which is RBAC's rule and
+/// is the one a reader guesses wrong — a login that may patch a Deployment may still not patch its
+/// scale.
+fn addresses(listed: &[String], asking: &Asking<'_>) -> bool {
+    let wanted = match asking.subresource {
+        Some(subresource) => format!("{}/{subresource}", asking.resource),
+        None => asking.resource.to_string(),
+    };
+    let across = asking
+        .subresource
+        .map(|subresource| format!("{ALL}/{subresource}"));
+    listed
+        .iter()
+        .any(|entry| entry == ALL || *entry == wanted || Some(entry.as_str()) == across.as_deref())
+}
+
+/// **Whether a rule limited to particular objects answers this question** — and the one place
+/// this file knowingly over-reports (NOTES § D229 ruling 4).
+///
+/// An empty `resourceNames` is every object, which is RBAC's own reading. A **non-empty** one
+/// beside a question that names no object is the interesting case: the login may perform the verb
+/// on *something*, and answering `No` would dim a key the reader can use on the row in front of
+/// them. Over-reporting leaves the key lit and lets the real call decide, which is the direction
+/// ruling 4 requires; under-reporting is the one it forbids.
+///
+/// **`*` is read as *every object* here, and two sources disagree about that.** The API's own
+/// description of this field on a `SelfSubjectRulesReview` says *"`*` means all"*; RBAC's
+/// `ResourceNameMatches` compares names literally and has no wildcard, so a rule naming `*` grants
+/// nothing that is not called `*`. [`covers`] follows the first, which is also the direction the
+/// paragraph above requires: reading it as *all* over-reports, and reading it literally would
+/// refuse a key over a rule the reader may well be able to use.
+fn about(listed: &[String], name: Option<&str>) -> bool {
+    listed.is_empty() || name.is_none_or(|name| covers(listed, name))
+}
+
+// --- MAY I END ---
 
 // --- THE AUDIT LOG START ---
 //

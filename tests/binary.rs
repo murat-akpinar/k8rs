@@ -1372,6 +1372,32 @@ const UID_READS: &str = "18f0b6ee";
 /// The kubeconfig context every run below is on, except the one that is about not having a name.
 const STUB_CONTEXT: &str = "stub";
 
+/// The namespace whose review this cluster answers, against the rules in [`GRANTED`].
+const GRANTING_NAMESPACE: &str = "payments";
+
+/// **The namespace whose review comes back `201` with no `status` on it** — the answer that is not
+/// one. `ops::may_i` has an arm for it and, until this stub could produce it, nothing outside
+/// `src/ops_tests.rs` reached it.
+const UNANSWERED_NAMESPACE: &str = "unanswered";
+
+/// The namespace whose review this cluster refuses outright, with an apiserver's own `403` body.
+const FORBIDDEN_NAMESPACE: &str = "forbidden";
+
+/// **The three things this login may do**, written as the `resourceAttributes` a
+/// `SelfSubjectAccessReview` carries them in.
+///
+/// **A stub that said yes to everything would make every `yes` row vacuous**, so the answer is a
+/// match against this and the `no` rows are questions that genuinely miss it.
+///
+/// **`patch deployments` is not in it and `patch deployments/scale` is**, which is the one thing
+/// about the matcher D230's cluster run confirmed rather than reasoned — so this stub may not
+/// blur it either.
+const GRANTED: [(&str, &str, Option<&str>); 3] = [
+    ("list", "pods", None),
+    ("delete", "nodes", None),
+    ("patch", "deployments", Some("scale")),
+];
+
 /// **A context name that is read, resolved and connected with — and that invariant 9 strips to
 /// nothing.** `k8s::Session::context`'s third way to be `None` (NOTES § D202), and the only one
 /// that arrives on a connection that *worked*: kube looks the entry up by the file's own
@@ -1449,9 +1475,81 @@ fn a_cluster_that_answers_one_scale(
     (path, asked)
 }
 
-/// **The `autoscaling/v1 Scale` a cluster hands back for `deployment/web` in `payments`**, and an
-/// empty list for everything else — `/version`, `/api` and `/apis` all arrive on this socket and
-/// none of them is this box's subject.
+/// **How this cluster answers a permission review** — the status line and the body, chosen by the
+/// question rather than by a parameter. [`one_ops_run`] has none for a cluster's mood, and its
+/// **seven** callers (counted, 2026-09-05) are otherwise all about scaling and deleting;
+/// threading one through them would edit five tests that have no permission in them.
+///
+/// **It answers a `SelfSubjectAccessReview` and nothing else, because that is the only review a
+/// question sends** (NOTES § D230 ruling 5). A namespace used to select `ops::may_i_in` and its
+/// local matcher, and measured on a real cluster the same login was told **yes** to
+/// `may-i delete pods -n default` and **no** to `may-i delete pods`. A driver that went back to
+/// branching would send a `SelfSubjectRulesReview` here and be caught by the target the test below
+/// asserts, not by a stub quietly answering it.
+///
+/// **The namespace picks the mood instead**: [`GRANTING_NAMESPACE`] is answered against
+/// [`GRANTED`], [`UNANSWERED_NAMESPACE`] comes back `201` with **no `status` on it at all**, and
+/// [`FORBIDDEN_NAMESPACE`] is refused outright. The middle one is the shape NOTES § D229 ruling 4
+/// is about and the one a green suite would otherwise never see — measured by planting *a
+/// status-less review is an answer* and watching this file go red.
+///
+/// **A question with no namespace is a cluster-scoped one** and gets no mood, which is what keeps
+/// the `nodes` rows about nodes.
+///
+/// **What the request body says is `src/ops_tests.rs` § MAY I's**, which asserts both reviews byte
+/// for byte against a socket. What is only visible from out here is the target, the query string
+/// and how many went out, so those are what the test below reads.
+fn reviewed(body: &str) -> (&'static str, String) {
+    let named = |namespace: &str| body.contains(&format!("\"namespace\":\"{namespace}\""));
+    if named(FORBIDDEN_NAMESPACE) {
+        return (
+            "403 Forbidden",
+            "{\"kind\":\"Status\",\"apiVersion\":\"v1\",\"status\":\"Failure\",\
+             \"message\":\"selfsubjectaccessreviews.authorization.k8s.io is forbidden: User \
+             \\\"probe\\\" cannot create resource \\\"selfsubjectaccessreviews\\\" in API group \
+             \\\"authorization.k8s.io\\\" at the cluster scope\",\
+             \"reason\":\"Forbidden\",\"code\":403}"
+                .to_string(),
+        );
+    }
+    let answered = |status: &str| {
+        (
+            "201 Created",
+            format!(
+                "{{\"kind\":\"SelfSubjectAccessReview\",\
+                 \"apiVersion\":\"authorization.k8s.io/v1\",\
+                 \"metadata\":{{}},\"spec\":{{}}{status}}}"
+            ),
+        )
+    };
+    if named(UNANSWERED_NAMESPACE) {
+        return answered("");
+    }
+    answered(&format!(",\"status\":{{\"allowed\":{}}}", granted(body)))
+}
+
+/// **Whether [`GRANTED`] covers the question in this request body** — the stub's whole authorizer.
+///
+/// **A rule with no subresource does not grant one**, which is why the `None` arm reads the
+/// request for a `subresource` key rather than ignoring it: a stub that let `patch deployments`
+/// answer `patch deployments/scale` would agree with a matcher that had stopped telling them
+/// apart.
+fn granted(body: &str) -> bool {
+    let says = |key: &str, value: &str| body.contains(&format!("\"{key}\":\"{value}\""));
+    GRANTED.iter().any(|(verb, resource, subresource)| {
+        says("verb", verb)
+            && says("resource", resource)
+            && match subresource {
+                Some(name) => says("subresource", name),
+                None => !body.contains("\"subresource\":"),
+            }
+    })
+}
+
+/// **The `autoscaling/v1 Scale` a cluster hands back for `deployment/web` in `payments`**, an
+/// answered permission review for either `selfsubject…` path ([`reviewed`]), and an empty list for
+/// everything else — `/version`, `/api` and `/apis` all arrive on this socket and none of them is
+/// this box's subject.
 ///
 /// **A `PATCH` has a body, so a request does not end at the blank line** — the header says how
 /// much more there is, and reading one byte short glues the next request's first line onto this
@@ -1491,16 +1589,18 @@ fn answer_one_scale(mut socket: std::net::TcpStream, spec: i32, status: i32, see
             let verb = words.next().unwrap_or_default().to_string();
             let target = words.next().unwrap_or_default().to_string();
             let asked = format!("{verb} {target} {body}").trim_end().to_string();
-            let sent = if target.contains("/scale") {
-                scale.clone()
+            let (code, sent) = if target.contains("selfsubject") {
+                reviewed(&body)
+            } else if target.contains("/scale") {
+                ("200 OK", scale.clone())
             } else {
-                empty.to_string()
+                ("200 OK", empty.to_string())
             };
             seen.lock()
                 .expect("the record is never poisoned")
                 .push(asked);
             let answer = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                "HTTP/1.1 {code}\r\ncontent-type: application/json\r\n\
                  content-length: {}\r\n\r\n{sent}",
                 sent.len()
             );
@@ -1882,3 +1982,232 @@ fn a_context_whose_name_strips_to_nothing_is_recorded_as_a_gap_and_not_a_danglin
 }
 
 // --- ONE OPERATION END ---
+
+// --- ONE QUESTION START ---
+//
+// **`k8rs ops may-i` is the one `ops` line that changes nothing** (NOTES § D23, § D229, § D230),
+// and the four things it owes are the four only a process can be asked: which stream each sentence
+// went to, what it exited with, what actually went on the wire, and whether a probe left anything
+// behind in the reader's `$HOME`.
+//
+// **`src/main_tests.rs` proves the first of those for a line that was *refused*, which is where it
+// holds anyway.** `a_may_i_line_opens_no_audit_log_and_performs_no_operation` feeds a line
+// rejected before the seam is reached, so the double it counts was never going to be called by any
+// implementation. What nothing there can drive is a **well-formed** question: it opens a runtime,
+// reads the reader's own kubeconfig and dials it.
+//
+// **The failure this region exists to make red is a probe that answers `No`** (NOTES § D229
+// ruling 4, `PRIOR-ART § B4`). A refused or unfinished review that came back as a refusal would
+// hide an operation the reader is allowed to perform, and since NOTES § D230 ruling 4 the exit
+// code is where a script reads it — so the two are asserted together, because `1` and `2` are now
+// different answers and were the same one until this round.
+
+/// **A well-formed question is answered on stderr, exits by NOTES § D230 ruling 4's table, and
+/// leaves nothing behind** — `0` yes · `1` no · `2` k8rs could not find out.
+///
+/// **The `1` rows are new and they are the point of ruling 4.** Until this round a yes and a no
+/// both exited `0`, so a script could not get the answer out of the exit code at all and had to
+/// grep an English sentence invariant 14 will keep rewriting.
+///
+/// **The `unanswered` and `forbidden` rows are NOTES § D229 ruling 4.** Both are a probe that
+/// could not be run; neither may reach the reader as the cluster having refused, and neither may
+/// exit `1`. The `no` rows above them are what stop that being vacuous — an implementation that
+/// answered *could not tell* to everything would satisfy the failure rows and fail the `no` ones.
+///
+/// **Every row asserts the review that went out is a `SelfSubjectAccessReview`** (D230 ruling 5).
+/// One question is always that call, whether or not `-n` was given; a driver that went back to
+/// branching on the namespace would send a `SelfSubjectRulesReview` for the namespaced rows and
+/// two matchers could disagree about one login again.
+///
+/// **The question is a literal per row and not built from the line.** `may_i_asked` drops the
+/// trailing dot of the core group, so a question assembled here out of `line[3]` would be this
+/// file re-implementing the thing it is checking — and would agree with it however it changed.
+#[test]
+fn a_may_i_line_is_answered_on_stderr_and_leaves_nothing_behind() {
+    for (line, code, question, answer, attributes) in [
+        // Ruling 2: the group is required, and the core group is a trailing dot. Ruling 6: the
+        // sentence no longer claims the cluster's authority for the answer.
+        (
+            vec!["ops", "may-i", "list", "pods.", "-n", GRANTING_NAMESPACE],
+            0,
+            "may this login list pods in payments?",
+            "yes — this login is allowed to do that",
+            r#"{"group":"","namespace":"payments","resource":"pods","verb":"list"}"#,
+        ),
+        (
+            vec!["ops", "may-i", "delete", "pods.", "-n", GRANTING_NAMESPACE],
+            1,
+            "may this login delete pods in payments?",
+            "no — this login is not allowed to do that",
+            r#"{"group":"","namespace":"payments","resource":"pods","verb":"delete"}"#,
+        ),
+        (
+            vec!["ops", "may-i", "list", "pods.", "-n", UNANSWERED_NAMESPACE],
+            2,
+            "may this login list pods in unanswered?",
+            "That is not a no",
+            r#"{"group":"","namespace":"unanswered","resource":"pods","verb":"list"}"#,
+        ),
+        (
+            vec!["ops", "may-i", "list", "pods.", "-n", FORBIDDEN_NAMESPACE],
+            2,
+            "may this login list pods in forbidden?",
+            "That is not a no",
+            r#"{"group":"","namespace":"forbidden","resource":"pods","verb":"list"}"#,
+        ),
+        // Ruling 1's whole subject, in one line: the `/` is the object's own name and the
+        // subresource is a flag. `patch deployments` is not granted and `patch deployments/scale`
+        // is, so this row is a yes only if the driver put the subresource on the wire.
+        (
+            vec![
+                "ops",
+                "may-i",
+                "patch",
+                "deployments.apps/web",
+                "--subresource=scale",
+                "-n",
+                GRANTING_NAMESPACE,
+            ],
+            0,
+            "may this login patch deployments.apps/web (subresource: scale) in payments?",
+            "yes — this login is allowed to do that",
+            r#"{"group":"apps","name":"web","namespace":"payments","resource":"deployments","subresource":"scale","verb":"patch"}"#,
+        ),
+        // **The parent resource does not carry its subresource** — the one thing about the matcher
+        // D230's cluster run confirmed rather than reasoned (`subresource=''` allowed and
+        // `subresource='scale'` refused off one rule). It is the row above with the flag taken
+        // off, so the two together say the flag is what changed the answer, and it is what makes
+        // this file's own stub answer both cases instead of one.
+        (
+            vec![
+                "ops",
+                "may-i",
+                "patch",
+                "deployments.apps/web",
+                "-n",
+                GRANTING_NAMESPACE,
+            ],
+            1,
+            "may this login patch deployments.apps/web in payments?",
+            "no — this login is not allowed to do that",
+            r#"{"group":"apps","name":"web","namespace":"payments","resource":"deployments","verb":"patch"}"#,
+        ),
+        // A cluster-scoped question: no namespace on the wire at all, which is what `delete
+        // node/<name>` is (NOTES § D229 ruling 1).
+        (
+            vec!["ops", "may-i", "delete", "nodes."],
+            0,
+            "may this login delete nodes?",
+            "yes — this login is allowed to do that",
+            r#"{"group":"","resource":"nodes","verb":"delete"}"#,
+        ),
+        // Ruling 3: `--read-only` refuses every operation and permits a question. Measured, the
+        // old order told the reader most likely to ask what they may do that k8rs *will not change
+        // anything* — and it has to be the whole process, because the flag's claim is structural.
+        (
+            vec![
+                "--read-only",
+                "ops",
+                "may-i",
+                "list",
+                "pods.",
+                "-n",
+                GRANTING_NAMESPACE,
+            ],
+            0,
+            "may this login list pods in payments?",
+            "yes — this login is allowed to do that",
+            r#"{"group":"","namespace":"payments","resource":"pods","verb":"list"}"#,
+        ),
+    ] {
+        // No stdin: a question asks for no confirmation, so a child that read one would hang.
+        let ran = one_ops_run(3, 3, None, &line, true, STUB_CONTEXT);
+        let stderr = text(ran.out.stderr.clone());
+        println!(
+            "--- {line:?} → exit {:?} ---\n{stderr}",
+            ran.out.status.code()
+        );
+
+        assert_eq!(
+            ran.out.status.code(),
+            Some(code),
+            "{line:?} exited the wrong way: {stderr:?}"
+        );
+        assert_eq!(
+            text(ran.out.stdout.clone()),
+            "",
+            "{line:?} put an answer where a report goes, so `k8rs ops may-i … > out` is not empty"
+        );
+        // **The question above the answer, both on stderr, in that order** — so an answer is
+        // never read against a question k8rs did not ask.
+        //
+        // **The question is exact and the answer is a fragment, and the split is deliberate.** The
+        // two could-not-tell rows end in the server's own words, which live in this file's stub —
+        // asserting them whole here would be one string written twice, in the one place nothing
+        // could tell the copies apart. The prefix pins the stream, the order and every character
+        // of the question; the fragment pins which of the three answers came back.
+        assert!(
+            stderr.starts_with(&format!("k8rs: {question}\nk8rs: ")),
+            "{line:?} was not answered under the question it was asked: {stderr:?}"
+        );
+        assert!(
+            stderr.contains(answer),
+            "{line:?} was not answered with {answer:?}: {stderr:?}"
+        );
+        // **A probe leaves nothing behind** (NOTES § D221: the audit log records mutations, and a
+        // question is not one). Unlike the refused lines above, every row here reached the
+        // cluster — so the directory not being there is a fact about the probe and not about the
+        // line having been thrown out.
+        assert!(
+            !ran.state_dir,
+            "{line:?} made a state directory in the reader's home for a call that changed nothing"
+        );
+        assert_eq!(ran.audit, "", "{line:?} wrote an audit line for a question");
+
+        let reviews: Vec<&String> = ran
+            .asked
+            .iter()
+            .filter(|asked| asked.contains("selfsubject"))
+            .collect();
+        // "extracted nothing" and "nothing to extract" print the same line, so the filtered list
+        // says it found something before anything is asserted about its contents.
+        assert_eq!(
+            reviews.len(),
+            1,
+            "{line:?} did not send exactly one review: {:?}",
+            ran.asked
+        );
+        // **The whole `resourceAttributes` the typed line had to become**, as one literal rather
+        // than a field at a time. `src/ops_tests.rs` asserts `ops::Asking` → body; only out here
+        // is *typed string* → body asserted, which is the half NOTES § D230 ruling 1 is about — a
+        // `/` that stopped meaning the object's name, or a `--subresource` that never left the
+        // driver, would each print a plausible answer and send a different question.
+        //
+        // **The cluster-scoped row carries no `namespace` key at all**, which an equality says and
+        // a list of `contains` could not.
+        assert!(
+            reviews[0].contains(attributes),
+            "{line:?} did not become the question {attributes}: {:?}",
+            reviews[0]
+        );
+        assert!(
+            reviews[0].contains("/selfsubjectaccessreviews? "),
+            "{line:?} did not ask its one question with a SelfSubjectAccessReview, so two \
+             matchers can disagree about one login again (NOTES § D230 ruling 5): {:?}",
+            reviews[0]
+        );
+        // **The target ends at a bare `?`** — the assertion above carries the space after it, and
+        // nothing between them is what says no `dryRun` and no `fieldManager` rode out with a
+        // question. Read off the process's own bytes and not only off `Api`'s, because a parameter
+        // added anywhere between the two would be invisible from inside the crate.
+        for banned in ["dryRun", "fieldManager", "fieldValidation"] {
+            assert!(
+                !reviews[0].contains(banned),
+                "{line:?} sent {banned} with a call that changes nothing: {:?}",
+                reviews[0]
+            );
+        }
+    }
+}
+
+// --- ONE QUESTION END ---

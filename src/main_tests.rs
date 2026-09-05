@@ -3693,7 +3693,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     assert_eq!(
         unloadable,
         "k8rs: no cluster to watch — this kubeconfig has no such context — check the \
-         `--context` you gave, or the `current-context` line in the file"
+         `current-context` line in the file, and any `--context` on the command line"
     );
 
     // **An entry**: file fine, context fine, and the certificate it names is not on the disk.
@@ -10082,7 +10082,7 @@ fn ops(line: &[&str]) -> String {
 /// The same line, with the exit code it carries (NOTES § D220 ruling 1, [`Ended`]).
 fn ops_ended(line: &[&str]) -> Ended {
     let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
-    ops_line(&args, nowhere, unwired)
+    ops_line(&args, nowhere, unwired, unanswered)
         .expect("a line beginning with `ops` is the operations driver's")
 }
 
@@ -10110,6 +10110,20 @@ fn unwired(ready: Ready<'_>) -> Ended {
 
 /// An audit log that works, keeps nothing and has nothing to say — a real open, of the one path
 /// that is always there.
+/// **The same, for the one verb that is not an operation** — standing in for [`may_i_started`],
+/// which builds a runtime and dials the reader's own cluster exactly as [`ops_performed`] does.
+///
+/// **It panics rather than answering**, because every `may-i` line in this file is meant to be
+/// refused above the seam: a test that reaches here is a test that would have talked to whatever
+/// cluster the machine running it happens to have. The two tests that *want* the seam reached name
+/// their own double.
+fn unanswered(question: Question) -> Ended {
+    panic!(
+        "a unit test reached the cluster seam with `{} {}`",
+        question.verb, question.resource
+    )
+}
+
 fn nowhere() -> Result<(std::fs::File, Vec<String>), String> {
     std::fs::OpenOptions::new()
         .append(true)
@@ -10146,7 +10160,7 @@ fn only_a_bare_ops_word_is_the_subcommand_and_a_flags_value_is_not() {
     ] {
         let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
         assert!(
-            ops_line(&args, nowhere, unwired).is_none(),
+            ops_line(&args, nowhere, unwired, unanswered).is_none(),
             "{line:?} was taken for the operations subcommand"
         );
     }
@@ -11276,6 +11290,7 @@ fn a_line_k8rs_refuses_never_asks_for_an_audit_log() {
                 nowhere()
             },
             unwired,
+            unanswered,
         )
         .expect("a line beginning with `ops` is the operations driver's")
         .said;
@@ -11307,6 +11322,7 @@ fn a_well_formed_line_opens_the_audit_log_once_before_it_reaches_the_seam() {
                 nowhere()
             },
             unwired,
+            unanswered,
         )
         .expect("a line beginning with `ops` is the operations driver's")
         .said;
@@ -11357,6 +11373,7 @@ fn something_worth_saying_about_the_audit_log_is_said_above_the_seams_own_senten
             })
         },
         unwired,
+        unanswered,
     )
     .expect("a line beginning with `ops` is the operations driver's")
     .said;
@@ -11400,6 +11417,7 @@ fn a_machine_that_cannot_hold_the_audit_log_refuses_the_operation_and_says_why()
             )
         },
         unwired,
+        unanswered,
     )
     .expect("a line beginning with `ops` is the operations driver's")
     .said;
@@ -11763,6 +11781,7 @@ fn a_kind_an_operation_does_not_work_on_is_refused_before_the_audit_log_is_opene
                 nowhere()
             },
             unwired,
+            unanswered,
         )
         .expect("a line beginning with `ops` is the operations driver's");
         println!("--- {line:?} ---\n{}", ended.said);
@@ -11847,10 +11866,15 @@ fn the_seams_own_ending_is_what_an_ops_line_comes_back_with() {
         .iter()
         .map(|word| (*word).to_string())
         .collect();
-    let landed = ops_line(&args, nowhere, |_| Ended {
-        said: "k8rs: the change was made".to_string(),
-        code: 0,
-    })
+    let landed = ops_line(
+        &args,
+        nowhere,
+        |_| Ended {
+            said: "k8rs: the change was made".to_string(),
+            code: 0,
+        },
+        unanswered,
+    )
     .expect("a line beginning with `ops` is the operations driver's");
     println!("{} · exit {}", landed.said, landed.code);
     assert_eq!(landed.code, 0, "a seam that changed the cluster exited 2");
@@ -11864,6 +11888,7 @@ fn the_seams_own_ending_is_what_an_ops_line_comes_back_with() {
             said: "k8rs: the change was made".to_string(),
             code: 0,
         },
+        unanswered,
     )
     .expect("a line beginning with `ops` is the operations driver's");
     println!("{} · exit {}", noted.said, noted.code);
@@ -12529,4 +12554,516 @@ async fn a_headless_restart_nobody_confirmed_changes_nothing_and_exits_two() {
         1,
         "a cancelled restart sent the change anyway"
     );
+}
+
+// --- WHAT A QUESTION READS AS ---
+//
+// **`ops may-i` is the one `ops` line that changes nothing** (NOTES § D23, § D229), so what it
+// owes is a different list from the three above it: no confirmation, no audit line, no state
+// directory, and an exit code that tells a yes from a no from *k8rs could not find out*.
+//
+// **Everything here is a function over values except [`may_i_connected`]**, which is the same
+// eight lines of glue [`ops_connected`] is and is proven by running the binary.
+//
+// **The whole of what the operator review sent back was in this half of the box**
+// (NOTES § D230): the matcher one file down was measured correct and every defect was in how
+// this driver reads a typed string. So the rows below are the review's own measurements turned
+// into assertions — what `/` means, what a missing group means, what a `no` exits with, and
+// which review a single question goes to.
+
+/// **`/` is the object's own name and the subresource is a flag** — `kubectl auth can-i`'s
+/// meaning of both (NOTES § D230 ruling 1).
+///
+/// **The first two rows are the measurement that reversed this.** Under a rule with
+/// `resourceNames: [only-this-pod]`, `kubectl auth can-i delete pods/only-this-pod` is **yes** and
+/// k8rs answered **no**, because the `/` was read as a subresource — one string, two questions,
+/// two answers, in two tools this file's own comment claimed shared a spelling
+/// (`reports/2026-09-05-may-i-against-a-real-cluster.md` § 3c).
+///
+/// **Each row changes one part**, so a parse that dropped the group, read the `/` as a
+/// subresource again, or took the `.` before the `/` says which.
+#[test]
+fn a_may_i_line_reads_the_slash_as_the_object_name_and_the_subresource_as_a_flag() {
+    for (line, expected) in [
+        (
+            vec!["may-i", "delete", "pods."],
+            ("delete", "", "pods", None, None),
+        ),
+        (
+            vec!["may-i", "delete", "pods./only-this-pod"],
+            ("delete", "", "pods", None, Some("only-this-pod")),
+        ),
+        (
+            vec!["may-i", "patch", "deployments.apps"],
+            ("patch", "apps", "deployments", None, None),
+        ),
+        (
+            vec!["may-i", "patch", "deployments.apps", "--subresource=scale"],
+            ("patch", "apps", "deployments", Some("scale"), None),
+        ),
+        (
+            vec![
+                "may-i",
+                "patch",
+                "deployments.apps/web",
+                "--subresource",
+                "scale",
+            ],
+            ("patch", "apps", "deployments", Some("scale"), Some("web")),
+        ),
+        // The group can carry dots of its own, so the split is on the **first** one.
+        (
+            vec!["may-i", "create", "pods.something.invented"],
+            ("create", "something.invented", "pods", None, None),
+        ),
+    ] {
+        let rest: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let words = ops_words(&rest).unwrap_or_else(|refusal| panic!("{refusal}"));
+        let question = may_i_question(&words, &rest).unwrap_or_else(|refusal| panic!("{refusal}"));
+        println!("{line:?} → {}", may_i_asked(&question));
+        assert_eq!(
+            (
+                question.verb.as_str(),
+                question.group.as_str(),
+                question.resource.as_str(),
+                question.subresource.as_deref(),
+                question.name.as_deref(),
+            ),
+            expected,
+            "{line:?} was read as a different question"
+        );
+    }
+}
+
+/// **A resource with no API group on it is refused and never answered `no`**
+/// (NOTES § D230 ruling 2).
+///
+/// **Measured wrong, not reasoned wrong.** `patch deployments` defaulted the group to `""`,
+/// matched nothing in the core group and printed *no* under a login that `kubectl auth can-i`
+/// said **yes** for — for `deployments`, `deployment`, `deploy`, `pod` and `po` alike
+/// (`reports/2026-09-05-may-i-against-a-real-cluster.md` § 3e). The cluster said no such thing.
+///
+/// **The trailing dot is the core group and the negative row is what makes this a test.** Without
+/// `pods.` passing, an implementation that refused every resource word would satisfy the refusals
+/// and answer nothing.
+#[test]
+fn a_resource_with_no_group_is_refused_and_the_core_group_is_a_trailing_dot() {
+    for word in ["deployments", "deployment", "deploy", "pods", "pod", "po"] {
+        let line = vec!["may-i".to_string(), "patch".to_string(), word.to_string()];
+        let words: Vec<&str> = line.iter().map(String::as_str).collect();
+        let refusal = may_i_question(&words, &line)
+            .err()
+            .unwrap_or_else(|| panic!("{word} was answered rather than refused"));
+        println!("{word}\n{refusal}");
+        assert!(
+            refusal.contains("needs the API group as well as the resource"),
+            "{word} was refused for the wrong reason: {refusal:?}"
+        );
+        // **It names the fix**, which is the half that makes a refusal usable at 3am.
+        assert!(
+            refusal.contains("deployments.apps") && refusal.contains("pods."),
+            "{word}'s refusal does not say how to write it: {refusal:?}"
+        );
+        // **And it is a refusal and not a verdict** — no `no` anywhere in it, which is the
+        // measured defect this row closes.
+        assert!(
+            !refusal.contains("is not allowed to do that"),
+            "{word} was still answered as a refusal by the cluster: {refusal:?}"
+        );
+    }
+    let line = vec![
+        "may-i".to_string(),
+        "patch".to_string(),
+        "pods.".to_string(),
+    ];
+    let words: Vec<&str> = line.iter().map(String::as_str).collect();
+    let core = may_i_question(&words, &line).expect("`pods.` names the core group");
+    assert_eq!((core.resource.as_str(), core.group.as_str()), ("pods", ""));
+}
+
+/// **The question is printed back before the answer is** — so an answer is never read against a
+/// question k8rs did not ask.
+///
+/// **The group, the name and the subresource appear only when the line carried them**, because a
+/// printed `deployments.` or `nodes/` is a question nobody asked — and the core group's own
+/// trailing dot is a spelling the line requires rather than something a reader means, so it is not
+/// echoed either.
+#[test]
+fn a_question_is_printed_back_in_the_words_it_was_asked_in() {
+    for (line, expected) in [
+        (
+            vec!["may-i", "delete", "nodes."],
+            "may this login delete nodes?",
+        ),
+        (
+            vec!["may-i", "delete", "pods./only-this-pod", "-n", "payments"],
+            "may this login delete pods/only-this-pod in payments?",
+        ),
+        (
+            vec![
+                "may-i",
+                "patch",
+                "deployments.apps",
+                "--subresource=scale",
+                "-n",
+                "payments",
+            ],
+            "may this login patch deployments.apps (subresource: scale) in payments?",
+        ),
+    ] {
+        let rest: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let words = ops_words(&rest).unwrap_or_else(|refusal| panic!("{refusal}"));
+        let question = may_i_question(&words, &rest).unwrap_or_else(|refusal| panic!("{refusal}"));
+        let asked = may_i_asked(&question);
+        println!("{asked}");
+        assert_eq!(asked, expected);
+    }
+}
+
+/// **A word out of argv is echoed as it printed and never as it was typed** (invariant 9,
+/// invariant 4) — [`shown`]'s rule, on the one line in this region that echoes five values.
+///
+/// A verb with a bidi override in it must not come back looking like a verb somebody typed.
+#[test]
+fn a_question_says_when_the_words_it_echoes_are_not_the_words_that_were_typed() {
+    let line = vec!["may-i", "de\u{202e}lete", "nodes."];
+    let rest: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+    let question = may_i_question(&line, &rest).expect("a verb is not checked against a name rule");
+    let asked = may_i_asked(&question);
+    println!("{asked}");
+    assert!(
+        !asked.contains('\u{202e}'),
+        "a control character reached the screen: {asked:?}"
+    );
+    assert!(
+        asked.contains("(with what cannot print removed)"),
+        "the echo is not the word that was judged and does not say so: {asked:?}"
+    );
+}
+
+/// **Every way a `may-i` line is refused**, each naming what is wrong with it.
+///
+/// **`-n` and `--subresource` are both checked here.** A namespace narrows the question and a
+/// subresource is a different question entirely (NOTES § D230 ruling 1), so a line whose value for
+/// either is missing is a question about nothing.
+#[test]
+fn a_may_i_line_that_is_not_a_question_is_refused_and_says_which_part() {
+    for (line, expected) in [
+        (vec!["may-i"], "needs a verb and a resource"),
+        (vec!["may-i", "delete"], "needs a verb and a resource"),
+        (
+            vec!["may-i", "delete", "nodes.", "extra"],
+            "does not know what to do with",
+        ),
+        (
+            vec!["may-i", "delete", ".apps"],
+            "empty verb, resource or object name",
+        ),
+        (
+            vec!["may-i", "delete", "pods./"],
+            "empty verb, resource or object name",
+        ),
+        (vec!["may-i", "", "pods."], "empty verb, resource or object"),
+        (vec!["may-i", "delete", "pods.", "-n", "NOPE"], "is not one"),
+        (
+            vec!["may-i", "delete", "pods.", "-n"],
+            "needs the name of a namespace",
+        ),
+        (
+            vec!["may-i", "delete", "pods.", "--subresource"],
+            "needs the name of a subresource",
+        ),
+        (
+            vec!["may-i", "delete", "pods.", "--subresource="],
+            "needs the name of a subresource",
+        ),
+    ] {
+        let rest: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let words = ops_words(&rest).unwrap_or_else(|refusal| panic!("{line:?}: {refusal}"));
+        let refusal = may_i_question(&words, &rest)
+            .err()
+            .unwrap_or_else(|| panic!("{line:?} was read as a question"));
+        println!("{line:?}\n{refusal}");
+        assert!(
+            refusal.contains(expected),
+            "{line:?} was refused for the wrong reason: {refusal:?}"
+        );
+        // Every refusal on an `ops` line carries the usage under it, and this one is no exception.
+        assert!(refusal.contains("ops may-i <verb>"));
+    }
+}
+
+/// **`0` yes · `1` no · `2` k8rs could not find out** (NOTES § D230 ruling 4) — `kubectl auth
+/// can-i`'s vocabulary, so a script reads the answer off the code instead of grepping an English
+/// sentence invariant 14 will keep rewriting.
+///
+/// **The `CouldNotTell` row is the one this box exists for** (D229 ruling 4). A refused probe
+/// exiting `1` would be a script reading *k8rs could not find out* as the cluster's no, which is
+/// why the sentence is asserted beside the code.
+#[test]
+fn a_question_exits_zero_for_yes_one_for_no_and_two_when_k8rs_could_not_find_out() {
+    let question = Question {
+        verb: "delete".to_string(),
+        group: String::new(),
+        resource: "nodes".to_string(),
+        subresource: None,
+        name: None,
+        namespace: None,
+    };
+    for (verdict, code) in [
+        (ops::Verdict::Yes, 0),
+        (ops::Verdict::No, 1),
+        (
+            ops::Verdict::CouldNotTell("the cluster said nothing".to_string()),
+            2,
+        ),
+    ] {
+        let ended = may_i_ended(&question, &verdict);
+        println!("--- exit {} ---\n{}", ended.code, ended.said);
+        assert_eq!(ended.code, code, "{verdict:?} exited the wrong way");
+        assert!(
+            ended
+                .said
+                .starts_with("k8rs: may this login delete nodes?\nk8rs: "),
+            "the answer is not printed under the question it answers: {:?}",
+            ended.said
+        );
+    }
+    // **Neither answer claims the cluster's authority** (NOTES § D230 ruling 6): `Permits::may`
+    // over-reports on `resourceNames` by design, and *"the cluster says"* over that was measured
+    // against a `kubectl auth can-i` saying the opposite.
+    for verdict in [ops::Verdict::Yes, ops::Verdict::No] {
+        let said = may_i_ended(&question, &verdict).said;
+        assert!(
+            !said.contains("the cluster says"),
+            "an answer claimed the cluster said something it may not have: {said:?}"
+        );
+    }
+    // **The sentence is the other half of the ruling**: a script reads the code, a person reads
+    // this, and neither may take a probe that could not run for the cluster saying no.
+    let unsure = may_i_ended(
+        &question,
+        &ops::Verdict::CouldNotTell("the cluster said nothing".to_string()),
+    );
+    assert!(
+        unsure.said.contains("That is not a no"),
+        "a refused probe does not say it is not a refusal: {:?}",
+        unsure.said
+    );
+    assert!(
+        may_i_ended(&question, &ops::Verdict::No)
+            .said
+            .contains("is not allowed to do that"),
+        "a cluster that said no was not reported as one"
+    );
+}
+
+/// **`k8rs ops may-i` opens no state directory and never reaches an operation** — the branch is
+/// taken above [`operation_named`], so nothing below it runs.
+///
+/// **The audit double asserts it was never called**, which is what says a probe writes no audit
+/// line (NOTES § D221: the log records mutations, and a question is not one).
+#[test]
+fn a_may_i_line_opens_no_audit_log_and_performs_no_operation() {
+    let line: Vec<String> = ["ops", "may-i", "delete", "nodes.", "extra"]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+    let opened = std::cell::Cell::new(false);
+    let performed = std::cell::Cell::new(false);
+    let ended = ops_line(
+        &line,
+        || {
+            opened.set(true);
+            Err("the log should never have been opened".to_string())
+        },
+        |_| {
+            performed.set(true);
+            Ended::refused("an operation should never have been reached".to_string())
+        },
+        unanswered,
+    )
+    .expect("a line with `ops` first is this function's");
+    println!("--- exit {} ---\n{}", ended.code, ended.said);
+    assert!(!opened.get(), "a question opened the audit log");
+    assert!(!performed.get(), "a question was performed as an operation");
+    assert!(
+        ended.said.contains("does not know what to do with"),
+        "the refusal is not the question's own: {:?}",
+        ended.said
+    );
+}
+
+/// **`--read-only` permits a question and still refuses every operation** (NOTES § D230
+/// ruling 3).
+///
+/// **Measured backwards before this ruling**: the reader most likely to ask what they are allowed
+/// to do was told *"--read-only was asked for, so k8rs will not change anything"*. Invariant 2's
+/// subject is the write path, and `ops::may_i` is the first thing in `ops.rs` that is not one —
+/// put there for NOTES § D23's mechanical reason, which is exactly the price D23 said it was
+/// paying.
+///
+/// **The three operations are the negative and they are not decoration**: a carve-out that let
+/// every `ops` line past would be the flag doing nothing at all.
+#[test]
+fn read_only_permits_a_question_and_still_refuses_every_operation() {
+    // The question reaches the seam, which is where a test with no cluster stops — so what is
+    // asserted is that the refusal is *gone*, not that an answer arrived.
+    //
+    // **Both positions of the flag**, because only one was measured and the other is where the
+    // first fix stopped working: `--read-only` before `ops` is the shape the review ran, and after
+    // it is the shape [`ops_words`] refuses as an unknown flag unless the carve-out takes it out
+    // of the slice first.
+    for asking in [
+        vec!["--read-only", "ops", "may-i", "delete", "nodes.", "extra"],
+        vec!["ops", "may-i", "delete", "nodes.", "extra", "--read-only"],
+    ] {
+        let asking: Vec<String> = asking.iter().map(|word| (*word).to_string()).collect();
+        let ended = ops_line(
+            &asking,
+            || panic!("a question opens no audit log"),
+            |_| panic!("a question performs nothing"),
+            unanswered,
+        )
+        .expect("a line with `ops` on it is this function's");
+        println!("--- {asking:?} → exit {} ---\n{}", ended.code, ended.said);
+        assert!(
+            !ended.said.contains("will not change anything"),
+            "a question that changes nothing was refused for not changing anything: {:?}",
+            ended.said
+        );
+        assert!(
+            ended.said.contains("does not know what to do with"),
+            "the question was not read as one: {:?}",
+            ended.said
+        );
+    }
+
+    for verb in [SCALE, RESTART, DELETE] {
+        let line: Vec<String> = [READ_ONLY, "ops", verb, "deploy/web", "3", "-n", "payments"]
+            .iter()
+            .map(|word| (*word).to_string())
+            .collect();
+        let ended = ops_line(
+            &line,
+            || panic!("a refused line opens no audit log"),
+            |_| panic!("a refused line performs nothing"),
+            unanswered,
+        )
+        .expect("a line with `ops` on it is this function's");
+        println!("--- {verb} → exit {} ---\n{}", ended.code, ended.said);
+        assert_eq!(ended.code, 2);
+        assert!(
+            ended.said.contains("--read-only was asked for"),
+            "{verb} was not refused under --read-only: {:?}",
+            ended.said
+        );
+    }
+}
+
+/// **`--subresource` belongs to the question and to nothing else** (NOTES § D230 ruling 1).
+///
+/// [`ops_words`] consumes the flag for every line, because it runs before the verb is known — so
+/// without this refusal a mutation carrying it would be performed with a flag silently dropped,
+/// which is the shape that function refuses for every other unknown flag.
+#[test]
+fn only_a_question_takes_the_subresource_flag() {
+    for verb in [SCALE, RESTART, DELETE] {
+        let line: Vec<String> = [
+            "ops",
+            verb,
+            "deploy/web",
+            "3",
+            "-n",
+            "payments",
+            "--subresource=scale",
+        ]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+        let ended = ops_line(
+            &line,
+            || panic!("a refused line opens no audit log"),
+            |_| panic!("a refused line performs nothing"),
+            unanswered,
+        )
+        .expect("a line with `ops` on it is this function's");
+        println!("--- {verb} → exit {} ---\n{}", ended.code, ended.said);
+        assert_eq!(ended.code, 2);
+        assert!(
+            ended.said.contains("does not take --subresource"),
+            "{verb} accepted a flag it does not read: {:?}",
+            ended.said
+        );
+    }
+    // **Named twice is refused for the namespace's own reason** — `value_of` is first-wins and
+    // `kubectl` is last-wins, so guessing asks a different question from the one that was typed.
+    //
+    // **Both spellings, because they are counted on two different lines** (my own second pass,
+    // found by `just mutants-diff`): a row with only the attached form left `replace += with *=`
+    // surviving on the separate-value branch, and a counter stuck at zero is a flag that can be
+    // named as often as you like.
+    for tail in [
+        vec!["--subresource=scale", "--subresource=status"],
+        vec!["--subresource", "scale", "--subresource", "status"],
+        vec!["--subresource=scale", "--subresource", "status"],
+    ] {
+        let mut line = vec!["ops", "may-i", "patch", "deployments.apps"];
+        line.extend(tail.iter().copied());
+        let line: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let ended = ops_line(
+            &line,
+            || panic!("a refused line opens no audit log"),
+            |_| panic!("a refused line performs nothing"),
+            unanswered,
+        )
+        .expect("a line with `ops` on it is this function's");
+        println!("{tail:?}\n{}", ended.said);
+        assert!(
+            ended.said.contains("names the subresource more than once"),
+            "{tail:?}: two subresources were guessed between: {:?}",
+            ended.said
+        );
+    }
+}
+
+/// **The usage says the question exists, in both places a reader can find it** — the top-level
+/// synopsis, which is the only place a reader learns a mode exists, and `k8rs ops`'s own rows.
+///
+/// **`may-i`'s shape is not the operations' shape**, and the synopsis showed only theirs
+/// (`k8s-admin`, 2026-09-05): a reader who followed `ops <operation> <kind>/<name>` for a question
+/// would write `may-i delete/nodes`.
+#[test]
+fn the_usage_offers_the_question_in_the_synopsis_and_in_the_ops_rows() {
+    println!("{USAGE}");
+    assert!(
+        USAGE.contains("k8rs ops may-i <verb> <resource>.<group>[/<name>]"),
+        "the top-level usage does not say a question exists"
+    );
+    let usage = ops_usage();
+    println!("{usage}");
+    assert!(
+        usage.contains("ops may-i <verb> <resource>.<group>[/<name>] [--subresource <name>]"),
+        "the ops usage does not say how to ask a question"
+    );
+    // **The two rules that are the question's alone**, in the prose under the rows rather than
+    // inside one 250-character row (NOTES § D230 rulings 1 and 2).
+    for said in [
+        "Spell the API group",
+        "pods.",
+        "the object's own name",
+        "it asks about the whole cluster",
+    ] {
+        assert!(
+            usage.contains(said),
+            "the usage does not say {said:?}: {usage}"
+        );
+    }
+    // **Every row is a row.** The one this box added was 250 characters beside five one-liners.
+    for line in usage.lines().filter(|line| line.starts_with("  ")) {
+        assert!(
+            line.chars().count() <= 100,
+            "a usage row is a paragraph: {line:?}"
+        );
+    }
 }

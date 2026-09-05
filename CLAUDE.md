@@ -220,9 +220,11 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     mutual-exclusion table**
     ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
     **The flag list here is a fact about the code, it gets no `check-docs` and no
-    operator review, and it has now gone stale twice** — four when the binary had
-    six (fixed 2026-08-30, [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
-    six when it had fourteen (fixed 2026-08-31). **Counted, not recalled:**
+    operator review, and it has now gone stale three times** — four when the binary
+    had six (fixed 2026-08-30, [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
+    six when it had fourteen (fixed 2026-08-31), fourteen when it had fifteen
+    (fixed 2026-09-05 — `--subresource`, and it was `dev-core` who counted it, not
+    this file). **Counted, not recalled:**
     `grep -oE '^const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs`. Two groups, and
     the split is the point:
     **released** — `--read-only` `--context` `--namespace` `--once` `--analysis`
@@ -230,10 +232,10 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     [D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30));
     **temporary driver's, and gone at Phase 12** — `--live`, plus the verbs and
     the selector that name one object: `--logs` `--describe` `--yaml`, `--object`
-    `--kind` `--container` `--previous` `--follow`
+    `--kind` `--container` `--previous` `--follow` `--subresource`
     ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) ·
     [D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
-    `--namespace` also answers to `-n`. **Nine of these fourteen are scaffolding,
+    `--namespace` also answers to `-n`. **Ten of these fifteen are scaffolding,
     which is why the count alone was never the thing to defend** — the threshold
     below is. No `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
@@ -327,7 +329,15 @@ that goes green says nothing about those.
       `details`, so a formatter reading `details.group`/`details.kind` prints an
       empty sentence and the only true one names the path: *"this kubeconfig may
       not `get /apis`"*.
-- [ ] `--read-only` is structurally true — `ops.rs` unreachable, keys unbound.
+- [ ] `--read-only` is structurally true — **no mutation is reachable**, keys
+      unbound. **The row said *`ops.rs` unreachable* until 2026-09-05 and that is
+      no longer the same sentence**
+      ([D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+      ruling 3): `may_i` is in `ops.rs` for [D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)'s
+      *mechanical* reason and writes nothing, and `--read-only` refusing it told
+      the read-only user they could not ask what they were allowed to do. The
+      invariant's subject was always mutation; the shorthand stopped being true
+      the moment the allowlist's own cost landed in the file.
 
 **The write path**
 
