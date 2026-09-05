@@ -1230,12 +1230,25 @@ fn and_said(line: String, said: Option<&str>) -> String {
 /// choice: an operator greps an audit log for `uid <value>`, and a phrase in the middle of that
 /// breaks the log's own primary access pattern to say something a trailing clause says as well.
 ///
+/// **Neither arm says what the cluster made of it, because this line is written before anything
+/// is sent** ([`perform`] writes it ahead of `show` and ahead of either `call`; `k8s-admin`,
+/// 2026-09-05, invariant 4). *The cluster checked this was the object* was true on a `200`, false
+/// on a `409` — an attempt line saying the cluster stood behind a uid, with the result line under
+/// it recording the cluster refusing that same uid — and unknown when nothing reached the cluster
+/// at all. What the field can state at that moment is what the request carries, which is true of
+/// all three. It is not reachable from this binary ([`Deleting::uid`] is `None` from the headless
+/// driver) and Phase 11's dialog is its first caller, so it is fixed here rather than after
+/// `ops.rs` freezes — NOTES § D235's own reason for the field.
+///
 /// **It is [`gap`]'s job with one more fact, and not [`gap`] with a suffix parameter** — a fourth
 /// argument used by one of its five callers is a helper shaped by its exception.
 fn which_uid(uid: Option<&str>, sent: bool) -> String {
     match uid {
         Some(uid) if !uid.is_empty() && sent => {
-            format!("uid {uid} (the cluster checked this was the object)")
+            format!(
+                "uid {uid} (a condition on the change — the cluster does not make it unless the \
+                 object is this one)"
+            )
         }
         Some(uid) if !uid.is_empty() => format!("uid {uid} (what k8rs read, not what it changed)"),
         _ => "no uid was read".to_string(),
@@ -1353,10 +1366,17 @@ fn in_words(fault: Fault) -> &'static str {
         // here rather than in [`verdict`]'s two arms so that *the change was never sent* and
         // *nothing was changed* say it once between them (NOTES § D103).
         //
-        // **The sentence outlived the precondition it was written beside** (NOTES § D228). No
-        // operation in this file sends one now, so a `409` here comes from somewhere else — and
-        // there is no divergence from the taught line to note, because `kubectl scale` carries no
-        // precondition either and the two now behave the same on a conflict.
+        // **The sentence outlived the `resourceVersion` precondition it was written beside**
+        // (NOTES § D228) and then got a second one it fits better: [`delete`] sends
+        // `preconditions.uid` wherever a caller has a uid to give (NOTES § D235), and *look at it
+        // again* is exactly what a name held by a different object asks of the reader.
+        //
+        // **That one is a divergence from the taught line, and `delete`'s second**
+        // (`k8s-admin`, 2026-09-05). `kubectl delete` has no flag for a uid precondition, so
+        // the command in the record goes through where k8rs was refused — invariant 4's split
+        // carrying weight — the shape NOTES § D226 wrote down for `--wait` and NOTES § D227
+        // ruling 5 for the `scale` precondition NOTES § D228 then removed. The taught line is not
+        // wrong; it is less careful, and a reader holding both records is told which.
         Fault::Conflict => {
             "the object had already been changed by something else, so look at it again before \
              deciding whether you still want this change"
@@ -2123,11 +2143,16 @@ pub struct Restarting<'a> {
 /// wrong was being told the copies had been replaced.
 ///
 /// **It also carries whatever precision the clock has, where kubectl truncates to the second** —
-/// measured on the real binary, `2026-09-04T13:57:59.520444947Z`. Both are RFC3339 and the
-/// annotation is validated by nothing, and the finer one is the one that *keeps* the contract: two
-/// `kubectl rollout restart` runs inside one second write the identical value and start no second
-/// rollout, and k8rs's cannot. Nothing is rounded to buy a resemblance the taught line never
+/// measured on the real binary, `2026-09-04T13:57:59.520444947Z`. Both are RFC3339, the annotation
+/// is validated by nothing, and nothing is rounded to buy a resemblance the taught line never
 /// claims.
+///
+/// **So the taught line is equivalent at second resolution, and run twice inside one second it
+/// does not reproduce what k8rs did** (NOTES § D236). `kubectl rollout restart` refuses its own
+/// second run before it sends anything — *if restart has already been triggered within the past
+/// second, please wait* — and exits `1`; k8rs's finer stamp is a patch that is not a no-op, so it
+/// performs both, and the generation moves twice where kubectl's moves once. k8rs did what it said
+/// it would, and the difference is the stamp's resolution and nothing else.
 pub async fn restart<Show, Ask, Asked>(
     client: &Client,
     restarting: &Restarting<'_>,

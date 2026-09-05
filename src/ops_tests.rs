@@ -4558,8 +4558,14 @@ async fn a_delete_sends_exactly_one_request_and_it_is_the_change_itself() {
 /// **The second row is what stops the first being vacuous.** A `delete` that refused every uid
 /// would satisfy the `409` row and break the operation; the matching uid has to come back `Done`.
 ///
-/// **And the record says which of the two it was** ([`which_uid`]): a uid the cluster checked
-/// reads differently from one k8rs merely read, because for a delete the cluster did check it.
+/// **And the record says which of the two it was** ([`which_uid`]): a uid that rides out as a
+/// condition on the change reads differently from one k8rs merely read.
+///
+/// **The attempt line is asserted on both rows, because it is written before anything is sent**
+/// and cannot depend on what comes back. It was only read on the `200` row until 2026-09-05, and
+/// the sentence it carried — *the cluster checked this was the object* — was false on the row
+/// below: an attempt line saying the cluster stood behind this uid, with the result line under it
+/// recording the cluster refusing it (`k8s-admin`, invariant 4).
 #[tokio::test]
 async fn a_uid_the_cluster_does_not_recognise_refuses_the_delete_and_the_right_one_does_not() {
     const HELD: &str = "9c4d2429-1b2c-4d5e-8f90-a1b2c3d4e5f6";
@@ -4614,6 +4620,18 @@ async fn a_uid_the_cluster_does_not_recognise_refuses_the_delete_and_the_right_o
             sent.iter().any(|request| request.contains(uid)),
             "the uid never reached the wire: {sent:?}"
         );
+        // **What the attempt line may say about a uid, on either row** ([`which_uid`]): what the
+        // request carries, never what the cluster made of it. [`perform`] writes this line before
+        // `show` and before the call, so on the conflict row the old sentence had the cluster
+        // standing behind a uid it is about to refuse two lines further down.
+        assert!(
+            line.contains(&format!(
+                "uid {uid} (a condition on the change — the cluster does not make it unless the \
+                 object is this one)"
+            )),
+            "the attempt line does not say what the request carries, or claims an answer that \
+             had not come back when it was written: {line:?}"
+        );
         match expected {
             Some(outcome) => {
                 assert_eq!(
@@ -4621,14 +4639,6 @@ async fn a_uid_the_cluster_does_not_recognise_refuses_the_delete_and_the_right_o
                     Some(outcome),
                     "the uid the cluster holds was refused, so the operation is broken for every \
                      caller that has one"
-                );
-                // **The record says the cluster checked it**, which is the whole difference
-                // between this uid and a `scale`'s (NOTES § D235).
-                assert!(
-                    line.contains(&format!(
-                        "uid {uid} (the cluster checked this was the object)"
-                    )),
-                    "the record does not say the cluster stood behind this uid: {line:?}"
                 );
             }
             None => {
