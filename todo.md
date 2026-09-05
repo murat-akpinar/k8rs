@@ -3265,12 +3265,13 @@ public release.
       **This is the first unchecked box in the file and it is not the next one to
       work.** Nothing here can move until the user runs `cargo publish` and until
       Phase 13 writes the README. **The next box is the first unchecked one in the
-      lowest open phase below this one — Phase 8 today** (Phase 7 closed
-      2026-09-05), and that phase's head note says why a later phase runs over this
-      one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+      lowest open phase below this one — Phase 9 today** (Phase 8 closed
+      2026-09-05, the same day as Phase 7), and that phase's head note says why a
+      later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
       [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)).
       **This line names a phase and so it goes stale at every close** — it has now
-      done so twice; the note itself moves forward with whichever phase is open,
+      done so three times, the third caught during Phase 8's own close ritual and
+      not afterwards. The note itself moves forward with whichever phase is open,
       and moving it is part of the close ritual rather than a thing to notice later
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
