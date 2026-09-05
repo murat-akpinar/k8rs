@@ -122,23 +122,40 @@ fn clean(text: &str) -> String {
 ///
 /// **Every arm is a literal and none of them formats the error**, including the catch-all:
 /// `KubeconfigError` is not `#[non_exhaustive]`, so an exhaustive match would compile today and
-/// break on a kube bump — a `_` that is also a fixed sentence is safe in both directions. All
-/// six arms were reached and each printed its own line, the canary one of them carried being
-/// the *context name* rather than a token, so an arm that formatted its payload would have said
-/// so.
+/// break on a kube bump — a `_` that is also a fixed sentence is safe in both directions.
+///
+/// **Six arms, counted off this function and not recalled** —
+/// `awk '/^fn because/,/^}/' examples/spike_tui.rs | grep -c '=>'` prints `6`, and it is
+/// written without line numbers so it still answers after this file moves. The first draft of
+/// this comment claimed six when
+/// there were five, which is a wrong number wearing a measurement's clothes and is the one
+/// thing a file whose product is knowledge cannot do. Each was reached and printed its own
+/// line; the canary one of them carried was the *context name* rather than a token, so an arm
+/// that formatted its payload would have said so.
+///
+/// **`src/k8s.rs` groups the same fifteen variants into three**, because a `Fault` has three
+/// places to send a reader and every extra group needs a fourth. A `&'static str` has as many
+/// as are written, so the cluster-entry and certificate arms stay apart here where the product
+/// merges both into `Fault::BadEntry`.
 fn because(error: &KubeconfigError) -> &'static str {
     match error {
         KubeconfigError::FindPath | KubeconfigError::ReadConfig(..) => {
             "the kubeconfig file is missing, or cannot be read"
         }
         KubeconfigError::Parse(..) => "the kubeconfig is not valid YAML",
-        KubeconfigError::CurrentContextNotSet
-        | KubeconfigError::LoadContext(..)
-        | KubeconfigError::LoadClusterOfContext(..)
+        KubeconfigError::CurrentContextNotSet | KubeconfigError::LoadContext(..) => {
+            "the kubeconfig is valid YAML but does not name a context that is in it"
+        }
+        // **These four are not a context problem, and saying so sends the reader to the wrong
+        // file** (`src/k8s.rs`'s `kubeconfig_fault`): for `LoadClusterOfContext` the context
+        // *was* found and the `clusters:` entry it names is missing. Told to check
+        // `current-context:` and `--context`, the reader checks a line that is correct.
+        KubeconfigError::LoadClusterOfContext(..)
         | KubeconfigError::MissingClusterUrl
         | KubeconfigError::ParseClusterUrl(..)
         | KubeconfigError::ParseProxyUrl(..) => {
-            "the kubeconfig is valid YAML but does not describe a usable current context"
+            "this kubeconfig loaded, and a cluster one of its contexts points at did not — \
+             a missing `clusters:` entry, or a `server:` line that is not a URL"
         }
         KubeconfigError::LoadCertificateAuthority(..)
         | KubeconfigError::LoadClientCertificate(..)
@@ -199,6 +216,20 @@ struct App {
     /// pod, and stayed on screen after the watch recovered. A failure is a property of the
     /// watch, so it lives beside the list and not in it.
     failure: Option<String>,
+    /// **The fifth line of `src/k8s.rs`'s `InitDone`, which the first draft copied four of.**
+    /// `false` until a LIST has finished, and it is the whole of `PRIOR-ART § C2` — *"empty"
+    /// and "not loaded yet" are different screens*. `rows` stays empty until `InitDone`, which
+    /// on `kind-k8rs` is watch event **43 of 43**, so without this flag every frame before it
+    /// drew an empty bordered box for a cluster with 41 pods — milliseconds on local kind,
+    /// seconds on 5000 pods over a WAN, and indistinguishable from the true empty answer the
+    /// whole time. C2 wants three states: this is two, and *denied* is `failure` above.
+    ///
+    /// **Never reset, exactly as `src/k8s.rs` never resets it.** A relist leaves the previous
+    /// answer in `rows` while it runs, so flipping back to *still listing* would call a screen
+    /// full of rows unloaded. The one place that reads oddly is a cluster that listed empty and
+    /// is now relisting: it says *no pods* rather than *listing*. The product does the same,
+    /// and "the last complete answer" is what the word means.
+    complete: bool,
     /// Proof the watch is live even in the minute nothing in the cluster happens to change.
     events: u64,
     cursor: usize,
@@ -213,6 +244,15 @@ impl App {
     /// modal is open *every* key belongs to it — including `q`, which is why the list cannot
     /// be quit out from under a confirmation, and including `up`/`down`, which move the
     /// dialog's choice and leave the list's cursor exactly where it was.
+    ///
+    /// **That is true of the keyboard and it is not true of the screen, which is the half
+    /// Phase 8 found** (`PRIOR-ART § G1`). No key can retarget the modal; a *watch event* can.
+    /// `draw` re-resolves `rows.keys().nth(cursor)` every frame, so a pod arriving ahead of the
+    /// cursor slides a different name under an open confirmation — reproduced with an
+    /// unrelated `Apply`, `cursor=1` naming `prod/c-app` and then `prod/b-app`. **Left
+    /// deliberately**: invariant 2's typed name is what it is compared *against*, and Phase 11
+    /// is where the dialog captures its subject at open. The spike demonstrating the defect is
+    /// worth more than the spike quietly not having it.
     fn key(&mut self, code: KeyCode) -> bool {
         if let Some(choice) = self.dialog.as_mut() {
             match code {
@@ -279,6 +319,7 @@ impl App {
             watcher::Event::InitDone => {
                 if let Some(listed) = self.filling.take() {
                     self.rows = listed;
+                    self.complete = true;
                     self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
                 }
             }
@@ -325,14 +366,27 @@ fn draw(frame: &mut Frame, app: &App) {
         head,
     );
 
-    let items: Vec<String> = app
-        .rows
-        .iter()
-        .map(|(key, status)| format!("{key}  {status}"))
-        .collect();
+    // **An empty box has to say *which* empty it is** (`PRIOR-ART § C2`, finding 1 above).
+    // `still listing` and `no pods` are different answers and a bordered box with nothing in it
+    // is the first one wearing the second one's clothes.
+    let items: Vec<String> = if app.rows.is_empty() {
+        let state = if app.complete {
+            "this cluster has no pods"
+        } else {
+            "still listing the cluster…"
+        };
+        vec![format!("  {state}")]
+    } else {
+        app.rows
+            .iter()
+            .map(|(key, status)| format!("{key}  {status}"))
+            .collect()
+    };
     // The selection is marked with a symbol and not a colour, because `tmux capture-pane -p`
     // captures text and drops the attributes — the spike has to be legible in its own proof.
-    let mut state = ListState::default().with_selected(Some(app.cursor));
+    // No selection over the placeholder: a state is not a row and must not look pickable.
+    let selected = (!app.rows.is_empty()).then_some(app.cursor);
+    let mut state = ListState::default().with_selected(selected);
     frame.render_stateful_widget(
         List::new(items)
             .block(Block::bordered().title(" pods "))

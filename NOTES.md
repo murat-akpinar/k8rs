@@ -20949,6 +20949,38 @@ the clause that took a decision to arrive at, so a sanitiser that only filters
    iteration; `UnboundedReceiver::recv` and `StreamExt::next` over a `BoxStream`
    are, and a `read_line`-shaped arm would silently eat one keystroke per frame.
 
+#### The close ran on a second machine, and one nit turned out not to be one
+
+Built and run on the LAN test host (Ubuntu 24.04, rustc 1.97.1, its own 3-node
+kind cluster) rather than only where it was written: 63 pods, the counter moving
+65 → 66 with no keypress, resize reflowing at 55x9, the modal holding `q`, `esc`
+handing focus back, `q` exiting 0 with **0 bytes on stderr**. The D239 sentence
+travelled too — canary count 0, exit 2.
+
+**And the nit that was filed as a nit was real.** `restarts=` summed only
+`container_statuses`, which the review called irrelevant in a spike. On that
+cluster `broken-init` reads `initContainerStatuses: 768` and
+`containerStatuses: 0` — so before the fix the busiest crashloop on the screen
+would have rendered `restarts=0`. Nothing on the dev machine's cluster has an
+init container, which is exactly why it was invisible. **An incomplete
+denominator does not look wrong; it looks calm**, and the only thing that
+distinguished the two was running it somewhere else.
+
+#### A sixth fact, which the re-review had to find because copying is not reading
+
+**`InitDone` publishes the map *and* says the listing finished, and only the first
+half is obvious.** `src/k8s.rs:1569-1602` sets `live` and `complete`; the spike's
+first fix copied four of those five lines and dropped the flag, which is what
+`still_listing` reads and what
+[`PRIOR-ART § C2`](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)
+— *"empty" and "not loaded yet" are different screens* — is tagged `covered` on.
+Measured on the 41-pod cluster, headers deduped from process start: **42 of 43
+frames said `0 pods` inside a bordered `pods` box.** Milliseconds on local kind;
+seconds on 5000 pods over a WAN, saying *this cluster has no pods* and looking
+exactly like the true empty answer. **The lesson is narrower and more useful than
+the flag**: a relist has two outputs, and the one that is a *state* rather than
+*data* is the one a careful copy leaves behind.
+
 #### Three more, recorded where they will be looked for
 
 **The dialog retargeted itself** — [`PRIOR-ART § G1`](PRIOR-ART.md#g1--k9s-arrived-where-invariant-2-starts),

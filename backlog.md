@@ -27,6 +27,16 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
 
 ## Open
 
+- **Two `KubeconfigError` variants get a sentence in which every clause is false.**
+  `KindMismatch` and `ApiVersionMismatch` group into `Fault::Kubeconfig`, which
+  `main.rs`'s `because()` renders as *"the kubeconfig itself could not be read — it
+  is missing, unreadable, or not valid YAML"*. Both fire when two `KUBECONFIG`
+  paths will not merge: both files were **found, read and parsed**. Found by
+  `k8s-admin` while diffing Phase 8's spike against the product it mirrors
+  (2026-09-05) — it is a decision disagreeing with reality rather than code
+  disagreeing with a decision, it is in `src/`, and it was out of that phase's
+  scope.
+
 - **Refused-connect and dropped-connection are not the same retry path, and two
   agents measured opposite things.** Phase 8, same spike: a killed live socket gave
   **~1138 redraws/s at 102% of one core**, while `127.0.0.1:1` gave **0
