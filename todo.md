@@ -3265,12 +3265,13 @@ public release.
       **This is the first unchecked box in the file and it is not the next one to
       work.** Nothing here can move until the user runs `cargo publish` and until
       Phase 13 writes the README. **The next box is the first unchecked one in the
-      lowest open phase below this one — Phase 8 today** (Phase 7 closed
-      2026-09-05), and that phase's head note says why a later phase runs over this
-      one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+      lowest open phase below this one — Phase 9 today** (Phase 8 closed
+      2026-09-05, the same day as Phase 7), and that phase's head note says why a
+      later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
       [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)).
       **This line names a phase and so it goes stale at every close** — it has now
-      done so twice; the note itself moves forward with whichever phase is open,
+      done so three times, the third caught during Phase 8's own close ritual and
+      not afterwards. The note itself moves forward with whichever phase is open,
       and moving it is part of the close ritual rather than a thing to notice later
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
@@ -4128,26 +4129,19 @@ Goal: learn the ratatui event loop without touching product files.
 
 ## Phase 9 — Theme
 
-> **Phase 5's release box is still unchecked, and it is still not next** — it
-> needs the maintainer's crates.io credential and a `README.md` that belongs to
-> Phase 13
-> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
-> It is the first unchecked box in this file, so a cold session lands on it. This
-> note moves forward with whichever phase is open and **has now moved three
-> times** — from Phase 6, Phase 7, and Phase 8, which closed 2026-09-05. Running a
-> later phase over a deliberately open earlier one is
-> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
-> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
-> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
-> runs whole when that box closes**
-> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
-> The next box is the first unchecked one below.
+> **Closed 2026-09-05.** `theme.rs` is frozen. What the review round found — a
+> test that accepted a mark truncated to one letter, an `include_str!` that only
+> breaks in the downloader's hands, and a comment that measured false — is
+> [D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05).
 
 *Also read: [PRIOR-ART § D2](PRIOR-ART.md#d2--do-not-fight-the-users-terminal) (the user's own 16 colours win; bold is a per-emulator setting) and [§ K](PRIOR-ART.md#k-accessibility) (colour is never the only carrier of meaning — every state, not just severity).*
 
-- [ ] `theme.rs`: 10 Catppuccin Mocha constants + `COLORTERM` check with a
+- [x] `theme.rs`: 10 Catppuccin Mocha constants + `COLORTERM` check with a
       16-color fallback
-- [ ] Severity symbols `● ▲ ○` — never colour alone, **and the same rule for
+      ([D241](NOTES.md#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05) —
+      the palette is data and names no `ratatui` type, because this file freezes
+      here and `--once` has no ratatui between it and the terminal)
+- [x] Severity symbols `● ▲ ○` — never colour alone, **and the same rule for
       every other meaning on the screen.** Selection, focus, the `changing…`
       state, the disconnected banner and the `--read-only` marker each carry a
       symbol, reverse video or a word beside their colour. It belongs here rather
@@ -4170,11 +4164,47 @@ looking broken.
 
 ## Phase 10 — View state
 
+> **Phase 5's release box is still unchecked, and it is still not next** — it
+> needs the maintainer's crates.io credential and a `README.md` that belongs to
+> Phase 13
+> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
+> It is the first unchecked box in this file, so a cold session lands on it. This
+> note moves forward with whichever phase is open and **has now moved four
+> times** — from Phase 6, Phase 7, Phase 8, and Phase 9, which closed 2026-09-05.
+> Running a later phase over a deliberately open earlier one is
+> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
+> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
+> runs whole when that box closes**
+> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
+> The next box is the first unchecked one below.
+
 *Also read: [PRIOR-ART § F1](PRIOR-ART.md#f1--sorting) (sorting the rendered string instead of the value — a defect class k9s has never closed) and [§ F4](PRIOR-ART.md#f4--the-api-surface-is-not-a-constant) (a resource is group + version + resource, always all three).*
 
 Goal: `ui.rs` can be a pure function of state, which is the only thing that
 keeps TUI code from rotting.
 
+- [ ] **`just mutants-diff` must see a new file, because `views.rs` is one.** The
+      recipe is `git diff HEAD`, and an untracked file is not in it — so the sweep
+      runs against whatever else is in the tree and prints green having tested none
+      of the box. It does not trip the recipe's own `0 mutants tested` guard,
+      because the diff is non-empty, just non-empty with somebody else's work
+      ([backlog.md](backlog.md); found on Phase 9's first turn, worked around by
+      hand there). `git add -N` is **not** the fix — the index is the PM's and no
+      agent may write it. Try `git ls-files --others --exclude-standard` plus a
+      `git diff --no-index /dev/null <each>` appended to the diff, which stages
+      nothing. **Done when** a deliberately weak test in a brand-new untracked file
+      is reported `MISSED`. `tester`'s box, and it comes first because every box
+      under it is a new file
+- [ ] **`just check` gains a `cargo package` step.** Phase 9 shipped a defect that
+      exists only in the published crate — `include_str!` reading a directory
+      `exclude` drops, where `cargo publish` verifies with a build and a build never
+      compiles a test module
+      ([D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05)
+      finding 2). It was caught by hand; no gate could see it, which by *`just
+      check` is the whole of CI, or it is a lie* is a gap. **Done when** packing,
+      unpacking and `cargo test --no-run` on the result runs inside `just check`,
+      and the Phase 9 defect is replanted and seen red. `tester`'s box
 - [ ] `views.rs`: which view, which item selected, filters, scroll, detail tab
 - [ ] Sidebar model built from discovery — groups (workloads / network /
       storage / config / cluster), not a hard-coded list

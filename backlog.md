@@ -2572,3 +2572,128 @@ long-form version and stays the authority.*
   The cheap fix is a sentence in that paragraph naming `$HOME/.cache`; the honest
   one is whatever `mutants.sh` already does, said once for everybody. Found by
   `dev-core`, 2026-09-05
+
+- **`screens/widgets.md § 9` routes *"styles"* to `theme.rs`, and Phase 9 leaves
+  that word slightly wider than the file.**
+  [D241](NOTES.md#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05)
+  rules that `theme.rs` names no `ratatui` type, so the palette is data and the
+  mapping to `Color` / `Modifier` lands in Phase 11's `ui.rs`. Nothing in
+  `widgets.md` is false today — `theme.rs` is still the single place that decides
+  what a colour *is*, which is what that row was for — but a Phase 11 reader
+  following it will look for `Style` values in a file that holds none. It is
+  `tui-designer`'s file and the fix belongs in the change that first draws a real
+  screen, not in a mid-phase edit to another owner's document
+  (CLAUDE.md § Every file here also has to get smaller). Found by the PM while
+  briefing Phase 9, 2026-09-05
+
+- **`just mutants-diff` tests nothing on the first turn of a new file, and prints
+  green.** The recipe is `git diff HEAD > "$diff"`, and a **new file is untracked**,
+  so `git diff HEAD` holds not one byte of it. The sweep then runs against whatever
+  else happens to be in the tree — on 2026-09-05 that was the PM's `NOTES.md` and
+  `backlog.md` edits — and reports a clean pass having tested none of the box. **It
+  does not trip the recipe's own `0 mutants tested` guard**, because the diff is
+  not empty; it is just non-empty with somebody else's work, which is the one shape
+  that guard cannot see. This is
+  [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+  shape again — the gate's failure and its pass print the same thing — on a
+  different input. `dev-ui` caught it and worked around it by hand
+  (`scripts/mutants.sh --gate --timeout 90 --in-diff` over a
+  `git diff --no-index /dev/null src/theme{,_tests}.rs`), so Phase 9's evidence is
+  sound: 3 caught, 2 unviable, 0 MISSED, both unviables naming a type. **Every
+  first turn of a new file has this hole, and Phase 10 (`views.rs`) and Phase 11
+  (`ui.rs`) walk straight into it** — which is why it is boxed at the head of
+  Phase 10 rather than fixed inside a running Phase 9. The obvious fix,
+  `git add -N`, is **not** obviously safe: the index belongs to the PM, an agent
+  must never write it, and `dev-ui` refused to run it for exactly that reason and
+  was right to. A fix that stages nothing — enumerating untracked files with
+  `git ls-files --others --exclude-standard` and appending
+  `git diff --no-index /dev/null <each>` — is the shape to try first. `tester` owns
+  the `justfile`. Found by `dev-ui`, confirmed by the PM, 2026-09-05
+
+- **`just check` has no `cargo package` step, so a defect that only exists in the
+  published crate is invisible to the whole gate.** Phase 9 shipped one and it was
+  caught by hand, not by CI:
+  [D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05)
+  finding 2 — `include_str!` reading a directory `Cargo.toml`'s `exclude` drops,
+  where `cargo publish`'s own verify step is a **build** and a build never compiles
+  a `#[cfg(test)]` module. `cargo package` + unpack + `cargo test --no-run` is the
+  step that would have seen it, and by *"`just check` is the whole of CI, or it is
+  a lie"* its absence is a gap rather than a preference. Phase 5's open box is the
+  crates.io release, which is what makes this worth a box rather than a note.
+  `tester` owns `justfile` and `scripts/`. Found by `tester`, 2026-09-05
+
+- **The Alerts and Analysis mockups mark no selected row, and `theme.rs` has
+  already frozen the constant that would mark it.** Measured over `screens/`
+  2026-09-06: the only `▸` in `alerts.md` (lines 8, 376) and all eight in
+  `analysis.md` are the **sidebar** nav row; no finding card and no report row in
+  any mockup carries a marker, and the string `focus` appears **zero times in all
+  eleven files**. `PANEL` degrades to `Ink::Default` on a 16-colour terminal by
+  design, on the argument that `SELECTION` and `FOCUS` carry the row — so as drawn,
+  the selected Alerts card there has no fill, no mark and no reverse. Press `tab`
+  on the default view and nothing changes, then `↑↓` moves the sidebar instead of
+  the cards. That is k9s#3955 reproduced on the front door by the box written to
+  prevent it. The constants exist and are right; what is missing is the drawing.
+  `tui-designer`'s, for Phase 11 when the console is drawn —
+  [D243](NOTES.md#d243--the-phase-9-close-the-constant-is-the-carrier-and-not-the-sentence-the-pairing-that-would-have-been-written-twice-and-a-comment-three-files-had-already-copied-2026-09-06)
+  finding 3. Found by `tui-designer` at the Phase 9 close
+
+- **Which colour the healthy line takes is not decided, and `band` cannot decide
+  it.** `OK` (green) is the one palette role with no `Signal` beside it, and the one
+  line that would draw it — `○ nothing is broken` — uses `○`, which is
+  `INFO_SIGNAL` and pairs with blue through `theme::band`. Adding an `OK_SIGNAL`
+  holding the same glyph is *not* the answer (it is the second copy D243 finding 3
+  is about, and `INFO_SIGNAL`'s doc already names both meanings). The open question
+  is the colour, and `band` cannot answer it because the healthy line carries no
+  `Severity`. For Phase 11, where a renderer exists to make the choice. Found by
+  the PM's second pass over the landed tree, 2026-09-06
+
+- **Two `screens/` sentences point into `theme.rs` at things shaped differently
+  than what landed.** `screens/analysis.md` § How a report is drawn says
+  *"`theme.rs` draws the glyph from `severity`"* — `theme.rs` draws nothing
+  ([D241](NOTES.md#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05)),
+  it *decides*; and `screens/widgets.md` § 2 names a `Badge::severity`, where what
+  exists is `theme::band` returning a pair and no `Badge` type. Both are now
+  satisfiable — `band` is the thing they were reaching for — so this is a wording
+  fix, not a missing feature. Joins the `widgets.md § 9` "styles" note above; all
+  three are `tui-designer`'s and belong in the change that first draws a real
+  screen. Found by `tui-designer` at the Phase 9 close
+
+- **`screens/README.md` rule 4 is narrower than the family it describes.** It calls
+  the `⚠` family *"a connection or trust problem"*, and clock skew
+  (`⚠ your clock is behind`) and the kubeconfig errors (`⚠ cluster undefined`,
+  `⚠ duplicate name`) are neither. Surfaced by D243's ruling that `ALARM` is the
+  glyph and not one sentence — widening the constant is what made the rule's own
+  scope visible. `tui-designer`'s. Found by `dev-ui`, 2026-09-06
+
+- **`screens/dialogs.md` rule 3 still promises a dry-run the product declines.** It
+  reads *"The dry-run verdict is shown before the button is live, wherever the API
+  supports dry-run"*, which
+  [D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+  ruling 1 narrowed — the API *does* support a `DELETE` dry-run and k8rs declines
+  it, because the marker rides in the request body and the cluster's own
+  `Metadata`-level audit record could not then tell a cancelled dialog from a
+  delete that happened. The same page's delete boxes already say so correctly
+  (*"k8rs did not check this one with the cluster first"*); rule 3 is the summary
+  that did not follow the ruling. `tui-designer`'s own file, found by
+  `tui-designer` at the Phase 9 close and outside that turn's scope
+
+- **`guards.sh` is `set -e`, so one red guard hides every answer after it.**
+  Measured on this turn's deliberate red: 30 command lines follow `set -x` and
+  **20 of them — 13 distinct tools — sit after `signal-guard.py`**, so `dev-ui` had
+  to run thirteen guards by hand to prove its change broke only one. `just check`'s
+  own per-line fail-fast then hid `cargo deny check` and `just cross` as well —
+  a **second** mechanism, so a box that only fixes `guards.sh` half-closes it. The
+  edit is small: a `run` wrapper that executes, remembers the failure and returns
+  0, an accumulated `rc`, failed steps printed last. Three costs, all real.
+  (1) **Ordering is not decoration** — `toolchain-guard.py` runs first because it
+  decides whether anything after it meant anything, and a failed `--self-test`
+  makes its own real run's verdict meaningless. (2) **A guard that dies mid-way is
+  a writer that did not clean up** ([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)):
+  measured, only `e2e.sh` carries a `trap`, while `fixture-audit.sh` and
+  `mutants.sh` call `mktemp` without one. Neither edits the repo tree, so today it
+  is a temp-directory leak and not a corrupted read — but confirming that per guard
+  is part of the box, not an assumption to inherit from this line. (3) `set -x` is
+  what makes CI readable, so *"the last traced line is the guard that failed"*
+  stops being true and the summary must be last and must name the steps. Not
+  urgent: it costs a re-run, never a wrong answer. `tester`'s. Found by `tester`,
+  2026-09-06
