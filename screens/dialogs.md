@@ -755,15 +755,33 @@ by its ReplicaSet while you were typing its name
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-The dialog holds the object's `uid` and the `resourceVersion` it opened with,
-which gives two outcomes and not one:
+The dialog holds the object's `uid` — the field that answers *is this still
+the same object*, the question this dialog exists to ask. It does not hold
+the `resourceVersion` it opened with, which is what this section said until
+this round and was wrong: `resourceVersion` answers *has anything at all been
+written*, and that field bumps on a status-only write from the object's own
+controller as readily as on a real replacement. Measured on a real cluster: a
+healthy, idle Deployment writes zero times in three minutes, while a
+`CrashLoopBackOff` one — the object the operator most needs this dialog to
+still work on — writes every 2.45 seconds, median
+([NOTES § D228](../NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)).
+A dialog keyed on that field would flip to "changed" and kill its own confirm
+button about that often.
 
-- **Gone** — the screen above. The confirm button dies. Sending a delete by
-  name at this point would hit whatever now holds that name, which is how the
-  wrong pod gets deleted.
-- **Changed** — the dialog says the object changed underneath and offers a
-  re-read. The same mechanic as a 409, moved to where it costs the user
-  nothing.
+So **Gone** — the screen above — is the only outcome this dialog has. The
+confirm button dies, because sending a delete by name at this point would hit
+whatever now holds that name, which is how the wrong pod gets deleted.
+
+A write that leaves the object in place — a scale, a status update, a label —
+does not reopen this dialog, and none of today's three operations need it to:
+`scale` asks for a count, not a change relative to whatever is running, so a
+write between open and confirm cannot make the count the operator agreed to
+wrong; `restart` and `delete` read no live number this dialog would need to
+refresh either. A genuine read-modify-write conflict — the case a
+`resourceVersion` precondition actually guards — is `edit`'s, arriving with
+v0.4, with its own precondition and its own state to design then, never this
+one
+([REQUIREMENTS](../REQUIREMENTS.md#write-operations-new--the-reversal)).
 
 ## While the call is running
 

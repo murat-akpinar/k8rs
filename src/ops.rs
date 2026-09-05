@@ -165,6 +165,25 @@ pub struct Mutation<'a> {
     pub path: &'a str,
     /// The `resourceVersion` sent with the call, where one is sent — the value a `409` is
     /// argued from.
+    ///
+    /// **No operation sets it today** (NOTES § D228 took [`scale`]'s back out), and v0.4's `edit`
+    /// is the first that will — it is a genuine read-modify-write, which is where
+    /// [REQUIREMENTS.md](../REQUIREMENTS.md) always put conflict handling.
+    ///
+    /// **Whatever an operation puts here must survive [`Record::of`]'s strip unchanged, and the
+    /// operation owes that guard at the point it reads the value.** This is the one field that
+    /// travels both ways — raw in the request body, stripped into the record — so a value the
+    /// strip alters makes the two disagree about the field a `409` is argued from. `edit` owes it
+    /// in its own box.
+    ///
+    /// **It is prose here and not a check in [`Record::of`], and that was measured** (`tester`,
+    /// 2026-09-05). An assertion there refuses every input where `cleaned(v) != v`, so every value
+    /// a test may then supply satisfies `cleaned(v) == v` by construction and nothing can move the
+    /// strip: planting its removal went from **three failing tests to none**. It also could not
+    /// close the hole, since a `debug_assert` is compiled out of the build the divergence would
+    /// ship in. The enforcement belongs where both halves of the invariant are visible — the
+    /// operation, which holds the value it is about to send *and* the record it is about to
+    /// write — and not here.
     pub version: Option<&'a str>,
     /// **Whether this operation sends a `dryRun=All` check before the change.** When it is
     /// `false` nothing is sent before the confirmation and the audit line records that no check
@@ -1223,7 +1242,22 @@ fn in_words(fault: Fault) -> &'static str {
     match fault {
         Fault::Refused => "the cluster would not allow it",
         Fault::Rejected => "the cluster would not accept the request k8rs made",
-        Fault::Conflict => "the object had already been changed by something else",
+        // **The one fault whose sentence names a next step, because it is the one whose fix the
+        // reader can act on** — todo.md § Phase 7's `resourceVersion` box, whose own title is *a
+        // `409` offers a re-read, never a blind overwrite*. Headlessly the offer *is* the
+        // sentence; the dialog that re-reads for real is Phase 11's, drawn in
+        // `screens/dialogs.md` § The object went away while the dialog was open. It is written
+        // here rather than in [`verdict`]'s two arms so that *the change was never sent* and
+        // *nothing was changed* say it once between them (NOTES § D103).
+        //
+        // **The sentence outlived the precondition it was written beside** (NOTES § D228). No
+        // operation in this file sends one now, so a `409` here comes from somewhere else — and
+        // there is no divergence from the taught line to note, because `kubectl scale` carries no
+        // precondition either and the two now behave the same on a conflict.
+        Fault::Conflict => {
+            "the object had already been changed by something else, so look at it again before \
+             deciding whether you still want this change"
+        }
         Fault::Expired => "the login k8rs was using had run out",
         // **Not *any more*, which asserts it used to be there** (`k8s-admin`, 2026-09-04). A `404`
         // is reached by a mistyped name far more often than by a deletion — `scale
@@ -1264,12 +1298,17 @@ fn in_words(fault: Fault) -> &'static str {
 /// [`perform`] uses it for the pair — and the number was three people's arithmetic over the
 /// caps, which went stale the moment [`Mutation::server`] and [`Mutation::uid`] were added.
 /// `a_line_and_a_record_have_a_measured_ceiling_and_it_is_far_under_one_write` builds a mutation
-/// with every field past its cap and prints what comes out: **the longest attempt line is 15 689
-/// bytes, the longest result line 4 864, and the longest record — both lines — 20 553**. What the
-/// claim above needs is the *line*, since that is what one `write_all` is handed, and 15.7 KB is
-/// still three orders below where the kernel starts short-writing a regular file. The test asserts
-/// a 32 KiB ceiling rather than the figure, so a cap that moves by a byte is not a red build and
-/// a cap that moves by an order of magnitude is.
+/// with every field far past its cap, **prints** the longest attempt line, the longest result line
+/// and the longest record, and asserts a **32 KiB** ceiling on the line — which is what the claim
+/// above needs, since a line is what one `write_all` is handed, and the measured figure is three
+/// orders below where the kernel starts short-writing a regular file.
+///
+/// **The figures live in that test's output and are deliberately not repeated here**
+/// (2026-09-05). They were, and two of the three were stale at `HEAD` with nothing red: the
+/// ceiling assertion is on the order of magnitude and correctly does not care about a byte. A
+/// number quoted in prose beside a test that prints it is a second copy, and this file has paid
+/// for those (NOTES § D103). Run the test to see them. The ceiling is the claim; a cap that moves
+/// by a byte is not a red build and a cap that moves by an order of magnitude is.
 ///
 /// **The real ceiling on a record is not its size, it is a full disk** (`tester`, 2026-09-04).
 /// Filling a tmpfs mid-record, `write_all` came back `StorageFull` part-way and the file ended
@@ -1345,9 +1384,20 @@ fn a_kind(kind: &str) -> String {
 // scaling *is*. Scope — namespaced or not — is the driver's answer and is taken as a parameter;
 // re-deriving it here would be the third copy that ruling refuses.
 //
-// **No `resourceVersion` and no `409` re-read** (NOTES § D220 ruling 6). todo.md 3824 wires that
-// for every call at once, because the precondition and the re-read are one mechanism; half of one
-// built inside this operation would be a box added to a running phase.
+// **No `resourceVersion` precondition, and this is a reversal of a version that shipped**
+// (NOTES § D228). `metadata.resourceVersion` bumps on **every** write to the object, a `status`
+// write by the deployment controller included — measured: a `status`-only patch moved the scale
+// subresource's version `954 → 1102` with `generation` and `spec.replicas` unchanged, and the
+// scale after it was a `409`. So the precondition is strictly broader than the thing it defends,
+// and a rolling Deployment is a healthy one: 15 writes in 3.46 s under a `kubectl set image`, 20
+// in 99.4 s on a `CrashLoopBackOff`, against 0 in 180 s when settled. Through this binary with a
+// 10 s confirmation, 5 of 9 runs against churning objects failed *after* the operator typed yes.
+//
+// **`--replicas=N` is absolute intent and not a read-modify-write**, which is why nothing is lost:
+// if something else scaled to 4 while the dialog was open, sending 5 still delivers the 5 that was
+// asked for. [REQUIREMENTS.md](../REQUIREMENTS.md) puts conflict handling under **Edit flow**, and
+// v0.4's `edit` is the operation that reads, modifies and writes back — [`Mutation::version`] and
+// the audit line's column are there for it and are set by nothing today.
 
 /// **What `scale` can be pointed at, in the words the refusal uses** — NOTES § Operations' `s`
 /// row.
@@ -1523,6 +1573,8 @@ where
         kubectl: &kubectl,
         verb: "PATCH",
         path: &path,
+        // **No precondition, and the region comment above is where the measurement is**
+        // (NOTES § D228).
         version: None,
         // **A scale is checkable and this one asks.** `dryRun=All` on the scale subresource is a
         // request every cluster answers, and `screens/dialogs.md` rule 3 is what makes the button
@@ -1681,6 +1733,16 @@ fn noun(count: i64) -> &'static str {
 // same exposure: a `GET` of a Deployment would pull those container environments into k8rs for a
 // dialog that shows none of them. So `uid` and `version` are both `None`, and a missing object is
 // refused by the dry-run in the apiserver's own words.
+//
+// **The box that would have sent a `resourceVersion` landed and was then reversed, and neither
+// state ever reached this operation** (NOTES § D227 ruling 1, § D228). Nothing is read here, so
+// there was never a version to send. The one mechanism that looked like it bought a version
+// without the exposure was measured and does not: `Api::get_metadata`'s
+// `PartialObjectMetadata` returns no `spec`, but it returns `metadata.annotations`, and on any
+// object created with `kubectl apply` that carries
+// `kubectl.kubernetes.io/last-applied-configuration` — the whole applied pod spec, planted canary
+// included (D227 ruling 2). It is also not cheap: 5247 bytes against the full `GET`'s 7243, of
+// which 2148 are `managedFields`.
 //
 // **What the check's *answer* says is read, and that is not the same thing** (NOTES § D224). The
 // apiserver accepts this patch on a paused Deployment and changes nothing an operator can see, so
@@ -2041,9 +2103,18 @@ where
 // more reason: a `GET` to fetch a `uid` pulls the object — container environments included — into
 // k8rs for a dialog that shows none of it. So `uid` and `version` are both `None`, there are no
 // `Preconditions`, and a missing object is refused by the apiserver's own `404` on the real call.
-// `DeleteParams::preconditions` is the delete-shaped spelling of the *next* box in this phase —
-// *every call sends the resourceVersion that was read* — which takes the read for every call at
-// once; half of it built here would leave that box with its premise decided underneath it.
+//
+// **That box left this operation alone twice over** — *every call sends the resourceVersion that
+// was read* was a conditional and nothing is read here (NOTES § D227 ruling 1), and the one
+// operation it did reach has since had it taken back out (NOTES § D228).
+// `DeleteParams::preconditions` is
+// measured to work — `resourceVersion` and `uid`, namespaced and cluster-scoped, each with its own
+// `409` sentence — and `uid` is the guard for NOTES § D22's *wrong pod deleted*, the worst case in
+// the write path. It is Phase 11's, because that is where the dialog can supply a `uid` off the
+// watch rather than a `GET` buying one at the exposure this ruling refuses. **And an empty
+// precondition is a trap on this verb specifically**: `{"preconditions":{"resourceVersion":""}}`
+// is a `409` that can never clear, where the same value in a patch is silently *no precondition*
+// (D227 ruling 6).
 //
 // **And this is the operation that sends no check at all: `checkable` is `false`**
 // (D225 ruling 1). A `dryRun=All` delete is a real `DELETE` on the wire, sent before anybody has

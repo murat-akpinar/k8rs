@@ -248,6 +248,8 @@ its line moving with it.
 - [D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04) — the `restart` review round: two blockers a stand-in apiserver could not produce, and the sentence that promised a cluster's settings
 - [D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04) — the five rulings `delete` could not be briefed without, and the preflight it declines
 - [D226](#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04) — the `delete` review round: a token that could be replayed, a removal that had not happened, and the sandbox that was not one
+- [D227](#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05) — the resourceVersion goes only where a read already happened, and the metadata read that leaks what a `GET` was refused for
+- [D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05) — the review round that reversed the box: a precondition on a field that moves when nothing changed, and the dry-run window that was 0.2% of what it claimed
 
 ## Why it exists — where the gap is
 
@@ -1015,13 +1017,24 @@ The watch is still running behind the modal, so the dialog does not need to
 poll anything:
 
 - The dialog holds the object's `uid` **and** the `resourceVersion` it was
-  opened with.
+  opened with. (**The `resourceVersion` half is withdrawn** — see the `Changed`
+  bullet below and D228.)
 - **Gone:** the dialog becomes *"this pod is already gone — something else
   removed it"* and the confirm button dies. Deleting by name what the user
   believes is the object they selected is how the wrong pod gets deleted.
 - **Changed:** it says so and offers a re-read. This is the 409 mechanic from
   [REQUIREMENTS § Conflict handling](REQUIREMENTS.md#write-operations-new--the-reversal), moved to
   where the user can still do something about it cheaply.
+  **This bullet named the wrong field and is superseded by
+  [D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)
+  (2026-09-05).** `metadata.resourceVersion` moves on every write to the object,
+  a `status` write by its own controller included — measured at **20 writes in
+  99.4 s, median gap 2.45 s**, on a `CrashLoopBackOff` Deployment whose spec
+  never moved. Keyed on it, this modal kills its own confirm button every couple
+  of seconds on precisely the object the dialog was opened for. **The `Changed`
+  state is retired rather than re-keyed**, and the dialog holds the `uid` alone:
+  `Gone` — *is this still the object you selected* — was always the hazard this
+  entry was written for, and it is untouched.
 
 ### D23 — permissions are discovered by failing, and that is backwards
 
@@ -19498,3 +19511,275 @@ run's own diff snapshot compared line for line against `git diff HEAD` (1506
 added non-comment `src/` lines on both sides, zero differences), because the
 sweep started before the last comment edits and *the gate covered the final tree*
 is exactly the kind of claim this repo requires measured rather than assumed.
+
+### D227 — the resourceVersion goes only where a read already happened, and the metadata read that leaks what a `GET` was refused for (2026-09-05)
+
+todo.md 3837 is Phase 7's next box: *every call sends the resourceVersion that
+was read; a `409` offers a re-read, never a blind overwrite*. Three operations
+have landed and all three set `version: None`, so the box reads as an
+instruction to widen. It is not, and the five rulings below are what the brief
+could not be written without. Every number here is
+[reports/2026-09-05-resourceversion-and-409-on-the-wire.md](reports/2026-09-05-resourceversion-and-409-on-the-wire.md),
+measured against a `K8RS_CLUSTER=review` kind cluster on server v1.36.1.
+
+**The box's scope is narrower than its first sentence, and
+[REQUIREMENTS.md](REQUIREMENTS.md#write-operations-new--the-reversal) is where
+that shows.** The requirement it implements reads *"**apply** uses the
+resourceVersion that was read"*, sits directly under **Edit flow**, and the box's
+own parenthetical says why it is in Phase 7 at all — *the case `edit` will lean
+on in v0.4*. A blind overwrite is a hazard of **read → modify → write back**, and
+`edit` is the only operation in the plan that does that. The box generalised
+`apply` to *every call*; the requirement never did.
+
+**1. `scale` sends it. `restart` and `delete` do not, and this does not reopen
+their boxes.** The box says *the resourceVersion **that was read*** — a
+conditional, not an order to add a read. `scale` already reads: `Api::get_scale`,
+for the running count its consequence sentence turns on. So it holds one and
+throws it away, which is the box's whole subject. `restart` and `delete` read
+nothing, by
+[D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3 and
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 4 — a `GET` of a Deployment pulls `spec.template.spec.containers[].env[]`
+into k8rs for a dialog that shows none of it — so there is no resourceVersion
+that was read, and nothing to send.
+
+**2. The one mechanism that looked like it dissolved that was measured and it
+does not.** A `PartialObjectMetadata` read (`Accept: …as=PartialObjectMetadata…`,
+which `Api::get_metadata` sends) returns no `spec` at all, so it reads as the
+obvious way to buy a resourceVersion without the exposure. It is not: it returns
+`metadata.annotations`, and on any object created with `kubectl apply` that
+carries `kubectl.kubernetes.io/last-applied-configuration` — **the whole applied
+pod spec**. The planted canary `ZZZ-PLANTED-CANARY-ZZZ` appears **once** in the
+PartialObjectMetadata response (twice in the full `GET`). Nor is it cheap:
+**5247 bytes against 7243, 1.38×**, of which **2148** are `managedFields`,
+unpruned — the field invariant 6 drops everywhere else — leaving **260** bytes
+once the annotation and `managedFields` come out. **And the leak is
+user-dependent**: an object created with `kubectl create` carries no such
+annotation, so the safe case is the one a test writes and the leaking case is the
+one an operator has. (A Secret's metadata does *not* carry `data`, plain or
+base64 — measured, and the one reassuring result in the section.) So the
+exposure argument that closed those two boxes survives the mechanism that looked
+like it would answer it, and it survives *measured* rather than argued.
+
+**3. What the precondition buys on `scale` is the record, not the intent — and
+that is why it is worth one field.** `--replicas=3` is absolute: if something
+else scaled to 5 while the dialog was open, sending 3 still expresses exactly
+what the operator asked for, so nothing about the *change* needs guarding. What
+was derived from the read is **the consequence sentence the operator agreed to**
+(*"this starts 2 more copies"*, computed from `spec.replicas`) and **the `uid` on
+the audit line**. If the object moved in between, both records describe a state
+that no longer held — invariant 4's *neither record may lie*, about the one
+number the reader is agreeing to. The precondition makes that premise
+structurally true or stops the call. It is the same argument
+[`scale`] already makes when it refuses a `Scale` with no `spec.replicas` rather
+than reading it as zero.
+
+**4. The conflict lands on the check pass, and costs no new plumbing.** A
+resourceVersion in a merge-patch body **is** a server-side precondition on the
+scale subresource: stale → `409 Conflict`, current → `200`, the identical body
+re-sent → `409`. `?dryRun=All` returns **the same 409**, and it **does not
+consume the value** — `rv=862` before the dry-run, `862` after, and the real call
+with that same `862` succeeds. `scale` is already `checkable: true`, so a
+conflict surfaces as `Outcome::NotSent { fault: Fault::Conflict }` *before anyone
+is asked to confirm*: [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s
+*moved to where it costs the user nothing*, reached in Phase 7 with no watch and
+no dialog. `Fault::Conflict` already exists on a `409` and already has a
+sentence. **What the box still owes is the second half of its own title**: that
+sentence stops at *the object had already been changed by something else* and
+names no next step, where the box says a `409` **offers a re-read**. Headlessly
+the offer is a sentence; the dialog that offers it for real is Phase 11's, drawn
+already in [screens/dialogs.md](screens/dialogs.md).
+
+**5. The taught line stays flagless, and this is the first time invariant 4's
+two-record split carries weight.** No `kubectl` line is both honest and
+precondition-carrying. `kubectl delete`, `kubectl rollout restart` and `kubectl
+patch` have **no such flag at all**. `kubectl scale` has `--resource-version`,
+and it is a *different request*: with a stale value it makes **two GETs and no
+write**, failing client-side with `error: Expected resource version to be 1, was
+908` — no `409`, no `Status` to render — and with a correct one it switches the
+verb to **`PUT` of the whole `Scale`**. The flagless form is
+`PATCH …/scale`, `application/merge-patch+json`, `{"spec":{"replicas":N}}` —
+**byte-identical to what `ops.rs` sends today**. So putting the flag on the
+command log would teach a mechanism k8rs did not use, which is worse than
+omitting one it did. The line stays flagless; the resourceVersion rides on the
+**audit** line, which is exactly where
+[REQUIREMENTS § DevSecOps](REQUIREMENTS.md#devsecops-requirements) put it
+(*"the real API call (verb, path, resourceVersion sent, …)"*) and where
+`Record::attempt_line` already prints it or `not sent`. **The divergence is named
+rather than hidden**, beside `delete`'s `--wait` divergence in [`verdict`]: the
+taught line will succeed where k8rs declines.
+
+**6. An absent or empty resourceVersion is refused, never sent — and nothing
+parses it.** `{"metadata":{"resourceVersion":""}}` in a patch is **`200`, treated
+as no precondition**: a `Some("")` reaching the wire produces a patch that looks
+guarded, is not, and writes a record claiming a precondition that never existed —
+the blind overwrite this box exists to remove, wearing the box's own clothes. (On
+a delete the same value is a `409` **that can never clear**, which is the other
+half of the trap and is why the rule is *refused*, not *coerced*.) So a read that
+comes back without a usable resourceVersion is refused in the same breath as one
+with no `spec.replicas`. **What is not done is validating the value's shape**:
+`resourceVersion` is opaque by API contract and a client may not parse it. A
+non-numeric value is a `500` with **no `reason` field** rather than a `409` —
+recorded because a reader will meet it, not because k8rs should pre-empt it; no
+apiserver hands one back, and baking *must be numeric* into k8rs would encode
+etcd's storage layer as an API rule.
+
+**What is deliberately left, with a home.** `delete`'s
+`preconditions.uid` is measured to work — namespaced and cluster-scoped, with its
+own sentence (*"The object might have been deleted and then recreated"*) — and it
+is the guard for [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s
+*wrong pod deleted*, the worst case in the write path. It is **not this box's**,
+because `delete` reads nothing and D22 puts the `uid` on the dialog, from the
+watch. It is boxed in Phase 11, where that dialog is built — a later phase, never
+the running one. Two more the report names as unmeasured and nothing here leans
+on: a `409` under genuine concurrency (every conflict measured was manufactured
+with `kubectl label --overwrite`), and whether `details.retryAfterSeconds` ever
+appears on a `Conflict` — absent in all seven bodies captured, so no formatter
+may read it. **And one correction owed elsewhere**:
+[D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)'s
+4859-byte `Status.message` echo was **not reproduced** in five shapes on this same
+v1.36.1 — largest body 820 bytes, canary in none. That is not evidence against
+D217; it is a named gap, boxed for a re-measure rather than quietly assumed
+still true.
+
+### D228 — the review round that reversed the box: a precondition on a field that moves when nothing changed, and the dry-run window that was 0.2% of what it claimed (2026-09-05)
+
+[D227](#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05)
+ruled that `scale` should send the `resourceVersion` it had already read. It
+landed, `tester` found and closed a real defect in it, and then the operator
+review measured the thing none of the three of us had:
+[reports/2026-09-05-scale-precondition-under-churn.md](reports/2026-09-05-scale-precondition-under-churn.md).
+**D227 ruling 1 is reversed for `scale`, and rulings 2, 5 and 6 are unaffected.**
+
+**The reversal, and the one sentence it turns on.** `metadata.resourceVersion`
+bumps on **every** write to the object, *including a `status` write by the
+deployment controller*. D227 ruling 3 named exactly what the precondition was
+defending — *the consequence sentence the operator agreed to, computed from
+`spec.replicas`, and the `uid` on the audit line* — and **a status write
+falsifies neither.** So the guard is strictly broader than the invariant it
+defends, and the excess is the population k8rs exists for. Constructed and
+measured: a `PATCH …/deployments/web/status` with `{"status":{"collisionCount":1}}`
+moved the scale subresource's `resourceVersion` from `954` to `1102` with
+`generation` and `spec.replicas` unchanged, and the scale that followed was a
+`409`.
+
+**How often, counted off a watch:** steady at 3/3 ready, **0 writes in 180 s** —
+so the healthy case really is quiet. One `kubectl set image`, **15 writes in
+3.46 s**. One pod deleted, **4 in 0.57 s**. `CrashLoopBackOff` on three pods,
+**20 writes in 99.4 s**, median gap **2.45 s**. Through the built binary with a
+10 s confirmation delay, **5 of 9 runs against churning objects failed** and
+**0 of 2 against a settled one** — and the failures came *after* the operator
+typed `yes`. A rolling Deployment is a healthy one and a crashlooping one is the
+3am case; refusing both is worse than the blind overwrite the box set out to
+remove. This is [PRIOR-ART § B4](PRIOR-ART.md) (k9s #3583) in a new place: a
+check the operation does not need makes a working key stop working for a class
+of users.
+
+**What is *not* the fix, and it was measured rather than dismissed.** A
+`json-patch` `test` op on `/spec/replicas` guards the actual premise and
+**survives a status-only write** — measured. It is refused anyway: the failure
+is a `422 Invalid` whose message is *"the server rejected our request due to an
+error in our request"*, naming no field and no values, which
+[D213](#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04)
+classifies as `Fault::Rejected` — so the conflict sentence this box wrote would
+never be reached, and the operator would get a worse message than the one being
+replaced. **And the deeper reason to decline it: nothing asks for it.**
+[REQUIREMENTS.md](REQUIREMENTS.md#write-operations-new--the-reversal) puts
+conflict handling under **Edit flow** and says *"**apply** uses the
+resourceVersion that was read"*. `scale --replicas=N` is absolute intent, not a
+read-modify-write: if something else scaled to 4 while the dialog was open, sending
+5 still delivers exactly the 5 the operator asked for. **The requirement was
+right and D227 over-read it** — which is why the fix is to stop sending, not to
+send something cleverer.
+
+**Ruling 4's claim was false and is corrected here, not quietly dropped.** D227
+said one body on both passes *"is what makes a conflict surface before the
+operator is asked to confirm rather than after."* Measured: the dry-run lands
+**9–21 ms** after the `GET` in all 24 trials, while the confirmation window is
+seconds — so the check covers **~0.2 %** of the exposure at an 8 s dialog and
+**~0.05 %** at 30 s, and **4 of the 9 conflicts had a `200` dry-run and a `409`
+real call**. It catches the *dense* case by luck, never the *long* case by
+design. [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s *moved to
+where it costs the user nothing* is a property of **a watch behind an open
+dialog**, and borrowing the phrase for a dry-run fired milliseconds after the read
+was the error. Recorded because the next reader would have built on it.
+
+**The finding a per-box review could not have seen, and the reason step 6 exists.**
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s second bullet and
+[screens/dialogs.md](screens/dialogs.md) already pre-commit Phase 11's dialog to
+holding *"the `uid` **and** the `resourceVersion` it was opened with"* and flipping
+to **Changed** on the latter. On the same measurement that is a modal killing its
+own confirm button roughly **every 2.5 seconds** on a crashlooping Deployment whose
+spec never moved. `ops.rs` and `screens/dialogs.md` were about to read one field
+and be wrong the same way, so fixing this box without fixing D22 would have bought
+nothing. **`uid` is the field that means what D22 wants** — *is this still the same
+object* — and `resourceVersion` answers *has anything at all been written*, which
+is not the question.
+
+**`Changed` is retired rather than re-keyed, and that is `tui-designer`'s ruling
+on its own file** (2026-09-05). Re-keying it would mean inventing a per-operation
+*what would make this stale* field that nothing in
+[REQUIREMENTS.md](REQUIREMENTS.md) asks for, to drive a pre-send state that
+duplicates conflict handling that already exists after the call. **And this box's
+own argument about `scale` generalises**: absolute intent means sending N still
+delivers N whatever ran in between, and neither `restart` nor `delete` shows the
+operator a live number whose staleness makes the confirmed change wrong. The one
+operation that does is `edit` — read-modify-write, v0.4 — and
+[REQUIREMENTS § Conflict handling](REQUIREMENTS.md#write-operations-new--the-reversal)
+already scopes it there. So `Gone`, on the `uid`, is the only outcome, and D22's
+bullet, that requirement's second half, `screens/dialogs.md` and Phase 11's box
+all say so.
+
+**What survives the reversal.** `Fault::Conflict`'s sentence keeps its next step —
+a `409` is reachable from other paths, and *"look at it again before deciding
+whether you still want this change"* is what the box's own title owed. The
+`Mutation::version` field, the audit line's `resourceVersion` column and
+[`Record::of`]'s strip stay as they are, unused by any operation until v0.4's
+`edit`, which **is** a read-modify-write and is where the requirement always put
+this. **The contract `tester` found by breaking it was moved from prose into
+[`Record::of`] as a `debug_assert`, and then moved back — the round trip is the
+part worth keeping.** `k8s-admin` proposed it (finding 5) and I took it: one
+check for every future operation instead of a paragraph asking `edit` to
+remember. `tester` then measured it. Plant the strip removal in `Record::of` —
+`version: record.version.map(str::to_string)` — and nothing else: **at `HEAD`
+three tests fail; with the assertion in, all 1056 pass.** Coverage of that strip
+went from three tests to none, and **structurally, not by oversight**: the
+assertion refuses every input where `cleaned(v) != v`, so every value a test may
+supply satisfies `cleaned(v) == v` by construction and the strip is a no-op on
+all of them.
+
+**And it never closed the hole it was added for.** `debug_assert` is compiled out
+in release, so a crafted `resourceVersion` in a release build passes it, gets
+stripped, and the audit line diverges from the wire again — the original defect,
+in the only build that ships. So it enforced the contract exactly where it was
+never going to be violated while removing the coverage that protected the path
+where it could be. The assertion is gone, the three invariant-9 tests are back to
+their `HEAD` shapes, and the strip stays as defence-in-depth for invariant 9 — a
+crafted value must not reach a file somebody `cat`s — now tested again.
+
+**Where the contract actually belongs, and why prose is the honest answer here.**
+It is the *operation's*, held at the point it reads the value, which is what
+`scale`'s removed guard did. `Record::of` sees one half of the invariant: what
+the record will print. The other half — what the request will carry — is the
+operation's and is not in scope at that call. An assertion over half an
+invariant is what this looked like, and v0.4's `edit`, the first operation that
+will set the field, owes the guard in its own box.
+
+**The general lesson, since this repo has now paid for it twice in one box:** a
+guard that makes a hostile input unrepresentable also makes it unfeedable, and
+the tests that were proving the sanitizer are the ones that stop being able to.
+Check what a new assertion makes *untestable* before taking it — the count of
+tests that go red when you break the line underneath it is one command.
+
+**Two corrections owed elsewhere, both from this round.**
+[D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)'s
+4859-byte echo **was reproduced** — yesterday's five failed shapes missed it on
+*media type*, not on version: `application/merge-patch+json` with an unknown field
+under `Strict` returns a **13218-byte** body with a **5132-byte** message carrying
+the planted canary **twice**, where `strategic-merge-patch+json` returns 514 bytes
+and no canary. `Pass::patch`'s doc had this right all along; the backlog entry
+D227 opened had a wrong premise and is retired. And `removal` serves
+**`replicaset`**, which invariant 6 fetches on demand and never watches — so
+Phase 11's *`uid` off the watch* has no watch for that one kind, boxed there
+rather than discovered in it.

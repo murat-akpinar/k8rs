@@ -3834,9 +3834,30 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       one; `just check` `0` with 1026 + 28 tests and `just mutants-diff` **51
       mutants, 33 caught, 18 unviable, 0 missed** over a diff proven line for
       line to be the final tree
-- [ ] Every call sends the resourceVersion that was read; a `409` offers a
+- [x] Every call sends the resourceVersion that was read; a `409` offers a
       re-read, never a blind overwrite (the case `edit` will lean on in v0.4 —
-      the mechanism is built and tested now, while it is cheap)
+      the mechanism is built and tested now, while it is cheap).
+      **No call sends one, and that is the finding rather than a gap**
+      ([D227](NOTES.md#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05) ·
+      [D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)).
+      *The resourceVersion **that was read*** is a conditional: `restart` and
+      `delete` read nothing, and `scale` reads only the count. It was built for
+      `scale` and then taken back out, because `metadata.resourceVersion` moves
+      on every write — a `status` write by the object's own controller
+      included — and so guards a different question from the one being defended.
+      **Done when:** measured against ephemeral review clusters on server
+      v1.36.1 — a status-only patch moved the scale subresource `954 → 1102` with
+      `generation` and `spec.replicas` unchanged and the next scale was a `409`;
+      writes to one Deployment counted at **0 in 180 s idle, 15 in 3.46 s
+      mid-rollout, 20 in 99.4 s crashlooping**; the built binary failed **5 of 9**
+      runs against churning objects *after* the operator typed `yes`, and 0 of 2
+      against a settled one. The `409` half **is** delivered: `Fault::Conflict`
+      names a next step where it named none. `Mutation::version`, the audit
+      column and `Record::of`'s strip stand unused until `edit` sets them, and
+      the guard that must come with it is written into that box, not left in a
+      comment. `just check` green (**1027 + 28**), `just mutants-diff` 3 mutants
+      0 missed, and the strip's own coverage proven by planting its removal —
+      three tests red, the same three as at `HEAD`
 - [ ] **`may_i(...)`** — `SelfSubjectRulesReview` per namespace, plus a
       `SelfSubjectAccessReview` for the two cluster-scoped operations. It lives
       in `ops.rs` although it mutates nothing, because it is performed with
@@ -3997,11 +4018,33 @@ string and key was settled in the design phase, so this phase is drawing.
       [NOTES § D12](NOTES.md#d12--the-key-map-and-two-keys-deleted) assigns them
 - [ ] Confirmation dialogs: consequence in plain language above the kubectl
       line, and the typed-name variant for delete
-- [ ] **A dialog tracks its object while open** — holds `uid` +
-      `resourceVersion`, and the watch behind it turns the dialog into "already
-      gone" or "it changed, re-read" instead of confirming a name that now
-      belongs to something else
-      ([NOTES § D22](NOTES.md#d22--a-confirmation-can-outlive-the-thing-it-confirms))
+- [ ] **A dialog tracks its object while open** — the watch behind it turns the
+      dialog into "already gone" instead of confirming a name that now belongs
+      to something else
+      ([NOTES § D22](NOTES.md#d22--a-confirmation-can-outlive-the-thing-it-confirms)).
+      **It holds the `uid`, and deliberately not the `resourceVersion`**
+      ([D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)):
+      that field moves on every write including a `status` write by the object's
+      own controller — **20 writes in 99.4 s, median gap 2.45 s** on a
+      `CrashLoopBackOff` Deployment whose spec never moved — so a modal keyed on
+      it kills its own confirm button every couple of seconds on exactly the
+      object it was opened for. D22's *Changed* bullet is narrowed there and
+      `screens/dialogs.md` is the spec.
+      **And the `uid` has no source for one kind:** `ops::removal` serves
+      `replicaset`, which [invariant 6](CLAUDE.md) fetches on demand and never
+      watches, so *the `uid` comes off the watch* has no watch for that kind.
+      Decide it here rather than discovering it mid-phase.
+      **And this is where `delete` gains `preconditions.uid`** — the wire-level
+      half of the same guard, left here by
+      [D227](NOTES.md#d227--the-resourceversion-goes-only-where-a-read-already-happened-and-the-metadata-read-that-leaks-what-a-get-was-refused-for-2026-09-05)
+      because `delete` reads nothing and the `uid` is the watch's to supply, not
+      a `GET`'s. Measured to work on both scopes, with its own sentence — *"the
+      UID in the precondition … does not match the UID in record … The object
+      might have been deleted and then recreated"* — where a stale
+      `resourceVersion` says only that it was modified
+      ([reports/2026-09-05](reports/2026-09-05-resourceversion-and-409-on-the-wire.md) § 4b).
+      It is the guard against D22's *wrong pod deleted*, the worst case in the
+      write path, and the dialog is the first thing that can carry it
 - [ ] **Keys the user is not allowed to use are dim from the start**, from the
       `may_i` result, with the reason in the footer. The typed-name delete
       exists to prevent an accident, not to waste the time of someone who was
@@ -4216,6 +4259,27 @@ without asking us anything.
   specs; a real one carries `containers[].env[].value`. Truncation is not
   redaction, so the audit line needs more than the existing bound
   ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
+  **Re-measured 2026-09-05 and the size is the media type's, which `edit`
+  chooses:** on server v1.36.1 an unknown field under `Strict` answers **13218
+  bytes / 5132-byte message carrying the planted canary twice** under
+  `application/merge-patch+json`, and **514 bytes / 122, canary absent** under
+  `application/strategic-merge-patch+json`.
+  **And this is the operation that owes the `resourceVersion` guard**
+  ([D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)).
+  `edit` is a genuine read-modify-write, so it is the first operation that sets
+  `Mutation::version`, and
+  [REQUIREMENTS § Conflict handling](REQUIREMENTS.md#write-operations-new--the-reversal)'s
+  *apply uses the resourceVersion that was read* is its requirement and never
+  `scale`'s. Two things come with it, both proven and then deliberately not built
+  in Phase 7: **the precondition works** — a `resourceVersion` in the patch body
+  is a real server-side precondition, `409` when stale, and a `dryRun=All` sees
+  it without consuming it — and **the value it sets must survive
+  `Record::of`'s strip unchanged**, or the audit line names a version the request
+  did not carry (measured through the built binary: a zero-width-only value went
+  on the wire while the log read `resourceVersion not sent`). The guard belongs
+  here, at the point the value is read, where both halves of the invariant are in
+  scope; `Record::of` cannot hold it and D228 says why. **Its done-when carries
+  both.**
   **The sharpest case is `edit` on a Secret**: a Strict `422` there puts the
   `data` map into `Status.message`, and from there into the audit log and onto
   the screen — the security gate's *a revealed value never enters the audit log*

@@ -692,7 +692,8 @@ async fn a_failure_this_side_of_the_wire_is_not_recorded_as_the_server_refusing(
         (
             refusal("", "Conflict", 409),
             Fault::Conflict,
-            "the object had already been changed by something else",
+            "the object had already been changed by something else, so look at it again before \
+             deciding whether you still want this change",
         ),
     ] {
         let trace = trace();
@@ -2131,6 +2132,12 @@ fn the_two_ends_of_the_replicas_field_are_described_without_overflowing() {
 ///
 /// **The body is `spec.replicas` and nothing else.** A full-object patch would be a scale that can
 /// drift a pod template while claiming to be counting copies.
+///
+/// **And no `metadata.resourceVersion`, which is a reversal of a version that shipped**
+/// (NOTES § D228). A precondition here 409s on a `status` write by the deployment controller,
+/// which falsifies nothing the operator agreed to — measured, 5 of 9 runs against a churning
+/// object failed after the operator typed yes. Asserted against the bytes the socket received,
+/// because a body key is invisible to anything reading a struct.
 #[tokio::test]
 async fn a_scale_reads_the_count_off_the_subresource_and_patches_only_that() {
     let (client, sent) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
@@ -2181,6 +2188,10 @@ async fn a_scale_reads_the_count_off_the_subresource_and_patches_only_that() {
 /// **What the dialog and the audit log were given, off a real answer from a real socket** —
 /// the consequence built from the count that came back, the object as the reader knows it, the
 /// `uid` the `Scale` carried, and the path the request really took.
+///
+/// **`resourceVersion not sent`, and it is the truth again after a reversal** (NOTES § D228): the
+/// column is [`Record::attempt_line`]'s and stays, and no operation in this file sets the field
+/// until v0.4's `edit`.
 #[tokio::test]
 async fn what_a_scale_records_is_the_object_it_read_and_the_call_it_made() {
     let (client, _) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
@@ -2378,6 +2389,96 @@ async fn a_scale_the_cluster_gave_no_count_for_is_refused_rather_than_read_as_no
     assert!(
         transcript(&trace).is_empty(),
         "a mutation nobody could describe was written into the audit log"
+    );
+}
+
+/// **A `409` on the check stops the scale before anybody is asked, and says what to do next** —
+/// the box's own title (*a `409` offers a re-read, never a blind overwrite*) through the real
+/// operation and a real socket, rather than through the contract's double.
+///
+/// **k8rs no longer sends a precondition, so this conflict comes from somewhere else**
+/// (NOTES § D228) — a namespace being terminated, a quota race, an admission controller. That is
+/// why the stub answers `409` to any write rather than to a particular body: what is under test is
+/// the sentence and the stopping, not what provoked it.
+///
+/// **The `Status` is the one a real apiserver sent** — 377 bytes,
+/// `reports/2026-09-05-resourceversion-and-409-on-the-wire.md` § 1 and § 7, with no
+/// `details.retryAfterSeconds` and no `details.causes` for any formatter to reach for.
+#[tokio::test]
+async fn a_conflict_on_the_check_stops_the_scale_asks_nobody_and_names_the_next_step() {
+    let conflict = "Operation cannot be fulfilled on deployments.apps \"web\": the object has \
+                    been modified; please apply your changes to the latest version and try again";
+    let status = format!(
+        r#"{{"kind":"Status","apiVersion":"v1","metadata":{{}},"status":"Failure",
+           "message":"{}","reason":"Conflict",
+           "details":{{"name":"web","group":"apps","kind":"deployments"}},"code":409}}"#,
+        conflict.replace('"', "\\\"")
+    );
+    let (client, sent) = stub(move |asked| {
+        if asked.starts_with("GET ") {
+            ("200 OK".to_string(), scale_body(2))
+        } else {
+            ("409 Conflict".to_string(), status.clone())
+        }
+    })
+    .await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let stopped = scale(
+        &client,
+        &asking(3),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        confirms(&trace),
+    )
+    .await
+    .expect("a conflict is an outcome of a mutation, not a refusal of the request");
+
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests.len(),
+        2,
+        "a scale whose check conflicted sent something after it: {requests:?}"
+    );
+    assert!(
+        requests[1].contains("dryRun=All") && !requests[1].contains("resourceVersion"),
+        "the request that conflicted was not a check, or it carried a precondition NOTES § D228 \
+         took out: {:?}",
+        requests[1]
+    );
+    assert_eq!(
+        stopped.outcome,
+        Some(Outcome::NotSent {
+            fault: Fault::Conflict,
+            said: Some(conflict.to_string()),
+        }),
+        "a `409` on the check was not read as the object having moved"
+    );
+    assert!(
+        !stopped.changed(),
+        "a scale that never went out is an exit 0"
+    );
+    // **The dialog opened and was never asked.** `screens/dialogs.md` rule 3 puts the modal on
+    // screen with a dead button before the check goes out, so *shown* is expected here and
+    // *asked* is what a refused check removes. One assertion and not two: `Trace::asks` is written
+    // by the same helper that pushes `asked`, so a second check of it could never fail on its own.
+    let steps = transcript(&trace);
+    assert!(
+        steps.contains(&"shown".to_string()) && !steps.contains(&"asked".to_string()),
+        "the operator was asked to confirm a change the cluster had already refused: {steps:?}"
+    );
+    // **The next step is in the sentence, because headlessly that is the whole of the offer.**
+    // The dialog that re-reads for real is Phase 11's.
+    assert_eq!(
+        stopped.plainly(),
+        format!(
+            "the change was never sent — the object had already been changed by something else, \
+             so look at it again before deciding whether you still want this change: {conflict}"
+        ),
+        "the conflict does not tell the reader what to do next"
     );
 }
 
@@ -2638,7 +2739,8 @@ fn everything_that_is_not_a_change_says_so_and_none_of_it_exits_zero() {
                 fault: Fault::Conflict,
                 said: None,
             },
-            "nothing was changed — the object had already been changed by something else",
+            "nothing was changed — the object had already been changed by something else, so \
+             look at it again before deciding whether you still want this change",
         ),
         // **A `404` does not claim the object used to be there.** *no such object any more* over a
         // mistyped name — the commonest way to reach this — sends the reader looking for whoever

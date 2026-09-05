@@ -1708,6 +1708,11 @@ fn a_confirmed_scale_changes_the_cluster_exits_0_and_leaves_stdout_empty() {
         calls,
         [
             "GET /apis/apps/v1/namespaces/payments/deployments/web/scale",
+            // **Neither pass carries a `metadata.resourceVersion`, and that is a reversal of a
+            // version that shipped** (NOTES § D228): a precondition here `409`s on a `status`
+            // write by the deployment controller, which falsifies nothing the operator agreed to.
+            // Whole-list equality is what says it: a body key that came back would be red here
+            // whatever else stayed the same.
             "PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale\
              ?&dryRun=All&fieldValidation=Strict {\"spec\":{\"replicas\":0}}",
             "PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale\
@@ -1737,6 +1742,15 @@ fn a_confirmed_scale_changes_the_cluster_exits_0_and_leaves_stdout_empty() {
     assert!(
         ran.audit.contains(&format!("uid {UID_READS}")),
         "the strip ate the uid instead of cleaning it: {:?}",
+        ran.audit
+    );
+    // **`resourceVersion not sent` is the record telling the truth about a request that carries
+    // no precondition** (NOTES § D228). The wire assertion above says none went out; this says
+    // the audit line agrees with it, which is the pair invariant 4 asks for and the only place
+    // the two are read against each other through the built binary.
+    assert!(
+        ran.audit.contains("· resourceVersion not sent\n"),
+        "the record does not agree with the wire about the precondition: {:?}",
         ran.audit
     );
 }

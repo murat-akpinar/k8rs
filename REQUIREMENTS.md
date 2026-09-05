@@ -127,10 +127,19 @@
   re-read — never a blind overwrite.
 - **A confirmation dialog tracks its object while it is open.** The watch is
   still running behind the modal: if the object is deleted while the user is
-  typing its name, the dialog says it is already gone and the button dies; if
-  it merely changed, the dialog offers the re-read before the call rather than
-  after the 409
+  typing its name, the dialog says it is already gone and the button dies
   ([NOTES § D22](NOTES.md#d22--a-confirmation-can-outlive-the-thing-it-confirms)).
+  **It tracks the `uid` and nothing else.** This bullet also promised a second
+  state — *if it merely changed, the dialog offers the re-read before the call
+  rather than after the 409* — and that state is retired
+  ([NOTES § D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)):
+  the only field that could have driven it, `metadata.resourceVersion`, moves on
+  every write including a `status` write by the object's own controller — 20 in
+  99.4 s on a `CrashLoopBackOff` Deployment whose spec never moved — so it would
+  have killed its own confirm button on the object it was opened for. None of
+  `scale`, `restart` or `delete` shows the operator a live number whose staleness
+  makes the confirmed change wrong. The operation that genuinely needs it is
+  `edit`, and the **Conflict handling** bullet above is already where that lives.
 - **A call in flight is a visible state.** The modal closes on confirmation,
   not on completion; the command log line ends in `…` until the result arrives;
   a second mutation, `X` and `q` are refused until it does. `drain` gets a

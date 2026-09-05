@@ -340,7 +340,16 @@ that goes green says nothing about those.
       all of them.
 - [ ] Destructive actions require the typed object name.
 - [ ] Applies carry the resourceVersion that was read; a 409 offers a re-read,
-      never a blind overwrite.
+      never a blind overwrite. **"Applies" is the word to read literally — it
+      means a read-modify-write, which today is only v0.4's `edit`, and this row
+      is not a licence to put a precondition on every mutation**
+      ([D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)).
+      A Phase 7 box read it as *every call*, `scale` got one, and it was measured
+      refusing **5 of 9** runs against rolling and crashlooping Deployments —
+      because `metadata.resourceVersion` moves on a `status` write by the object's
+      own controller, which falsifies nothing an operator agreed to. `scale
+      --replicas=N` is absolute intent and needs no precondition; the second half
+      of the row — a `409` names a next step — is live and shipped.
 - [ ] No bulk mutation, no operation without a selected object.
 - [ ] Every attempt — success, failure, refusal — reaches the audit log.
 
