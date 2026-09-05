@@ -206,6 +206,7 @@
 - *(docs)* Stop the open release box pointing at a closed phase ([d3cf966](https://github.com/murat-akpinar/k8rs/commit/d3cf966996f8fcc22e56b1619fa9ce3c9bd110fc)) — The Phase 5 release box ended with 'the next box is Phase 6's first unchecked one'. Phase 6 closed today, so the sentence routed a cold session into a phase with nothing unchecked in it. It now names the rule — the first unchecked box in the lowest open phase below this one — with Phase 7 as today's answer.
 - *(docs)* Record that src cites todo.md by a line number that cannot stay true ([6a2a196](https://github.com/murat-akpinar/k8rs/commit/6a2a1965350d501e0ba39577e55be0ed92ab970f))
 - *(docs)* The dialog's $ line and the command log's are not the same line ([f42e498](https://github.com/murat-akpinar/k8rs/commit/f42e4982ca6af3f4baeb1defaea522683df64af1)) — The command-log box needed no code: reads already build "$ kubectl …" in command_log, the dialog already writes "$ {shown.kubectl}", and both come from one Mutation::kubectl stripped once by Record::of, so invariant 4's two records cannot disagree about a name.
+- *(docs)* Move the phase pointer forward with phase 8's close ([8de87c0](https://github.com/murat-akpinar/k8rs/commit/8de87c02b9381077be9794d237e4d0f7d0ca41db))
 
 ### ⚡ Performance
 
