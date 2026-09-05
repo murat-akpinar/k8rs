@@ -114,6 +114,28 @@ use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, namespace_name, object_nam
 // (todo.md 3687), `restart` (3689), `delete` (3692). This region carries the seam and records
 // what happened, and asserts nothing about which way any operation sets it.
 //
+// **In-flight is this region's already, and it needs nothing added** (NOTES § D232, § D20). Two
+// facts, both easy to look for and not find:
+//
+// **Started is [`Ask`]'s return value, and a `started` callback would be a second copy of it.**
+// [`Answer::Confirmed`] carrying this call's ticket is the *one* arm that reaches
+// `call(FOR_REAL)` — `Cancelled`, `Gone` and `Changed` each end the mutation with nothing sent —
+// so the caller's own `ask` returning it **is** the signal, it arrives exactly when D20 wants the
+// modal to close, and it cannot drift from what [`perform`] does because it is what [`perform`]
+// branches on (D232 ruling 1).
+//
+// **Exactly one mutation can be outstanding, and the borrow checker is what says so.** `audit` is
+// `&mut impl Write` and k8rs opens one log ([`audit_log`]), so two concurrent [`perform`] calls
+// need two `&mut` borrows of one sink and do not compile. That is stronger than a runtime flag
+// and it costs nothing — and it is worth writing down for [`Checked`]'s reason: a reader looking
+// for the guard D20 asks for finds no guard, and is right to worry until told why there is none
+// (D232 ruling 2).
+//
+// **And the signature can be driven beside an event loop, which was the freeze risk** — proven
+// rather than reasoned, in `ops_tests.rs` § THE CALL THAT IS STILL OUT, both pinned to a stack
+// and parked in a struct. What a caller may *not* do is own the audit log inside the same struct
+// that holds the future: that is a self-reference and `rustc` refuses it (D232 ruling 3).
+//
 // **A cluster can also refuse every dry-run there is**: a `ValidatingWebhookConfiguration` with
 // `sideEffects: Some | Unknown` fails `dryRun=All` for a fully authorised user. That is accepted
 // rather than designed around — there is no flag for it — and what makes it diagnosable is that

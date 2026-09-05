@@ -253,6 +253,7 @@ its line moving with it.
 - [D229](#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05) — the four rulings `may_i` could not be briefed without, and the box's arithmetic that went stale under it
 - [D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) — the `may_i` review round: a spelling that answers the opposite of `kubectl`, and the read-only user who could not ask what they may do
 - [D231](#d231--the-audit-box-was-built-under-three-other-boxes-and-d21s-startup-clause-belongs-to-a-screen-that-does-not-exist-2026-09-05) — the audit box was built under three other boxes, and D21's startup clause belongs to a screen that does not exist
+- [D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05) — in-flight needs no new callback, one-at-a-time is already structural, and the freeze risk is whether `perform` can be driven beside an event loop
 
 ## Why it exists — where the gap is
 
@@ -20035,3 +20036,80 @@ clause nobody has checked. That is the only honest way to tick a box whose work
 arrived under three other boxes: *it was already done* is a claim, and this repo
 has a rule about those
 ([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)).
+
+### D232 — in-flight needs no new callback, one-at-a-time is already structural, and the freeze risk is whether `perform` can be driven beside an event loop (2026-09-05)
+
+todo.md's *in-flight is part of the contract, not a UI detail* is the next Phase 7
+box. [D20](#d20--a-call-that-takes-time-is-a-state-and-there-was-none) is almost
+entirely screen behaviour — the modal, the `…` on the command line, `q`/`X`
+refused, `drain`'s progress pane — so the question this box has to answer is what
+the **contract** owes before `ops.rs` freezes.
+
+**1. *Started* is already reported, and a new callback would be a second copy of
+it.** `ask` is handed a [`Checked`] and its return value is the only path to the real
+call: `Answer::Confirmed` with this call's ticket is the one arm that reaches
+`call(FOR_REAL)`, and `Cancelled`, `Gone` and `Changed` each end the mutation
+without sending anything. So *the caller's own `ask` returning `Confirmed`* **is**
+the started signal, it arrives exactly when D20 wants the modal to close, and it
+cannot drift from what `perform` does because it is what `perform` branches on. A
+`started` callback beside it would be a second thing to keep in step with the
+first, which is the shape this region already refuses for
+[`Pass`] and [`Checked`].
+
+**2. Exactly one mutation can be outstanding, and it is the borrow checker that
+says so — worth stating because it is not obvious.** [`perform`] takes
+`audit: &mut impl Write`, and k8rs opens exactly one audit log
+([`audit_log`]). Two concurrent `perform` calls therefore need two `&mut` borrows
+of the same sink and **do not compile**. That is stronger than a runtime flag and
+it costs nothing, but it is invisible to a reader looking for a guard — the same
+reason [invariant 1](CLAUDE.md)'s *one file to audit* had to be written down
+rather than assumed. It is also why D20's *a second mutation is refused* needs no
+mechanism in `ops.rs`: there is no way to start one.
+
+**3. The freeze risk, and it is the only real work in this box.** D20 says *the
+modal closes on confirmation, not on completion*, and *navigation stays free* —
+so a Phase 12 caller must keep drawing while the real call is outstanding, which
+means driving [`perform`]'s future **concurrently with an event loop**. But
+`perform` borrows: `&Mutation<'_>`, whose fields are `&'a str`, and
+`&mut impl Write`. A borrowed future cannot be `tokio::spawn`ed, which needs
+`'static`, and holding it in the app's own state beside the data it borrows is a
+self-referential struct Rust will not build without pinning work nobody has
+costed. **`ops.rs` freezes at the end of this phase.** If the signature cannot be
+driven that way, Phase 12 discovers it against a frozen file — which is the
+*stop, fix the order* case
+[CLAUDE.md § Architecture workflow](CLAUDE.md) exists for, and the cheapest
+possible moment to find it is now.
+
+**So this box proves it rather than reasoning about it**: a test that drives
+`perform` inside a `select!` beside another stream, with the confirmation
+answered after the loop has gone round — the shape a TUI actually has. If it
+compiles and passes, the signature is proven usable and the fact is recorded
+where Phase 12 will look. If it does not, the plan is wrong and it is wrong while
+the file is still open. **This is `ops.rs`'s own *dangerous code is proven before
+it is bound to a key*, applied to a lifetime instead of to a write.**
+
+**Answered, 2026-09-05: yes, and both shapes work.** A pinned local under
+`tokio::pin!` + `select!` passes, and so does the one the box actually rides on —
+the future **parked in a struct, boxed, polled through `&mut` each iteration**,
+which is what a `ratatui` loop has. `Box::pin` is the mechanism: it makes the
+future `Unpin` enough to live in a field, where a `'static` bound would otherwise
+have forced a `tokio::spawn` this signature cannot satisfy. Both tests assert the
+*interleaving* — two terminal events processed between `asked` and `confirmed`,
+and the console drawing more than the one frame the answer lands in — so a
+mutation awaited straight through fails them.
+
+**And it found the constraint, by making the compiler say it rather than by
+reading the types.** The obvious Phase 12 design — an app struct owning the audit
+`File` and holding the in-flight future that borrows it — is self-referential and
+`rustc` refuses it: *`console.audit` does not live long enough … dropped here
+while still borrowed*. So the `Mutation`, its strings and the `File` all live in
+the frame that runs the loop, and the console carries a lifetime — `Console<'a>`,
+never `Console`. That is workable and it is **a decision about where the `File`
+lives, taken before the struct is designed rather than after**, which is the whole
+value of asking the question while the file is still open. It is boxed in
+Phase 12.
+
+**What stays Phase 11's**: the `…` that becomes an outcome, `q` and `X` refused
+in the footer, and `drain`'s counted progress pane, which is v0.2's operation
+anyway. None of them is reachable from a headless driver, and none of them needs
+`ops.rs` reopened once point 3 is answered.

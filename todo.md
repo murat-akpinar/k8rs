@@ -3921,10 +3921,31 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       subresource first — the attempt line's `uid` and consequence are built from
       that read. D21's own *before the API call*, meaning the mutating one, is the
       accurate phrasing
-- [ ] **In-flight is part of the contract**, not a UI detail: an operation
+- [x] **In-flight is part of the contract**, not a UI detail: an operation
       reports started → result, so exactly one mutation can be outstanding and
       `q`/`X` can be refused while one is
-      ([NOTES § D20](NOTES.md#d20--a-call-that-takes-time-is-a-state-and-there-was-none))
+      ([NOTES § D20](NOTES.md#d20--a-call-that-takes-time-is-a-state-and-there-was-none) ·
+      [D232](NOTES.md#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)).
+      **Two of the three were already true and are now written down.** *Started*
+      is `ask`'s own return value — `Answer::Confirmed` carrying this call's ticket
+      is the only arm that reaches the real call — so a second signal would be a
+      second thing to keep in step. *Exactly one outstanding* is the **borrow
+      checker**: `perform` takes `audit: &mut impl Write` and there is one audit
+      log, so two concurrent calls need two `&mut` borrows of one sink and do not
+      compile.
+      **Done when:** the third was a freeze risk and it is answered by a test, not
+      by an argument — `perform` borrows, a borrowed future cannot be
+      `tokio::spawn`ed, and `ops.rs` freezes here. Proven both ways: a pinned local
+      under `select!`, and the future **parked in a struct, boxed, polled through
+      `&mut`** — the shape a `ratatui` loop has. Both assert the interleaving (two
+      terminal events between `asked` and `confirmed`; the console drawing more
+      than the frame the answer lands in), so a mutation awaited straight through
+      fails them — watched red. `just check` green (**1055 + 29**).
+      **And it found the constraint by making `rustc` say it:** a struct owning
+      the audit `File` *and* holding the future that borrows it is
+      self-referential and is refused, so the `File` lives in the frame that runs
+      the loop and the console carries a lifetime. Boxed in Phase 12, where the
+      struct is designed
 - [ ] The command log feed — every command as the user would have typed it
       (the UI panel comes later; the data starts here)
 - [ ] `--read-only`: `ops.rs` unreachable, not merely unbound. **Its premise in
@@ -4152,7 +4173,19 @@ Secret is redrawn after the reveal is dismissed.
 Goal: one binary, live and safe.
 
 - [ ] `main.rs`: single `tokio::select!` (watch streams · crossterm events ·
-      Ctrl-C), draw-on-change with ~100ms coalescing, block when idle
+      Ctrl-C), draw-on-change with ~100ms coalescing, block when idle.
+      **Decide where the audit `File` lives before the app struct is designed, not
+      after** ([D232](NOTES.md#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)).
+      `ops::perform` borrows — `&Mutation<'_>` and `&mut impl Write` — so an
+      in-flight mutation parked in app state borrows both. Proven in Phase 7 that
+      this *works*, two ways, `Box::pin` being what makes the future `Unpin`
+      enough to sit in a field and be polled through `&mut`. **What `rustc`
+      refuses is the obvious design**: a struct that owns the `File` *and* holds
+      the future borrowing it is self-referential — `console.audit does not live
+      long enough … dropped here while still borrowed`. So the `Mutation`, its
+      strings and the `File` live in the frame that runs the loop, and the console
+      carries a lifetime: `Console<'a>`, never `Console`. Cheap if it shapes the
+      struct; a rewrite if it is met afterwards
 - [ ] **A coalescing test that ends quiet and asserts the final state** — the
       loop above draws on change with ~100 ms coalescing, which is invariant 7
       and also the exact manoeuvre k9s merged and reverted a month later

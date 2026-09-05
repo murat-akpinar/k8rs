@@ -6612,3 +6612,262 @@ async fn a_question_about_another_namespace_is_not_answered_from_this_ones_rules
         );
     }
 }
+
+// --- THE CALL THAT IS STILL OUT ---
+//
+// **One question, and it is about the freeze rather than about behaviour** (NOTES § D232
+// ruling 3). NOTES § D20 says the modal closes on *confirmation* and not on completion, and that
+// navigation stays free — so a Phase 12 caller has to keep drawing while the real call is
+// outstanding, which means driving [`perform`]'s future beside an event loop.
+//
+// **[`perform`] borrows, and that is the risk.** `&Mutation<'_>` whose fields are `&'a str`, and
+// `&mut impl Write`. A borrowed future cannot be `tokio::spawn`ed — that wants `'static` — so the
+// only shapes left are a pinned local and a boxed future parked beside the data it borrows. Both
+// are tried below, against the real signature, while `ops.rs` is still open.
+//
+// **Nothing here is a new feature and nothing here changes `ops.rs`.** *Started* is already
+// reported: [`Answer::Confirmed`] carrying this call's ticket is the one arm that reaches
+// `call(FOR_REAL)`, so the caller's own `ask` returning it **is** the signal, and it cannot drift
+// from what [`perform`] does because it is what [`perform`] branches on (D232 ruling 1). One at a
+// time is already structural: `audit: &mut impl Write` over the one log k8rs opens means two
+// concurrent [`perform`] calls need two `&mut` borrows of one sink and do not compile (ruling 2).
+
+/// How many terminal events the stand-in stream has to give out before the confirmation arrives.
+///
+/// **Two and not one, so *the loop went round* is not one lucky poll.** The confirmation is
+/// released on the second, so both are necessarily processed while the mutation is outstanding.
+const EVENTS_BEFORE_THE_ANSWER: usize = 2;
+
+/// **A stand-in for the terminal's event stream** — `Ready` until `count` have been taken, then
+/// `Pending` for ever, which is what a real one does between keypresses.
+///
+/// **It registers no waker on the `Pending` path deliberately.** A real event source wakes the
+/// loop when a key arrives; this one is only ever polled beside a future that wakes itself, so a
+/// waker here would buy nothing and hide which of the two is keeping the loop alive.
+fn keypresses(taken: &std::cell::Cell<usize>, count: usize) -> impl Future<Output = usize> + '_ {
+    std::future::poll_fn(move |_| {
+        let so_far = taken.get();
+        if so_far < count {
+            taken.set(so_far + 1);
+            std::task::Poll::Ready(so_far + 1)
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+}
+
+/// **The dialog a console really has: it is *shown*, and it is answered later, by the event
+/// loop** — which is the whole shape this region exists to prove [`perform`] can be driven in.
+///
+/// **`ask` being called and `ask` resolving are two different moments and the transcript records
+/// both.** Between them is D20's window — the dialog is open, the check has come back, and
+/// nothing has been sent. A dialog whose future resolves the instant it is created (every other
+/// `ask` in this file, which is `std::future::ready`) collapses that window to nothing and can
+/// prove nothing about it.
+///
+/// **It wakes itself while it waits**, so a `select!` that polls it first and finds it pending
+/// still makes progress on the other branch and comes back — the lost-wakeup hang, closed with
+/// one line rather than with a channel this crate would have to grow a `tokio` feature for.
+fn answered_by_the_loop<'a, R: 'a>(
+    trace: &'a Shared,
+    released: &'a std::cell::Cell<bool>,
+) -> impl FnOnce(Checked<R>) -> std::pin::Pin<Box<dyn Future<Output = Answer> + 'a>> + 'a {
+    move |checked| {
+        trace.borrow_mut().steps.push("asked".to_string());
+        Box::pin(std::future::poll_fn(move |cx| {
+            if !released.get() {
+                cx.waker().wake_by_ref();
+                return std::task::Poll::Pending;
+            }
+            trace.borrow_mut().steps.push("confirmed".to_string());
+            std::task::Poll::Ready(checked.pressed())
+        }))
+    }
+}
+
+/// **[`perform`] driven inside a `select!` beside an event stream, with the confirmation answered
+/// after the loop has gone round** — NOTES § D232 ruling 3's proof, and the shape Phase 12
+/// inherits.
+///
+/// **What would fail here.** A future that can only be driven by being awaited straight through
+/// would never reach the confirmation, because the confirmation is released by the *other* branch;
+/// a signature that could not be pinned and re-polled would not compile at all. The assertion that
+/// the events land **between** `asked` and `confirmed` is what says the loop really interleaved,
+/// rather than that the mutation merely completed.
+///
+/// **`biased;` so the order is a fact and not a coin toss.** `tokio::select!` randomises branch
+/// order by default, which would make the transcript below differ between runs; polling the
+/// mutation first is also what a console wants, since a finished call should be drawn before the
+/// next key is read.
+#[tokio::test]
+async fn a_mutation_can_be_driven_beside_an_event_loop_and_answered_from_it() {
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let scaling = scaling();
+    let released = std::cell::Cell::new(false);
+    let taken = std::cell::Cell::new(0);
+
+    let performing = performed(
+        &scaling,
+        stamp,
+        &mut sink,
+        shows(&trace),
+        answered_by_the_loop(&trace, &released),
+        works(&trace),
+    );
+    tokio::pin!(performing);
+
+    let done = loop {
+        tokio::select! {
+            biased;
+            done = &mut performing => break done,
+            event = keypresses(&taken, EVENTS_BEFORE_THE_ANSWER) => {
+                trace.borrow_mut().steps.push(format!("event {event}"));
+                if event == EVENTS_BEFORE_THE_ANSWER {
+                    released.set(true);
+                }
+            }
+        }
+    };
+
+    let steps = transcript(&trace);
+    println!("{done:?} · {} events taken", taken.get());
+    assert_eq!(
+        done,
+        Performed {
+            outcome: Some(Outcome::Done),
+            recorded: true
+        },
+        "a mutation driven from an event loop did not end the way the same mutation awaited \
+         straight through does"
+    );
+
+    // **The window is what this test is about.** Everything between `asked` and `confirmed`
+    // happened while the dialog was open and nothing had been sent — which is exactly D20's
+    // *the modal closes on confirmation, not on completion*, from the contract's side.
+    let at = |what: &str| {
+        steps
+            .iter()
+            .position(|step| step == what)
+            .unwrap_or_else(|| panic!("{what} is not in the transcript: {steps:?}"))
+    };
+    assert!(
+        at("asked") < at("event 1") && at("event 2") < at("confirmed"),
+        "no event was processed while the mutation was outstanding, so the loop did not \
+         interleave: {steps:?}"
+    );
+    assert!(
+        at("confirmed") < at("call"),
+        "the real call went out before the confirmation resolved: {steps:?}"
+    );
+    // **A derived list says what it found**: an event stream that produced nothing would satisfy
+    // every ordering above by having no events to be out of order.
+    assert_eq!(
+        taken.get(),
+        EVENTS_BEFORE_THE_ANSWER,
+        "the loop did not go round while the mutation was outstanding"
+    );
+}
+
+/// **What a console holds while a mutation is outstanding** — the other half of the freeze
+/// question, and the half a pinned local cannot answer.
+///
+/// **A `ratatui` loop does not keep its state in a `select!` arm; it keeps it in a struct.** So
+/// the shape that matters for Phase 12 is a *parked* future — boxed, held in app state, polled
+/// each time round — beside whatever else the app is drawing from. This is that struct, cut to
+/// the one field the question is about plus a counter standing in for the frames it drew.
+///
+/// **The lifetime is the finding.** `dyn Future<Output = Performed> + 'a` and not `+ 'static`,
+/// because [`perform`] borrows its [`Mutation`] and its audit sink — so this struct can be held
+/// beside the borrowed data but can never *own* it. What that costs Phase 12 is written up in the
+/// test below.
+struct Console<'a> {
+    /// The mutation that has been confirmed and not yet answered, or `None` when none is.
+    outstanding: Option<std::pin::Pin<Box<dyn Future<Output = Performed> + 'a>>>,
+    /// Frames drawn — D20's *navigation stays free*, counted rather than asserted about.
+    drawn: usize,
+}
+
+/// **The same proof with the future parked in app state rather than pinned to the stack** — the
+/// shape a `ratatui` event loop actually has (NOTES § D232 ruling 3).
+///
+/// **Why both shapes and not just the first.** A pinned local proves the future can be polled in
+/// a loop; it does not prove a console can *hold* one, because a `select!` arm and a struct field
+/// are different problems. `Box::pin` makes the future `Unpin` so it can live in a field and be
+/// polled through `&mut`, and the boxing is what a `'static` bound would otherwise have forced
+/// into a `tokio::spawn` this signature cannot satisfy.
+///
+/// **The lifetime that comes out of it is the thing Phase 12 inherits**: `Console<'a>` borrows
+/// for as long as the mutation is outstanding, so the `Mutation`, its strings and the audit
+/// `File` all have to outlive the struct — they live in the frame that runs the loop, and the
+/// console cannot own the log file it writes to while a call is in flight.
+#[tokio::test]
+async fn a_mutation_can_be_parked_in_a_console_and_polled_from_its_loop() {
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let scaling = scaling();
+    let released = std::cell::Cell::new(false);
+    let taken = std::cell::Cell::new(0);
+
+    // Declared after everything it borrows, so it is dropped before them.
+    let mut console = Console {
+        outstanding: None,
+        drawn: 0,
+    };
+    console.outstanding = Some(Box::pin(performed(
+        &scaling,
+        stamp,
+        &mut sink,
+        shows(&trace),
+        answered_by_the_loop(&trace, &released),
+        works(&trace),
+    )));
+
+    let done = loop {
+        // **The frame a real loop would draw**, and the reason D20 says navigation stays free:
+        // this happens while the call is out.
+        console.drawn += 1;
+        let outstanding = console
+            .outstanding
+            .as_mut()
+            .expect("a console with no mutation outstanding has nothing to poll");
+        tokio::select! {
+            biased;
+            done = outstanding => break done,
+            event = keypresses(&taken, EVENTS_BEFORE_THE_ANSWER) => {
+                trace.borrow_mut().steps.push(format!("event {event}"));
+                if event == EVENTS_BEFORE_THE_ANSWER {
+                    released.set(true);
+                }
+            }
+        }
+    };
+    console.outstanding = None;
+
+    let steps = transcript(&trace);
+    println!(
+        "{done:?} · {} frames · {} events",
+        console.drawn,
+        taken.get()
+    );
+    assert_eq!(
+        done,
+        Performed {
+            outcome: Some(Outcome::Done),
+            recorded: true
+        },
+        "a mutation parked in app state did not end the way the same mutation awaited straight \
+         through does"
+    );
+    // **Drawn more than once while the call was out**, which is the half of D20 a transcript
+    // cannot show: the loop kept going round rather than blocking on the mutation.
+    assert!(
+        console.drawn > 1,
+        "the console drew one frame and then blocked, so navigation did not stay free"
+    );
+    assert_eq!(taken.get(), EVENTS_BEFORE_THE_ANSWER);
+    assert!(
+        steps.contains(&"event 1".to_string()) && steps.contains(&"confirmed".to_string()),
+        "the loop did not answer the dialog it was holding: {steps:?}"
+    );
+}
