@@ -3946,8 +3946,37 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       self-referential and is refused, so the `File` lives in the frame that runs
       the loop and the console carries a lifetime. Boxed in Phase 12, where the
       struct is designed
-- [ ] The command log feed — every command as the user would have typed it
+- [x] The command log feed — every command as the user would have typed it
       (the UI panel comes later; the data starts here)
+      ([D233](NOTES.md#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05)).
+      **The data is here and both paths already agree on it**: reads build
+      `$ kubectl …` in `command_log`, the dialog writes `$ {shown.kubectl}`, and
+      both come from the one `Mutation::kubectl` stripped once by `Record::of`,
+      so invariant 4's two records cannot disagree about a name (D8).
+      **What this box settled is which lines belong in a log at all.** The
+      dialog's `$` line is printed when the dialog *opens* — correct, it is the
+      teaching line under the consequence — and a **command log** records what
+      k8rs *ran*. Same text, two different lines; feeding one into the other
+      publishes a command nobody ran. The log line is appended when `ask` returns
+      `Answer::Confirmed`, which is the same instant D232 calls *started* and D20
+      closes the modal on, so the `…` has a place and a moment. `Cancelled`,
+      `Gone` and `Changed` append nothing.
+      **Done when:** the distinction is already observable and was read off the
+      running code, not argued — `cancelled_gone_and_changed_are_three_different_records_and_not_one`
+      prints `shown / dry-run / asked` with **no `call`** step, while the audit
+      line still carries the `kubectl:` text and says *nobody confirmed it*. That
+      is the audit log recording an attempt and the command log correctly having
+      nothing to show.
+      **No structure is built here, on purpose:** the accumulating list whose last
+      line is edited in place is view state, and `views.rs` is Phase 10. Putting
+      it in `ops.rs` would freeze a UI structure inside the file whose whole
+      justification is that it holds writes and nothing else.
+      **And Phase 11 inherits a limitation, recorded rather than discovered:** the
+      read side is a *manifest*, computed up front from what the run will do —
+      right for `--once` — not a live feed, and `k8s.rs` froze at Phase 6. So the
+      panel is honest only if it is the manifest at startup plus mutations as they
+      are confirmed; implying every line appeared when its request went out would
+      be a third record that lies
 - [ ] `--read-only`: `ops.rs` unreachable, not merely unbound. **Its premise in
       the code has already gone stale**: `src/main.rs`'s doc for the flag says
       *"it is unreachable: `ops.rs` does not exist yet"*, and `ops.rs` is 698

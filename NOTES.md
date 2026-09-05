@@ -254,6 +254,7 @@ its line moving with it.
 - [D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) — the `may_i` review round: a spelling that answers the opposite of `kubectl`, and the read-only user who could not ask what they may do
 - [D231](#d231--the-audit-box-was-built-under-three-other-boxes-and-d21s-startup-clause-belongs-to-a-screen-that-does-not-exist-2026-09-05) — the audit box was built under three other boxes, and D21's startup clause belongs to a screen that does not exist
 - [D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05) — in-flight needs no new callback, one-at-a-time is already structural, and the freeze risk is whether `perform` can be driven beside an event loop
+- [D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) — the dialog's `$` line and the command log's are not the same line, and the read side is a manifest rather than a feed
 
 ## Why it exists — where the gap is
 
@@ -20113,3 +20114,56 @@ Phase 12.
 in the footer, and `drain`'s counted progress pane, which is v0.2's operation
 anyway. None of them is reachable from a headless driver, and none of them needs
 `ops.rs` reopened once point 3 is answered.
+
+### D233 — the dialog's `$` line and the command log's are not the same line, and the read side is a manifest rather than a feed (2026-09-05)
+
+todo.md's *the command log feed — every command as the user would have typed it
+(the UI panel comes later; the data starts here)* is the next Phase 7 box. Read
+at HEAD, the data is there and in one format; what is **not** settled is which
+lines belong in a log at all, and that has to be settled before Phase 11 draws a
+panel from it.
+
+**What already holds.** Both paths emit the same shape. Reads build
+`$ kubectl …` lines in `command_log`; the headless dialog writes
+`writeln!(out, "$ {}", shown.kubectl)`. [`Mutation::kubectl`] is the single
+source, stripped once through [`Record::of`], and invariant 4's two records are
+written from one value so they cannot disagree about a name
+([D8](#d8--invariant-4-was-not-literally-true)). Nothing here needs building.
+
+**1. A cancelled mutation must not appear in the command log, and today's `$`
+line would put it there.** The dialog prints its `$ kubectl …` when it **opens**,
+which is right — `screens/dialogs.md` puts the teaching line under the
+consequence, before anyone has agreed to anything. A **command log** is a record
+of what k8rs *ran*. Those are two different lines that happen to carry the same
+text, and an implementer who feeds the dialog's line straight into the panel
+publishes a command that was never run — invariant 4's *neither record may lie*,
+reached by reusing a string rather than by writing a wrong one. **The log line is
+appended when [`ask`] returns `Answer::Confirmed`**, which is the same instant
+[D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)
+ruling 1 identifies as *started* and the same instant
+[D20](#d20--a-call-that-takes-time-is-a-state-and-there-was-none) closes the
+modal — so the `…` D20 wants on that line has a place to be put and a moment to
+be put there. `Cancelled`, `Gone` and `Changed` append nothing.
+
+**2. The feed is view state, and `views.rs` is Phase 10 — `ops.rs` owes it
+nothing more.** A panel needs an accumulating list whose last line is edited in
+place when the outcome arrives. `ops.rs` already hands over everything that
+requires: the text ([`Shown::kubectl`]), the moment ([`ask`]'s return), and the
+outcome ([`Performed`]). Putting the list in `ops.rs` would be a UI structure in
+the file whose whole justification is that it holds writes and nothing else, and
+it would freeze there. So this box does not build one.
+
+**3. The read side is a manifest, not a feed, and `k8s.rs` is frozen — so
+Phase 11 inherits a limitation rather than a bug.** `command_log(analysis,
+coverage, namespace)` is computed **up front** from what the run is *going* to
+do, which is exactly right for `--once`: one pass, a known set of calls, printed
+before they run. A live TUI's panel shows commands *as they happen*, and building
+that means instrumenting the read path — which froze at the end of Phase 6, with
+two named exceptions, neither of them this. **So the panel Phase 11 draws is
+honest only if it says what it is**: the manifest at startup, and mutations
+appended as they are confirmed. A panel that implies every line appeared when its
+request went out would be a third record that lies. Recorded here rather than
+discovered against a frozen file, which is the same reason
+[D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)
+ruling 3 was asked while `ops.rs` was still open. Widening it later is a
+`k8s.rs` reopening and therefore a plan change, not a feature.
