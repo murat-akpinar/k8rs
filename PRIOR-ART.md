@@ -98,8 +98,20 @@ eliminate per-item goroutine overhead". The Go shape (a goroutine per row) does
 not transfer; the Rust shape does: an allocation, a clone or a format per row per
 draw, times 10 000, times every event.
 
-**covered.** Invariant 7 (coalesce ~100 ms, block when idle) is the structural
-half. The measurement half is Phase 5's 10 000-pod box.
+**covered — and this said so on the strength of invariant 7 alone, which is one
+multiplicand of two.** Invariant 7 (coalesce ~100 ms, block when idle) bounds
+*frames per event*. It does not bound *work per frame*, and a renderer that
+formats every row of the map rather than the ~24 rows of the viewport is O(total)
+inside each of those coalesced frames. Phase 8's spike is the shape, measured
+against a stub serving one page (release build, localhost, zero server latency):
+**500 pods → 0.108 s · 2000 → 0.836 s · 5000 → 4.15 s**. Ten times the pods,
+thirty-eight times the time. A coalescer emitting one frame per 100 ms during a
+5000-pod storm still formats 5000 rows in each of them, so the second
+multiplicand has to be killed in `views.rs` at Phase 10 — draw the viewport, not
+the map — and invariant 7 will not do it
+([NOTES § D240](NOTES.md#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05)).
+Memory is not the problem: 12 MB RSS at 5000 pods. The measurement half is still
+Phase 5's 10 000-pod box.
 
 ### A5 — the perf fix that got reverted ★
 
@@ -512,9 +524,30 @@ delete a namespace") → [#2248](https://github.com/derailed/k9s/pull/2248) (202
 "challenge deletion by text phrase").
 
 Four years from "please stop deleting things when I mis-key" to typed-name
-confirmation. **immune** — invariant 2 has it on day one, including the typed name
-for deletes and drains. Recorded here so it is never argued down as ceremony: it
-is the ending of a four-year thread in the tool we are compared to.
+confirmation. **immune for the reason it was tagged, and Phase 8 found the half
+the tag did not cover.** Invariant 2 has the confirmation and the typed name on
+day one, for deletes and drains, and that is never to be argued down as
+ceremony — it is the ending of a four-year thread in the tool we are compared to.
+
+**What the typed name does not decide is what it is compared *against*.** The
+spike's dialog resolved its target as `rows.keys().nth(cursor)` inside `draw` —
+a live index, re-read every frame — and a watch event was measured retargeting an
+open confirmation with nobody at the keyboard:
+
+    === operator selects the top row and presses d ===
+                      │Pretend this deletes:
+                      │  default/alpha
+    === 8 s later, no key pressed, one pod created elsewhere ===
+                      │Pretend this deletes:
+                      │  default/aaa-brand-new
+
+The operator types `alpha`; whether that is matched against a value captured when
+the dialog opened or against the index at match time is the difference between
+*refuses for no visible reason* and *deletes the wrong pod*, and both are the
+defect. **A dialog stores its target, it never derives it** — already boxed at
+Phase 11 (*a dialog tracks its object while open*), and now with a measurement
+under it rather than a worry
+([NOTES § D240](NOTES.md#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05)).
 
 ### G2 — read-only enforced per view is a hole per view
 
