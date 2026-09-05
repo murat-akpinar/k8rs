@@ -52,10 +52,15 @@ Three of these were added by the 2026-08-11 scope reversal — `serde_yaml_ng`,
 were the invariant-10 reversals above.
 
 **What is actually in `Cargo.toml` today** — approved is not the same as present,
-and **five** of the twelve have not arrived yet: `ratatui`, `crossterm`,
-`anyhow`, `serde_yaml_ng` and `similar`. (This said *four* from before
-`futures-util` landed; counted against the file on 2026-08-28 it was already
-wrong then, which is what a number nobody re-measures does.)
+and **three** of the twelve have not arrived yet: `crossterm`, `anyhow` and
+`similar`. Counted with
+`for c in …; do grep -qE "^$c = " Cargo.toml || echo $c; done`, not recalled —
+this line said *four* before `futures-util` landed and *five* while
+`serde_yaml_ng` was already in the file, and both times it was a number nobody
+re-measured. `crossterm` may never arrive under its own name:
+[D238](../NOTES.md#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)
+takes `ratatui`'s re-export instead, so that a second version number in this
+manifest cannot drift away from the one `ratatui-crossterm` chose.
 
 | Crate | Pin | Landed | Features |
 |---|---|---|---|
@@ -65,7 +70,9 @@ wrong then, which is what a number nobody re-measures does.)
 | `tokio` | `1.53.1` | Phase 5 | `rt-multi-thread`, `macros`, `net`, no defaults |
 | `futures-util` | `0.3.34` | Phase 5 | `std`, no defaults — the narrow crate, not the `futures` facade |
 | `tokio-rustls` | `0.26.4` | Phase 5 | no defaults — the connector C2's handshake is driven with |
+| `serde_yaml_ng` | `0.10.0` | Phase 6 | — — the first arrival that is not free: `Cargo.lock` 213 → 218 |
 | `serde_json` | `1` | Phase 3, as a **dev**-dependency | — |
+| `ratatui` | `0.30.2` | Phase 8, as a **dev**-dependency ([D238](../NOTES.md#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)) | — — `Cargo.lock` 218 → 319, and `cargo tree -e no-dev` matches **zero** ratatui lines, so none of the 101 is in the graph `cargo install` builds. Phase 11 moves it to `[dependencies]` |
 
 `kube` 4.x is the line that resolves against the `k8s-openapi` pin — 3.1.0 wants
 `^0.27.0` — and the two are upgraded together, never separately.

@@ -26,6 +26,9 @@ exclude = [
     "NOTES.md", "REQUIREMENTS.md", "todo.md", "CLAUDE.md",
     "reports/", "backlog.md", "PRIOR-ART.md",
     ".claude/", ".github/", ".gitignore",
+    # Added 2026-09-05 with the Phase 8 spike that creates it (NOTES § D238).
+    # Throwaway code is not part of what a stranger downloads from crates.io.
+    "examples/",
     "justfile", "deny.toml", "cliff.toml", "clippy.toml",
 ]
 
@@ -193,6 +196,24 @@ tokio = { version = "1.53.1", features = ["net", "io-util"] }
 # already comes through in that file, so the Table decode named no new
 # dependency at all (2026-08-22).
 serde_json = "1"
+
+# **The eighth of the approved twelve to arrive, and it is here rather than in
+# `[dependencies]` on purpose** ([NOTES § D238](NOTES.md)). Phase 8's spike is an
+# `examples/` file and examples link dev-dependencies; the published binary does
+# not. Phase 5's release box is open, and D193 has just taken a TUI *claim* out of
+# this crate's description because the binary has no TUI — compiling a TUI library
+# into the same artifact to learn an event loop puts it back in the payload
+# instead of the prose. Phase 11 moves this line up, in the change that first
+# draws a real screen.
+#
+# **`crossterm` is not named beside it, though invariant 10 approves it too.**
+# 0.30 re-exports the backend's own — `pub use ratatui_crossterm::crossterm`,
+# resolved at `^0.29` — and a second version number in this manifest is how a tree
+# ends up with two crossterms in it, where the backend refuses the `Event` the
+# product hands it. `deny.toml` has `multiple-versions = "warn"`, so that would
+# arrive as a warning and not a red build. It gets named the day our own code
+# calls it directly (D165's shape: name what we write, inherit nothing silently).
+ratatui = "0.30.2"
 
 [profile.release]
 lto = true

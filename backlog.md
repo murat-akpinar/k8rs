@@ -27,6 +27,37 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
 
 ## Open
 
+- **Refused-connect and dropped-connection are not the same retry path, and two
+  agents measured opposite things.** Phase 8, same spike: a killed live socket gave
+  **~1138 redraws/s at 102% of one core**, while `127.0.0.1:1` gave **0
+  CPU-seconds over 22 s and no progress**. The 403 loop reproduced cleanly twice and
+  is not in question
+  ([D240](NOTES.md#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05));
+  this one wants its own look, probably at `backon` in kube's connect layer, before
+  Phase 12 decides what the reconnect banner says.
+
+- **Does Phase 12 owe a signal handler?** Invariant 8 is about panics and is
+  satisfied — ratatui's hook restores the terminal. Signals are a different path:
+  measured on Phase 8's spike, SIGINT/SIGTERM/SIGHUP all leave the terminal on the
+  alternate screen with `TERMIOS-DIFFER`, and under raw mode `ISIG` is cleared so
+  the Ctrl-C *keystroke* is inert and `q` is the only way out
+  ([D240](NOTES.md#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05)).
+  Nobody has ruled on whether that is acceptable or a `tokio::signal` arm in the
+  Phase 12 `select!`. `tokio`'s `signal` feature is not enabled today.
+- **Is a 20 MiB apiserver message bounded before it is held, or only before it is
+  drawn?** Phase 8's spike took a 20 MiB `Status.message` to **919 MB VmPeak /
+  188 MB RSS** while rendering an 85-byte row — the renderer half of the security
+  gate's *sizes are bounded* held and the memory half did not (`tester`,
+  2026-09-05). The spike has no ingest guard so this is expected of *it*; the
+  open question is where in `k8s.rs` the cap at `FREE_TEXT = 4096` sits relative
+  to the whole response being in memory, which nobody has measured on the
+  product.
+- **`PRIOR-ART.md` appears in no **Writes** cell of
+  [CLAUDE.md § Ownership](CLAUDE.md#ownership--and-the-file-each-one-may-write),
+  which claims every path appears in exactly one.** Treated as the PM's in
+  practice (2026-09-05, the Phase 8 review updated § A4 and § G1). Either the
+  table gains a row or the claim is qualified.
+
 - **The phase-close run on the test host has no guard.** Every other step of
   [CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
   is proven by something that cannot lie — `just check`, the `scripts/` guards,

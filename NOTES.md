@@ -259,6 +259,9 @@ its line moving with it.
 - [D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05) — the delete that removed a pod nobody had seen, and why the fix costs no read
 - [D236](#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05) — the four rulings the e2e box needs: where a wire is visible, what `just e2e` is then, and the synopsis that buried a correct answer
 - [D237](#d237--the-phase-7-family-review-what-the-freeze-forced-into-this-turn-what-the-sweep-can-and-cannot-cover-and-the-tag-whose-reason-stopped-being-true-2026-09-05) — the Phase 7 family review: what the freeze forced into this turn, what the sweep can and cannot cover, and the tag whose reason stopped being true
+- [D238](#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05) — the spike cannot import the product, and the TUI crate does not go in the shipped artifact to learn a loop
+- [D239](#d239--the-kubeconfig-parse-error-carries-a-snippet-of-the-kubeconfig-and-the-fault-enum-that-has-no-string-is-what-saved-the-product-2026-09-05) — the kubeconfig parse error carries a snippet of the kubeconfig, and the `Fault` enum that has no string is what saved the product
+- [D240](#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05) — what Phase 8 cost and what it bought: the three comments that taught the wrong lesson, and the five facts Phase 12 is built on
 
 ## Why it exists — where the gap is
 
@@ -20685,3 +20688,287 @@ denied lint — 22 log(s) read*. The nine are honest. **The count alone could no
 have told me that**, which is the whole of D133, and the reason the shard was
 re-run is that the first pass had its stdout redirected to `/dev/null` — a saving
 of nothing that cost the evidence.
+
+### D238 — the spike cannot import the product, and the TUI crate does not go in the shipped artifact to learn a loop (2026-09-05)
+
+Three rulings Phase 8's spike could not be briefed without. None of them is a
+reversal; two are older decisions holding in a place nobody had read them
+against, and the third is a packaging consequence this box creates.
+
+**1. `examples/` sees nothing in `src/`, and that is
+[D50](#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)
+working, not a wall to route around.** `cargo metadata` still reports exactly one
+target — `k8rs`, kind `bin` — so an example is a separate crate that can
+`use kube::...` and cannot `use k8rs::...`. The box says *live updates from the
+watch*, and the watch it means, `k8s.rs`'s `drive_watching`, is unreachable from
+the file that has to consume it. **The spike writes its own watch against `kube`
+directly** — a `watcher(Api::<Pod>::all(client), Config::default())` and a
+stream, which is four lines and is the thing being learned anyway. The
+alternative is a `lib.rs`, and *so the spike can reach the code* is the same
+argument D50 refused for the rule tests, made weaker by the fact that this code
+is thrown away. **Phase 12 is where `main.rs` consumes the real watch beside the
+real event loop, in the bin crate, where both already live**; the spike proves
+the loop, not the wiring.
+
+**2. `ratatui` is named alone, and in `[dev-dependencies]`.**
+
+*Alone*, because 0.30.2 re-exports the backend's own crossterm —
+`pub use ratatui_crossterm::crossterm`, resolved at `^0.29`. Naming `crossterm`
+separately in this manifest pins a second version number against the one
+`ratatui-crossterm` chose, and the two drifting apart is not a warning, it is a
+tree with two crossterms in it where the backend refuses the `Event` the product
+hands it. `deny.toml` has `multiple-versions = "warn"`, so that arrives as a
+warning and not a red build. Both crates are on invariant 10's twelve, so this
+needs no reversal — it takes *one* of the two and leaves the other for the day
+something calls it directly, which is [D165](#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27)'s
+shape: name what our code writes, inherit nothing silently.
+
+*In `[dev-dependencies]`*, because examples link dev-dependencies and the
+published binary does not. **This one is not free and the number is the argument
+for where it went**: `Cargo.lock` goes **218 → 319 packages**, a hundred and one
+of them for a spike that gets deleted — `palette` and its colour spaces,
+`ratatui-crossterm`, `ratatui-macros`, the unicode tables. `cargo tree -e no-dev`
+matches **zero** lines for `ratatui`, which is the whole point: none of the
+hundred and one is in the graph `cargo install k8rs` builds.
+`cargo deny check advisories licenses sources bans` is green with them in
+(2026-09-05). **Phase 5's release box is open right now**, and
+[D193](#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)
+has just finished taking a TUI *claim* out of the crate's public description
+because the binary has no TUI. Compiling a TUI library into that same artifact to
+learn an event loop puts it back — in the payload rather than the prose. Phase 11
+moves the line to `[dependencies]`, in the change that first draws a real screen.
+
+**And `examples/` joins `exclude`, in this same edit.** The directory did not
+exist when that list was measured at 90 files / 4.3 MiB, so nothing there was
+wrong; this box creates it, and throwaway code is not part of what a stranger
+downloads from crates.io.
+
+**3. The proof is a driven pty, not a test suite.** Everything else in this repo
+leaves a runnable check behind, and this is the one place that rule does not
+reach: the artifact is throwaway by its own done-when, and a test asserting the
+shape of code scheduled for deletion is the scaffolding
+[invariant 11](CLAUDE.md) exists to refuse. What replaces it is not *the author
+watched it work* — that is the claim [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)
+does not accept. **`tmux` drives the four claims headlessly and each one prints
+something**: a detached session runs the example, `capture-pane` shows the list
+redrawing as pods change, `resize-window` then `capture-pane` shows the reflow,
+`send-keys q` ends it, and `send-keys` on a deliberate panic key shows whether
+the shell that comes back is in raw mode. `just check` still has to be green —
+`cargo clippy --all-targets` and `cargo test --all-targets` both build examples,
+under `-D warnings` and under `clippy.toml`'s crate-wide write ban, which the
+spike inherits like every other file outside `ops.rs`.
+
+### D239 — the kubeconfig parse error carries a snippet of the kubeconfig, and the `Fault` enum that has no string is what saved the product (2026-09-05)
+
+Found by the PM's own read of Phase 8's spike, then measured rather than
+reasoned. It is the first time [D164](#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27)'s
+announced gap — *the guard cannot tell whether a `{:?}` on a kube error leaks, so
+every such call is hand-checked* — has been walked into by new code, and the
+hand-check is the thing that caught it.
+
+**kube-rs 4.2.0 parses the kubeconfig with `serde-saphyr`, whose errors embed a
+cropped region of the input.** Not a line number: the text. `KubeconfigError::Parse`
+wraps a `WithSnippet { regions: [CroppedRegion { text, .. }], crop_radius: 64 }`,
+so anything that `Display`s or `Debug`s that error prints up to ~128 characters of
+the kubeconfig *around the syntax error* — and the neighbourhood of a syntax error
+in a kubeconfig is `token:`, `client-key-data:`, `password:`. Measured against the
+spike, whose `main` returns `Box<dyn Error>` and therefore gets Rust's default
+`Debug` print:
+
+    $ KUBECONFIG=malformed.yaml ./target/debug/examples/spike_tui
+    Error: Parse(WithSnippet { regions: [CroppedRegion { text: "- name: u\n
+      user: {token: \"FAKE-SECRET-CANARY-BBBB\"\ncontexts: [\n", source_name:
+      "<input>", start_line: 4, end_line: 7, ... }], crop_radius: 64, error:
+      ExternalMessage { source: Parser, msg: "invalid indentation", ... } })
+
+The canary is the token, verbatim, on stderr, before any terminal was taken over.
+
+**The product does not do this, and the reason is a design choice that had until
+now only been argued.** Same file, same malformed kubeconfig, the shipped binary:
+
+    $ KUBECONFIG=malformed.yaml ./target/debug/k8rs --once
+    k8rs: no cluster to watch — the kubeconfig itself could not be read — it is
+    missing, unreadable, or not valid YAML
+    (exit 2)
+    $ ... | grep -c 'FAKE-SECRET-CANARY'
+    0
+
+`k8s.rs` never formats a `KubeconfigError`. It has exactly three consumers —
+`kubeconfig_fault` twice and `said` once — and **`Fault` carries no string at
+all** while `said` returns `None` for the kubeconfig arm on purpose, which
+[`NotConnected::Kubeconfig`](CLAUDE.md)'s own doc comment already called *the
+honest answer and not a shortcut*. The sentence the reader gets is
+`main.rs`'s `because()`, written by us. So the property that made this safe is not
+a filter over the error text — **it is that the error text never had a way in.**
+A typed fault with no payload is a structural guarantee where a sanitiser is a
+review obligation, and that is the transferable half.
+
+**The spike was fixed the same way and found a better spelling for it.** Asked to
+print its own sentence rather than the error, `dev-ui` wrote
+`fn because(&KubeconfigError) -> &'static str` — and the **return type** is the
+guard. A `&'static str` is structurally unable to carry a byte of the error, so
+there is nothing to review and no way for a later edit to widen it by accident;
+`k8s.rs` gets the same property from a `Fault` that holds no string, and this says
+it in the signature instead of in a discipline. Measured over six error classes,
+`grep -c` for the canary is **0** in every one, stdout is 0 bytes in every one, and
+the six sentences are distinct so the class is still named. The case that tests the
+mechanism rather than the outcome is `CurrentContextNotSet`/`LoadContext(String)`,
+where the canary is the `current-context` *value* — the arms that do carry a
+`String`, and an arm that formatted its payload would have printed it.
+`KubeconfigError` is not `#[non_exhaustive]`, so the catch-all is a fixed sentence
+too rather than an exhaustive match that breaks on a kube bump.
+
+**What this costs, said plainly**: `because()` cannot name *which line* of the
+kubeconfig is malformed, and D164's hand-check is still the only thing standing
+between a future `{:?}` and this snippet. The upgrade, if a line number is ever
+worth it, is to lift `location.line` off the error and carry the number — never
+the region — which is the same shape as [`Fault::BadEntry`](CLAUDE.md) declining
+to name which entry.
+
+### D240 — what Phase 8 cost and what it bought: the three comments that taught the wrong lesson, and the five facts Phase 12 is built on (2026-09-05)
+
+The spike's code is deleted at Phase 12. **This entry is what the phase actually
+produced**, which is why it is long where the diff is small — and why three of
+the review's seven findings were against *comments*. In an artifact whose whole
+output is knowledge, a confident wrong sentence is the defect.
+
+#### The three that were teaching the wrong lesson
+
+**1. Ignoring `Init`/`InitDone` is not a cosmetic shortcut, it is a permanently
+wrong list.** The spike's comment said a store needing atomic replacement buffers
+between the pair and *a dumb list does not*, framing the cost as a flicker.
+kube's own doc says otherwise (`kube-runtime-4.2.0/src/watcher.rs:81-83`):
+*"Any objects that were previously `Applied` but are not listed in any of the
+`InitApply` events should be assumed to have been `Deleted`."* Measured against a
+stub that lists `alpha`+`beta`, sends `410 Expired`, and re-lists with only
+`alpha` — `beta` having been deleted while the watch was down, so no `Delete`
+event for it exists anywhere:
+
+    3 pods · 7 watch events · cursor 0
+    > ! watch  error ... too old resource version: 100 (300): Expired
+      default/alpha  Running restarts=0
+      default/beta   Running restarts=0
+
+`beta` is not in the cluster and stays on screen for the life of the process. A
+screen that is confidently wrong with no way to notice is this project's stated
+3am failure. `k8s.rs` has always got it right — `Init` opens `filling`,
+`InitApply` fills it, `InitDone` swaps it into `live` whole
+(`src/k8s.rs:1569-1588`) — and **the sentence Phase 12 carries is that a consumer
+which does not buffer between the pair shows deleted objects forever after any
+desync**, not that a simple consumer may skip the buffering.
+
+**2. `watcher()` reconnects, and that is the half that is not the problem.**
+`kube-runtime` 4.2.0's `watcher()` is a bare `unfold` (`watcher.rs:791`) with no
+backoff, and its own docs say *"To avoid constantly looping errors, make sure
+backoff is applied"* (`watcher.rs:26`). Against a stub refusing everything with
+403: **438 watch events and 219 LIST attempts in 20 s, 11.3% CPU, retry gaps flat
+at 46-48 ms and not growing.** Reproduced independently by a second agent that
+declined to quote the first — **407 requests in 20 s, ~20/s, flat** — which is the
+same ~200 LIST/watch pairs counted a different way. Healthy idle is 0 events and 0
+ticks, so invariant 7 holds where nothing is wrong and dies where something is,
+and the security gate's *a 403 never crashes and never retries in a loop* is the
+row this breaks.
+
+**A second shape was measured and then failed to reproduce, so it is recorded as
+contested rather than as a fact.** Against a socket that had been alive and was
+then killed, one agent measured **~1138 redraws/s at 102% of one core**; against
+`127.0.0.1:1`, which was never listening, another measured **0 CPU-seconds over
+22 s and no progress at all**. Refused-connect and dropped-connection are
+evidently not the same path — `backon` is in the tree and kube's connect layer may
+back off where its watch layer does not — and nobody has taken it apart. That is
+[`backlog.md`](backlog.md)'s. **What is not contested is the 403 loop**, which is
+the one a beginner actually hits. **The first thing a beginner hits is a wrong kubeconfig or an expired
+credential**, which is precisely this path.
+
+**So the security gate's Authorization row does not pass for the spike, and it is
+recorded here rather than ticked.** The fix needs `StandingBackoff`, which lives
+in `src/k8s.rs` and is unreachable from `examples/` by
+[D238](#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)
+ruling 1; writing a second backoff inside the spike would add code to an artifact
+whose done-when is *understood, then deleted*. The exception is **scoped to code
+that is not shipped** — `examples/` is a dev-dependency target, excluded from the
+package, and gone at Phase 12 — and the file says so at the top where a reader
+meets it. **Phase 12 inherits the row unchanged**, and it is the one thing on this
+list that a `main.rs` reviewer must not accept a comment for.
+
+**`.default_backoff()` is not the fix, and measuring that independently
+corroborated a ruling this repo already made.** One line, and the same binary
+gives 16 events instead of 438 at 0.6% CPU — but its gaps plateau at ~1 s and
+never climb (1.42, 1.59, 1.09, 0.93, 1.08), because `StreamBackoff` resets on
+every non-error item and a refused `watcher()` emits `Ok(Init)` before every
+`Err`. That is why `src/k8s.rs:6662-6674` writes `StandingBackoff` instead
+([D166](#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27)
+— *the backoff kube's own default did not earn* — reached here from a different
+direction, by someone who did not know that entry existed until after the numbers
+were in.)
+
+**3. `!is_control()` is the first clause of invariant 9, not invariant 9.** The
+spike's `clean()` filtered control characters and its doc comment called itself
+*the one line that keeps the spike from being a demonstration of the defect*. It
+stops ESC, BEL, BS and FF — measured, **0 ESC bytes** in the screen buffer under
+attack. It does not stop the ranges `src/k8s.rs`'s `unprintable()` also
+covers. A stub `Status.message` carrying U+202E / U+202C / U+200B, `cat -A` of the
+pane:
+
+    > ! watch  error ...: pods is forbidden:namespace M-bM-^@M-.gnp-doprdM-bM-^@M-, may not list
+
+`gnp-doprd` is `prod-png` rendered backwards — Trojan Source, live, on a path the
+spike genuinely has, because an apiserver message is server-controlled free text
+and not an RFC1123 name. Two more differences in the same line: the newline was
+**deleted** rather than folded to a space, gluing `forbidden:namespace`
+(`src/k8s.rs:261-265` folds it for exactly that reason), and `take(120)`
+truncates with no marker and counts chars where `text()` appends `SHORTENED` and
+counts bytes. **The transferable half is that the bidi and zero-width ranges are
+the clause that took a decision to arrive at, so a sanitiser that only filters
+`is_control()` looks finished and is not.**
+
+#### The five facts Phase 12 is built on
+
+1. **`ratatui::init()` / `restore()`, not `run()`.** `run` takes
+   `FnOnce(&mut DefaultTerminal) -> R` with no async variant. `init` installs a
+   panic hook that chains to the previous one and calls `restore()`, so
+   **invariant 8's terminal half is free** — proven under attack with harnesses
+   first shown able to fail: `stty -g` byte-identical before and after, `EXIT=101`,
+   scrollback intact. **The credential half is still ours**, because the chained
+   default hook prints the payload.
+2. **`crossterm::event::EventStream` is unreachable, so keys come off an OS
+   thread.** `EventStream` is `#[cfg(feature = "event-stream")]`
+   (`crossterm-0.29.0/src/event.rs:124`); `ratatui-crossterm` 0.1.2's only
+   passthroughs are `serde`, `scrolling-regions` and `unstable-backend-writer`.
+   Checked structurally, not by feature count.
+3. **It must be `std::thread`, not `spawn_blocking`** — measured with two probes
+   identical but for the spawn, each parking a 10 s sleep and returning from
+   `main` at 200 ms: `spawn_blocking` exits at **10.004 s**, the thread at
+   **0.206 s**. `#[tokio::main]`'s runtime drop waits for the blocking pool, a
+   blocking task cannot be cancelled, and `event::read()` does not return.
+   `q` would hang forever.
+4. **The redraw is triggered from one place — the top of the loop — and resize
+   needs no arm at all**, because `draw` re-reads the backend's real size rather
+   than trusting the event. Survives down to **1x1**, with and without a modal.
+5. **Both `select!` arms must be cancel-safe.** `select!` drops the loser every
+   iteration; `UnboundedReceiver::recv` and `StreamExt::next` over a `BoxStream`
+   are, and a `read_line`-shaped arm would silently eat one keystroke per frame.
+
+#### Three more, recorded where they will be looked for
+
+**The dialog retargeted itself** — [`PRIOR-ART § G1`](PRIOR-ART.md#g1--k9s-arrived-where-invariant-2-starts),
+whose `immune` tag covered the typed name but not what it is compared against.
+**The initial paint is quadratic for a second reason nobody had named** —
+[`PRIOR-ART § A4`](PRIOR-ART.md#a4--per-object-overhead-is-paid-once-per-object-per-refresh),
+where `covered` rested on invariant 7 alone. And **signals are not the panic
+path**: under raw mode `ISIG` is cleared, so the Ctrl-C *keystroke* is inert and
+`q` is the only way out, while SIGINT/SIGTERM/SIGHUP all leave the terminal on the
+alternate screen with `TERMIOS-DIFFER`. Invariant 8 is about panics and is
+satisfied; **whether Phase 12 owes a signal handler is a question this turn
+raises and does not answer**, and it is [`backlog.md`](backlog.md)'s until someone
+rules on it.
+
+#### One correction to D238, from the review
+
+[D238](#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)
+said naming `crossterm` separately is *how a tree ends up with two crossterms in
+it*. Stated that flatly it is wrong: naming `crossterm = "0.29"` today would
+unify onto the same package `ratatui-crossterm` already resolves. **The risk is
+drift, not naming** — two independently-written version specifiers that later
+diverge — and two crossterms is drift's consequence rather than naming's. The
+ruling is unchanged; the sentence was doing more work than the evidence.

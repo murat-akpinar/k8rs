@@ -4094,42 +4094,54 @@ matches what happened.
 
 ## Phase 8 — TUI spike (throwaway)
 
+> **The owner changed here.** Phases 3–7 were `dev-core`'s; Phase 8 was
+> `dev-ui`'s first, and its code lives in `examples/` and never merges into
+> `src/`. **`ops.rs` froze at Phase 7's close**
+> ([D237](NOTES.md#d237--the-phase-7-family-review-what-the-freeze-forced-into-this-turn-what-the-sweep-can-and-cannot-cover-and-the-tag-whose-reason-stopped-being-true-2026-09-05)).
+> **Closed 2026-09-05.** What it produced is knowledge, not code — the code is
+> deleted at Phase 12 — and the knowledge is
+> [D240](NOTES.md#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05).
+
+Goal: learn the ratatui event loop without touching product files.
+
+- [x] Start from the ratatui async template in `examples/`
+      ([D238](NOTES.md#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05) —
+      the spike cannot `use k8rs::`, so it writes its own watch; `ratatui` alone,
+      in `[dev-dependencies]`)
+- [x] Dumb list: live updates from the watch, `q` quits, resize works,
+      terminal restored on panic — all four driven under `tmux` and each one
+      shown, plus resize down to 1x1 and `TERMIOS-IDENTICAL` after a deliberate
+      panic
+      ([D240](NOTES.md#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05))
+- [x] Spike the hard interaction: a modal dialog over a list, keyboard focus
+      and all. Terminal handover (suspend, give the terminal away, take it
+      back) is *not* spiked here — nothing in v0.1 needs it now that `edit`
+      moved to v0.4 and `exec` to v0.3. It gets its own spike then.
+      Focus proven both ways: with the modal open `p` does not panic and two
+      `q`s do not quit, and the watch counter still ticks. **It also found that a
+      dialog must store its target and never derive it**, which reopened
+      [PRIOR-ART § G1](PRIOR-ART.md#g1--k9s-arrived-where-invariant-2-starts)'s
+      `immune` tag ([D240](NOTES.md#d240--what-phase-8-cost-and-what-it-bought-the-three-comments-that-taught-the-wrong-lesson-and-the-five-facts-phase-12-is-built-on-2026-09-05))
+
+**Done when:** the spike runs and the loop is understood. Code stays in
+`examples/`, never merged into `src/`.
+
+## Phase 9 — Theme
+
 > **Phase 5's release box is still unchecked, and it is still not next** — it
 > needs the maintainer's crates.io credential and a `README.md` that belongs to
 > Phase 13
 > ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
-> It is the first unchecked box in this file, so a cold session lands on it; the
-> note that said so sat at Phase 7's head, and **Phase 7 closed 2026-09-05**, so
-> it is repeated here and moves forward with whichever phase is open — it has now
-> moved twice, from Phase 6 and from Phase 7. Running a later phase over a
-> deliberately open earlier one is
+> It is the first unchecked box in this file, so a cold session lands on it. This
+> note moves forward with whichever phase is open and **has now moved three
+> times** — from Phase 6, Phase 7, and Phase 8, which closed 2026-09-05. Running a
+> later phase over a deliberately open earlier one is
 > [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
 > [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
 > shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
 > runs whole when that box closes**
 > ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
 > The next box is the first unchecked one below.
->
-> **The owner changes here.** Phases 3–7 were `dev-core`'s; Phase 8 is `dev-ui`'s
-> first, and its code lives in `examples/` and never merges into `src/`.
-> **`ops.rs` froze at Phase 7's close** — it changes now only by a reversal
-> recorded in `NOTES.md` before it is acted on
-> ([D237](NOTES.md#d237--the-phase-7-family-review-what-the-freeze-forced-into-this-turn-what-the-sweep-can-and-cannot-cover-and-the-tag-whose-reason-stopped-being-true-2026-09-05)).
-
-Goal: learn the ratatui event loop without touching product files.
-
-- [ ] Start from the ratatui async template in `examples/`
-- [ ] Dumb list: live updates from the watch, `q` quits, resize works,
-      terminal restored on panic
-- [ ] Spike the hard interaction: a modal dialog over a list, keyboard focus
-      and all. Terminal handover (suspend, give the terminal away, take it
-      back) is *not* spiked here — nothing in v0.1 needs it now that `edit`
-      moved to v0.4 and `exec` to v0.3. It gets its own spike then
-
-**Done when:** the spike runs and the loop is understood. Code stays in
-`examples/`, never merged into `src/`.
-
-## Phase 9 — Theme
 
 *Also read: [PRIOR-ART § D2](PRIOR-ART.md#d2--do-not-fight-the-users-terminal) (the user's own 16 colours win; bold is a per-emulator setting) and [§ K](PRIOR-ART.md#k-accessibility) (colour is never the only carrier of meaning — every state, not just severity).*
 
