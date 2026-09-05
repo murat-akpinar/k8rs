@@ -2448,3 +2448,86 @@ long-form version and stays the authority.*
   twice, by `NOTES.md` and by the session memory directory, and a hosted instance
   would put project data on an outbound connection that
   [docs/security.md](docs/security.md) says does not exist.
+
+- **Six intra-doc links in `src/` do not resolve, and nothing in `just check`
+  reads them.** Measured 2026-09-05 by `dev-core` while confirming a link of its
+  own: `cargo doc --no-deps --document-private-items` emits six
+  `rustdoc::broken_intra_doc_links` warnings — `crate::rules::in_days`
+  (`analysis.rs:3182`), `tests` twice and `crate::main::sanitize`
+  (`k8s.rs:5468`, `5534`, `6450`), `crate::analysis::capped` (`rules.rs:973`) and
+  `Row::NotComputed` (`rules.rs:1812`). All pre-existing, none in that turn's
+  diff. **`RUSTFLAGS=-D warnings` does not cover them** because nothing in
+  `just check` runs `cargo doc`, so these are the one warning class the gate is
+  structurally blind to — the same shape as
+  [D212](NOTES.md#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03),
+  where an allowed lint could not report itself. A `cargo doc` line in
+  `just check` would close it and would go red on the six today. Not boxed: it is
+  a gate change and Phase 7 was closing. Found by `dev-core`, 2026-09-05
+
+- **`k8rs-readonly` needs the `selfsubjectaccessreviews` `create` grant, or
+  `--read-only ops may-i` is a subcommand the documented role cannot run.**
+  [D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+  ruling 3 shipped the path in Phase 7; the role predates it. Fails open —
+  `CouldNotTell`, exit `2` — on a cluster without the default `system:basic-user`
+  binding, which is
+  [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)'s
+  condition. `docs/security.md` now names the gap; adding the grant is a decision
+  about what a *read-only* role may create, and D230 measured it
+  needed-and-sufficient. Found by the Phase 7 family review, 2026-09-05
+
+- **A `may-i` line that cannot reach a cluster is answered *"nothing was
+  changed"*, and the question changes nothing by construction.**
+  `src/main.rs:7192` (`no_cluster`), called from `may_i_connected` at `:6864` and
+  `:6868`. `ops_usage`'s own row for that verb ends `— changes nothing`.
+  [D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+  ruling 7 already ruled this class one layer down and fixed `ops::unasked` —
+  *"the **subject** of the sentence is not [right], and a refused question needs
+  its own words"* — but the sibling site in the driver is the only one an operator
+  meets when the kubeconfig or the connection is the problem, and it kept the
+  operation's wording. `unasked` already spells the right sentence. Found by the
+  Phase 7 family review, 2026-09-05
+
+- **The `-n`-on-a-node refusal is answered twice — once in its own sentence and
+  again as line 7 of a synopsis the reader did not need.** `src/main.rs:6623`.
+  [D236](NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)
+  ruling 4's boundary is the *call* (parse vs `applies`) and not the wording,
+  deliberately — a grep-able rule survives a fourth operation and a per-site
+  reading does not — so this sits on the synopsis side by the rule while meeting
+  the description of the other side: the reader named a real operation, a real
+  kind and a real object and was handed a complete instruction. **Not a request to
+  re-litigate the boundary**; the question is whether one refusal deserves a named
+  exception. Found by the Phase 7 family review, 2026-09-05
+
+- **The delete prompt never names the token it wants, and typing what the screen
+  shows cancels.** `src/main.rs:6965`. The title line says `pod/web-7d9f4`, the
+  prompt says *type the object's own name*, and the token is `web-7d9f4` — nothing
+  on screen distinguishes the two. Safe direction and one retry on a tty, but the
+  headless prompt is the only one a newcomer meets before Phase 11, and
+  `screens/dialogs.md`'s drawn dialog already labels the field per kind (*"Type
+  the pod's name to confirm"*). Invariant 14. Found by the Phase 7 family review,
+  2026-09-05
+
+- **`tests/binary.rs:2684`'s *"the prompt really was reached"* is satisfied by the
+  session's own `GET`.** `k8s::connect_with` makes GETs before any operation
+  starts, so the assertion fires for a run that never got near `ask`, and `delete`
+  sends nothing of its own before the prompt. The test is still sound — the
+  `stderr.ends_with("nobody confirmed it…")` assertion two lines up is only
+  producible by `perform` reaching `ask` and getting `Cancelled` — so what is
+  wrong is the doc comment claiming a property the assertion under it does not
+  have. Same class as the three records this phase found that read as checks and
+  were satisfied by runs that did nothing, here in a comment. Found by the Phase 7
+  family review, 2026-09-05
+
+- **An agent that builds in its own scratchpad can fill `/tmp`, and nothing warns
+  it.** `/tmp` here is a 12 GiB tmpfs and the agent scratchpad lives on it;
+  `dev-core` hit it at 92% full on 2026-09-05, and the build that filled it lost
+  the tool's own stdout. This is
+  [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+  condition one layer out from the mutation gate: `scripts/mutants.sh` already
+  names `$HOME/.cache` and refuses to start without headroom, so it was never at
+  risk, and **the scratchpad is covered by nothing**. Every agent in this repo is
+  told to copy the tree when it needs a clean one — CLAUDE.md § The one hard rule
+  of concurrency — and the obvious place to put the copy is the one that breaks.
+  The cheap fix is a sentence in that paragraph naming `$HOME/.cache`; the honest
+  one is whatever `mutants.sh` already does, said once for everybody. Found by
+  `dev-core`, 2026-09-05

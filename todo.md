@@ -3265,9 +3265,13 @@ public release.
       **This is the first unchecked box in the file and it is not the next one to
       work.** Nothing here can move until the user runs `cargo publish` and until
       Phase 13 writes the README. **The next box is the first unchecked one in the
-      lowest open phase below this one — Phase 7 today**, and that phase's head
-      note says why a later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
-      [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12))
+      lowest open phase below this one — Phase 8 today** (Phase 7 closed
+      2026-09-05), and that phase's head note says why a later phase runs over this
+      one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+      [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)).
+      **This line names a phase and so it goes stale at every close** — it has now
+      done so twice; the note itself moves forward with whichever phase is open,
+      and moving it is part of the close ritual rather than a thing to notice later
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
 kubeconfig sets `insecure-skip-tls-verify` it is honoured *and surfaced*, not
@@ -3633,21 +3637,6 @@ a frozen-file problem in Phase 11, not a small addition.
 Goal: every write works and is safe, **before a single key is bound to one**.
 This is the phase where the reversal actually happens, and it is deliberately
 placed low in the pyramid so the dangerous code is proven headlessly.
-
-> **Phase 5's release box is still unchecked, and it is still not next** — it
-> needs the maintainer's crates.io credential and a `README.md` that belongs to
-> Phase 13
-> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
-> It is the first unchecked box in this file, so a cold session lands on it; the
-> note that said so sat at Phase 6's head, and Phase 6 has closed, so it is
-> repeated here and moves forward with whichever phase is open. Running a later
-> phase over a deliberately open earlier one is
-> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
-> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
-> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
-> runs whole when that box closes**
-> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
-> The next box is the first unchecked one below.
 
 - [x] `ops.rs` with the single `#![allow(clippy::disallowed_methods)]`; CI's
       containment check now expects exactly this file — `scripts/write-guard.py`,
@@ -4040,25 +4029,61 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       `just check` green (**1058 + 30**), `just mutants-diff` **20 caught, 0
       missed** — and the first run found a real gap, a uid that strips to empty
       leaving a dangling label
-- [ ] e2e job under `--read-only` that fails if any mutating request reaches
-      the API server.
-      **Two notes from the cluster run to fold in rather than lose**
-      ([reports/2026-09-05](reports/2026-09-05-every-operation-against-a-real-cluster.md)):
-      `kubectl rollout restart` refuses a second restart inside one second and
-      exits `1`, where k8rs stamps to nanoseconds and cheerfully does two — k8rs's
-      direction is the truthful one, it did what it said, but the taught line run
-      twice does not reproduce it, and that is a sentence the box owes rather than
-      a change. And a precise semantic refusal (`ops restart rs/x`) is followed by
-      eight lines of `ops_usage()`, which is invariant 14's second half: the reader
-      typed a well-formed line and got a correct answer buried under a synopsis
+- [x] e2e job under `--read-only` that fails if any mutating request reaches
+      the API server
+      ([D236](NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)).
+      **Proven at two ranges, because a kind apiserver cannot tell you what one
+      client sent it** — no client label on `apiserver_request_total`, and an
+      audit policy would mean recreating the control plane the committed fixtures
+      come from. The **wire** is `tests/binary.rs` § THE WIRE against the
+      recording stub, every verb the binary's own usage advertises, both flag
+      positions, on every push; the **cluster** is `just e2e`, by hand.
+      **Done when:** `just e2e` green against `kind-k8rs` — `deploy/healthy-deploy`
+      unchanged, `--read-only` opened no audit log, **3 operations refused then
+      cancelled, 1 question answered under the flag and without it**; `just check`
+      exit `0` (**1058 + 32**, `e2e --self-test: 20 cases`). Phase 2's one declared
+      freeze exception is spent: the recipe has a body, delegated to
+      `scripts/e2e.sh`, whose `--self-test` is in `scripts/guards.sh` so its
+      decisions run on machines with no cluster.
+      **The negative assertion `backlog.md` was holding for this box is spent**, at
+      both ranges: a well-formed `ops` line with `</dev/null` cancels, exits
+      non-zero and reaches the cluster with nothing that changes it
+      ([D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)).
+      **Vacuity is the thing this box had to defend against and it took four
+      findings to get there** — under the flag the operations dial *nothing*, so a
+      filter over an empty list is green for the wrong reason. The question is the
+      row that keeps it honest, and three records that read as checks were
+      satisfied by runs that did nothing: the per-row line said *refused and
+      cancelled* about the one row that was neither, *refused* was never asserted
+      for the operations, and the audit log was inspected-if-present rather than
+      required. All three were green.
+      **The two folded-in notes.** `ops_usage()` no longer follows a refusal about
+      *meaning*: nine `applies` lines went **9 stderr lines → 2** — the sentence and
+      one pointer — while the four parse refusals stayed at 9 and `--read-only`
+      stayed at 1. The boundary is the call and not the wording, so a fourth
+      operation inherits it. And `restart`'s doc now says the taught `kubectl` line
+      is equivalent *at second resolution*; writing that sentence falsified the one
+      it replaced, which had claimed kubectl writes an identical value where it in
+      fact refuses client-side and exits `1`.
+      **The screen sync drew a refusal the binary cannot print** and it took the
+      binary, not the source, to see it: a Service never reaches `restartable`'s
+      *other* arm because `known_kind` refuses it first
 
 **🔒 Security gate — the heaviest one in the plan:** object names are
 sanitised before they touch a path or a URL segment — `../` must not escape,
 and a pod named `; rm -rf ~` must be boring everywhere it appears. Audit log
 mode 0600, append-only, recording refusals and failures too, and recording the
 real API call alongside the kubectl line. The command log is display text —
-k8rs never executes it. `--read-only` verified by the e2e job, which fails if
-any mutating request reaches the API server. *(The `$EDITOR` and temp-file
+k8rs never executes it. **`--read-only` is verified at two ranges, because a
+cluster cannot show you what one client sent it**
+([NOTES § D236](NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)
+ruling 1): the **wire** — no mutating request leaves the process — against a
+recording stub, on every push; the **cluster** — by `just e2e` against kind, by
+hand, which asserts the object did not change, that `--read-only` opened no audit
+log at all, that every operation it refused *then* recorded a cancellation saying
+nothing was changed, and that the one row the flag permits — the question — is
+answered under it and without it. This row said *the e2e job* singular until
+2026-09-05. *(The `$EDITOR` and temp-file
 items of this gate move to v0.4 with `edit`; they are written out in the
 Later section so they cannot be forgotten.)*
 
@@ -4068,6 +4093,28 @@ matches what happened.
 **Frozen after:** `ops.rs`.
 
 ## Phase 8 — TUI spike (throwaway)
+
+> **Phase 5's release box is still unchecked, and it is still not next** — it
+> needs the maintainer's crates.io credential and a `README.md` that belongs to
+> Phase 13
+> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
+> It is the first unchecked box in this file, so a cold session lands on it; the
+> note that said so sat at Phase 7's head, and **Phase 7 closed 2026-09-05**, so
+> it is repeated here and moves forward with whichever phase is open — it has now
+> moved twice, from Phase 6 and from Phase 7. Running a later phase over a
+> deliberately open earlier one is
+> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
+> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
+> runs whole when that box closes**
+> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
+> The next box is the first unchecked one below.
+>
+> **The owner changes here.** Phases 3–7 were `dev-core`'s; Phase 8 is `dev-ui`'s
+> first, and its code lives in `examples/` and never merges into `src/`.
+> **`ops.rs` froze at Phase 7's close** — it changes now only by a reversal
+> recorded in `NOTES.md` before it is acted on
+> ([D237](NOTES.md#d237--the-phase-7-family-review-what-the-freeze-forced-into-this-turn-what-the-sweep-can-and-cannot-cover-and-the-tag-whose-reason-stopped-being-true-2026-09-05)).
 
 Goal: learn the ratatui event loop without touching product files.
 

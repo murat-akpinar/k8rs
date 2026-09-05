@@ -277,10 +277,20 @@ rules:
     verbs: ["create"]
 ```
 
-**`k8rs-readonly` deliberately does not carry that last rule.** No read-only code
-path calls `may_i` today, and this file holds itself to *every rule is reachable
-by code that exists* — [D187](../NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
-removed two grants on that test. It arrives with the browser row that reads it
+**`k8rs-readonly` does not carry that last rule, and since 2026-09-05 that is a
+gap rather than a policy.** This paragraph said *no read-only code path calls
+`may_i` today*, holding the file to *every rule is reachable by code that
+exists* — [D187](../NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
+removed two grants on that test. **Phase 7 shipped one**:
+[D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3 made `k8rs --read-only ops may-i …` permitted, precisely so a read-only
+user can ask what they are allowed to do. So on a cluster without the default
+`system:basic-user` binding — [D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)'s
+condition — a user bound only to `k8rs-readonly` gets `CouldNotTell` and exit `2`
+for a subcommand shipped for them. **It fails open, so nothing breaks and nothing
+is granted by accident**; what is wrong is a role that does not cover a path that
+now exists. Found by the Phase 7 family review
+([reports/2026-09-05](../reports/2026-09-05-the-frozen-write-path-read-whole.md)). It arrives with the browser row that reads it
 ([NOTES § D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)).
 The probe **fails open**, so a read-only login without the grant is told k8rs
 could not find out — never that it may not.
@@ -342,8 +352,21 @@ resource.
   every cargo root, and in `Cargo.toml`, `.cargo/config.toml` and the committed
   rustc command lines that can silence it with no `.rs` file changed
   ([NOTES § D212](../NOTES.md#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03)).
-- The e2e job runs under `--read-only` against kind and fails if any mutating
-  request reaches the API server.
+- **`--read-only` is proven at two ranges, and the split is forced by what each
+  one can see**
+  ([NOTES § D236](../NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05)
+  ruling 1). **The wire**: `tests/binary.rs` § THE WIRE runs the built binary
+  under the flag, for every verb the binary's own usage advertises, against a
+  recording stub that logs `METHOD target body` per request — and fails if any
+  mutating method went out. It runs on every push. **The cluster**: `just e2e`
+  runs the same binary against kind and asserts what a real apiserver makes
+  visible — the object did not change, and `--read-only` opened no audit log at
+  all. It is run by hand, not by CI. **A kind apiserver cannot tell you what one
+  client sent it** — `apiserver_request_total` carries no client label, and an
+  audit policy would mean recreating the control plane of the cluster the
+  committed fixtures come from — so *fails if any mutating request reaches the
+  API server* is the stub's claim to make, not kind's. This row said it was one
+  job against kind until 2026-09-05.
 - **The mechanizable half of the review checklist is a script**, not a list
   somebody re-reads:
   [`scripts/security-guard.py`](../scripts/security-guard.py) fails the build on
@@ -465,8 +488,8 @@ not be what k8rs wrote
 Two lines per attempted mutation:
 
 ```
-2026-09-04T09:12:31.44Z attempt · deployment/web · context prod-eu · namespace payments · kubectl: kubectl scale deployment/web --replicas=3 -n payments · call: PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion 88213
-result · attempt 2026-09-04T09:12:31.44Z · recorded 2026-09-04T09:12:33.06Z · deployment/web · dry-run: the cluster checked it first and accepted it · the change was made
+2026-09-05T10:17:38.70883222Z attempt · deployment/web · context prod-eu · server https://10.0.0.1:6443 · namespace payments · uid 3713e7a9-73ee-4a4e-bb7c-663a8abe51f3 (what k8rs read, not what it changed) · kubectl: kubectl scale deployment/web --replicas=5 -n payments · call: PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion not sent
+result · attempt 2026-09-05T10:17:38.70883222Z · recorded 2026-09-05T10:17:38.713311965Z · deployment/web · dry-run: the cluster checked it first and accepted it · the change was made
 ```
 
 **Two lines per mutation, and both records are on them.** k8rs calls

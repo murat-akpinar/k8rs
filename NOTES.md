@@ -257,6 +257,8 @@ its line moving with it.
 - [D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) — the dialog's `$` line and the command log's are not the same line, and the read side is a manifest rather than a feed
 - [D234](#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05) — `--read-only`'s box went stale twice, and the carve-out I ordered is the thing to attack
 - [D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05) — the delete that removed a pod nobody had seen, and why the fix costs no read
+- [D236](#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05) — the four rulings the e2e box needs: where a wire is visible, what `just e2e` is then, and the synopsis that buried a correct answer
+- [D237](#d237--the-phase-7-family-review-what-the-freeze-forced-into-this-turn-what-the-sweep-can-and-cannot-cover-and-the-tag-whose-reason-stopped-being-true-2026-09-05) — the Phase 7 family review: what the freeze forced into this turn, what the sweep can and cannot cover, and the tag whose reason stopped being true
 
 ## Why it exists — where the gap is
 
@@ -20304,3 +20306,382 @@ recorded rather than papered over.
   costs a second `GET` that D223 ruling 3 discourages. So the consequence says
   *if* a deployment manages this replicaset its controller will put the count
   back, which is true either way and costs nothing.
+
+### D236 — the four rulings the e2e box needs: where a wire is visible, what `just e2e` is then, and the synopsis that buried a correct answer (2026-09-05)
+
+Phase 7's last box is *e2e job under `--read-only` that fails if any mutating
+request reaches the API server*, plus two notes the kind run
+([reports/2026-09-05](reports/2026-09-05-every-operation-against-a-real-cluster.md))
+left for it. Four things had to be settled before it could be briefed, and two of
+them narrow what the box was written expecting.
+
+**1. The wire is watched at the stub, because kind cannot see one.**
+[D234](#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05)
+ruling 3 split this box from the last one on exactly this axis — *that box proves
+k8rs refuses, this one proves nothing got out* — and the split only pays if the
+second half really observes the socket. **A kind apiserver cannot tell you what
+one client sent it.** `apiserver_request_total` carries `verb`, `resource`,
+`scope` and `code` and **no client label**, so every controller in the cluster is
+in the same counter; attributing a `PATCH` to k8rs off it is not possible. The
+alternatives each buy something else: an audit policy means
+`kubeadmConfigPatches` and a **recreated control plane**, and the fixture cluster
+is the one object in this repo that may not be quietly reshaped
+([D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12));
+a read-only RBAC login proves *the apiserver refused*, which is a different
+claim from *nothing was sent* and is the claim k8rs is not allowed to lean on.
+**The recording stub already in `tests/binary.rs` is the honest observation
+point**: `Ran::asked` holds `METHOD target body` for every request the binary
+actually dispatched, so *no mutating request reached the API server* is a filter
+over a list that exists today. It also runs on every push, which no cluster leg
+can. **The stub is the API server from the binary's side** — kube dialled it, the
+kubeconfig named it, the bytes went over a socket — and that is the whole of what
+the assertion claims.
+
+**2. `just e2e` is therefore the cluster leg, and it asserts what a cluster can
+actually prove.** The recipe is Phase 2's one declared freeze exception
+(`todo.md` Phase 2, *Frozen after*), so leaving `@exit 1` in it at phase close
+would spend the exception on nothing. What it runs is its own declaration —
+the built binary against kind, `--read-only` over every verb the usage
+advertises, and the operations enabled for the cancel case — and what it asserts
+is what is visible from outside a real apiserver: **the object did not change**.
+Not the wire. **The clause this ruling first carried — *and no audit line was
+written* — was true of one leg and false of the other, and `tester` measured it
+rather than taking it**: under `--read-only` nothing is attempted so no log is
+opened at all, but a *cancelled* operation writes attempt **and** result, because
+invariant 2 requires every attempt — success, failure, refusal — to reach the
+audit log. So the cluster leg asserts the record **exists and says nothing was
+changed**, which is the stronger claim: a leg that demanded silence would have
+gone red on the contract working. **It is not in `just check`** and it is
+not a CI job: [REQUIREMENTS § CI](REQUIREMENTS.md#ci-github-actions) refuses a
+kind job in v1 and *tests must pass with no `KUBECONFIG`* — both still hold, and
+this recipe is the PM's to run
+([CLAUDE.md § The boxes no agent can run](CLAUDE.md)). The sentence in
+[docs/security.md](docs/security.md) that said *the e2e job runs against kind and
+fails if any mutating request reaches the API server* was one claim about one
+job; it is two now, and the docs say which range proves which.
+
+**3. The negative assertion is the same box's, at both ranges.**
+[D218](#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)'s
+confirmation design is only distinguishable from a `--yes` flag by what happens
+when nobody answers: a well-formed `ops` line with `</dev/null` must cancel, exit
+non-zero, and reach the cluster with **nothing**. Every positive test in the file
+still passes if that regresses, which is why it was carried in
+[`backlog.md`](backlog.md) waiting for this box rather than assumed.
+
+**4. The synopsis prints when the *form* is wrong, and not when the *meaning*
+is.** Measured at HEAD, `k8rs ops <anything refused>` is one line of message and
+**eight** lines of `ops_usage()`, for all six refusals — the wrong operation name,
+the missing namespace, the missing copies **and** `ops restart rs/x -n payments`,
+whose answer is *a replicaset is normally made by a deployment, and restarting
+that deployment is what replaces its copies*. That last reader typed a well-formed
+line and got a complete, correct answer buried under a synopsis they did not
+need, which is invariant 14's second half. **The split is by what the reader is
+missing**: someone who wrote `frobnicate`, or left out `-n`, or left out the
+copies, does not know the shape and the synopsis is the answer; someone who named
+a real operation and a real object and was told *k8rs does not do that to that
+kind* knows the shape already. Form keeps the synopsis; meaning gets the sentence
+and a one-line pointer back to `k8rs ops`.
+
+**And the note that is a sentence rather than a change.** `kubectl rollout
+restart` refuses a second restart inside the same second and exits `1` — its
+annotation stamp is second-resolution — where k8rs stamps to nanoseconds and
+performs both. k8rs did what it said it would, so this is not a defect in the
+direction that matters; what it costs is that the taught `kubectl` line, run
+twice inside a second, does not reproduce what k8rs did. Invariant 4 says the
+command log shows the equivalent command *as the user would have typed it*, and
+it stays equivalent — but the equivalence has a resolution, and `restart`'s doc
+comment now says so rather than leaving the next reader to find it against a
+cluster.
+
+**And the comment it replaced was not merely silent, it was wrong.** `restart`'s
+doc had said since 2026-09-04 that *two `kubectl rollout restart` runs inside one
+second write the identical value and start no second rollout* — reasoned from the
+annotation being second-resolution, which is true, to a conclusion the cluster
+falsified: kubectl never writes a second value at all. It refuses **client-side**,
+before it sends anything — *if restart has already been triggered within the past
+second, please wait* — and exits `1`, generation `5 → 6`, where k8rs went
+`6 → 8`. This is CLAUDE.md's *a claim reasoned from a definition instead of
+measured against the object*, in its quiet prose form, written by someone being
+careful about a stamp one `kubectl` away
+([D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+Found by `dev-core` while writing the sentence this box owed — which is the
+argument for owing it.
+
+**What the classification came out as, and it is mechanical rather than a
+judgement per site.** Every refusal in the operations driver is produced either by
+*parsing the line* — `ops_words`, `operation_named`, `ops_object`, `ops_value`,
+`ops_namespace`, `may_i_question`, `known_kind`, the word-order and subresource
+checks — or by *asking the operation whether it applies to that kind*, which is
+`applies` and only `applies`. Parse refusals keep the synopsis; `applies` gets the
+sentence and the pointer. **A rule that can be grepped survives a fourth
+operation and a per-site reading does not**, which is why the boundary is drawn at
+the call and not at the wording. Two sites sit on the form side where the call is
+not obvious: `known_kind` — a kind k8rs does not know is not *a real object*, so
+the reader is missing the kind list — and `may-i`'s missing group, whose whole
+sentence is about how to spell the line. **`--read-only` is a third category**: it
+prints no usage at all and did not move
+([D234](#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05)).
+Measured: nine `applies` lines went 9 stderr lines → **2**, the four parse
+refusals stayed at 9, all at exit `2`.
+
+**The recipe's body lives in `scripts/e2e.sh`, and that honours the exception
+rather than dodging it.** `todo.md` Phase 2 says *Phase 7 writes that body and
+nothing else in the file*; the file had `@exit 1` and now has a body, which is
+what the exception was held open for. A justfile recipe cannot be run against
+fakes, and this one is nothing but decisions a cluster is not needed to get
+wrong — which context it refuses, which failure is loud, whether it vetted a
+single row. `scripts/e2e.sh --self-test` drives every one of those and sits in
+`scripts/guards.sh`, so the logic runs on every push on machines that have no
+cluster; the cluster run itself never does. Six scripts in this repo are already
+shaped that way and `scripts/` is not frozen.
+
+**Run against `kind-k8rs` (v1.36.1) by the PM, and it printed a line that lied.**
+Green on its assertions — `deploy/healthy-deploy` unchanged, `--read-only` opened
+no audit log, three cancelled attempts recorded — and the fourth of its per-row
+lines said *`ops may-i list pods.` — refused under `--read-only`, cancelled
+without it (exit 0)*, of which **both halves are false**. Measured in both flag
+positions: the question is permitted by
+[D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3, reached the cluster, and answered *yes — this login is allowed to do
+that*, exit `0`. The Rust half of this box already reads `mutates` off the row's
+own tail; the shell half printed one sentence for every row. **A per-row line that
+says the same thing about a row that did something different is the same defect
+class as invariant 4's**, and it is worse in a green run than in a red one,
+because nobody re-reads a green run — a reader at 3am takes those four lines as
+proof the flag refused four things when it refused three. Found by the PM's own
+run, which is the argument for the run being a gate and not a formality.
+
+**And the screen sync drew a refusal the binary cannot be made to print.**
+`screens/dialogs.md` had said since it was written that *every other kind — a
+Service, a ConfigMap, anything restart was never meant for — gets the same shape
+of answer*, and this box's sync promoted that sentence into a drawn block and put
+the new pointer line under it. Measured at HEAD: `k8rs ops restart
+service/web -n payments` prints **`k8rs does not work on a kind called service —
+the ones an operation can be pointed at are deployment, statefulset, daemonset,
+replicaset, pod and node`**, followed by the whole eight-line synopsis, because
+`known_kind` refuses a Service before `applies` is ever asked. **The `restartable`
+"other" arm is reachable and a Service is not one of its subjects** — the only
+kinds that reach it are inside the six: `node` for `restart`, `node` and
+`daemonset` for `scale`, and `delete` refuses no kind through `applies` at all.
+The reviewer verified the arm's **string builder** in `ops.rs` and not its
+**reachable output**, which is the same defect class as the `restart` doc comment
+two paragraphs up and was found the same way — by running the binary rather than
+reading the function that feeds it. **The error predates this box**; what this box
+did was turn a false sentence into a drawn screen, which is what made it
+blocking. `screens/` has no guard that can catch this: `screens-check.py` measures
+that a mockup fits 80×24, not that it is a thing the program says.
+
+**The `may-i` line was one of three records that were true by luck, and the other
+two were found by the agent sent to fix the first.** Both are the same shape as
+the line that lied — an assertion that reads as a check and is satisfied by a run
+that did nothing. *Refused under `--read-only`* was never checked for the
+operations either: leg 1 asserted only *no audit log and no stdout*, which is
+equally true of a row that failed for any other reason, so it now requires exit
+`2`. And the cancelled-attempt audit log was **inspected if present** rather than
+required, which is what made `3 cancelled attempts recorded` true by coincidence
+— measured against the pre-change script, one operation recording and one not was
+**green**, printing `1 operations refused then cancelled` about two. It is now
+required per operation, and the test is `-s` rather than `-e`, because an empty
+log is a reachable state: with an unreadable kubeconfig `ops::audit_log` opens
+`audit.log` at 0600 and never writes to it, and *opened and never written* is
+*recorded nothing*. **A green run is where this class hides**, because nobody
+re-reads one.
+
+### D237 — the Phase 7 family review: what the freeze forced into this turn, what the sweep can and cannot cover, and the tag whose reason stopped being true (2026-09-05)
+
+Phase 7 closed on eleven findings from the family review
+([reports/2026-09-05](reports/2026-09-05-the-frozen-write-path-read-whole.md)).
+The reviewer would have blocked on none of them; the triage below is the PM's,
+and its axis is **not severity — it is the freeze**.
+
+**1. `ops.rs` freezes, so two nits became blockers and the rest did not.**
+[CLAUDE.md § Phase close](CLAUDE.md) item 6 says a blocker is fixed and everything
+else is boxed later, which is what stops the loop. But *later* is not available
+for the file that closes: after this phase, `ops.rs` changes only by a recorded
+reversal, so a one-sentence defect in it is more expensive tomorrow than a
+three-site defect in `main.rs`, which `dev-ui` deletes at Phase 12 anyway. That is
+[D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05)'s
+precedent applied as a rule rather than re-derived: `Deleting` got its `uid` field
+in this phase for the same reason.
+**So the two that landed are the two the freeze owns** — an attempt line claiming
+*the cluster checked this was the object* about a round trip that has not
+happened when the line is written (`write_line` at `ops.rs:925`, before `show` at
+`:935` and before either `call`), true on a `200`, false on a `409`, and committed
+to disk before either is known; and the missing note that a `preconditions.uid`
+delete has **no** `kubectl` spelling, so the taught line succeeds where k8rs
+declines — the shape
+[D227](#decision-index) ruling 5 and [D226](#decision-index) both wrote down for
+their own divergences. Neither is reachable from today's binary; **Phase 11's
+dialog is the first caller of both**, which is exactly why they could not wait.
+**Four nits went to [`backlog.md`](backlog.md)** with the reasoning, and the phase
+still closed.
+
+**2. The third fix is not about the freeze and is here because it costs a working
+operator time.** Three driver refusals name the word they have just said k8rs does
+not have: with a zero-width space in it, `ops restart dep<U+200B>loyment/web`
+answers *k8rs does not work on a kind called deployment — the ones an operation
+can be pointed at are deployment, …*. The operator retypes an identical-looking
+line and gets an identical refusal. **`ops.rs` already ruled this class and the
+ruling landed in the copy nothing can reach**: `a_kind` quotes the word only where
+the strip left it alone ([D224](#decision-index)), and its own doc says *neither
+is reachable from argv today*.
+[D218](#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)
+finding 2 had claimed the driver's half *closed by `shown(arg, NAME_MAX)`* —
+measured, `shown` removes the character and appends *(with what cannot print
+removed)*, which does not stop the sentence contradicting its own second clause.
+**A ruling that lands only where it is unreachable is not a landed ruling**, and
+that is the general lesson rather than the ZWSP.
+
+**3. The mutation sweep covers the file that freezes and not the one that is
+deleted.** `just mutants` is scoped to `rules.rs` and `analysis.rs` — Phase 7's
+files have never been in the recipe, so there was no standing gate to run.
+Measured: **805 mutants** across `main.rs` (604) and `ops.rs` (201), at ~19s each
+— about nine hours, against a ten-minute cap per foreground call
+([D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)).
+**The ruling: sweep `ops.rs` and not `main.rs`.** `ops.rs` freezes and every
+surviving mutant in it is a test that can never be fixed cheaply again; `main.rs`
+is the temporary driver `dev-ui` replaces at Phase 12, and sweeping code that is
+scheduled for deletion buys a gate nobody will ever collect on. Every diff in this
+phase was gated by `just mutants-diff` when it was written; this is the whole-file
+pass on top of that, and **it is stated as `ops.rs` only rather than left to read
+like a whole-tree sweep that happened**.
+**A shard that looked interrupted was not.** `--shard 0/8` printed `ERROR
+interrupted` and its `outcomes.json` held all 26 entries — 22 caught, 3 honest
+unviables (`Default` is not implemented for the three types), one baseline, **0
+missed**. The kill landed on the reporting, after the work. That is
+[D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+lesson in the other direction — there, a failed run read as a pass; here a passed
+run read as a failure — and both are the same instruction: **read the run's own
+records, never its exit line.**
+
+**4. A `prior-art` tag kept its verdict and lost its argument.**
+[PRIOR-ART § G2](PRIOR-ART.md#g-destructive-actions) said `--read-only` makes the
+write path unreachable *so a new view cannot forget to check a flag — there is
+nothing to call*. There is now: the three operations are `pub`, called from
+`main.rs`, and `ops.rs` contains no read-only parameter, type or token. **The
+verdict survives and the reason does not**, so the entry now states what actually
+holds — one guarded entry point, proven by an equivalence over the verbs the
+binary advertises, plus D236's wire half — and names Phase 12 as where
+*unreachable* becomes a claim about types. **An `immune` tag whose stated
+mechanism has been replaced is worse than no tag**, because it is the sentence a
+future reviewer is told to defend.
+
+**5. Two `docs/security.md` sentences described code this phase changed**, in a
+file that was already in this turn's diff: the audit-line example still showed
+`resourceVersion 88213` on a scale — a precondition
+[D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)
+reversed and no operation sends — while omitting the `server` field D219 added and
+the uid clause D235 added; and *no read-only code path calls `may_i` today* was
+falsified by [D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3 in this same phase. The second one leaves a real gap — `k8rs-readonly`
+does not grant the `create` that the question it now permits needs — which fails
+open and is boxed rather than granted here, because *what a read-only role may
+create* is a decision and not a typo.
+
+**6. The same defect was at five sites, not three, and the ruling is *fix the
+siblings*.** `dev-core` fixed the three the review named, then reported two more
+from its own green sweep — `ops_object`'s `k8s::object_name` arm and
+`not_a_namespace`, where `deploy/we<U+202E>b` answers *`web` … is not the name of
+an object — a name is letters, digits, dashes and dots* about a word that
+satisfies every rule the sentence then states. It was right to stop: the brief
+named three sites and `main.rs` does not freeze. **The ruling is fix, and the
+reason is the shape rather than the count** — the helper already existed and each
+was one call, and a phase that ships three of five sites of one defect leaves the
+next reader no way to tell which sentences were vetted. That is the sibling-caller
+failure, and the fix that is smallest at the root is smaller than the fix repeated
+per report. The turn's deliverable became the **sweep**: every refusal in
+`main.rs` that echoes an argv-derived word, not the five that had been named.
+
+**7. What the shared rule is, and what it is not.** `a_kind`'s decision was not
+copied into `main.rs` and `ops::a_kind` was not made `pub` — its
+`"a {kind}"`/`"that kind"` shape fits none of the driver's frames. What is shared
+is the **decision**: `as_typed` takes the caller's sentence frame as a closure, so
+each site keeps its own words and none can forget the rule. **The predicate is the
+strip and not a character list**, matching `a_kind`; that costs the echo on a word
+carrying an escape sequence, which could have been quoted safely — and a narrower
+rule here beside a broad one in `ops.rs` would be two rules for one decision,
+which is the failure this repo pays most for. Clean-word output is byte-identical
+by construction, which is why the frames stayed and only the slot moved.
+
+**8. And writing the note for finding B found the paragraph already false.**
+`in_words`'s `Fault::Conflict` arm read *"No operation in this file sends one now
+… there is no divergence from the taught line to note."*
+[D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05)
+had falsified both halves in this same phase and the comment had not moved. The
+first draft of its replacement then cited D227 ruling 5 as live, which
+[D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)
+had reversed — caught by the author's own second pass, against `NOTES.md` rather
+than against the brief. **Three of this phase's last findings are the same
+sentence**: a comment that was true when written, about code that moved
+underneath it, in the file where nothing forces the two to agree.
+
+**9. The sweep found eleven sites, not five, and one of them was a live security
+gate row.** Asked to answer *are these all of them* by measurement rather than by
+reading, `dev-core` fed the same zero-width space to every refusal in `main.rs`
+that names an argv-derived word. **Six more**, each finding C exactly: `mistyped`'s
+`--object` name half, its `--container`, and its two separate unknown-flag
+branches; `refuse_count`'s not-a-number arm — *has to be a whole number, and `3` …
+is not one*; and `which_kind`'s no-match arm, which is the cruelest, because it
+tells the reader to **check the spelling** of a spelling that is correct. Verified
+by the PM: `grep -c 'as_typed("' src/main.rs` → **11**.
+**And the two unknown-flag sites used `sanitize` rather than `shown`, so they were
+unbounded** — `k8rs --once --<9000 a's>` printed all nine thousand characters
+back. That is the security gate's *sizes are bounded* row, live, in a file the
+gate has been read against every turn for a phase; routing through `as_typed` cuts
+it. Measured by the PM after the fix: **303 bytes of stderr**, and it is the one
+clean-word sentence that moved, gaining `(shortened by k8rs)`. **A defect nobody
+was looking for came out of a sweep somebody was made to run**, which is the
+argument for asking *are these all of them* as a deliverable rather than as a
+closing question.
+**What was deliberately left is recorded in the test rather than in a head**: the
+sentences where the cleaned word is still true of what is being refused (`--context
+--live`), the extra-word refusals (an extra word is extra however it is spelled),
+and four arms reachable only by a word that *matched* or *parsed*, which a word
+carrying an unprintable character cannot do. `in_namespace` was checked by
+experiment and not by argument — a zero-width space put into a kubeconfig was
+already stripped by `k8s::drawable` before that refusal saw it.
+**The fix retired a test's subject, which is the part that could not be quietly
+absorbed.** `tests/binary.rs`'s crafted-namespace assertion existed as *a terminal
+sink for a value nobody has stripped before*; `as_typed` removes the sink, so the
+value never reaches the terminal and the assertion's premise is gone rather than
+wrong. Updating the expected string to match the new output would have been the
+exact move CLAUDE.md forbids, and `dev-core` stopped at the file boundary and said
+so instead of making it.
+
+**10. And the blocker was the panic under all of it.** `src/main.rs:82` read argv
+with `std::env::args()`, which **panics on a word that is not valid UTF-8**.
+Measured by the PM at HEAD: `k8rs --once $'--\xff'` → *called `Result::unwrap()`
+on an `Err` value: `"--\xFF"`*, **exit 101** where every refusal on that path exits
+`2`. It is reachable without the user typing anything wrong — `k8rs *.json` in a
+directory holding one latin-1 filename, which is the threat this file's own test
+doc already names (*"argv is as untrusted as the API — a shell glob expands
+whatever the directory is named"*). [CLAUDE.md § Phase close](CLAUDE.md) item 6
+names *a crash* as a blocker, so it was fixed rather than boxed, and it is the one
+path in the binary that answered untrusted input with a Rust backtrace instead of
+a k8rs sentence.
+**The ruling is refuse, not convert**, and it is the turn's own rule one layer
+out: `as_typed` had just established that *a word the strip would change is not
+the word it looks like, so it is not echoed*. A word that is not UTF-8 is the same
+class at the process boundary — k8rs cannot act on it and must not pretend it can,
+and a lossy conversion would manufacture a word the user never typed and then
+refuse *that*.
+**Three findings in a row came out of asking for a sweep rather than a fix** —
+eleven echo sites, two unbounded ones, and this. Each was found by the agent sent
+to close the previous one, in the file everyone had already read. **The
+instruction that produced them is one sentence** — *are these all of them, measured
+rather than reasoned* — and it belongs in a brief that fixes anything found by
+sampling.
+
+**11. The sweep, run.** `src/ops.rs` at its freeze, ten shards, **201 mutants:
+169 caught, 32 unviable, 0 missed.** The count matches `cargo mutants --list`
+exactly, which is the only thing that proves no shard silently tested nothing.
+**One shard was re-run with its output visible rather than trusted**: shard 5
+came back with **nine** unviables, which is the shape
+[D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
+is about — and every one of them names a *type* (`ApiResource`, `Patch<Value>`,
+`Performed`, `Verdict`, none of which implement `Default`), with
+`scripts/mutants.sh`'s own log scan reporting *no log names the filesystem or a
+denied lint — 22 log(s) read*. The nine are honest. **The count alone could not
+have told me that**, which is the whole of D133, and the reason the shard was
+re-run is that the first pass had its stdout redirected to `/dev/null` — a saving
+of nothing that cost the evidence.

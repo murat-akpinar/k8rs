@@ -105,6 +105,12 @@ bash scripts/mutants.sh --self-test
 # sanitize.jq anchors the refusal, and this is the loud early one, on the path
 # that builds the cluster in the first place.
 bash scripts/cluster.sh --self-test
+# `just e2e` needs a kind cluster and CI has none, so the only thing that ever
+# runs on a push is this — and it is where the recipe's decisions live: which
+# context it refuses, which failure is loud, and whether it vetted a single row
+# (NOTES § D236 ruling 2). A `just e2e` that exits 0 because there was no cluster
+# is the invisible gap, and it is invisible on exactly the machines CI runs on.
+bash scripts/e2e.sh --self-test
 # reports/ carries real cluster output into a committed file with no filter in
 # front of it (NOTES § D108). This is that filter, for prose rather than JSON.
 python3 scripts/reports-guard.py --self-test
