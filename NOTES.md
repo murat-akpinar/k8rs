@@ -255,6 +255,7 @@ its line moving with it.
 - [D231](#d231--the-audit-box-was-built-under-three-other-boxes-and-d21s-startup-clause-belongs-to-a-screen-that-does-not-exist-2026-09-05) — the audit box was built under three other boxes, and D21's startup clause belongs to a screen that does not exist
 - [D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05) — in-flight needs no new callback, one-at-a-time is already structural, and the freeze risk is whether `perform` can be driven beside an event loop
 - [D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) — the dialog's `$` line and the command log's are not the same line, and the read side is a manifest rather than a feed
+- [D234](#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05) — `--read-only`'s box went stale twice, and the carve-out I ordered is the thing to attack
 
 ## Why it exists — where the gap is
 
@@ -20167,3 +20168,55 @@ discovered against a frozen file, which is the same reason
 [D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)
 ruling 3 was asked while `ops.rs` was still open. Widening it later is a
 `k8s.rs` reopening and therefore a plan change, not a feature.
+
+### D234 — `--read-only`'s box went stale twice, and the carve-out I ordered is the thing to attack (2026-09-05)
+
+todo.md's `--read-only` box carries its own staleness warning from `tester`
+(2026-09-04) and has gone stale **again since**, in the way that matters more.
+
+**What the box says, and what is true at HEAD.** It says `ops.rs` is *698 lines*;
+it is **3271**. It says the conclusion holds because *`main.rs` declares
+`mod ops;` and calls nothing from it* — that is now flatly false: `main.rs` calls
+`ops::scale`, `ops::restart`, `ops::delete`, `ops::may_i`, `ops::may_i_in` and
+`ops::audit_log`. **The number was the harmless half and the reason was the
+load-bearing one**, which is the shape
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+names: a wrong figure is embarrassing, a reason that has quietly stopped applying
+is a box built on nothing.
+
+**1. What makes the flag true today is a guard at a single door, and that is
+invariant 2's intent rather than a weakening of it.** `ops_line` is the one route
+from argv into any mutation, and the refusal sits in it. *Unreachable, not merely
+unbound* was written against the failure it names — a UI that stops **drawing** a
+key while the path underneath still works. A guarded single entry point is the
+opposite of that. **What it is not is a compile-time guarantee**, and this entry
+says so plainly rather than letting *structurally true* be read as one:
+`ops::scale` and its neighbours are `pub`, and a second caller inside `main.rs`
+would bypass the door entirely. Nothing today is that caller, and **the claim
+that there is exactly one door is a fact about the code that no test asserts** —
+which is what this box owes.
+
+**2. The carve-out I ordered is the hole to attack, and I am naming it because I
+made it.**
+[D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3 made `--read-only` permit `may-i`, so the refusal is now conditional:
+`if !asking && …`. **Every conditional guard is a guard that can be talked out of
+its condition.** If `asking` is ever true for a line that is not a question — a
+verb added to the same branch, a parse that misreads a word — the flag stops
+refusing a mutation and nothing else is standing behind it. `tester` has already
+shown the guard fires for all three operations and in both flag positions; what
+is not shown is that `asking` **cannot** be true for anything that mutates. That
+is the assertion this box needs, and it did not exist before ruling 3 created the
+condition.
+
+**3. The `--read-only` e2e job is the box after this one and stays there.** *Fails
+if any mutating request reaches the API server* is a different proof — it watches
+the wire rather than the door — and splitting them is deliberate: this box proves
+k8rs refuses, that one proves nothing got out. A guard that is wrong in a way both
+boxes miss would have to fool a source assertion and a socket at once.
+
+**Phase 12 inherits the real version of this.** A TUI has keys, and `--read-only`
+must leave the write path unreachable rather than merely undrawn — the failure
+invariant 2 was written against. The driver's single door is the right answer for
+a driver and is not the answer for a console; that is Phase 12's box and it is
+where *structural* becomes a claim about types rather than about doors.

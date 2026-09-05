@@ -11948,14 +11948,31 @@ fn the_usage_says_ops_reaches_a_cluster_too() {
     };
     println!("{problem}");
     let synopsis = problem.lines().next().expect("the usage has a first line");
+    // **`ops <operation>` and not `k8rs ops <operation>`**: `--read-only` sits between them since
+    // 2026-09-05 (NOTES § D234), and what this row is about is the subcommand being offered at
+    // all, not what may precede it.
     assert!(
-        synopsis.contains("k8rs ops <operation>"),
+        synopsis.contains("ops <operation>"),
         "the synopsis offers no way to reach the one subcommand this build has: {synopsis:?}"
     );
+    // **That the synopsis offers `--read-only` at all is pinned in `tests/binary.rs`, not here**
+    // (NOTES § D234, `tester`, 2026-09-05). This assertion was here for one round and its failure
+    // set is a strict *subset* of that one's: it calls [`run`] directly and never sees the
+    // process, so a `main` that stops printing what `run` returns leaves it green — measured, the
+    // planted `main` passed here and failed there. Two of the three ways the flag can go
+    // undiscoverable are invisible from inside the crate, and the e2e test already spawns the
+    // binary, so the pin costs one `contains` on an invocation that is paid for either way.
     let last = problem.lines().last().expect("the usage has a last line");
     assert!(
         last.contains("--yaml or ops this build reads files only"),
         "the line that says what cannot reach a cluster still leaves `ops` out of it: {last:?}"
+    );
+    // **Offered *and* explained.** A bracketed flag on a mutating form reads as *and then it
+    // scales*; what it does is refuse, and the prose is where that fits without a fourth line
+    // (`tests/binary.rs` counts three).
+    assert!(
+        last.contains("refuses every operation"),
+        "the synopsis offers a flag it never says the effect of: {last:?}"
     );
 }
 

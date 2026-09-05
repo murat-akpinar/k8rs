@@ -77,7 +77,27 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
     // `--namespace` joined the list when the scoping box landed. It is here for the reason the
     // three beside it are: the synopsis is the only place a reader learns the flag exists, and
     // a flag that scopes what the tool reads is the one a reader most needs offered.
-    for named in ["--analysis", "--live", "--context", "--namespace"] {
+    //
+    // **`--read-only` is the fifth, and it is the one this loop was most owed** (NOTES § D234).
+    // It was in *nothing* the binary printed until 2026-09-05 — measured, `grep -c -- --read-only`
+    // over the no-argument usage, `--help`, `-h` and `k8rs ops` was `0` — while being the one word
+    // standing between a reader and a mutation. A flag nobody can discover refuses nothing.
+    //
+    // **And it is pinned here rather than over the `USAGE` const, which is where it briefly also
+    // was.** The two are not two spellings of one assertion: a unit test calls `run(&[])` and
+    // never sees the process, so its failure set is a strict subset of this one's. Measured, with
+    // `main`'s body made to exit before it prints — which is the mutation this whole file exists
+    // for: `src/main_tests.rs`'s `the_usage_says_ops_reaches_a_cluster_too` passed, and this
+    // assertion's own test failed on the line above. The narrow thing the `contains` adds over
+    // that line count is a `main` that prints a *different*, well-formed usage — thin, and the
+    // reason to keep exactly one of the two rather than both.
+    for named in [
+        "--analysis",
+        "--live",
+        "--context",
+        "--namespace",
+        "--read-only",
+    ] {
         assert!(
             synopsis.contains(named),
             "the synopsis does not offer {named}, so nothing tells a reader how to reach \
@@ -2211,3 +2231,115 @@ fn a_may_i_line_is_answered_on_stderr_and_leaves_nothing_behind() {
 }
 
 // --- ONE QUESTION END ---
+
+// --- THE ONE DOOR START ---
+
+/// **Every verb the binary advertises is refused under `--read-only` except the question, and the
+/// list of verbs is read off the binary rather than written here** (NOTES § D234 ruling 2).
+///
+/// **What was already proven and what was not.** `src/main_tests.rs` shows the guard firing for
+/// `scale`, `restart` and `delete` in both flag positions — three verbs it names in a literal
+/// `[SCALE, RESTART, DELETE]`. What no test asserted is the shape D234 names as the hazard:
+/// `--read-only`'s refusal is conditional now (`if !asking && …`), and **a fourth operation added
+/// to the same branch is refused by nothing**. Measured, in a copy of the tree: a fourth
+/// `OPERATIONS` row wired to the real delete and added to that condition left
+/// `k8rs --read-only ops purge pod/web -n payments` past every refusal in the driver — the audit
+/// log opened, `$XDG_STATE_HOME/k8rs` was made, and the only thing that stopped it was that the
+/// run had no kubeconfig to dial. **Not one test in the suite was about the flag**: 1053 stayed
+/// green, and the single unit test the plant did trip was about the shortcut it took to reach a
+/// mutation — pointing the new verb at `delete`'s arm — and not about `--read-only` at all.
+///
+/// **So the list is derived and the derivation is what makes this test widen on its own.**
+/// `ops_usage` is built from `OPERATIONS`, so a fourth operation appears in the text this reads
+/// without anyone touching this file — which is the one property a literal cannot have. The
+/// canary below is the other half of that (CLAUDE.md § A derived list asserts it found
+/// something): *extracted nothing* and *nothing to extract* would otherwise both be a green loop
+/// over an empty vector.
+///
+/// **The carve-out is asserted as an equivalence, not as an exception.** Permitted **if and only
+/// if** the verb is `may-i` — so a change that widened the condition and a change that closed it
+/// over the question are both red, and neither can be reached by adding a row anywhere else.
+///
+/// **The negative control is the same line without the flag**, because an assertion on one exact
+/// sentence proves nothing about *what* produced it: `ops restart deploy/web -n payments` is a
+/// well-formed line that reaches for a cluster, and the only thing this test changes about it is
+/// the flag.
+///
+/// **This watches the door and not the wire.** No stub cluster is started for any row — todo.md's
+/// next box is the one that asserts no mutating request left the process, and splitting them is
+/// deliberate (D234 ruling 3).
+#[test]
+fn read_only_permits_exactly_the_verbs_the_binary_calls_questions() {
+    const REFUSAL: &str = "k8rs: --read-only was asked for, so k8rs will not change anything — \
+                           run it without that flag to use an operation";
+
+    let usage = text(k8rs_with_no_kubeconfig(&["ops"]).stderr);
+    println!("--- the usage this test reads its verbs off ---\n{usage}");
+    let verbs: Vec<&str> = usage
+        .lines()
+        .filter_map(|line| line.strip_prefix("  ops "))
+        .filter_map(|row| row.split_whitespace().next())
+        .collect();
+    println!("--- verbs derived: {verbs:?} ---");
+    for known in ["scale", "restart", "delete", "may-i"] {
+        assert!(
+            verbs.contains(&known),
+            "the usage no longer advertises `{known}`, so this loop is about to vet nothing — \
+             either `ops_usage` stopped listing an operation or the row shape moved: {usage:?}"
+        );
+    }
+
+    for verb in verbs {
+        // **Both positions**, because only one was measured when the carve-out landed and the
+        // other is where its first fix stopped working (NOTES § D230 ruling 3).
+        for line in [
+            vec!["--read-only", "ops", verb, "deploy/web", "-n", "payments"],
+            vec!["ops", verb, "deploy/web", "-n", "payments", "--read-only"],
+        ] {
+            let ran = one_ops_run(3, 3, None, &line, false, STUB_CONTEXT);
+            let stderr = text(ran.out.stderr);
+            println!(
+                "--- {line:?} → exit {:?} ---\n{stderr}",
+                ran.out.status.code()
+            );
+            // The question is the one verb `ops.rs` holds that is not a write (NOTES § D23,
+            // § D230 ruling 3); every other verb in that usage changes something.
+            if verb == "may-i" {
+                assert!(
+                    !stderr.contains("--read-only was asked for"),
+                    "{line:?} changes nothing and was refused for changing something: {stderr:?}"
+                );
+                continue;
+            }
+            assert_eq!(
+                stderr.trim_end(),
+                REFUSAL,
+                "{line:?} was answered about something other than the flag that forbids it"
+            );
+            assert_eq!(ran.out.status.code(), Some(2), "{line:?} did not exit 2");
+            assert_eq!(text(ran.out.stdout), "", "{line:?} wrote to stdout");
+            assert!(
+                !ran.state_dir,
+                "{line:?} was refused and made a state directory in the user's home anyway"
+            );
+            assert_eq!(ran.audit, "", "{line:?} wrote an audit line for nothing");
+        }
+
+        // **The control: the flag is what refused it.** Without it the same words get some other
+        // sentence — a complaint about the line, or a run that reached for a cluster and found
+        // none. Either way the refusal above is the flag's and not a spelling mistake's.
+        let allowed = vec!["ops", verb, "deploy/web", "-n", "payments"];
+        let ran = one_ops_run(3, 3, None, &allowed, false, STUB_CONTEXT);
+        let stderr = text(ran.out.stderr);
+        println!(
+            "--- control {allowed:?} → exit {:?} ---\n{stderr}",
+            ran.out.status.code()
+        );
+        assert!(
+            !stderr.contains("--read-only was asked for"),
+            "{allowed:?} carries no flag and was refused for one: {stderr:?}"
+        );
+    }
+}
+
+// --- THE ONE DOOR END ---

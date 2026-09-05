@@ -3165,9 +3165,14 @@ public release.
       [reports/2026-08-30](reports/2026-08-30-the-read-only-clusterrole-under-itself.md)).
       **The Authorization row of the security gate is now earned in both halves**
       — the 403-degradation half by the namespace box, this half here — **except
-      its `--read-only` bullet, which is not tickable and must not be inherited
-      as proven**: `ops.rs` does not exist and `--read-only` is not a flag this
-      build accepts. That is Phase 7.
+      its `--read-only` bullet, which was not tickable here and was not to be
+      inherited as proven**: at the time `ops.rs` did not exist and `--read-only`
+      was not a flag this build accepted. That was Phase 7's, **and Phase 7 has
+      since earned it**
+      ([D234](NOTES.md#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05))
+      — the two sentences above are kept in the past tense rather than deleted,
+      because a reader meeting them beside a 3271-line `ops.rs` should be told
+      they expired rather than left to wonder.
       **What this box did not cover**: the browser, whose rows need `list` +
       `watch` on every discovered kind rather than the 15 this role names — it is
       Phase 11 and does not exist yet, and the 2026-08-22 measurement behind that
@@ -3977,12 +3982,37 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       panel is honest only if it is the manifest at startup plus mutations as they
       are confirmed; implying every line appeared when its request went out would
       be a third record that lies
-- [ ] `--read-only`: `ops.rs` unreachable, not merely unbound. **Its premise in
-      the code has already gone stale**: `src/main.rs`'s doc for the flag says
-      *"it is unreachable: `ops.rs` does not exist yet"*, and `ops.rs` is 698
-      lines. The conclusion still holds for a different reason — `main.rs`
-      declares `mod ops;` and calls nothing from it — but the sentence is false
-      and this is the box that owns it (`tester`, 2026-09-04)
+- [x] `--read-only`: `ops.rs` unreachable, not merely unbound
+      ([D234](NOTES.md#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05)).
+      **The premise went stale twice and the second time took the reason with
+      it**: `ops.rs` is **3271** lines, not 698 — the harmless half — and *`main.rs`
+      calls nothing from it* is now flatly false, which was the load-bearing half.
+      **What holds today is a guard at a single door** — `ops_line`, with
+      `ops::scale`/`restart`/`delete` at one call site each, reached through
+      `ops_started` ← `ops_performed` ← `main:92`, measured by inventory. That is
+      invariant 2's *intent*: *unreachable* was written against a UI that stops
+      **drawing** a key while the path underneath works, and a guarded single
+      entry point is the opposite failure. **It is not a compile-time guarantee**
+      and the code now says so — the `ops::` functions are `pub`.
+      **Done when:** the hole was built and watched work. D230 ruling 3 made the
+      refusal conditional (`!asking && …`), so a fourth operation wired into that
+      branch let `k8rs --read-only ops purge pod/web` past **every** refusal —
+      state directory made, audit log opened — stopped only by an absent
+      kubeconfig, with **1053 unit tests green**, because both existing tests
+      hand-list the three verbs. The replacement derives the verb list from the
+      binary's own usage and asserts permitted **iff** `may-i`, so a fourth
+      operation widens it with nobody editing the test; its canary fires when the
+      derivation yields nothing.
+      **And the box's own subject held a live defect:** `--read-only` appeared in
+      nothing the binary printed — the one flag between a reader and a mutation
+      was undiscoverable. `grep -c` over the usage, `--help`, `-h` and `k8rs ops`
+      went **0 → 4**, pinned in `tests/binary.rs` where the synopsis contract
+      lives. Three stale doc sentences and one that argued a safety property from
+      a mechanism that had stopped applying went with it.
+      `just check` green (**1055 + 30**).
+      **A one-door guard was priced and refused** — a reachability guard is a
+      call graph in Python (2 false positives at n=8) and `main.rs` is deleted at
+      Phase 12, where doors become types
 - [ ] Verified against kind: scale it, watch the replicas change through the
       watch stream, read the audit line back. Then the same for each operation
 - [ ] e2e job under `--read-only` that fails if any mutating request reaches

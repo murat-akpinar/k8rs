@@ -2429,6 +2429,14 @@ recorded reversal and a later box rather than a dev round
   only if a real cluster is ever seen producing it, which none has been. `dev-core`
   and `tester`, 2026-09-05
 
+- **`scripts/width-guard.py` reads `src/` only, so `tests/` has no column gate.**
+  Three pre-existing lines are over 100 columns (`tests/binary.rs:569, 2074,
+  2093`), none of them from the turn that noticed. Widening the guard's scope is
+  unrelated work and a box is never added to a running phase, so it belongs to a
+  later phase with `scripts/` as its file. Cheap — the guard already walks a
+  directory — but it will go red on those three lines the moment it is switched
+  on, so the box has to own the reflow too. Found by `tester`, 2026-09-05
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

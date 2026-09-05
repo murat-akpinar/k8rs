@@ -1054,9 +1054,11 @@ run exists to show
 | `--watch` | That is the TUI. |
 
 `--context`, `--namespace` and `--analysis` apply unchanged. `--read-only` is
-accepted and does nothing in v0.0.1 — there is no write path in the release
-that ships this, and a flag that errors because the danger it guards has not
-been built yet teaches the wrong lesson.
+accepted here too, but a `--once` run gives it nothing to do: the flag
+refuses a write when the command line asks for one — `ops scale`, `ops
+restart`, `ops delete` — and a `--once` line never does. So on this path the
+flag has no visible effect, not because the write path does not exist, but
+because this command never reaches it.
 
 ## The rule that matters most here
 

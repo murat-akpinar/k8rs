@@ -230,12 +230,13 @@ const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   \
      [--context <name>] [--namespace <name>]   |   \
      k8rs --describe|--yaml --object <[namespace/]name> [--kind <kind>] [--context <name>] \
      [--namespace <name>]   |   \
-     k8rs ops <operation> <kind>/<name> [<value>] --namespace <name>   |   \
+     k8rs [--read-only] ops <operation> <kind>/<name> [<value>] --namespace <name>   |   \
      k8rs ops may-i <verb> <resource>.<group>[/<name>] [--subresource <name>] \
      [--namespace <name>]\n\
      Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
      Without --once, --live, --logs, --describe, --yaml or ops this build reads files only — it \
-     cannot reach a cluster.";
+     cannot reach a cluster. --read-only refuses every operation, so a run that carries it can \
+     ask (ops may-i) and never change anything.";
 
 /// **Part of the released surface and not scaffolding** (NOTES § D188): `analysis.rs`'s seven
 /// reports are whole-cluster answers rather than per-object cards, so they are a second report
@@ -1566,26 +1567,37 @@ fn once_wanted(args: &[String]) -> bool {
     args.iter().any(|arg| arg == ONCE)
 }
 
-/// **Accepted, and it does nothing in v0.0.1** (`screens/once.md` § What `--once` does not do,
-/// which says so in those words and is what this build ships).
+/// **Load-bearing since Phase 7's operations landed** — every doc this comment carried before
+/// 2026-09-05 described a build where it did nothing, and three of those sentences were still
+/// here after it did (NOTES § D234).
 ///
-/// **Honest rather than a stub.** [Invariant 2](CLAUDE.md) says `--read-only` makes the write
-/// path *unreachable* rather than merely unbound, and it is unreachable: `ops.rs` does not exist
-/// yet. Refusing it — which is what this build did until 2026-08-30 — teaches the reader that
-/// k8rs has no such flag, and they learn otherwise a release later.
+/// **What makes it hold is a guard at a single door.** [`ops_line`] is the one route from argv
+/// into any mutation — `ops::scale`, `ops::restart` and `ops::delete` have one call site each,
+/// reached through [`ops_started`] ← [`ops_performed`] ← [`main`] — and the refusal sits in it,
+/// above the word-order check and above everything [`ops_run`] does.
 ///
-/// # Phase 7 has to make it load-bearing, and this is the line that says so
+/// **That is [invariant 2](CLAUDE.md)'s intent and not a weakening of it.** *Unreachable rather
+/// than merely unbound* was written against a UI that stops **drawing** a key while the path
+/// underneath still works; a guarded single entry point is the opposite failure mode, and D234
+/// ruling 1 is where that reading is argued rather than here.
 ///
-/// **A flag that silently means nothing after there is something to guard is the failure this is
-/// one phase away from.** The moment `ops.rs` lands, this word must reach it: keys unbound *and*
-/// the path structurally unreachable, which is the invariant and not a preference. Nothing else
-/// in this file will notice if it does not, because nothing else in this file writes.
+/// **What it is not is a compile-time guarantee, and this line exists so nobody reads
+/// *structural* as one** (D234 ruling 1). `ops::scale` and its neighbours are `pub`, so a second
+/// caller added inside this file would bypass the door entirely. Nothing today is that caller —
+/// an inventory, not an argument — and no test asserts that the door stays singular, which is why
+/// the claim is written down as a claim.
 ///
-/// **It is not in [`USAGE`], and that is the same decision rather than an oversight.** The
-/// synopsis is where a reader learns which flags exist (`tests/binary.rs` asserts the four that
-/// are there for exactly that reason), and offering one that changes nothing about this build
-/// would be teaching a reader to type a word for its effect. The change that makes it
-/// load-bearing is the change that puts it in the line.
+/// **The carve-out is the part to attack, because it is a condition and conditions can be talked
+/// out of** (D234 ruling 2): `if !asking && …` since NOTES § D230 ruling 3 let a question through.
+/// A verb that ever made `asking` true while mutating would find nothing standing behind it.
+///
+/// **It is in [`USAGE`] now, and its absence was the defect this box was written around.** The
+/// synopsis is the only place a reader learns a flag exists (`tests/binary.rs` asserts the ones
+/// that are there for exactly that reason), and the one flag between a reader and a mutation
+/// appeared in nothing the binary printed — measured, not noticed:
+/// `for a in "" --help -h ops; do k8rs $a; done | grep -c -- --read-only` was **0**. The old doc
+/// said the change that makes it load-bearing is the change that puts it in the line; the first
+/// half happened three boxes ago and the second half did not.
 const READ_ONLY: &str = "--read-only";
 
 /// The context `--live` connects to, when the run names one. **The real `--context` flag is
@@ -5976,11 +5988,21 @@ fn ops_at(args: &[String]) -> Option<usize> {
 /// — there is nothing to call* — and k9s #2434 is the same precedence going the unsafe way. A
 /// line with no bare `ops` word on it is still nobody's business here.
 ///
-/// **The scan is over the whole line and [`ops_at`]'s value skip is not applied to it**, which
-/// costs one edge and buys the safe direction: `k8rs --live -n --read-only ops scale deploy/web
-/// 3` is `ops` at index 2 with `--read-only` read here as the flag and there as `-n`'s value. The
-/// line is wrong either way — `--read-only` is not a namespace `k8s::namespace_name` accepts —
-/// and of the two wrong answers the one that refuses to write is the one to give.
+/// **A `--read-only` sitting where a flag's value belongs never reaches this function at all, and
+/// the sentence here described a mechanism that stopped running** (NOTES § D234, measured on the
+/// built binary). `k8rs --live -n --read-only ops scale deploy/web 3` was documented as *`ops` at
+/// index 2, refused here for the flag* — the safe one of two wrong answers. What actually happens
+/// since D230 ruling 3's strip is one step earlier: [`READ_ONLY`] is filtered out **before**
+/// [`ops_at`] runs, so `-n` swallows the bare `ops`, [`ops_at`] answers `None`, and the `?` on its
+/// line leaves this function before the flag is ever scanned for. The run ends on the `--live`
+/// path's own refusal — *`--namespace` needs the name of a namespace, and `--read-only` is not
+/// one*.
+///
+/// **The conclusion survives and the reasoning did not, which is the half worth writing down**
+/// (`tester`, 2026-09-05, over all six value-taking flags in that position): every one is
+/// refused, none mutates, and none makes a state directory. The line is wrong either way and
+/// nothing is sent either way — but it is a *safety* property argued from a mechanism that had
+/// quietly stopped applying, which is NOTES § D136's class exactly.
 ///
 /// **`audit` is how the log is opened, and it is a parameter rather than a call** —
 /// `ops::audit_log` in [`main`], a scratch file in a test. `$XDG_STATE_HOME` cannot be set from a
