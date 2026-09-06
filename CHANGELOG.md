@@ -117,6 +117,7 @@
 - *(ops)* The attempt line claimed a check the cluster had not made yet ([58c3d9c](https://github.com/murat-akpinar/k8rs/commit/58c3d9c3b0ac221ca92fa1e18c675a72c2216415)) — `delete`'s audit attempt line said `uid <x> (the cluster checked this was the object)`, and `perform` writes that line before `show` and before either call — so at the moment it reaches disk no request has left the process. True on a 200, false on a 409, unknown on a dead socket, and committed either way. It now says the uid is a condition on the change, which is true of all three. The test asserted the sentence only on the 200 arm; it runs on the 409 arm now, where the old wording was contradicted by the result line beside it.
 - *(main)* A refusal named the word it had just said k8rs does not have ([a41c3bb](https://github.com/murat-akpinar/k8rs/commit/a41c3bb62354c48fcedb0a1183ebd15f13ec14a8)) — With a zero-width space in it, `ops restart dep<ZWSP>loyment/web` answered "k8rs does not work on a kind called deployment — the ones an operation can be pointed at are deployment, statefulset, ...". The operator retypes an identical-looking line and gets an identical refusal, forever. ops.rs had already ruled this class and the ruling landed in the copy nothing can reach: `a_kind` quotes a word only where the strip left it alone, and its own doc says neither arm is reachable from argv.
 - *(ui)* The spike said a listing cluster was an empty one ([a1632ce](https://github.com/murat-akpinar/k8rs/commit/a1632ceec24a5d128e5a9a2013cc20a957631563)) — The re-review of Phase 8's own fixes, four findings, none blocking.
+- *(ci)* Force cargo's output plain where a guard parses it ([a356a5a](https://github.com/murat-akpinar/k8rs/commit/a356a5a5159d4a0210bbf86b9d987271347af84f))
 
 ### 💼 Other
 
@@ -211,6 +212,7 @@
 - *(docs)* Move the phase pointer forward with phase 8's close ([8de87c0](https://github.com/murat-akpinar/k8rs/commit/8de87c02b9381077be9794d237e4d0f7d0ca41db))
 - *(docs)* Record phase 9's close date and the decisions it took ([447dede](https://github.com/murat-akpinar/k8rs/commit/447dede721fe9993436d412336855ca39f942978))
 - *(docs)* Move phase 5's own pointer forward with phase 9's close ([4c31b09](https://github.com/murat-akpinar/k8rs/commit/4c31b091fad0ab44c7e8a18f99a4a91ae7993476))
+- *(docs)* Record what the phase 10 close deferred ([b646cfb](https://github.com/murat-akpinar/k8rs/commit/b646cfb8dbde997c422a2afb5fc4cd4ea8dfcf60))
 
 ### ⚡ Performance
 
