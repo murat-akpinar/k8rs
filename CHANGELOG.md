@@ -213,6 +213,8 @@
 - *(docs)* Record phase 9's close date and the decisions it took ([447dede](https://github.com/murat-akpinar/k8rs/commit/447dede721fe9993436d412336855ca39f942978))
 - *(docs)* Move phase 5's own pointer forward with phase 9's close ([4c31b09](https://github.com/murat-akpinar/k8rs/commit/4c31b091fad0ab44c7e8a18f99a4a91ae7993476))
 - *(docs)* Record what the phase 10 close deferred ([b646cfb](https://github.com/murat-akpinar/k8rs/commit/b646cfb8dbde997c422a2afb5fc4cd4ea8dfcf60))
+- *(ci)* Answer the CI cost question the guard scheduled for itself ([d79def5](https://github.com/murat-akpinar/k8rs/commit/d79def589d775cdd908483b2bed7f0415a22dc84)) — Run 34013476688: 78s of the guards step's 2m25s, and 47s of that is rebuilding every dependency into the nested build directory on a run that got an exact cache hit. So rust-cache does not hand target/package-check-build back across pushes. What that does not settle is whether it could — both runs hit the key exactly, so neither saved a cache; the run to read is the first after a Cargo.lock or toolchain bump.
+- *(ui)* Put every card's age on one rule, and say what a run of ageless ones looks like ([84d09e0](https://github.com/murat-akpinar/k8rs/commit/84d09e0e7549176564093edf2ff413c311695b36)) — The survey found the border-flush case already fixed and a different one still loose: states.md's shop/api card used once.md's dot-joined trailing age inside the Alerts screen, three columns short of where every sibling ends. It is on the right-aligned rule now.
 
 ### ⚡ Performance
 
