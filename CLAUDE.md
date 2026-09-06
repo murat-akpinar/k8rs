@@ -796,6 +796,11 @@ decision, and the PM writes it into `NOTES.md` before committing.
   while the PM was writing documents. The whole dispatch is then wasted and its
   output is a merge nobody asked for. It costs one command and it is step 1's
   gate now ([D195](NOTES.md#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)).
+  **`git status` cannot say *whose* dirty tree it is**, and that is the half that
+  cost a day on 2026-09-06 ([D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)):
+  `.claude/session-check.sh` answers it at every session start and every
+  `/clear` — a live process with this repo as its cwd is another writer, and no
+  such process over a dirty tree is your own box to finish.
 - A box checked for work that was written but never *run*.
 - A test that has only ever been green — step 4's mutation run skipped because
   the diff looked small. It is `--in-diff` and it costs a minute.
