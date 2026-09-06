@@ -2751,3 +2751,21 @@ long-form version and stays the authority.*
   NOTES § D116), which is why it is here and not a box: it rides along the next time
   `dev-core` legitimately opens `k8s.rs`. Found at the Resources box by `dev-ui`, confirmed
   by the PM, 2026-09-06
+
+- **The Alerts card's own name is cut silently, and `screens/alerts.md` says in as many
+  words that it is not.** That file's § *The age, and what it costs the name* ends: *"Anything
+  that does not fit clips at the pane edge like every other string — **k8rs never truncates
+  one itself**, and the card's one deliberate cut is on the evidence line rather than here."*
+  `ui::identity` does truncate it itself — `fits(&name, room)` with no marker — and it has to
+  as the layout stands, because the age is right-aligned by padding to
+  `body - (width(left) + measured)` and an untruncated name would push the age off the card.
+  So there are **three** deliberate cuts in the product where `widgets.md` § 7 now names two
+  (the evidence line, and the browser's line under the table, ruled 2026-09-06). **It needs a
+  screen ruling before a line of code**: either `alerts.md` gains this as a third deliberate
+  cut and it takes `CUT` like the other two, or the layout stops truncating and the age is
+  what gives way. **Nothing reaches it today** — every card name in the committed captures is
+  short enough, and `ui::draw` has no caller until Phase 12 — which is exactly why it survived
+  a family review, a mutation run and two second passes. Found by `dev-ui` at the Resources
+  box's last round while implementing the *other* two cuts, confirmed by the PM against
+  `alerts.md`:963–966 and `ui.rs`'s `identity`. `tui-designer` first, then `dev-ui`.
+  2026-09-06

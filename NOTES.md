@@ -272,6 +272,7 @@ its line moving with it.
 - [D248](#d248--the-sidebars-five-sections-are-k8rss-vocabulary-and-not-the-clusters-and-invariant-12-is-untouched-by-that-2026-09-06) — the sidebar's five sections are k8rs's vocabulary and not the cluster's, and invariant 12 is untouched by that
 - [D249](#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06) — the layout box lands from a second session: the header gives way from its front, and a refusal keeps the list it is about
 - [D250](#d250--the-browser-pane-a-width-rule-that-is-not-widgetsmds-sentence-an-empty-list-that-is-not-nothing-is-broken-and-a-test-that-passed-on-the-screen-it-forbids-2026-09-06) — the browser pane: a width rule that is not `widgets.md`'s sentence, an empty list that is not *nothing is broken*, and a test that passed on the screen it forbids
+- [D251](#d251--the-bleed-through-one-line-about-the-selected-row-a-count-that-is-asked-and-not-re-derived-and-the-third-silent-cut-the-mark-went-looking-for-2026-09-06) — the bleed-through: one line about the selected row, a count that is asked and not re-derived, and the third silent cut the mark went looking for
 
 ## Why it exists — where the gap is
 
@@ -21846,3 +21847,89 @@ written in some *other* file could reach `Table::from` and skip the bound — an
 decode exists. It is in [`backlog.md`](backlog.md) as a guard worth writing, not as a hole
 that is open. *Somebody else's finding stays an estimate until you have run it* cuts both
 ways, and this is the direction that gets checked less.
+
+### D251 — the bleed-through: one line about the selected row, a count that is asked and not re-derived, and the third silent cut the mark went looking for (2026-09-06)
+
+The Resources box's second half — `screens/resources.md`'s § Rules opening line, *"a row
+whose object has a finding is marked (`●`), so the browser never disagrees with the Alerts
+view"*, and the one-line summary its populated mockup draws under the table. Two rulings
+were handed to the box in its brief and are recorded here because `ui.rs` cites them; the
+rest are what the round found.
+
+**1. The line is about the *selected* row, not one per marked row.** `⏎ to see` names the
+key that opens the selection, so a line per marked row would be a second list competing with
+the table above it — and the table already carries every mark. One line, under the last row,
+absent when the selected row owns no card, the same way the card's fifth part is absent on a
+single-finding card.
+
+**2. The count is `views::Card::affected`, and whether a pod count is a fact at all is
+*asked* of `Card::count()` rather than re-derived beside it.** That method already answers
+`None` in two different shapes, for two different reasons the screen file now cites
+separately: a node card has `affected == 0` because the number counts pods and a node card is
+about one machine
+([D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)),
+and a bare pod's card has `owner.kind == Pod`, so a fraction of one pod out of itself is not
+a fact
+([D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+ruling 2). **Two sentences and no third** — `● web has 3 pods with problems — ⏎ to see` and
+`● node-3 has problems — ⏎ to see`, both literal in `screens/resources.md` § *The line under
+the table*. Re-deriving those two conditions here is how a screen eventually prints
+`0 pods with problems`.
+
+**3. The join is the uid, and `None` never matches `None`.** A card's `owner.uid` against
+`k8s::Row::uid`, both `Option<String>`, and a row fetched with `?includeObject=None` carries
+none — so the absent case must not collide with every other absent one. **A marked row means
+Alerts holds a card *about that object*, read literally**: an owned pod's row in the `pods`
+browser is not marked, because Alerts has no card for it — the card is filed under its owner
+— and `⏎` there could open nothing. That is also what keeps ruling 2's single count true.
+
+**4. One function decides which cards the screen may read, because it was the same `match`
+written twice.** `found(&Pane<Vec<Card>>)`: `Ready` and `Denied` yield their cards, `Loading`
+yields none. The sidebar's badge now reads it too. **A still-loading Alerts pane must not let
+the browser claim there is nothing wrong** — that is the same *loading is not empty*
+distinction the panes themselves are built on (PRIOR-ART § C2), one level down, and two
+copies of that match is exactly where the badge and the marks would have started
+disagreeing.
+
+**5. The mark is a `Span` prepended to the first cell, never a column of its own** — a column
+takes `column_spacing` beside it and would put three blanks where every mockup draws one
+(`screens/widgets.md` § 2's own row for this) — and **an unmarked table draws no gutter at
+all**, which is what makes *not one column different* literally true and is asserted
+cell-for-cell.
+
+**6. The cut is marked, and finding that out found a third one.** The line's name gave way
+silently — `fits(name, room)` and a bare prefix, so a 57-column pane printed
+`● kube-system/cored has 3 pods with problems`, a name that reads as a pod and is not one.
+`screens/widgets.md` § 7 forbids that in as many words: *what § 7 forbids is a silent cut and
+a byte cut*. `tui-designer` ruled the rule rather than a drawing — `room − 1` columns, `…`
+glued to the last character kept, no space before it, nothing at all where `room` is 0, and
+`⏎ to see` never gives way — and § 7 now names **two** deliberate truncation points instead
+of one. **The third is in `identity`, the Alerts card's own name line**, which truncates
+itself while `screens/alerts.md` says *"k8rs never truncates one itself"* — it has to, as
+that layout stands, because the age is right-aligned by padding. Nothing reaches it: every
+card name in the committed captures is short enough, which is why a family review, a mutation
+run and two second passes all missed it. It is in [`backlog.md`](backlog.md) with the ruling
+it needs, not fixed here, because it is not this box
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+
+**7. Two of the round's six surviving mutants were removed rather than tested, and that is
+the better answer.** The first mutation run missed six. Four were real gaps and got tests —
+the narrow-pane header over the gutter, and the blank row between a short table and its line.
+The other two were **equivalent mutants**: `format!("{blank:0$}")` produces the same string
+with the branch or without it, and `width(MARKER) + GUTTER` is unchanged under `*` because
+2 + 2 = 2 × 2. A test that pins an equivalent mutant pins nothing. Both were deleted instead —
+the branch removed, and the indent measured off `spanned()` of the spans about to be drawn
+rather than restating two constants — so the code says the thing once and the mutant has
+nowhere to live.
+
+**And the run's last survivor was the arm no terminal width can reach.** `problems` draws
+nothing at all where `room` is 0 — `screens/resources.md` rule 4 — and the gate replaced that
+guard with `false` and nothing failed: `draw` refuses anything under 80×24, the content pane
+is 57 columns there, and no tail is long enough to starve the name to zero, so the arm is
+ruled and unreachable from outside. **Deleting it was not available**, because without the
+guard that case falls into the marked-cut arm and prints a lone `…` where the name would be —
+measured, and it costs `⏎ to see` its last column on the way. The test therefore calls
+`problems` directly with a `Rect` of exactly the prefix plus the sentence: **the one assertion
+in `ui_tests.rs` that does not go through `draw`**, and it says so in its own doc comment so
+the next reader does not have to work out whether it was a shortcut. 39 mutants, 37 caught, 2
+unviable naming a type with no `Default`, 0 missed.

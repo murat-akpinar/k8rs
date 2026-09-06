@@ -1630,6 +1630,526 @@ fn the_browser_has_the_same_three_answers_the_alerts_pane_has() {
     }
 }
 
+/// A card filed under the object one browser row **is** — the uid join and nothing else
+/// (`screens/resources.md` § Rules). The kind is the owner's, not the browsed row's: what a card
+/// is filed under is the controller, and the browser is open on whatever kind that controller is.
+fn filed(severity: Severity, kind: ObjectKind, at: &crate::k8s::Row, affected: usize) -> Card {
+    let owner = ObjectId {
+        kind,
+        namespace: at.namespace.clone(),
+        name: at.name.clone().expect("a captured row carries a name"),
+        uid: at.uid.clone(),
+    };
+    Card {
+        owner: owner.clone(),
+        findings: vec![Finding {
+            owner,
+            ..finding(
+                severity,
+                "Containers exceeded their memory limit and were killed by the kernel (OOMKilled)",
+                "limit 256Mi · exit 137 · 47 restarts",
+                "raise limits.memory, or find the leak",
+            )
+        }],
+        affected,
+        total: Some(5),
+    }
+}
+
+/// The browser open on `table-pods` — the one committed capture whose rows carry uids — with an
+/// Alerts pane bleeding through onto it.
+fn bleeding<'a>(
+    browser: &'a Pane<crate::k8s::Table>,
+    alerts: &'a Pane<Vec<Card>>,
+    kinds: &'a [Browsable],
+    now: &'a Time,
+) -> Screen<'a> {
+    let mut screen = browsing(browser, kinds, now);
+    screen.alerts = alerts;
+    screen
+}
+
+/// The pane's own columns with the frame's right border dropped — what a whole-line `==` has to
+/// compare, where every `contains` above can ignore it.
+fn only(line: &str) -> String {
+    pane(line).trim_end_matches('│').to_owned()
+}
+
+/// The column a row's own glyph sits in: the pane's left edge, past the selection marker.
+fn gutter() -> usize {
+    usize::from(1 + SIDEBAR + 1) + width(MARKER)
+}
+
+/// **Wider than the floor, so a row can be told from its neighbour.** `table-pods` is fourteen
+/// kube-system pods whose names share a prefix, and at 80 columns the name cell clips them to
+/// `kube-system/coredns` — two rows, one string, and an assertion that cannot say which row it
+/// found. Nothing about the mark depends on the width; the floor is printed at the end of this
+/// file, where the clip is the thing being shown.
+fn spacious(app: &App, screen: &Screen) -> Buffer {
+    render_at(120, MIN_HEIGHT, app, screen)
+}
+
+/// **A row whose object Alerts has a card about is marked, in that card's own band** —
+/// `screens/resources.md` § Rules, *so the browser never disagrees with the Alerts view*.
+///
+/// **The colour and the glyph both come from `theme::band`**, which is what makes the mark
+/// survive a monochrome terminal and what keeps this screen from writing a colour of its own.
+/// The negative half is the half that matters: every other row of the same capture draws the
+/// gutter **blank rather than absent**, which is what keeps the names — and `NAME` over them — in
+/// one column whether the row carries a glyph or not.
+#[test]
+fn a_row_its_card_is_filed_under_is_marked_in_that_cards_band() {
+    let now = now();
+    let pods = table("table-pods");
+    let critical = filed(Severity::Critical, ObjectKind::Deployment, &pods.rows[0], 3);
+    let warn = filed(Severity::Warn, ObjectKind::DaemonSet, &pods.rows[3], 2);
+    let alerts = Pane::Ready(vec![critical, warn]);
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let drawn = spacious(&opened(), &bleeding(&ready, &alerts, &kinds, &now));
+    let lines = rows(&drawn);
+    println!("{}", lines.join("\n"));
+
+    let banded = |needle: &str, glyph: char, colour: Colour| {
+        let at = lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", lines.join("\n")));
+        assert_eq!(column(&lines[at], gutter()), glyph, "{:?}", lines[at]);
+        assert_eq!(
+            drawn
+                .cell((gutter() as u16, at as u16))
+                .expect("a cell in the pane")
+                .fg,
+            ink(colour, Depth::TrueColor),
+            "the band's colour, never one written in `ui.rs`"
+        );
+    };
+    banded("hdrv5", '●', theme::CRITICAL);
+    banded("kindnet-bhzgd", '▲', theme::WARN);
+
+    // **Nobody else**, and the gutter they leave is blank rather than absent: the names line up
+    // with the marked ones, and `NAME` lines up with both.
+    for quiet in ["lbkj6", "etcd-k8rs", "kindnet-szmvh", "kube-proxy-5d9xj"] {
+        assert_eq!(
+            column(&row(&drawn, quiet), gutter()),
+            ' ',
+            "no card is filed under {quiet}"
+        );
+    }
+    let header = pane(&row(&drawn, "RESTARTS"));
+    let at = columns_at(&header, &["NAME", "READY", "STATUS", "RESTARTS", "AGE"]);
+    assert_eq!(
+        at[0],
+        MARKER.chars().count() + GUTTER,
+        "the header moves over the gutter with the cells: {header:?}"
+    );
+    for line in ["hdrv5", "etcd-k8rs"] {
+        let line = pane(&row(&drawn, line));
+        assert_eq!(
+            line.chars().nth(at[0]),
+            Some('k'),
+            "marked or not, the name starts in the same column: {line:?}"
+        );
+    }
+}
+
+/// **A table nobody has a finding in draws exactly what it drew before Alerts bled through** —
+/// the whole pane compared cell for cell, not a column counted by hand.
+///
+/// Three panes that must all produce that frame: no cards at all, cards about objects this kind
+/// does not hold, and an Alerts pane that has **not answered yet**. The third is the one with a
+/// claim in it — a browser that marked nothing while Alerts was still loading would be saying
+/// *no findings here*, which nobody has established.
+#[test]
+fn a_table_with_no_card_in_it_is_the_frame_that_was_drawn_before() {
+    let now = now();
+    let pods = table("table-pods");
+    let elsewhere = Pane::Ready(vec![oom(), cordon(None)]);
+    let loading: Pane<Vec<Card>> = Pane::Loading;
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+
+    // **The pane, not the frame**: the sidebar's badge counts every card there is, and two of
+    // these panes legitimately have cards in them — about objects this kind does not hold.
+    let panes = |buffer: &Buffer| -> Vec<String> { rows(buffer).iter().map(|l| pane(l)).collect() };
+    let plain = spacious(&opened(), &bleeding(&ready, &QUIET, &kinds, &now));
+    for alerts in [&elsewhere, &loading] {
+        let drawn = spacious(&opened(), &bleeding(&ready, alerts, &kinds, &now));
+        assert_eq!(
+            panes(&drawn),
+            panes(&plain),
+            "not a single column moves:\n{}",
+            rows(&drawn).join("\n")
+        );
+        assert!(!holds(&drawn, "with problems"), "no row is marked");
+    }
+    // And a card that *is* filed under a row of this capture moves it, or the comparison above
+    // proves only that the fixture is quiet.
+    let here = Pane::Ready(vec![filed(
+        Severity::Critical,
+        ObjectKind::Deployment,
+        &table("table-pods").rows[0],
+        3,
+    )]);
+    let marked = spacious(&opened(), &bleeding(&ready, &here, &kinds, &now));
+    assert_ne!(panes(&marked), panes(&plain));
+}
+
+/// **One line under the table, about the row the cursor is on** (NOTES § D251) — not one per
+/// marked row, which would be a second list competing with the table above it.
+///
+/// **And the count in it is the card's own numerator**: `3 pods with problems` here and
+/// `3 of 5 pods` on the card one screen over are the same three objects, drawn from the same
+/// field. Both are rendered from one `Card` below, so a second count could not be introduced
+/// without this failing.
+#[test]
+fn the_line_under_the_table_is_about_the_selected_row_and_counts_the_cards_own_pods() {
+    let now = now();
+    let pods = table("table-pods");
+    let uids: Vec<Option<String>> = pods.rows.iter().map(|row| row.uid.clone()).collect();
+    let alerts = Pane::Ready(vec![filed(
+        Severity::Critical,
+        ObjectKind::Deployment,
+        &pods.rows[0],
+        3,
+    )]);
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+
+    let on = spacious(&opened(), &bleeding(&ready, &alerts, &kinds, &now));
+    println!("{}", rows(&on).join("\n"));
+    let said = row(&on, "with problems");
+    assert!(
+        said.contains("kube-system/coredns-589f44dc88-hdrv5 has 3 pods with problems — ⏎ to see"),
+        "the selected row, named the way the table drew it: {said:?}"
+    );
+    assert_eq!(
+        column(&said, gutter()),
+        '●',
+        "the line's glyph sits under the row's: {said:?}"
+    );
+    assert_eq!(
+        rows(&on)
+            .iter()
+            .filter(|line| line.contains("with problems"))
+            .count(),
+        1,
+        "one line, never one per marked row"
+    );
+
+    // **The cursor moves off it and the line goes with it** — the row stays marked, because the
+    // mark is about the object and the line is about the selection.
+    let mut moved = opened();
+    let anchors: Vec<Option<&str>> = uids.iter().map(Option::as_deref).collect();
+    moved.content.down(&anchors);
+    let off = spacious(&moved, &bleeding(&ready, &alerts, &kinds, &now));
+    assert!(
+        !holds(&off, "with problems"),
+        "the row the cursor is on has no card:\n{}",
+        rows(&off).join("\n")
+    );
+    assert_eq!(column(&row(&off, "hdrv5"), gutter()), '●');
+
+    // The same card, drawn as a card: one numerator, two screens. Wide, for [`spacious`]' reason
+    // one level over — at the floor this name is 39 of the card region's 51 columns and the
+    // `· n of m pods` fragment is what gives way (`screens/alerts.md` § The age).
+    let card = spacious(&app(), &screen(&alerts, &now));
+    assert!(
+        holds(&card, "3 of 5 pods"),
+        "the Alerts view counts the same objects:\n{}",
+        rows(&card).join("\n")
+    );
+}
+
+/// **A card with no pod count draws the line without one, never `0 pods`** — the two cases
+/// `Card::count` already refuses (NOTES § D246 ruling 2): a card about no pods at all, and one
+/// whose owner *is* the pod the row shows.
+#[test]
+fn a_card_that_counts_no_pods_says_so_by_leaving_the_count_out() {
+    let now = now();
+    let pods = table("table-pods");
+    let kinds = [browsable("pods", true)];
+    for owner in [
+        // A card about no pods at all, which is every node card: nothing here counts pods. The
+        // pairing is synthetic — a node's uid is not a pod's — and the code path is the one a
+        // marked row in the `nodes` browser takes.
+        filed(Severity::Critical, ObjectKind::Node, &pods.rows[0], 0),
+        // A bare pod: nothing owns it, so a fraction of one pod out of itself is not a fact.
+        filed(Severity::Critical, ObjectKind::Pod, &pods.rows[0], 1),
+    ] {
+        let alerts = Pane::Ready(vec![owner]);
+        let ready = Pane::Ready(table("table-pods"));
+        let drawn = spacious(&opened(), &bleeding(&ready, &alerts, &kinds, &now));
+        let said = row(&drawn, "has problems");
+        println!("{said}");
+        assert!(said.contains("hdrv5 has problems — ⏎ to see"), "{said:?}");
+        for invented in ["0 pods", "1 pods", "pods with problems"] {
+            assert!(
+                !holds(&drawn, invented),
+                "a count that is not a fact is left out, never printed: {invented}"
+            );
+        }
+        assert_eq!(column(&said, gutter()), '●');
+    }
+}
+
+/// **A short kind draws the mockup's own spacing**: every row, then one blank, then the line —
+/// `screens/resources.md`'s populated mockup has four rows and puts the line two below the last.
+///
+/// The table is a prefix of the committed capture rather than a shape invented here (NOTES § D53
+/// is about editing a capture, and taking four of its rows edits nothing): every capture in this
+/// repo is longer than the pane at the floor, so nothing else in this file reaches the case where
+/// the table asks for less height than it is offered.
+#[test]
+fn a_short_kind_puts_the_line_one_blank_row_under_its_last_row() {
+    let now = now();
+    let mut pods = table("table-pods");
+    pods.rows.truncate(4);
+    let alerts = Pane::Ready(vec![filed(
+        Severity::Critical,
+        ObjectKind::Deployment,
+        &pods.rows[0],
+        3,
+    )]);
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let drawn = render(&opened(), &bleeding(&ready, &alerts, &kinds, &now));
+    let lines = rows(&drawn);
+    println!("{}", lines.join("\n"));
+
+    let last = lines
+        .iter()
+        // Clipped at the floor, which is the point of drawing this one at the floor.
+        .position(|line| line.contains("kindnet-bh"))
+        .expect("the fourth row of the capture");
+    assert!(
+        only(&lines[last + 1]).trim().is_empty(),
+        "one blank row between the table and the line: {:?}",
+        lines[last + 1]
+    );
+    assert!(
+        lines[last + 2].contains("has 3 pods with problems"),
+        "and the line under that, not at the bottom of the pane: {:?}",
+        lines[last + 2]
+    );
+}
+
+/// **The gutter is bought out of the name column's minimum**, so a pane too narrow for its
+/// columns still draws `NAME` whole over names it has clipped to nothing.
+///
+/// Nine `priority: 0` columns want 102 of the floor's 51 — the shape
+/// [`more_columns_than_the_pane_can_hold_still_draws_a_frame`] builds, with a mark on it. The
+/// first column is then held at exactly its minimum, which is the only width at which that
+/// minimum is a fact anyone can see.
+#[test]
+fn a_pane_too_narrow_for_its_columns_still_draws_the_header_over_the_gutter() {
+    let now = now();
+    let mut pods = table("table-pods");
+    for column in &mut pods.columns {
+        column.priority = 0;
+    }
+    let alerts = Pane::Ready(vec![filed(
+        Severity::Critical,
+        ObjectKind::Deployment,
+        &pods.rows[0],
+        3,
+    )]);
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let drawn = render(&opened(), &bleeding(&ready, &alerts, &kinds, &now));
+    println!("{}", rows(&drawn).join("\n"));
+
+    let header = pane(&row(&drawn, "RESTA"));
+    assert!(
+        header.starts_with("    NAME"),
+        "the gutter and the header both survive the squeeze: {header:?}"
+    );
+    // Every name is clipped to four columns here, so the marked row is named by its marker.
+    assert_eq!(column(&row(&drawn, "▸ ● "), gutter()), '●');
+}
+
+/// **At the floor the line is exactly this, name cut and marked and `⏎ to see` intact** — the
+/// whole string, because the cut point is arithmetic and an assertion on a substring cannot see
+/// it move.
+///
+/// 57 columns of pane, less the selection marker's 2 and the gutter's 2, less the 36 the sentence
+/// needs, leaves the name 17: sixteen columns of it and the [`CUT`] that says the rest is gone.
+/// What gives way is the name, never the half that says what to do next
+/// (`screens/resources.md` § The line under the table; `⏎` opens the object the rest of it is on).
+#[test]
+fn the_line_clips_its_name_and_never_the_key_it_names() {
+    let now = now();
+    let pods = table("table-pods");
+    let alerts = Pane::Ready(vec![filed(
+        Severity::Critical,
+        ObjectKind::Deployment,
+        &pods.rows[0],
+        3,
+    )]);
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let drawn = render(&opened(), &bleeding(&ready, &alerts, &kinds, &now));
+    let said = only(&row(&drawn, "with problems"));
+    println!("{said:?}");
+
+    assert_eq!(
+        said.trim_end(),
+        "  ● kube-system/core… has 3 pods with problems — ⏎ to see"
+    );
+    assert_eq!(
+        width("kube-system/core") + width(CUT),
+        57 - width(MARKER) - GUTTER - width(" has 3 pods with problems — ⏎ to see"),
+        "the name and its mark get what the pane has left and not a column more"
+    );
+}
+
+/// **Both sides of the boundary** — a name that fills `room` exactly draws whole and unmarked, one
+/// column past it draws cut and marked (`screens/resources.md` § The line under the table,
+/// rules 2 and 3).
+///
+/// **The marked side is asserted on the mark and the kept width, never on a longer string being
+/// present.** `contains("kube-system/core")` is true of the unmarked screen that rule forbids,
+/// which is how one shipped: a whole-string `==` written to match the output says only that the
+/// output has not changed since somebody looked at it.
+#[test]
+fn the_name_is_cut_with_a_visible_mark_one_column_past_where_it_fits() {
+    let now = now();
+    let pods = table("table-pods");
+    let alerts = Pane::Ready(vec![filed(
+        Severity::Critical,
+        ObjectKind::Deployment,
+        &pods.rows[0],
+        3,
+    )]);
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let view = bleeding(&ready, &alerts, &kinds, &now);
+
+    let name = "kube-system/coredns-589f44dc88-hdrv5";
+    let tail = " has 3 pods with problems — ⏎ to see";
+    // The narrowest terminal that leaves the name every column it needs and not one more: the
+    // frame's furniture — left border, sidebar, divider, right border — then the line itself.
+    let exact = 1
+        + SIDEBAR
+        + 1
+        + u16::try_from(width(MARKER) + GUTTER + width(name) + width(tail)).expect("a width")
+        + 1;
+
+    let said = only(&row(
+        &render_at(exact, MIN_HEIGHT, &opened(), &view),
+        "with problems",
+    ));
+    println!("{said:?}");
+    assert_eq!(
+        said.trim_end(),
+        format!("  ● {name}{tail}"),
+        "the name that fits exactly is drawn whole, and nothing marks it"
+    );
+
+    let said = only(&row(
+        &render_at(exact - 1, MIN_HEIGHT, &opened(), &view),
+        "with problems",
+    ));
+    println!("{said:?}");
+    let drawn: String = said
+        .trim_end()
+        .strip_suffix(tail)
+        .expect("`⏎ to see` never gives way")
+        .chars()
+        .skip(width(MARKER) + GUTTER)
+        .collect();
+    let kept = drawn
+        .strip_suffix(CUT)
+        .expect("a cut name carries the mark");
+    assert_eq!(
+        width(&drawn),
+        width(name) - 1,
+        "the name still fills the columns it has: {drawn:?}"
+    );
+    assert_eq!(
+        width(kept),
+        width(name) - 1 - width(CUT),
+        "the mark is paid for out of the name, not added beside it: {kept:?}"
+    );
+    assert!(
+        name.starts_with(kept),
+        "the mark is glued to a real prefix of the name: {kept:?}"
+    );
+}
+
+/// **Rule 4: a line with no room for a name draws none — and no [`CUT`] either**
+/// (`screens/resources.md` § The line under the table). A lone `…` standing where the name would
+/// be is what the rule's own guard, removed, prints, so the mark is what this asserts on: an
+/// assertion that only checks the name is gone passes on the screen rule 4 forbids.
+///
+/// **The one assertion in this file that calls a browser function instead of going through
+/// [`draw`], and it is not a shortcut.** `draw` refuses anything under 80×24 and the content pane
+/// is 57 columns at that floor, so no terminal width can starve this line through the frame — the
+/// arm is ruled and unreachable from outside, which is exactly why nothing had ever exercised it.
+/// The `Rect` here is the whole of what makes `room` zero: the prefix's four columns and the 36
+/// the sentence needs, and not one more.
+#[test]
+fn a_line_with_no_room_for_a_name_draws_neither_the_name_nor_the_mark() {
+    let now = now();
+    let pods = table("table-pods");
+    let card = filed(Severity::Critical, ObjectKind::Deployment, &pods.rows[0], 3);
+    let showing = screen(&QUIET, &now);
+    let tail = " has 3 pods with problems — ⏎ to see";
+    let wide = u16::try_from(width(MARKER) + GUTTER + width(tail)).expect("a width");
+
+    let mut terminal = Terminal::new(TestBackend::new(wide, 1)).expect("a terminal");
+    terminal
+        .draw(|frame| {
+            problems(
+                frame,
+                Rect::new(0, 0, wide, 1),
+                &showing,
+                &card,
+                "kube-system/coredns-589f44dc88-hdrv5",
+            );
+        })
+        .expect("a frame");
+    let said = rows(terminal.backend().buffer()).remove(0);
+    println!("{said:?}");
+
+    assert_eq!(
+        said,
+        format!("  ● {tail}"),
+        "nothing is drawn where the name would go"
+    );
+    assert!(
+        !said.contains(CUT),
+        "and a mark with no name under it is not a cut, it is a glyph: {said:?}"
+    );
+}
+
+/// **A refused Alerts pane marks what did come back**, because the badge beside `ALERTS` counts
+/// exactly those cards — a sidebar reading `1 ●` over a browser marking nothing is the
+/// disagreement `screens/resources.md` § Rules exists to forbid.
+#[test]
+fn a_refused_alerts_pane_marks_whatever_did_come_back() {
+    let now = now();
+    let pods = table("table-pods");
+    let said = "You can only see the namespaces your kubeconfig points at.";
+    let alerts = Pane::Denied(
+        said.to_owned(),
+        vec![filed(
+            Severity::Critical,
+            ObjectKind::Deployment,
+            &pods.rows[0],
+            3,
+        )],
+    );
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let drawn = spacious(&opened(), &bleeding(&ready, &alerts, &kinds, &now));
+    println!("{}", rows(&drawn).join("\n"));
+
+    assert_eq!(column(&row(&drawn, "hdrv5"), gutter()), '●');
+    assert!(holds(&drawn, "1 ●"), "and the badge counts the same card");
+}
+
 // --- MEASURING AND CUTTING ---
 
 #[test]
@@ -1819,6 +2339,34 @@ fn the_browser_screen_at_the_floor() {
         app.open(NavItem::Kind(at));
         println!("{}\n", rows(&render(&app, &screen)).join("\n"));
     }
+}
+
+/// The browser at the floor **with Alerts bleeding through it** — the gutter, the two bands, and
+/// the line under the table, at the 80 columns `screens/resources.md` draws its populated mockup
+/// at. Printed so a reader of the report can compare it with that mockup line by line.
+/// `cargo test -- --nocapture`.
+#[test]
+fn the_marked_browser_screen_at_the_floor() {
+    let now = now();
+    let pods = table("table-pods");
+    let alerts = Pane::Ready(vec![
+        filed(Severity::Critical, ObjectKind::Deployment, &pods.rows[0], 3),
+        filed(Severity::Warn, ObjectKind::DaemonSet, &pods.rows[3], 2),
+    ]);
+    let ready = Pane::Ready(pods);
+    let kinds: Vec<Browsable> = ["deployments", "statefulsets", "daemonsets", "pods", "jobs"]
+        .into_iter()
+        .map(|plural| browsable(plural, true))
+        .collect();
+    let log = ["$ kubectl get pods -A".to_owned()];
+    let mut screen = bleeding(&ready, &alerts, &kinds, &now);
+    screen.log = &log;
+    screen.keys = "↑↓ move  ⏎ open  s scale  r restart  ctrl-d delete  / filter";
+
+    let mut app = App::default();
+    app.open(NavItem::Group(Group::Workloads));
+    app.open(NavItem::Kind(3));
+    println!("{}", rows(&render(&app, &screen)).join("\n"));
 }
 
 /// **More columns than the pane has room for, which no committed capture has and every wide CRD

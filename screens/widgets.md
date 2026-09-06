@@ -341,16 +341,22 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   characters; `String::truncate` slices bytes and panics in the middle of a
   multi-byte name. Handing the full `Span` to the widget is both shorter and
   correct.
-- **One place truncates on purpose, and it is the exception that proves the
+- **Two places truncate on purpose, and they are the exceptions that prove the
   rule above:** the Alerts card's evidence line, capped at three wrapped lines
   with `…` at the cut
-  ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall)).
-  What § 7 forbids is a *silent* cut and a *byte* cut. That one is neither: it
-  is marked with a character the reader can see, it walks back to a whole word
-  before it cuts, and it steps by characters. The full text is one `⏎` away
-  ([detail.md](detail.md)) — which is what makes cutting it legitimate at all.
-  Everything else on a card is drawn whole and clips at the pane edge like any
-  other string.
+  ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall));
+  and the Resources browser's one-line summary under the table, whose name
+  gives way to the sentence around it and is marked the same way
+  ([resources.md § The line under the table](resources.md#the-line-under-the-table)).
+  What § 7 forbids is a *silent* cut and a *byte* cut. Neither of these is: both
+  are marked with a character the reader can see, and both step by whole
+  characters. The evidence line also walks back to a whole word before it
+  cuts, because it is prose; the browser's line does not — a name is one
+  token, so there is no word boundary to walk back to, and cutting mid-token
+  is what the mark is for. The full text is one `⏎` away in both cases
+  ([detail.md](detail.md)) — which is what makes cutting either one legitimate
+  at all. Everything else on a card, and every other string in the browser, is
+  drawn whole and clips at the pane edge like any other string.
 - Long values are bounded *before* they are stored, not at draw time — a 50 MB
   annotation must never become a `Text`.
 

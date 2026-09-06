@@ -113,6 +113,86 @@ own `Table` printing — the exact columns `kubectl get` would show.
   dropped out of the sidebar's own list
   ([states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser)).
 
+## The line under the table
+
+One line, drawn under the table about the **selected** row only, when that
+row's object owns an Alerts card — never one line per marked row in the pane,
+which would be a second list competing with the table above it.
+
+**Which sentence draws is [`Card::count`](../src/views.rs), not a layout
+choice.** A card with a real pod count gets the first; a card with none —
+every node card, and a card whose owner **is** the pod — gets the second.
+Both are literal strings, and there is no third:
+
+```
+● web has 3 pods with problems — ⏎ to see
+● node-3 has problems — ⏎ to see
+```
+
+- `3 pods` is [`Card::affected`](../src/views.rs) — the same number
+  `alerts.md`'s `· n of m pods` counts, off the same card, about the same
+  object.
+- The second form is **not** `0 pods with problems` and **not** a pod counted
+  against its own card — both were considered and rejected. A node's card has
+  `affected == 0` — that count counts pods, and a node card is about one
+  machine
+  ([NOTES § D39](../NOTES.md#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)).
+  A bare pod's card has `owner.kind == Pod` — nothing owns it, so a fraction
+  of one pod out of itself is not a fact
+  ([NOTES § D246 ruling 2](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)).
+  Both reach [`Card::count`](../src/views.rs)'s same `None`, and `has problems`
+  is the one sentence that is true of either without claiming to know which.
+
+### When it does not fit, the name gives way — and now it says so
+
+The line is a fixed prefix (the row marker's own column, the severity glyph)
+and a fixed tail — the sentence after the name, in full, one of the two
+strings above minus the name — with the name in between. **`⏎ to see` never
+gives way.** It is the half of the line that says what to do next, and the
+order that already ships is right: a line with a shortened name still tells
+the reader who it is about; a line with a shortened instruction tells them
+nothing — the same ordering `· n of m pods` already gives way to the name for,
+one level up
+([alerts.md § the age, and what it costs the name](alerts.md#the-age-and-what-it-costs-the-name)).
+
+The rule, so a reviewer can check any width against it rather than a drawing:
+
+1. `room` is the pane's width, less the prefix, less the tail — the same
+   measurement already made off the spans about to be drawn, not a sum
+   restated separately.
+2. The name fits in `room` → it draws whole. No mark.
+3. It does not → it is cut to `room − 1` columns, on a character boundary and
+   never inside one — the same rule every other clip on this page already
+   follows — and **one `…`** is appended, glued to the last character kept,
+   no space before it. Same mark, same rule as the one other place this
+   product cuts a string on purpose
+   ([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)).
+4. `room` is `0` → nothing is drawn where the name would go. Not reached at
+   the 80×24 floor by any tail this rule set produces today, and not designed
+   past that.
+
+**This is that section's exception extended to a second place, not a second
+convention** — [widgets.md § 7](widgets.md#7-text-that-came-from-the-api) now
+names both. What makes the cut legitimate here is the same thing that makes
+it legitimate there: the whole name is one `⏎` away, on the object's own
+detail screen ([detail.md](detail.md)), which was already true of every row
+on this pane before this rule existed.
+
+Illustrative, not a captured run — the exact column the cut lands on is the
+renderer's own measurement, not this page's:
+
+```
+│  ● payments/checkout-worker-servi… has 3 pods with problems — ⏎ to see│
+```
+
+The real case this rule exists for is narrower, and already run:
+`cargo test the_browser -- --nocapture` draws `kube-system/cored` with no
+mark at all today, on a 57-column pane — `kube-system/coredns`, a Deployment
+name, with its last two characters silently gone. Nothing about that string
+tells a reader it is not `kube-system/cored`, an object that does not exist.
+The fix is the rule above; the exact marked string it produces is
+`cargo test`'s to show next, not this file's to predict.
+
 ## Browsing every namespace
 
 `Fetch::table(kind, None)` on a namespaced kind lists **every namespace**, and

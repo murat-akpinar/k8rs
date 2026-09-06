@@ -75,6 +75,13 @@ const PAD: u16 = 2;
 /// point). One column would satisfy that rule; two is what every mockup on both screens draws.
 const GAP: usize = 2;
 
+/// **The gutter a band's glyph sits in — two columns whether or not there is a glyph**, so a
+/// banded row and a plain one start at the same column (`screens/alerts.md`,
+/// `screens/resources.md`). One number because it is the same gutter on both screens: a card's
+/// identity line and a browser row that a card bleeds through onto have to agree about where the
+/// name begins, or `● web` in Alerts and `● web` in the browser are two different indents.
+const GUTTER: usize = 2;
+
 /// **The priority plain `kubectl get` prints, and the only one the browser draws.** Anything
 /// above it is what `-o wide` adds, and drawing it makes every screen the wide view
 /// (`screens/resources.md`, [`crate::k8s::Column::priority`] — the filter is the screen's,
@@ -204,6 +211,31 @@ fn mark(signal: Signal) -> &'static str {
     match signal {
         Signal::Mark(text) => text,
         Signal::Reverse => "",
+    }
+}
+
+/// A band's mark in the [`GUTTER`] it is drawn in — the glyph, then the column that keeps it off
+/// the name. Padded rather than concatenated so a band whose mark is wider than one column still
+/// leaves the gutter the width every plain row reserves.
+fn glyph(signal: Signal) -> String {
+    format!("{:<width$}", mark(signal), width = GUTTER)
+}
+
+/// **The cards a screen may read, which is two of the three answers and not three.**
+///
+/// A pane that has not answered has nothing to count and nothing to mark — *blank, never guessed*
+/// (`screens/widgets.md` § 1a) — and a refused one carries whatever *did* come back, which is what
+/// `screens/states.md` § *You can only see some namespaces* draws: the banner, and `3 ● 7 ▲`
+/// beside `ALERTS`.
+///
+/// **One function because the sidebar's badge and the browser's marks are one claim seen twice.**
+/// A badge reading `3 ●` over a browser that marks nothing is exactly the disagreement
+/// `screens/resources.md` § Rules exists to forbid, and two copies of this match is how it would
+/// arrive.
+fn found(alerts: &Pane<Vec<Card>>) -> &[Card] {
+    match alerts {
+        Pane::Ready(cards) | Pane::Denied(_, cards) => cards,
+        Pane::Loading => &[],
     }
 }
 
@@ -485,14 +517,10 @@ fn sidebar(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 /// `3 ● 7 ▲` — **owners, not pods** (`screens/alerts.md`), and only the bands that have
 /// something in them, so the badge never claims a count it did not find.
 ///
-/// A pane that has not answered yet has nothing to count, and draws no badge rather than a zero:
-/// *a vital that cannot be read is blank, never guessed* (`screens/widgets.md` § 1a). **A refused
-/// one is not that pane** — it counts whatever did come back, which is what `screens/states.md`
-/// § *You can only see some namespaces* draws: the banner, and `3 ● 7 ▲` beside `ALERTS`.
+/// Which pane states it counts at all is [`found`]'s, so this badge and the browser's `●` marks
+/// cannot answer differently.
 fn tally<'a>(screen: &Screen) -> Vec<Span<'a>> {
-    let (Pane::Ready(cards) | Pane::Denied(_, cards)) = screen.alerts else {
-        return Vec::new();
-    };
+    let cards = found(screen.alerts);
     let mut spans = Vec::new();
     for severity in [Severity::Critical, Severity::Warn] {
         let count = cards
@@ -774,9 +802,7 @@ fn identity<'a>(card: &Card, screen: &Screen, region: usize) -> Line<'a> {
     let (colour, signal) = theme::band(card.severity());
     let age = card.age(screen.now);
     let measured = age.as_deref().map_or(0, width);
-    // The gutter is two columns whether or not there is a glyph, so a banded row and a plain one
-    // start at the same column.
-    let body = region.saturating_sub(2);
+    let body = region.saturating_sub(GUTTER);
     let room = if measured == 0 {
         body
     } else {
@@ -795,7 +821,7 @@ fn identity<'a>(card: &Card, screen: &Screen, region: usize) -> Line<'a> {
     };
 
     let mut spans = vec![
-        Span::styled(format!("{:<2}", mark(signal)), screen.fg(colour)),
+        Span::styled(glyph(signal), screen.fg(colour)),
         Span::styled(left.clone(), screen.fg(theme::TEXT)),
     ];
     if let Some(age) = age {
@@ -930,8 +956,9 @@ fn empty(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable
     centred(frame, area, lines);
 }
 
-/// **The header row and one row per object, both from `columnDefinitions`**
-/// (`screens/widgets.md` § 2, `screens/resources.md`).
+/// **The header row and one row per object, both from `columnDefinitions`** — and, where Alerts
+/// bleeds through onto it, a two-column gutter down the left of the names and one line under the
+/// table about the row the cursor is on (`screens/widgets.md` § 2, `screens/resources.md`).
 ///
 /// **The `priority: 0` filter is the whole of the column choice**, and the indices it kept are
 /// what every cell is then read at: [`crate::k8s::Row::cells`] is aligned to the *whole* column
@@ -944,7 +971,9 @@ fn empty(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable
 /// too narrow shrinks that one first: ratatui holds a `Min` at or above its minimum more strongly
 /// than it holds a `Length` at its length. That is the mockup's own order of sacrifice — the
 /// numbers keep their columns, the name clips — expressed as two constraints rather than a
-/// measurement per kind.
+/// measurement per kind. **The gutter is bought out of the same column**: it widens the first
+/// constraint's minimum by [`GUTTER`] and nothing else, so the marks cost the names two columns
+/// and cost the numbers none.
 ///
 /// **The cost is linear in rows and every row is walked twice** — once for the column widths,
 /// once to build the cells — which is what a column layout computed from content costs. Measured
@@ -975,13 +1004,28 @@ fn grid(
         return;
     }
 
+    // **The join, and the whole of it**: a card is filed under an owner, a row *is* an object, and
+    // both carry the same uid. Two rows with no uid are not the same object, so the `?` is what
+    // makes `None == None` not a match — `table-deployments` was captured with
+    // `?includeObject=None` and every row in it lands there.
+    let cards = found(screen.alerts);
+    let marks: Vec<Option<&Card>> = table.rows.iter().map(|row| about(cards, row)).collect();
+    // **A table nobody has a finding in spends no columns on an empty gutter**, so an unmarked
+    // kind draws exactly the columns it drew before Alerts bled through at all. Once one row is
+    // marked every row reserves the gutter, marked or not, or the names step in and out by two.
+    let gutter = if marks.iter().any(Option::is_some) {
+        GUTTER
+    } else {
+        0
+    };
+
     let widths: Vec<Constraint> = kept
         .iter()
         .enumerate()
         .map(|(nth, (at, header))| {
             let header = width(header) as u16;
             if nth == 0 {
-                return Constraint::Min(header);
+                return Constraint::Min(header + (gutter as u16));
             }
             let widest = table
                 .rows
@@ -996,23 +1040,30 @@ fn grid(
     let rows: Vec<Row> = table
         .rows
         .iter()
-        .map(|row| {
+        .zip(&marks)
+        .map(|(row, card)| {
             Row::new(kept.iter().enumerate().map(|(nth, (at, _))| {
                 let cell = row.cells.get(*at).map_or("", String::as_str);
-                match &row.namespace {
-                    // **`namespace/name` in the first cell, and no column of its own** — the
-                    // server sends no `NAMESPACE` column for an unscoped list, and `kubectl -A`
-                    // prepends one client-side (`screens/resources.md` § Browsing every
-                    // namespace). Without it, fourteen `kube-root-ca.crt` rows are fourteen
-                    // identical strings with a cursor resting on one of them, which satisfies
-                    // invariant 2's *explicitly selected object* in the letter and defeats it in
-                    // the intent. A scoped view already names its one namespace in the title, and
-                    // a row that carries none never grows one.
-                    Some(namespace) if nth == 0 && !scoped => {
-                        Cow::Owned(format!("{namespace}/{cell}"))
-                    }
-                    _ => Cow::Borrowed(cell),
+                if nth > 0 {
+                    return Line::raw(cell);
                 }
+                let mut spans = Vec::new();
+                if gutter > 0 {
+                    // **The `●` is a `Span` prepended to the first `Cell`, never a column of its
+                    // own** (`screens/widgets.md` § 2, the finding-marker row) — a column would
+                    // take [`GAP`] beside it and put three blanks between the glyph and the name
+                    // every mockup draws one blank in. An unmarked row pushes the same two
+                    // columns of nothing, which is what keeps the two aligned.
+                    spans.push(match card {
+                        Some(card) => {
+                            let (colour, signal) = theme::band(card.severity());
+                            Span::styled(glyph(signal), screen.fg(colour))
+                        }
+                        None => Span::raw(" ".repeat(GUTTER)),
+                    });
+                }
+                spans.push(Span::raw(identify(row, cell, scoped)));
+                Line::from(spans)
             }))
         })
         .collect();
@@ -1021,12 +1072,41 @@ fn grid(
     // row of a Table fetched with `?includeObject=None`, which the cursor falls back to its index
     // for rather than following a string.
     let anchors: Vec<Option<&str>> = table.rows.iter().map(|row| row.uid.as_deref()).collect();
-    let mut state = TableState::default().with_selected(app.content.selected(&anchors));
+    let at = app.content.selected(&anchors);
+    // **The line is about the row the cursor is on, not about every marked one** (NOTES § D251):
+    // one per marked row would be a second list competing with the table above it.
+    let selected = at.and_then(|nth| table.rows.get(nth).zip(marks.get(nth).copied().flatten()));
+    let (area, under) = match selected {
+        // **Right under the last row, and never off the bottom of the pane.** The table takes the
+        // height it needs up to two lines short of the pane, so a short kind draws the mockup's
+        // own spacing and a long one still keeps the line that says `⏎ to see`. Under three rows
+        // the table gets none and only the line is drawn; no pane the frame lays out is that
+        // short, the floor being 80×24 and this body thirteen.
+        Some(pair) => {
+            let tall = u16::try_from(table.rows.len() + 1).unwrap_or(u16::MAX);
+            let [top, _, line, _] = Layout::vertical([
+                Constraint::Length(tall.min(area.height.saturating_sub(2))),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(area);
+            (top, Some((line, pair)))
+        }
+        None => (area, None),
+    };
+    let mut state = TableState::default().with_selected(at);
     frame.render_stateful_widget(
         Table::new(rows, widths)
             .header(
-                Row::new(kept.iter().map(|(_, header)| header.as_str()))
-                    .style(screen.fg(theme::DIM)),
+                Row::new(kept.iter().enumerate().map(|(nth, (_, header))| {
+                    // The header moves over the gutter with the cells, or `NAME` sits two columns
+                    // left of the names under it. A table with no gutter pads by nothing, which
+                    // is the same string and needs no branch of its own.
+                    let pad = if nth == 0 { gutter } else { 0 };
+                    format!("{blank:pad$}{header}", blank = "")
+                }))
+                .style(screen.fg(theme::DIM)),
             )
             .column_spacing(GAP as u16)
             .highlight_symbol(MARKER)
@@ -1036,6 +1116,106 @@ fn grid(
         area,
         &mut state,
     );
+
+    if let Some((line, (row, card))) = under {
+        let cell = kept
+            .first()
+            .and_then(|(at, _)| row.cells.get(*at))
+            .map_or("", String::as_str);
+        problems(frame, line, screen, card, &identify(row, cell, scoped));
+    }
+}
+
+/// **The first cell as it is drawn** — `namespace/name` where the view carries no namespace scope,
+/// and the bare name everywhere else.
+///
+/// **The server sends no `NAMESPACE` column for an unscoped list**, and `kubectl -A` prepends one
+/// client-side (`screens/resources.md` § Browsing every namespace). Without it, fourteen
+/// `kube-root-ca.crt` rows are fourteen identical strings with a cursor resting on one of them,
+/// which satisfies invariant 2's *explicitly selected object* in the letter and defeats it in the
+/// intent. A scoped view already names its one namespace in the title, and a row that carries
+/// none never grows one.
+///
+/// One function because [`problems`] names the selected row and has to name it the way the table
+/// drew it — `web` under `ns: payments`, `payments/web` with no scope in effect.
+fn identify<'a>(row: &'a crate::k8s::Row, cell: &'a str, scoped: bool) -> Cow<'a, str> {
+    match &row.namespace {
+        Some(namespace) if !scoped => Cow::Owned(format!("{namespace}/{cell}")),
+        _ => Cow::Borrowed(cell),
+    }
+}
+
+/// **The card this row's object is the owner of, or nothing at all** — the whole of *Alerts bleed
+/// through* (`screens/resources.md` § Rules, NOTES § D251).
+///
+/// **The uid and never the name**: a name deleted and recreated is a different object
+/// ([`crate::k8s::Row::uid`]), and this is the same anchor the cursor already follows two lines
+/// down. Two rows carrying no uid are not the same object, which is what the `?` says — rule C1's
+/// kubeconfig certificate is a card whose owner has none, and `?includeObject=None` is a whole
+/// table of rows that do not.
+///
+/// **A card is filed under an *owner*** (NOTES § D3), so what this marks is the object Alerts has
+/// a card *about* — the Deployment, the node, the bare pod. A pod that has a finding but is owned
+/// by a Deployment is not one of those: Alerts draws no card for it, and marking its row would
+/// promise a card that `⏎` could not open.
+///
+/// **Its ceiling, named rather than left to be found: a linear scan per row**, so the frame pays
+/// O(rows × cards). Both terms are bounded by the same claim [`crate::views::cards`] makes about
+/// its own O(n²) — the card list is short, which is the whole of D3 — and if a cluster ever makes
+/// it long the key to build a map on is the uid this already reads.
+fn about<'a>(cards: &'a [Card], row: &crate::k8s::Row) -> Option<&'a Card> {
+    let uid = row.uid.as_deref()?;
+    cards
+        .iter()
+        .find(|card| card.owner.uid.as_deref() == Some(uid))
+}
+
+/// **`● web has 3 pods with problems — ⏎ to see`** — one line under the table, about the selected
+/// row (`screens/resources.md` § The line under the table, NOTES § D251).
+///
+/// **The count is [`crate::views::Card::affected`], the same objects `● web · 3 of 5 pods` counts
+/// one screen over**, and whether a pod count is a fact at all is asked of
+/// [`crate::views::Card::count`] rather than re-derived here. Its `None` has **two** causes and
+/// they are not one condition: a node card counts no pods at all, `affected == 0`
+/// (NOTES § D39), and a bare pod's card is `owner.kind == Pod`, because nothing owns it
+/// (NOTES § D246 ruling 2). A line reading `0 pods`, or one counting a row against itself, is
+/// what re-deriving either here would eventually print.
+///
+/// **Dim, with the glyph in the card's own band** — the shape [`lines`]' fifth part already has:
+/// a pointer to where the detail is, not an instruction. **The name is what gives way** when the
+/// sentence does not fit, never `⏎ to see`, which is the one half that says what to do next —
+/// **and the cut carries [`CUT`]**. The whole name being one `⏎` away is what makes cutting it
+/// legitimate; it is not what makes it silent, and a bare `kube-system/cored` reads as an object
+/// that exists (`screens/widgets.md` § 7, the second of the two places this product cuts on
+/// purpose).
+fn problems(frame: &mut Frame, area: Rect, screen: &Screen, card: &Card, name: &str) {
+    let tail = match card.count() {
+        Some(_) => format!(" has {} pods with problems — ⏎ to see", card.affected),
+        None => " has problems — ⏎ to see".to_owned(),
+    };
+    let (colour, signal) = theme::band(card.severity());
+    let mut spans = vec![
+        // The selection marker's own columns, so this `●` lands in the column the row's `●` is in.
+        Span::raw(" ".repeat(width(MARKER))),
+        Span::styled(glyph(signal), screen.fg(colour)),
+    ];
+    // **Measured off the spans that will be drawn, never restated as a sum of the same two
+    // constants** — the indent is what [`spanned`] says it is, so it cannot drift from the two
+    // lines above it.
+    let room = usize::from(area.width).saturating_sub(spanned(&spans) + width(&tail));
+    // `screens/resources.md` § The line under the table, rules 2–4: whole and unmarked when it
+    // fits; else `room` less [`CUT`]'s own column, with the mark glued to the last character
+    // kept and no space before it; and nothing at all where there is no room to mark a cut in.
+    let shown = match fits(name, room) {
+        whole if whole == name => whole.to_owned(),
+        _ if room == 0 => String::new(),
+        _ => format!("{}{CUT}", fits(name, room.saturating_sub(width(CUT)))),
+    };
+    spans.push(Span::styled(
+        format!("{shown}{tail}"),
+        screen.fg(theme::DIM),
+    ));
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 // --- THE BROWSER END ---

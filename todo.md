@@ -4309,17 +4309,16 @@ string and key was settled in the design phase, so this phase is drawing.
       `the_bands_survive_a_sixteen_colour_terminal`,
       `the_title_and_the_action_are_drawn_whole` and
       `an_empty_evidence_leaves_the_line_out`
-- [ ] **Resources view**: generic table driven by server-side columns; works
-      for a CRD without a line of code written for it — **the table half landed
-      2026-09-06** in `ui.rs`'s `// --- THE BROWSER ---`: the two-condition
-      `ns:` label, the `priority: 0` filter with cells read at the kept indices,
-      the three answers, and no kind name in the file
+- [x] **Resources view**: generic table driven by server-side columns; works
+      for a CRD without a line of code written for it — landed 2026-09-06 in
+      `ui.rs`'s `// --- THE BROWSER ---` in two turns. The table: the
+      two-condition `ns:` label, the `priority: 0` filter with cells read at the
+      kept indices, the three answers, and no kind name in the file
       ([D250](NOTES.md#d250--the-browser-pane-a-width-rule-that-is-not-widgetsmds-sentence-an-empty-list-that-is-not-nothing-is-broken-and-a-test-that-passed-on-the-screen-it-forbids-2026-09-06)).
-      **Open on its second half**: the `●` bleed-through on a row and the
-      `● web has 3 pods with problems — ⏎ to see` line under the table
-      ([screens/resources.md § Rules](screens/resources.md)), which needs
-      nothing from `rules.rs` — `k8s::Row::uid` against `rules::ObjectId::uid`,
-      both public, both `Option<String>`, measured at the first half
+      Then the bleed-through: the `●` on a row, joined by uid, and the one line
+      under the table about the selected row, whose name gives way behind a
+      visible mark
+      ([D251](NOTES.md#d251--the-bleed-through-one-line-about-the-selected-row-a-count-that-is-asked-and-not-re-derived-and-the-third-silent-cut-the-mark-went-looking-for-2026-09-06))
 - [ ] **Analysis view**: the Phase 4 reports, one pane each
 - [ ] Detail tabs per object: logs · describe · yaml · events, `[` / `]`
 - [ ] Command log panel — always visible, showing what k8rs ran
