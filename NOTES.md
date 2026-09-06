@@ -271,6 +271,7 @@ its line moving with it.
 - [D247](#d247--the-guard-that-read-a-colour-it-had-never-been-shown-and-the-second-one-beside-it-nobody-would-have-found-by-waiting-2026-09-06) — the guard that read a colour it had never been shown, and the second one beside it nobody would have found by waiting
 - [D248](#d248--the-sidebars-five-sections-are-k8rss-vocabulary-and-not-the-clusters-and-invariant-12-is-untouched-by-that-2026-09-06) — the sidebar's five sections are k8rs's vocabulary and not the cluster's, and invariant 12 is untouched by that
 - [D249](#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06) — the layout box lands from a second session: the header gives way from its front, and a refusal keeps the list it is about
+- [D250](#d250--the-browser-pane-a-width-rule-that-is-not-widgetsmds-sentence-an-empty-list-that-is-not-nothing-is-broken-and-a-test-that-passed-on-the-screen-it-forbids-2026-09-06) — the browser pane: a width rule that is not `widgets.md`'s sentence, an empty list that is not *nothing is broken*, and a test that passed on the screen it forbids
 
 ## Why it exists — where the gap is
 
@@ -21730,3 +21731,118 @@ directions of it. Which finding a card with more than one draws is
 list already sorts by, applied one level down
 ([D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
 ruling 4). Both are cited by `ui.rs` and neither gets a second copy here.
+
+### D250 — the browser pane: a width rule that is not `widgets.md`'s sentence, an empty list that is not *nothing is broken*, and a test that passed on the screen it forbids (2026-09-06)
+
+Phase 11's Resources box drew `screens/resources.md` into `ui.rs` — the pane title with
+its two-condition `ns:` label, the header and rows from the server's own
+`columnDefinitions`, the three answers a pane has, and no kind name anywhere in the file
+(checked: `grep -nE '"(pods?|deployments?|nodes?|…)"' src/ui.rs` is empty, which is
+invariant 12's actual test). `just check` green at 1229 tests; `just mutants-diff` **31
+mutants, 31 caught, 0 missed** in 13 minutes. What follows is the rulings the box had to
+make, in the order they cost something.
+
+**1. The width rule is not the sentence `screens/widgets.md` § 2 wrote, and the code is
+the one that is right.** That row says *widths `Constraint::Min(len(header))` per column*.
+Applied uniformly it gives every column an even share of the leftover, which clips `NAME`
+to 14 columns in the very configmaps case `resources.md` draws at 33. What ships is the
+first column `Min(header)` and every other `Length(header.max(widest cell))`, read off
+ratatui's own solver — `MIN_SIZE_GE` is `STRONG × 100` where `LENGTH_SIZE_EQ` is
+`STRONG × 10`, so spare width grows the name column and a pane too narrow shrinks that one
+first. **That is the mockup's own order of sacrifice** — the numbers keep their columns and
+the name clips — expressed as two constraints instead of a measurement per kind. The
+sentence in `widgets.md` needs the qualifier; the mockups it sits under are unchanged.
+
+**2. Two columns of spacing, not a column reserved inside the name cell.**
+`resources.md` requires that a clipped name and the number beside it are never read as one
+token, and *suggests* the name cell keep its last column back for that. `column_spacing(2)`
+gives the same guarantee with no arithmetic and matches the two-column gaps every mockup
+already draws. **The requirement is the guarantee, not the mechanism**, and it is asserted.
+
+**3. An empty list of one kind is not `nothing is broken`.** That glyph and that sentence
+are the Alerts pane's claim about the whole cluster — the strongest thing k8rs says — and a
+kind with no objects in it is an ordinary answer carrying no severity at all. The browser
+says `no deployments in payments` when a scope is in effect, `no deployments in this
+cluster` when none is, and `nothing here` when the view's index has outlived the discovery
+list it points into. **The renderer wrote those three strings because `screens/` had no
+empty browser at all**, which is the wrong order — a user-visible sentence is
+`tui-designer`'s. They went to that owner in the same turn rather than shipping unreviewed,
+and the review kept two and rewrote one: `nothing here` became **`no longer in the list —
+pick another kind`**, on `screens/states.md`'s own closing rule that *no state is a dead
+end — each one names the next thing to try*. The state now has a section, a table of three
+rows and three mockups in that file, and the code cites it instead of a PM ruling.
+
+**Landing that one string cost three red runs, and the second and third are the lesson.**
+The first red was the assertion against the old sentence — the case had *no test at all*
+until this round, so the third arm could have been deleted and every gate stayed green. The
+second: at 41 columns the new sentence broke in half, because `empty` wrapped at
+`BLOCK` — 34, the measure `screens/states.md` sets the *Alerts* pane's several paragraphs
+of prose to, which is not a measure for one line of dim text. The third: widening the wrap
+alone was not enough, because `centred` then laid a `Length(BLOCK)` column under it and
+what came back was *clipped* at 34 instead of *broken* at 34. **Two halves of one defect,
+one of which was invisible until the other was fixed.** `BLOCK` is now a floor inside
+`centred` — `widest.max(BLOCK).min(area.width)` — so the two scoped sentences keep the exact
+34-column block they always had, and the Alerts paragraphs are untouched by construction
+because `note` wraps them at `BLOCK` before they ever reach it.
+
+**And what that fix is not covered by, said here rather than left for someone to discover.**
+The clamp's `.min(area.width)` cannot be reached through `draw` today: the floor is 80×24,
+which leaves the content pane 57 columns, and the sentence is 41 — no pane the renderer will
+draw is narrower than it. So nothing pins that half, and it is a bound rather than a
+behaviour anyone can see. **The mutation gate does not close it either, and that was
+measured rather than assumed**: the re-run over the whole diff is 32 mutants, 32 caught, 0
+missed, and the only one cargo-mutants generated inside `centred` is *replace `centred` with
+`()`* — it swaps binary operators, not `.max()` and `.min()` calls, so the floor and the
+clamp are each held by one sentence's drawn width and by nothing stronger.
+
+**4. The row anchor is the `uid` and never the name, and the brief that said otherwise was
+wrong.** The PM's brief told the box *a browser row has a name, which is what anchors are
+for*; `views::Cursor`'s own doc says the anchor is the uid, precisely so a rename cannot
+carry a selection onto a different object. The box followed the doc over the brief, which
+is the right way round. `tests/fixtures/table-deployments.json` was captured with
+`?includeObject=None` and therefore carries no uid at all, so the committed fixture
+exercises the documented fall-back to the index rather than only the happy path.
+
+**5. `Screen` gains two fields, because *scoped to a namespace* is nobody's fact yet.**
+`browser: &Pane<k8s::Table>` is the answer; `namespace: Option<&str>` is the scope in
+effect, and it lives in neither `App` nor `k8s::Browsable`. The header's `context` string
+already spells it, and parsing a rendered string back is how two zones start disagreeing —
+so it arrives as its own field until the namespace picker exists to own it. Whoever writes
+that picker takes this field with it.
+
+**6. The mutation gate earned its thirteen minutes, and the interesting mutant was not the
+arithmetic.** Three mutants survived the first run, all in `heading`'s fit test. The fix
+made it two, and the one that stayed alive showed why: the test asserted the **whole**
+`ns: payments` label was present, and one column past the edge the mutant draws it and
+ratatui *clips* it — so a test looking for the complete string passes on exactly the screen
+it exists to forbid. **The assertion had to get weaker to get honest**: `ns:` present at
+all, at `fits` and at `fits + 1`. A screen test that reads back a string ratatui may have
+cut is not testing what it thinks it is.
+
+**One thing the printed evidence shows that Phase 12 has to keep true.** In the screen
+above the sidebar's marker sits on `ALERTS` while the browser is open, because the test
+reaches the view through `views::App::open` — the real entry point, deliberately — and
+`open` moves the *view* and not the *nav cursor*. In a real session the cursor is already on
+the kind's row, because moving it is how the user asked. **A wiring that calls `open`
+without having moved `nav` draws a screen no user could have reached**, and the key handler
+that keeps the two in step is Phase 12's.
+
+**7. Two counts for the record.** `ui.rs` is **1134 lines**, further past the ~800 at which
+[D11](#d11--the-ninth-file-pre-approved) pre-approves `dialog.rs` — and D11's ninth file is
+the *modal layer*, which does not exist yet, so the permission still has nothing to spend
+itself on. And the pane's cost is linear and measured, debug build, pods capture cycled:
+2.3 ms/frame at 100 rows, 7.4 at 1 000, 30 at 5 000, 117 at 20 000, every row walked twice —
+once for the widths, once for the cells. Nothing in `screens/` asks for a windowed draw, so
+none is written.
+
+**8. And one reported finding that was not one.** The box reported that `k8s::Table` has no
+bounded public constructor and that the browser would therefore be *the one screen whose
+cells never went through `text()`* (invariant 9). Checked against the file: `k8s::ingest`
+is `fn ingest<K, T: From<K> + Bounded>` — it calls `T::from` and then `bound()` — and its
+own doc already says the `From` is what makes that door unavoidable for the browser's rows,
+because `Table` implements no `Deserialize` and `Client::request::<Table>` cannot compile.
+**What is true is narrower**: `ingest` and `Bounded` are private to `k8s.rs`, so a decode
+written in some *other* file could reach `Table::from` and skip the bound — and no such
+decode exists. It is in [`backlog.md`](backlog.md) as a guard worth writing, not as a hole
+that is open. *Somebody else's finding stays an estimate until you have run it* cuts both
+ways, and this is the direction that gets checked less.

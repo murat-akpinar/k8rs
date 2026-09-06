@@ -92,12 +92,18 @@ fn app() -> App {
     App::default()
 }
 
+/// The browser pane a test that is not about the browser hands over: still loading, which is
+/// what a view nobody opened has answered.
+static UNOPENED: Pane<crate::k8s::Table> = Pane::Loading;
+
 fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
     Screen {
         depth: Depth::TrueColor,
         vitals: "nodes 3/3",
         context: "ctx: prod-eu · live · admin",
         alerts,
+        browser: &UNOPENED,
+        namespace: None,
         now,
         note: &[],
         kinds: &[],
@@ -1163,6 +1169,467 @@ fn a_refusal_is_a_banner_over_the_list_and_does_not_clear_it() {
     );
 }
 
+// --- THE BROWSER ---
+
+/// One of the two committed `Table` captures, decoded the way `k8s.rs` decodes a response
+/// (`tests/fixtures/`). **Never a hand-written column list** (NOTES § D53): what is proven below
+/// is that one code path draws two different kinds, so the kinds have to be the cluster's.
+///
+/// The ingest *bound* is not applied — the trait that carries it is private to `k8s.rs`, where it
+/// is tested. Nothing here is about the strip; `ui.rs` draws what it is handed (invariant 9 is
+/// paid at ingest, and `ui.rs`'s module doc says so).
+fn table(name: &str) -> crate::k8s::Table {
+    let path = format!("{}/tests/fixtures/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("fixture {path} could not be read: {e}"));
+    let response: crate::k8s::TableResponse = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("fixture {path} is not a Table: {e}"));
+    crate::k8s::Table::from(response)
+}
+
+/// A kind as discovery describes it. **Only `plural` and `namespaced` are read by the renderer**,
+/// which is the point — the rest is what a URL is built from, one layer down.
+fn browsable(plural: &str, namespaced: bool) -> Browsable {
+    Browsable {
+        group: "example.com".to_owned(),
+        version: "v1".to_owned(),
+        kind: "Whatever".to_owned(),
+        plural: plural.to_owned(),
+        namespaced,
+        verbs: vec!["list".to_owned()],
+    }
+}
+
+/// The Alerts pane a browser test hands over: not the pane under test, and its state must not
+/// change a single column of what the browser draws.
+static QUIET: Pane<Vec<Card>> = Pane::Ready(Vec::new());
+
+/// The browser open on the first kind, through [`App::open`] rather than by setting the field —
+/// so a test cannot reach a view the sidebar could not.
+fn opened() -> App {
+    let mut app = App::default();
+    app.open(NavItem::Kind(0));
+    app
+}
+
+fn browsing<'a>(
+    browser: &'a Pane<crate::k8s::Table>,
+    kinds: &'a [Browsable],
+    now: &'a Time,
+) -> Screen<'a> {
+    let mut screen = screen(&QUIET, now);
+    screen.browser = browser;
+    screen.kinds = kinds;
+    screen
+}
+
+/// The column each header starts at, in the drawn header row — so a cell assertion names its
+/// column instead of a magic offset that moves when a fixture does.
+fn columns_at(header: &str, names: &[&str]) -> Vec<usize> {
+    let mut from = 0;
+    names
+        .iter()
+        .map(|name| {
+            let byte = header[from..]
+                .find(name)
+                .unwrap_or_else(|| panic!("no header {name:?} after byte {from} in {header:?}"))
+                + from;
+            from = byte + name.len();
+            // **Counted in characters, never bytes** — the same reason [`column`] exists: a row
+            // here carries `▸` and a byte offset lands inside it.
+            header[..byte].chars().count()
+        })
+        .collect()
+}
+
+/// The row from one column on, counted in characters. `&line[2..]` panics inside `▸`.
+fn from(line: &str, at: usize) -> String {
+    line.chars().skip(at).collect()
+}
+
+/// **The whole of the browser's genericity claim, and both fixtures go through it.** Different
+/// kinds, different column counts, different priority splits (8 = 5 + 3 and 9 = 5 + 4), one code
+/// path, and nothing in it naming either.
+///
+/// **`priority: 1` is what `-o wide` adds** and drawing it makes every screen the wide view
+/// (`screens/resources.md`). The negative half is the half that matters: a header the server sent
+/// and this screen must not show.
+#[test]
+fn the_columns_are_the_servers_own_and_only_the_ones_plain_kubectl_prints() {
+    let now = now();
+    for (fixture, plural, plain, wide) in [
+        (
+            "table-deployments",
+            "deployments",
+            ["NAME", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"].as_slice(),
+            ["CONTAINERS", "IMAGES", "SELECTOR"].as_slice(),
+        ),
+        (
+            "table-pods",
+            "pods",
+            ["NAME", "READY", "STATUS", "RESTARTS", "AGE"].as_slice(),
+            ["IP", "NODE", "NOMINATED NODE", "READINESS GATES"].as_slice(),
+        ),
+    ] {
+        let ready = Pane::Ready(table(fixture));
+        let kinds = [browsable(plural, true)];
+        let drawn = render(&opened(), &browsing(&ready, &kinds, &now));
+        println!("{plural}\n{}\n", rows(&drawn).join("\n"));
+
+        let header = pane(&row(&drawn, plain[1]));
+        // Present, and in the server's own order — `columns_at` searches forward, so a header
+        // drawn out of order cannot be found — and the first one starts at the selection gutter,
+        // which is what puts the header over the cells rather than two columns off them.
+        let at = columns_at(&header, plain);
+        assert_eq!(at[0], MARKER.chars().count(), "{header:?}");
+        for column in wide {
+            assert!(
+                !holds(&drawn, column),
+                "{fixture}: {column:?} is priority 1, which is what `-o wide` adds"
+            );
+        }
+        assert!(holds(&drawn, plural), "the pane says which kind it is");
+    }
+}
+
+/// **A cell is read at the index of the column it was kept from, never at its place in the kept
+/// list** — [`crate::k8s::Row::cells`] is aligned to the *whole* column list.
+///
+/// **Neither committed capture can catch this**, and that is the reason this test builds a third
+/// shape: in both, the `priority: 0` columns are the first five, so the kept indices and their
+/// positions in the kept list are the same numbers. A CRD's `additionalPrinterColumns` carry a
+/// priority each and in any order, so a non-prefix split is an ordinary shape the pipeline can
+/// hand this file (NOTES § D29 — a check is proven only for the shapes it was fed). The columns
+/// and rows below are still the committed pods capture's; one column's `priority` is raised, in
+/// memory, and no fixture on disk is touched (NOTES § D53).
+#[test]
+fn a_cell_is_read_at_its_own_columns_index_and_not_at_its_place_in_the_kept_list() {
+    let now = now();
+    let mut pods = table("table-pods");
+    pods.columns[2].priority = 1;
+    assert_eq!(pods.columns[2].name, "Status", "the promoted column");
+    // Name, Ready, Restarts, Age — indices 0, 1, 3, 4, which is not 0, 1, 2, 3.
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let drawn = render(&opened(), &browsing(&ready, &kinds, &now));
+    println!("{}", rows(&drawn).join("\n"));
+
+    assert!(!holds(&drawn, "STATUS"), "Status is priority 1 here");
+    let header = pane(&row(&drawn, "RESTARTS"));
+    let at = columns_at(&header, &["NAME", "READY", "RESTARTS", "AGE"]);
+    let line = pane(&row(&drawn, "kube-system/coredns"));
+    for (column, cell) in at.iter().zip(["kube-system/coredns", "1/1", "0", "34h"]) {
+        assert!(
+            from(&line, *column).starts_with(cell),
+            "{cell:?} belongs under column {column}:\n{header}\n{line}"
+        );
+    }
+    assert!(
+        !line.contains("Running"),
+        "the cell of a dropped column is dropped with it: {line:?}"
+    );
+}
+
+/// **The `ns:` label is two conditions and not one** (`screens/resources.md` § Rules): discovery's
+/// own `namespaced` flag **and** a namespace scope in effect. A namespaced kind browsed with no
+/// scope reads the same as a cluster-wide one, and that is the *ordinary* state today.
+#[test]
+fn the_namespace_label_needs_both_the_flag_and_a_scope() {
+    let now = now();
+    let ready = Pane::Ready(table("table-deployments"));
+    for (namespaced, scope, labelled) in [
+        (true, Some("payments"), true),
+        (true, None, false),
+        (false, Some("payments"), false),
+        (false, None, false),
+    ] {
+        let kinds = [browsable("deployments", namespaced)];
+        let mut screen = browsing(&ready, &kinds, &now);
+        screen.namespace = scope;
+        let drawn = render(&opened(), &screen);
+        let title = row(&drawn, "deployments");
+        assert_eq!(
+            title.contains("ns: payments"),
+            labelled,
+            "namespaced={namespaced} scope={scope:?}: {title:?}"
+        );
+        // Never blank and never `ns: -` — absent (`screens/resources.md` § Rules).
+        assert!(!title.contains("ns: -"), "{title:?}");
+    }
+}
+
+/// **A label that does not fit is left out, never half-drawn** — `ns: payme` names a namespace
+/// that does not exist, and the header's own rule is that a vital is blank rather than guessed
+/// (`screens/widgets.md` § 1a). A 43-character namespace is an ordinary DNS label, and the pane
+/// has 53 columns at the floor.
+#[test]
+fn a_namespace_label_that_does_not_fit_is_left_out_rather_than_clipped() {
+    let now = now();
+    let long = "platform-integration-staging-eu-west-tenant";
+    let ready = Pane::Ready(table("table-deployments"));
+    let kinds = [browsable("deployments", true)];
+    let mut screen = browsing(&ready, &kinds, &now);
+    screen.namespace = Some(long);
+    let drawn = render(&opened(), &screen);
+    println!("{}", rows(&drawn).join("\n"));
+
+    let title = row(&drawn, "deployments");
+    assert!(title.contains("deployments"), "the kind is still named");
+    assert!(
+        !title.contains("ns:"),
+        "half a namespace names one that does not exist: {title:?}"
+    );
+    for cut in 4..long.len() {
+        assert!(
+            !holds(&drawn, &long[..cut]),
+            "no prefix of the namespace is drawn either: {:?}",
+            &long[..cut]
+        );
+    }
+    // It still fits when the pane has room for it, or this test proves only that the label is
+    // never drawn at all.
+    let mut room = browsing(&ready, &kinds, &now);
+    room.namespace = Some("payments");
+    assert!(holds(&render(&opened(), &room), "ns: payments"));
+}
+
+/// **Where the label stops fitting is one column, and it is the sum in [`heading`] that decides
+/// it.** Two data points either side of the edge: a namespace that misses by thirty columns is
+/// refused by any arithmetic that happens to be large there, which is what left three mutants of
+/// that sum alive on the first run (2026-09-06).
+#[test]
+fn the_namespace_label_fits_to_the_pane_edge_and_not_one_column_past_it() {
+    let now = now();
+    // The title's room at the floor: the frame's two borders, the sidebar, its divider and the
+    // pane's two pads — 53 columns, `screens/alerts.md` § The columns' own number.
+    let room = usize::from(MIN_WIDTH - 2 - SIDEBAR - 1 - 2 * PAD);
+    assert_eq!(room, 53, "the floor's pane is not what it was");
+    let fits = room - width("deployments") - GAP - width("ns: ");
+    let ready = Pane::Ready(table("table-deployments"));
+    let kinds = [browsable("deployments", true)];
+    for (length, drawn) in [(fits, true), (fits + 1, false)] {
+        let namespace = "n".repeat(length);
+        let mut screen = browsing(&ready, &kinds, &now);
+        screen.namespace = Some(&namespace);
+        let buffer = render(&opened(), &screen);
+        let title = row(&buffer, "deployments");
+        // **`ns:` at all, not the whole label.** One column past the edge the label is drawn and
+        // then *clipped* by the widget, so a test looking for the complete string passes on the
+        // very screen it exists to forbid -- which is how the first draft of this test left the
+        // sum's mutants alive twice (2026-09-06).
+        assert_eq!(
+            title.contains("ns:"),
+            drawn,
+            "a {length}-character namespace with {room} columns to put it in:\n{}",
+            rows(&buffer).join("\n")
+        );
+        if drawn {
+            assert!(title.contains(&format!("ns: {namespace}")), "{title:?}");
+        }
+    }
+}
+
+/// **A row carries its namespace exactly when the view does not** (`screens/resources.md`
+/// § Browsing every namespace) — the server sends no `NAMESPACE` column either way, so the
+/// identity goes in the first cell or nowhere.
+///
+/// The two captures are the two identity shapes: `table-pods` carries a `PartialObjectMetadata`
+/// per row, `table-deployments` was taken with `?includeObject=None` and carries none. **A row
+/// whose namespace is genuinely absent draws the bare name, never `None/name` and never a bare
+/// slash.**
+#[test]
+fn an_unscoped_row_is_prefixed_with_its_namespace_and_a_scoped_one_is_not() {
+    let now = now();
+    let pods = Pane::Ready(table("table-pods"));
+    let kinds = [browsable("pods", true)];
+
+    let unscoped = render(&opened(), &browsing(&pods, &kinds, &now));
+    println!("{}", rows(&unscoped).join("\n"));
+    assert!(
+        holds(&unscoped, "kube-system/coredns"),
+        "six identical names with a cursor on one of them is invariant 2 defeated in the intent"
+    );
+
+    let mut scoped = browsing(&pods, &kinds, &now);
+    scoped.namespace = Some("kube-system");
+    let scoped = render(&opened(), &scoped);
+    assert!(
+        !holds(&scoped, "kube-system/"),
+        "a scoped view already names its one namespace in the title"
+    );
+    assert!(holds(&scoped, "coredns-589f44"));
+
+    // `?includeObject=None`: no namespace on the row, so the bare name and nothing invented.
+    let deployments = Pane::Ready(table("table-deployments"));
+    let kinds = [browsable("deployments", true)];
+    let bare = render(&opened(), &browsing(&deployments, &kinds, &now));
+    assert!(holds(&bare, "broken-owned"));
+    for invented in ["None/", "/broken-owned"] {
+        assert!(
+            !holds(&bare, invented),
+            "no namespace is invented: {invented}"
+        );
+    }
+}
+
+/// **The selection marker comes from the same [`Cursor`] the sidebar and the cards use**, and one
+/// row carries it.
+///
+/// The anchor is the row's `uid` (`crate::views::Cursor`), and `table-deployments` was captured
+/// with `?includeObject=None` so it carries none at all — the documented shape where the cursor
+/// falls back to its index. `↓` therefore lands on the second row by position, which is what a
+/// renderer sees either way: `Cursor::selected` reads the anchors' *count*, not their values.
+#[test]
+fn the_selected_browser_row_carries_the_marker_and_no_other_row_does() {
+    let now = now();
+    let deployments = table("table-deployments");
+    let uids: Vec<Option<String>> = deployments.rows.iter().map(|row| row.uid.clone()).collect();
+    let second = deployments.rows[1].cells[0].clone();
+    let ready = Pane::Ready(deployments);
+    let kinds = [browsable("deployments", true)];
+
+    let mut app = opened();
+    let anchors: Vec<Option<&str>> = uids.iter().map(Option::as_deref).collect();
+    app.content.down(&anchors);
+    let drawn = render(&app, &browsing(&ready, &kinds, &now));
+    println!("{}", rows(&drawn).join("\n"));
+
+    assert!(
+        pane(&row(&drawn, &second)).starts_with(MARKER),
+        "the marker sits on the selected row: {:?}",
+        pane(&row(&drawn, &second))
+    );
+    let marked = rows(&drawn)
+        .iter()
+        .filter(|line| pane(line).starts_with(MARKER))
+        .count();
+    assert_eq!(
+        marked,
+        1,
+        "one row, never two:\n{}",
+        rows(&drawn).join("\n")
+    );
+}
+
+/// **A name too long for its column clips, and never fuses onto the number beside it**
+/// (`screens/resources.md` § Browsing every namespace, the clip point).
+///
+/// **The order of sacrifice is the name's**: every other column keeps the width its header and its
+/// widest cell asked for, and the name column is the one that gives way — `Min(len(header))`
+/// against `Length(natural)`, which is `screens/widgets.md` § 2's own spelling.
+#[test]
+fn the_name_gives_way_and_leaves_a_blank_column_before_the_next_cell() {
+    let now = now();
+    let ready = Pane::Ready(table("table-pods"));
+    let kinds = [browsable("pods", true)];
+    let drawn = render(&opened(), &browsing(&ready, &kinds, &now));
+
+    let header = pane(&row(&drawn, "RESTARTS"));
+    let at = columns_at(&header, &["NAME", "READY", "STATUS", "RESTARTS", "AGE"]);
+    let line = pane(&row(&drawn, "kube-system/"));
+    assert!(
+        line.chars().count() > at[1],
+        "the row reaches the second column: {line:?}"
+    );
+    assert!(
+        line.chars()
+            .take(at[1])
+            .collect::<String>()
+            .contains("kube-system/"),
+        "the identity did not fit whole and is clipped where its column ends: {line:?}"
+    );
+    assert_eq!(
+        column(&line, at[1] - 1),
+        ' ',
+        "a clipped identity and the number beside it are never read as one token:\n{header}\n{line}"
+    );
+    // **The numbers keep the width their own content asked for**, which is the other half of the
+    // give-way rule: `RESTARTS` is an 8-column header whose widest cell is `3 (34h ago)`, so the
+    // column is eleven — not an even share of the pane, and not shrunk to the header.
+    assert_eq!(at[4] - at[3], width("3 (34h ago)") + GAP, "{header:?}");
+}
+
+/// **Still loading · nothing there · refused** — the same three the Alerts pane has, and none of
+/// them says `403` or the word RBAC.
+///
+/// **An empty list of deployments is not `nothing is broken`**: that sentence is Alerts' claim
+/// about the whole cluster, and a kind with no objects in it has no severity at all. **A refusal
+/// never reaches the empty sentence either** — *we were not allowed to look* is not *there is
+/// nothing*.
+#[test]
+fn the_browser_has_the_same_three_answers_the_alerts_pane_has() {
+    let now = now();
+    let kinds = [browsable("deployments", true)];
+
+    let loading = Pane::Loading;
+    let still = render(&opened(), &browsing(&loading, &kinds, &now));
+    assert!(holds(&still, "reading the cluster…"));
+    assert!(!holds(&still, "no deployments"));
+
+    let none = Pane::Ready(crate::k8s::Table::default());
+    let bare = render(&opened(), &browsing(&none, &kinds, &now));
+    assert!(holds(&bare, "no deployments in this cluster"));
+    assert!(
+        !holds(&bare, "nothing is broken"),
+        "that is the Alerts pane's claim about the cluster, not this kind's row count"
+    );
+    let mut scoped = browsing(&none, &kinds, &now);
+    scoped.namespace = Some("payments");
+    let scoped = render(&opened(), &scoped);
+    assert!(holds(&scoped, "no deployments in payments"));
+
+    // **The kind that outlived discovery**: an empty `kinds` slice under `View::Resources(0)`,
+    // which is what a discovery refresh that dropped a kind leaves the view pointing at. There is
+    // no plural to put in a sentence, so the pane names the next thing to try instead
+    // (`screens/states.md` § An empty kind in the browser, third row).
+    let stale = render(&opened(), &browsing(&none, &[], &now));
+    assert!(
+        holds(&stale, "no longer in the list — pick another kind"),
+        "with no kind to name, the pane names the next thing to try:\n{}",
+        rows(&stale).join("\n")
+    );
+    assert!(
+        !holds(&stale, "no  in"),
+        "never the scoped sentence with a hole where the kind would be"
+    );
+
+    let said = "You can't list deployments across the whole cluster, so k8rs is showing the \
+                namespace your kubeconfig points at: payments.";
+    let refused = Pane::Denied(said.to_owned(), table("table-deployments"));
+    let banner = render(&opened(), &browsing(&refused, &kinds, &now));
+    assert!(holds(
+        &banner,
+        "You can't list deployments across the whole"
+    ));
+    assert!(
+        holds(&banner, "broken-owned"),
+        "a banner over whatever did come back, never instead of it"
+    );
+    let empty = Pane::Denied(said.to_owned(), crate::k8s::Table::default());
+    let empty = render(&opened(), &browsing(&empty, &kinds, &now));
+    assert!(holds(&empty, "You can't list deployments across the whole"));
+    assert!(
+        !holds(&empty, "no deployments"),
+        "refused and nothing came back is not the same screen as there is nothing"
+    );
+
+    for state in [&still, &bare, &scoped, &stale, &banner, &empty] {
+        println!("{}\n", rows(state).join("\n"));
+        for word in ["403", "RBAC", "forbidden"] {
+            assert!(!holds(state, word), "no state prints {word:?}");
+        }
+    }
+    // **The title is drawn in every state**, asserted only where the kind's name could come from
+    // nowhere else: the two refusals put `deployments` in the banner's own sentence, so the same
+    // check there would pass without a title at all.
+    for state in [&still, &bare, &scoped] {
+        assert!(
+            row(state, "deployments").contains("deployments"),
+            "a pane that has not answered still says which kind it is about"
+        );
+    }
+}
+
 // --- MEASURING AND CUTTING ---
 
 #[test]
@@ -1323,4 +1790,90 @@ fn the_alerts_screen_at_the_floor() {
     let drawn = render(&app(), &screen);
     println!("{}", rows(&drawn).join("\n"));
     assert!(holds(&drawn, "▸ ALERTS"));
+}
+
+/// The browser, at the floor, for both committed captures and for both namespace scopes — printed
+/// so a reader of the report can compare it with `screens/resources.md` line by line.
+/// `cargo test -- --nocapture`.
+#[test]
+fn the_browser_screen_at_the_floor() {
+    let now = now();
+    let workloads: Vec<Browsable> = ["deployments", "statefulsets", "daemonsets", "pods", "jobs"]
+        .into_iter()
+        .map(|plural| browsable(plural, true))
+        .collect();
+    let log = ["$ kubectl get deployments -n payments".to_owned()];
+
+    for (fixture, at, namespace) in [
+        ("table-deployments", 0, Some("payments")),
+        ("table-pods", 3, None),
+    ] {
+        let ready = Pane::Ready(table(fixture));
+        let mut screen = browsing(&ready, &workloads, &now);
+        screen.namespace = namespace;
+        screen.log = &log;
+        screen.keys = "↑↓ move  ⏎ open  s scale  r restart  ctrl-d delete  / filter";
+
+        let mut app = App::default();
+        app.open(NavItem::Group(Group::Workloads));
+        app.open(NavItem::Kind(at));
+        println!("{}\n", rows(&render(&app, &screen)).join("\n"));
+    }
+}
+
+/// **More columns than the pane has room for, which no committed capture has and every wide CRD
+/// can.** The nine columns of `table-pods` all promoted to `priority: 0` want 102 of the 51 the
+/// floor gives them.
+///
+/// What is asserted is that the screen stays a screen: the frame is intact, the header and the
+/// rows still line up, and nothing panics. Which columns survive is ratatui's solver, not a rule
+/// `screens/` states — the one thing this file promises is that the name is what gives way first,
+/// and at this width it has already given everything it has.
+#[test]
+fn more_columns_than_the_pane_can_hold_still_draws_a_frame() {
+    let now = now();
+    let mut pods = table("table-pods");
+    for column in &mut pods.columns {
+        column.priority = 0;
+    }
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let drawn = render(&opened(), &browsing(&ready, &kinds, &now));
+    println!("{}", rows(&drawn).join("\n"));
+
+    for line in rows(&drawn) {
+        assert_eq!(line.chars().count(), usize::from(MIN_WIDTH), "{line:?}");
+    }
+    assert!(holds(&drawn, "NAME"), "the header is still drawn");
+    assert!(
+        holds(&drawn, "pods"),
+        "the pane still says which kind it is"
+    );
+}
+
+/// A server that sent rows and no `priority: 0` column at all — nothing in `screens/` draws it,
+/// and the only promise is that it is not a panic.
+#[test]
+fn rows_with_no_plain_column_draw_nothing_and_do_not_panic() {
+    let now = now();
+    let mut pods = table("table-pods");
+    for column in &mut pods.columns {
+        column.priority = 1;
+    }
+    let ready = Pane::Ready(pods);
+    let kinds = [browsable("pods", true)];
+    let drawn = render(&opened(), &browsing(&ready, &kinds, &now));
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        holds(&drawn, "pods"),
+        "the pane still says which kind it is"
+    );
+    assert!(!holds(&drawn, "NAME"), "no column survived the filter");
+    assert!(
+        !rows(&drawn)
+            .iter()
+            .any(|line| pane(line).starts_with(MARKER)),
+        "no marker over a row with nothing in it:\n{}",
+        rows(&drawn).join("\n")
+    );
 }

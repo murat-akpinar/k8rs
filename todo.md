@@ -4310,7 +4310,16 @@ string and key was settled in the design phase, so this phase is drawing.
       `the_title_and_the_action_are_drawn_whole` and
       `an_empty_evidence_leaves_the_line_out`
 - [ ] **Resources view**: generic table driven by server-side columns; works
-      for a CRD without a line of code written for it
+      for a CRD without a line of code written for it — **the table half landed
+      2026-09-06** in `ui.rs`'s `// --- THE BROWSER ---`: the two-condition
+      `ns:` label, the `priority: 0` filter with cells read at the kept indices,
+      the three answers, and no kind name in the file
+      ([D250](NOTES.md#d250--the-browser-pane-a-width-rule-that-is-not-widgetsmds-sentence-an-empty-list-that-is-not-nothing-is-broken-and-a-test-that-passed-on-the-screen-it-forbids-2026-09-06)).
+      **Open on its second half**: the `●` bleed-through on a row and the
+      `● web has 3 pods with problems — ⏎ to see` line under the table
+      ([screens/resources.md § Rules](screens/resources.md)), which needs
+      nothing from `rules.rs` — `k8s::Row::uid` against `rules::ObjectId::uid`,
+      both public, both `Option<String>`, measured at the first half
 - [ ] **Analysis view**: the Phase 4 reports, one pane each
 - [ ] Detail tabs per object: logs · describe · yaml · events, `[` / `]`
 - [ ] Command log panel — always visible, showing what k8rs ran

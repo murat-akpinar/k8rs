@@ -106,6 +106,12 @@ own `Table` printing — the exact columns `kubectl get` would show.
   Forty permanent streams is the problem this architecture exists to avoid.
 - Operations live here, on the selected object — see [dialogs.md](dialogs.md).
   Nothing is ever applied to a selection of more than one object.
+- **A kind with zero rows is not a finding.** It draws its own dim, centred
+  sentence — deliberately not the Alerts `○ nothing is broken` claim, because
+  an empty list of one kind carries no severity — covering all three ways the
+  pane can be empty: scoped, unscoped, and when the kind that was selected has
+  dropped out of the sidebar's own list
+  ([states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser)).
 
 ## Browsing every namespace
 

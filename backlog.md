@@ -2728,3 +2728,26 @@ long-form version and stays the authority.*
   stops being true and the summary must be last and must name the steps. Not
   urgent: it costs a re-run, never a wrong answer. `tester`'s. Found by `tester`,
   2026-09-06
+
+- **`Table::from` can be reached without `ingest`, and nothing fails if it is.**
+  `k8s::ingest<K, T: From<K> + Bounded>` is the single door — `T::from` then `bound()` —
+  and its doc says the `From` is what makes it unavoidable for the browser's rows, because
+  `Table` has no `Deserialize`. That holds *inside* `k8s.rs`. Outside it, `Table` and
+  `TableResponse` are both crate-visible while `ingest` and `Bounded` are private, so a
+  decode written in another file reaches `Table::from` and skips the bound — the cells
+  would then be the one thing on screen that never went through `text()` (invariant 9).
+  **No such decode exists today** and the browser fetch is not wired, so this is a guard
+  worth writing rather than a hole that is open: `k8s_tests.rs` already derives a
+  field-list guard the same way, and the shape here is *`Table::from` appears in exactly
+  one place and that place is `ingest`*. Reported by `dev-ui` as a live invariant-9 defect
+  at the Resources box, measured by the PM to be narrower than that
+  ([D250](NOTES.md#d250--the-browser-pane-a-width-rule-that-is-not-widgetsmds-sentence-an-empty-list-that-is-not-nothing-is-broken-and-a-test-that-passed-on-the-screen-it-forbids-2026-09-06)
+  ruling 8). `tester`'s, once `k8s.rs`'s freeze allows the assertion to name it. 2026-09-06
+
+- **`k8s::Column::name`'s doc says the header is "cased for the screen by `views.rs`", and
+  `views.rs` has no such function.** The casing is presentation and it landed where
+  presentation lives, `ui.rs`'s `grid` — so the line is wrong about a file that never held
+  it. One sentence to fix, in a file that **freezes after Phase 6** (todo.md § Phase 5,
+  NOTES § D116), which is why it is here and not a box: it rides along the next time
+  `dev-core` legitimately opens `k8s.rs`. Found at the Resources box by `dev-ui`, confirmed
+  by the PM, 2026-09-06

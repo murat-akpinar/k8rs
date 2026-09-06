@@ -36,6 +36,103 @@ drawn as an answer and points at the report that still has something to say.
 This screen is only honest because Alerts holds nothing but *broken right
 now* — a lint report would never be empty.
 
+## An empty kind in the browser
+
+Not the same claim as the one above. *Nothing is broken* is Alerts' verdict
+on the whole cluster, computed once and stated in one voice. `jobs` coming
+back with zero rows is not a verdict on anything — the cluster can have an
+OOMKilled pod three panes over while `jobs` is legitimately empty, and
+pairing the two would make the browser disagree with the screen it is never
+allowed to disagree with
+([resources.md § Rules](resources.md#rules), *alerts bleed through*). So the
+empty pane borrows the shape — centred, dim — and none of the four reserved
+symbols: `●` `▲` `○` are severities and this carries none, `⚠` is a
+connection or trust problem and this is neither
+([README § the five rules, item 4](README.md#the-five-rules-every-screen-obeys)).
+No glyph, one line of dim text.
+
+There are exactly three sentences, one per reason the pane can be empty:
+
+| When | The pane says |
+|---|---|
+| A namespaced kind, scoped to one namespace (title already reads `ns: payments`) | `no jobs in payments` |
+| A namespaced kind, no scope in effect — [browsing every namespace](resources.md#browsing-every-namespace), the ordinary case today | `no jobs in this cluster` |
+| The kind that was selected is no longer in the sidebar's own list (discovery changed mid-frame) | `no longer in the list — pick another kind` |
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  jobs                                         │
+│  RESOURCES         │                                               │
+│▸  workloads        │                                               │
+│     deployments  12│                                               │
+│     statefulsets  3│                                               │
+│     daemonsets    5│            no jobs in this cluster            │
+│     pods         84│                                               │
+│     jobs          0│                                               │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │                                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get jobs -A                                              │
+├────────────────────────────────────────────────────────────────────┤
+│ / filter                                                           │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The footer loses `⏎ open`, `s scale`, `r restart` and `ctrl-d delete`.**
+  All four act on a selected object (invariant 2), and zero rows leaves
+  nothing to select — showing them would be exactly the "promised key that
+  does nothing" this file's own key rule already forbids
+  ([README § the five rules, item 2](README.md#the-five-rules-every-screen-obeys)).
+  `↑↓ move` goes with them; there is nothing to move a cursor across.
+  `/ filter` stays: it opens a pane-level control, not an operation on an
+  object, so it is still honest to offer even though this particular list has
+  nothing to narrow.
+- **`no jobs in this cluster` is the ordinary state, not a fallback** — see
+  [resources.md § Browsing every namespace](resources.md#browsing-every-namespace):
+  without a namespace scope, `-A` is what k8rs is always doing today.
+
+Scoped to one namespace, only the sentence changes — the title still carries
+`ns: payments`, so the sentence does not repeat it:
+
+```
+┌───────────────────────────────────────────────┐
+│  jobs          ns: payments                   │
+│                                               │
+│              no jobs in payments              │
+│                                               │
+└───────────────────────────────────────────────┘
+```
+
+And when the kind itself is the thing missing — the sidebar's own list moved
+out from under the pane's remembered position, so there is no kind name left
+to put in a sentence:
+
+```
+┌───────────────────────────────────────────────┐
+│                                               │
+│   no longer in the list — pick another kind   │
+│                                               │
+└───────────────────────────────────────────────┘
+```
+
+- **The title bar is blank, not guessed.** Same rule the header's own vitals
+  already follow — a fact k8rs cannot read is blank, never invented
+  ([widgets.md § 1a](widgets.md#1a-the-header-row)) — applied here to a kind
+  name instead of a node count.
+- **The sentence still names a next step**, unlike a bare "nothing here":
+  every other state on this page ends by saying what to try next, and a rare
+  state is not the one to make an exception of. `⏎`, `s`, `r` and `ctrl-d` are
+  gone here too, for the same reason as the ordinary case above — there is
+  not even a kind to say nothing was selected *of*.
+- This is a resync glitch, not a failure — nothing to retry, nothing to
+  report. It clears itself the moment the reader picks any kind from the
+  sidebar, which is why the sentence sends them there instead of explaining
+  the mechanism.
+
 ## Still loading
 
 ```

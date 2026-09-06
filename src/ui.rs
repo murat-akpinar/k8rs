@@ -22,9 +22,9 @@
 //! What this file does owe is not *building* a string that escapes that guarantee, which is why
 //! every span below is either a literal or a value that arrived stripped.
 //!
-//! **What it does not draw yet**: the Resources and Analysis panes, the detail tabs, the modal
-//! layer and the `?` overlay. The content pane is the Alerts one because it is the only one
-//! built; the dispatch on [`crate::views::View`] arrives with the second pane, not before it.
+//! **What it does not draw yet**: the Analysis pane, the detail tabs, the modal layer and the
+//! `?` overlay. [`content`] dispatches on [`crate::views::View`] and has two arms built of the
+//! three, so an open report draws the Alerts pane until the box that writes its own.
 
 // Nothing outside `#[cfg(test)]` calls this file yet: the event loop that will is Phase 12's
 // `main.rs`. Same attribute, same position and same accepted blind spot as `theme.rs`'s and
@@ -42,13 +42,14 @@ use crate::analysis::Badge;
 use crate::k8s::Browsable;
 use crate::rules::{Finding, Severity};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
-use crate::views::{self, App, Card, NavItem, Pane};
+use crate::views::{self, App, Card, NavItem, Pane, View};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Row, Table, TableState};
+use std::borrow::Cow;
 
 // --- THE NUMBERS THE MOCKUPS ARE DRAWN TO START ---
 
@@ -68,8 +69,17 @@ const LOG_LINES: u16 = 2;
 /// 53 columns at the 80×24 floor (`screens/alerts.md` § The columns).
 const PAD: u16 = 2;
 
-/// Between a name that had to clip and the age beside it (`screens/alerts.md` § The age).
+/// Between a name that had to clip and the age beside it (`screens/alerts.md` § The age), and
+/// between two browser columns — **which is what keeps a clipped name and the number beside it
+/// from being read as one token** (`screens/resources.md` § Browsing every namespace, the clip
+/// point). One column would satisfy that rule; two is what every mockup on both screens draws.
 const GAP: usize = 2;
+
+/// **The priority plain `kubectl get` prints, and the only one the browser draws.** Anything
+/// above it is what `-o wide` adds, and drawing it makes every screen the wide view
+/// (`screens/resources.md`, [`crate::k8s::Column::priority`] — the filter is the screen's,
+/// because which columns fit is).
+const PLAIN: i32 = 0;
 
 /// The evidence is the one thing a card cuts, and it is cut at three wrapped lines. The number
 /// is a measurement rather than a taste: at two, rule 10's card stops before the quote it went
@@ -123,6 +133,23 @@ pub struct Screen<'a> {
     /// The Alerts list, in the three answers a pane has (`crate::views::Pane`) — and a refusal
     /// carries whatever did come back with it, which is what the banner is drawn *over*.
     pub alerts: &'a Pane<Vec<Card>>,
+    /// **The browser's answer for the kind [`crate::views::View::Resources`] names**, in the same
+    /// three (`screens/resources.md`). One `Table` and not one per kind: the caller fetches the
+    /// open kind and nothing else, because a view that is not open is not watched.
+    ///
+    /// **Nothing here says which kind it is** — that is `app.view`'s index into
+    /// [`Screen::kinds`], so *which kind* and *which answer* cannot come apart in this struct the
+    /// way `crate::views::View` already refuses to let them (invariant 12).
+    pub browser: &'a Pane<crate::k8s::Table>,
+    /// **The one namespace everything is scoped to, or `None` for every namespace** — from
+    /// `--namespace/-n` or the 403 fallback, never from a kind.
+    ///
+    /// It is the second of the two conditions the `ns:` label needs, [`Browsable::namespaced`]
+    /// being the first: *a namespaced kind browsed with no scope reads the same as a
+    /// cluster-wide one* (`screens/resources.md` § Rules). It is not derived from
+    /// [`Screen::context`], which already spells the same fact for the header — a string is not a
+    /// value, and parsing one back is how two zones start disagreeing.
+    pub namespace: Option<&'a str>,
     /// The snapshot's moment, so an age drawn here and an age sorted on in
     /// [`crate::views::cards`] are the same answer (NOTES § D246 ruling 4).
     pub now: &'a Time,
@@ -511,15 +538,28 @@ fn value<'a>(badge: Option<&'a Badge>, screen: &Screen) -> Vec<Span<'a>> {
 
 // --- THE CONTENT PANE START ---
 
-/// **Three answers, three screens** (PRIOR-ART § C2): *nothing came back yet* is not *there is
-/// nothing* is not *we were not allowed to look*. The three-arm match is what makes the second
-/// unreachable from the other two.
+/// **Which pane the content area is**, and inside each one **three answers, three screens**
+/// (PRIOR-ART § C2): *nothing came back yet* is not *there is nothing* is not *we were not
+/// allowed to look*. The three-arm match is what makes the second unreachable from the other two,
+/// and each pane repeats it rather than sharing a two-state helper that could collapse them.
+///
+/// **[`View::Analysis`] draws the Alerts pane, because the Analysis pane is the next box**
+/// (todo.md § Phase 11) — which is the behaviour this file already had when it dispatched on
+/// nothing at all. It shares an arm with [`View::Alerts`] rather than falling into a `_`, so the
+/// box that writes that pane finds the arm it has to split instead of a wildcard that swallowed
+/// it.
 fn content(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
-    match screen.alerts {
-        Pane::Loading => note(frame, area, screen, false),
-        Pane::Denied(said, cards) => denied(frame, area, app, screen, said, cards),
-        Pane::Ready(cards) if cards.is_empty() => note(frame, area, screen, true),
-        Pane::Ready(cards) => alerts(frame, area, app, screen, cards),
+    match app.view {
+        View::Resources(nth) => browser(frame, area, app, screen, screen.kinds.get(nth)),
+        View::Alerts | View::Analysis(_) => match screen.alerts {
+            Pane::Loading => note(frame, area, screen, false),
+            Pane::Denied(said, cards) => {
+                let rest = banner(frame, area, screen, said);
+                alerts(frame, rest, app, screen, cards);
+            }
+            Pane::Ready(cards) if cards.is_empty() => note(frame, area, screen, true),
+            Pane::Ready(cards) => alerts(frame, area, app, screen, cards),
+        },
     }
 }
 
@@ -562,8 +602,24 @@ fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool) {
                 .map(|line| Line::styled(line, dim)),
         );
     }
+    centred(frame, area, lines);
+}
+
+/// A short block of lines in the middle of a pane — the shape every *nothing to draw* screen
+/// takes (`screens/states.md`). One function because [`note`] and [`empty`] draw the same block
+/// with different sentences in it, and two copies of a centring calculation is how two panes
+/// start putting their sentence in different places.
+///
+/// **[`BLOCK`] is a floor, not a ceiling.** It is the measure several paragraphs of prose want,
+/// and a caller whose line is legitimately wider — `screens/states.md` § *An empty kind in the
+/// browser*, one line of dim text that the file draws unbroken — would otherwise have it clipped
+/// at 34 columns. The pane is the real ceiling. [`note`]'s own lines are wrapped at `BLOCK`
+/// before they arrive, so nothing about the Alerts block moves.
+fn centred(frame: &mut Frame, area: Rect, lines: Vec<Line>) {
+    let widest = lines.iter().map(Line::width).max().unwrap_or(0);
+    let widest = u16::try_from(widest).unwrap_or(u16::MAX);
     let block = area.centered(
-        Constraint::Length(BLOCK.min(area.width)),
+        Constraint::Length(widest.max(BLOCK).min(area.width)),
         Constraint::Length((lines.len() as u16).min(area.height)),
     );
     frame.render_widget(Paragraph::new(Text::from(lines)), block);
@@ -580,21 +636,25 @@ fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool) {
 /// *"Stale data stays visible and stays labelled… k8rs does not clear the screen because it lost
 /// its token."* Nothing came back is an empty list and draws nothing, which is not the same
 /// screen as `nothing is broken` and must never become it.
-fn denied(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, said: &str, cards: &[Card]) {
+///
+/// **It returns the pane that is left under it**, so the caller draws its own list there — cards
+/// for Alerts, a table for the browser. A banner that also drew the list could only ever serve
+/// one pane, and the sentence is the half both share.
+fn banner(frame: &mut Frame, area: Rect, screen: &Screen, said: &str) -> Rect {
     let text = wrapped(said, usize::from(padded(area).width));
     // The banner, then the blank row that separates it from the first card — the same blank a
     // card puts between itself and the next one.
-    let banner = u16::try_from(text.len() + 1)
+    let height = u16::try_from(text.len() + 1)
         .unwrap_or(u16::MAX)
         .min(area.height);
     let [top, rest] =
-        Layout::vertical([Constraint::Length(banner), Constraint::Min(0)]).areas(area);
+        Layout::vertical([Constraint::Length(height), Constraint::Min(0)]).areas(area);
     let lines: Vec<Line> = text
         .into_iter()
         .map(|line| Line::styled(line, screen.fg(theme::TEXT)))
         .collect();
     frame.render_widget(Paragraph::new(Text::from(lines)), padded(top));
-    alerts(frame, rest, app, screen, cards);
+    rest
 }
 
 /// The card region: the pane less a two-column pad each side — 53 columns at the floor
@@ -764,6 +824,221 @@ fn indent<'a>(text: Vec<String>, prefix: &'static str, style: Style) -> Vec<Line
 }
 
 // --- THE CONTENT PANE END ---
+
+// --- THE BROWSER START ---
+
+/// **Every kind the cluster serves, drawn from the server's own `Table` and nothing else**
+/// (`screens/resources.md`, invariant 12). Nothing below names a kind, reads one, or branches on
+/// one: the columns, their headers and their order are the API server's answer, which is what
+/// makes a CRD display correctly with no line written for it.
+///
+/// The title is drawn in every state — a pane that has not answered yet still has to say which
+/// kind it is about — and the three answers below it are the same three [`content`] gives the
+/// Alerts pane, for the same reason.
+fn browser(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, kind: Option<&Browsable>) {
+    let area = match screen.browser {
+        Pane::Denied(said, _) => banner(frame, area, screen, said),
+        _ => area,
+    };
+    let [head, _, body] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    // **The title is padded and the table is not**, which is what both mockups draw: the
+    // selection marker is the table's own gutter and sits at the pane's left edge, exactly where
+    // the sidebar's does (`screens/resources.md`, `screens/widgets.md` § 2's indent rule). A
+    // table padded like a card would spend two columns twice over, on the widest thing on the
+    // screen.
+    heading(frame, padded(head), screen, kind);
+    let scoped = scope(kind, screen).is_some();
+    match screen.browser {
+        Pane::Loading => note(frame, body, screen, false),
+        // **A refusal draws whatever did come back and never the empty sentence below**, which is
+        // [`banner`]'s rule one line up: *we were not allowed to look* is not *there is nothing*.
+        // A refusal that came back with no rows at all draws the banner and an empty grid.
+        Pane::Denied(_, table) => grid(frame, body, app, screen, table, scoped),
+        Pane::Ready(table) if table.rows.is_empty() => empty(frame, body, screen, kind),
+        Pane::Ready(table) => grid(frame, body, app, screen, table, scoped),
+    }
+}
+
+/// **The pane title: the kind, and `ns: payments` beside it under two conditions and not one**
+/// (`screens/resources.md` § Rules) — discovery's own `namespaced` flag, **and** a namespace scope
+/// actually in effect. A namespaced kind browsed with no scope reads the same as a cluster-wide
+/// one, which is the ordinary state of the browser today and not an edge case.
+///
+/// **A label that does not fit is left out, never half-drawn.** `ns: payme` names a namespace that
+/// does not exist, and the header's rule for a vital is this file's rule for every fact it draws:
+/// blank, never guessed (`screens/widgets.md` § 1a). The kind itself clips at the pane edge like
+/// any other string (§ 7) — it is the row's subject, so a shortened one still reads as itself.
+fn heading(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable>) {
+    let plural = plural(kind);
+    let mut spans = vec![Span::styled(plural.to_owned(), screen.fg(theme::TEXT))];
+    if let Some(namespace) = scope(kind, screen) {
+        let label = format!("ns: {namespace}");
+        if width(plural) + GAP + width(&label) <= usize::from(area.width) {
+            spans.push(Span::raw(" ".repeat(GAP)));
+            spans.push(Span::styled(label, screen.fg(theme::DIM)));
+        }
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// **The namespace this view is scoped to, or `None`** — one condition per fact, never a list of
+/// kinds (`screens/resources.md` § Rules). It decides the title's label *and* whether a row is
+/// drawn `namespace/name`, so the two can never answer differently.
+fn scope<'a>(kind: Option<&Browsable>, screen: &Screen<'a>) -> Option<&'a str> {
+    kind.filter(|kind| kind.namespaced).and(screen.namespace)
+}
+
+/// The word the sidebar drew for this kind — **the server's own plural**, never one derived from
+/// the kind name ([`Browsable::plural`]). Empty where the view's index has outlived the discovery
+/// list it points into, which is the sidebar's own answer for the same case.
+fn plural(kind: Option<&Browsable>) -> &str {
+    kind.map_or("", |kind| kind.plural.as_str())
+}
+
+/// **An empty list of deployments is not `nothing is broken`** — that is the Alerts pane's claim
+/// and the strongest one k8rs makes, and a kind with no objects in it is an ordinary answer with
+/// no severity at all.
+///
+/// **The three sentences are `screens/states.md` § An empty kind in the browser's own table** —
+/// one row per reason the pane can be empty, and that file decides their wording. The first two
+/// name the scope, because *no deployments* means two different things depending on whether one
+/// namespace or the whole cluster was looked at. The third has no kind to name — the stale-index
+/// case [`plural`] describes — so it names the next thing to try instead, which is that file's
+/// closing rule: no state is a dead end.
+fn empty(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable>) {
+    let plural = plural(kind);
+    let said = match (plural, scope(kind, screen)) {
+        ("", _) => "no longer in the list — pick another kind".to_owned(),
+        (plural, Some(namespace)) => format!("no {plural} in {namespace}"),
+        (plural, None) => format!("no {plural} in this cluster"),
+    };
+    let dim = screen.fg(theme::DIM);
+    // **The measure is the pane, not [`BLOCK`]** — every row of that table is one line of dim
+    // text, and `BLOCK` is the width the *Alerts* pane's several paragraphs of prose are set to.
+    // At 34 it breaks the third sentence in half. The pane still bounds it, so one too narrow for
+    // the sentence wraps rather than overruns; the two scoped sentences are shorter than `BLOCK`,
+    // which [`centred`] keeps as its floor, so their block is the same 34 columns it always was.
+    let lines = wrapped(&said, usize::from(area.width))
+        .into_iter()
+        .map(|line| Line::styled(line, dim).centered())
+        .collect();
+    centred(frame, area, lines);
+}
+
+/// **The header row and one row per object, both from `columnDefinitions`**
+/// (`screens/widgets.md` § 2, `screens/resources.md`).
+///
+/// **The `priority: 0` filter is the whole of the column choice**, and the indices it kept are
+/// what every cell is then read at: [`crate::k8s::Row::cells`] is aligned to the *whole* column
+/// list, so a filtered header over unfiltered cell indices puts `Ready` under `AGE` the moment a
+/// server sends a priority-1 column anywhere but the end.
+///
+/// **The widths are `screens/widgets.md` § 2's, and which column gives way follows from them.**
+/// Every column but the first is `Length(natural)` — the wider of its header and its widest
+/// cell — and the first is `Min(len(header))`, so leftover space grows the name column and a pane
+/// too narrow shrinks that one first: ratatui holds a `Min` at or above its minimum more strongly
+/// than it holds a `Length` at its length. That is the mockup's own order of sacrifice — the
+/// numbers keep their columns, the name clips — expressed as two constraints rather than a
+/// measurement per kind.
+///
+/// **The cost is linear in rows and every row is walked twice** — once for the column widths,
+/// once to build the cells — which is what a column layout computed from content costs. Measured
+/// on the pods capture cycled to length, debug build, 2026-09-06: 2.3 ms/frame at 100 rows,
+/// 7.4 at 1 000, 30 at 5 000, 117 at 20 000. Drawing only the visible window would halve it and
+/// no more, because ratatui walks the whole table itself for its column count; nothing in
+/// `screens/` asks for the other half, so it is not spent here.
+fn grid(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    screen: &Screen,
+    table: &crate::k8s::Table,
+    scoped: bool,
+) {
+    let kept: Vec<(usize, String)> = table
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, column)| column.priority == PLAIN)
+        .map(|(at, column)| (at, column.name.to_uppercase()))
+        .collect();
+    // **No column the reader was meant to see is nothing to draw**, and that includes the
+    // selection marker: a lone `▸` in a blank pane claims a selected row whose every cell
+    // was filtered away. Unreachable from a real API server — every printer, built-in and CRD,
+    // emits `Name` at priority 0 — and cheaper to state than to reason about.
+    if kept.is_empty() {
+        return;
+    }
+
+    let widths: Vec<Constraint> = kept
+        .iter()
+        .enumerate()
+        .map(|(nth, (at, header))| {
+            let header = width(header) as u16;
+            if nth == 0 {
+                return Constraint::Min(header);
+            }
+            let widest = table
+                .rows
+                .iter()
+                .map(|row| row.cells.get(*at).map_or(0, |cell| width(cell) as u16))
+                .max()
+                .unwrap_or(0);
+            Constraint::Length(header.max(widest))
+        })
+        .collect();
+
+    let rows: Vec<Row> = table
+        .rows
+        .iter()
+        .map(|row| {
+            Row::new(kept.iter().enumerate().map(|(nth, (at, _))| {
+                let cell = row.cells.get(*at).map_or("", String::as_str);
+                match &row.namespace {
+                    // **`namespace/name` in the first cell, and no column of its own** — the
+                    // server sends no `NAMESPACE` column for an unscoped list, and `kubectl -A`
+                    // prepends one client-side (`screens/resources.md` § Browsing every
+                    // namespace). Without it, fourteen `kube-root-ca.crt` rows are fourteen
+                    // identical strings with a cursor resting on one of them, which satisfies
+                    // invariant 2's *explicitly selected object* in the letter and defeats it in
+                    // the intent. A scoped view already names its one namespace in the title, and
+                    // a row that carries none never grows one.
+                    Some(namespace) if nth == 0 && !scoped => {
+                        Cow::Owned(format!("{namespace}/{cell}"))
+                    }
+                    _ => Cow::Borrowed(cell),
+                }
+            }))
+        })
+        .collect();
+
+    // The anchor is the row's `uid` and never its name (`crate::views::Cursor`) — `None` on every
+    // row of a Table fetched with `?includeObject=None`, which the cursor falls back to its index
+    // for rather than following a string.
+    let anchors: Vec<Option<&str>> = table.rows.iter().map(|row| row.uid.as_deref()).collect();
+    let mut state = TableState::default().with_selected(app.content.selected(&anchors));
+    frame.render_stateful_widget(
+        Table::new(rows, widths)
+            .header(
+                Row::new(kept.iter().map(|(_, header)| header.as_str()))
+                    .style(screen.fg(theme::DIM)),
+            )
+            .column_spacing(GAP as u16)
+            .highlight_symbol(MARKER)
+            // The same pairing the sidebar uses: the fill and the mark together, because `PANEL`
+            // degrades to nothing at sixteen colours and `▸` is what carries the selection there.
+            .row_highlight_style(Style::new().bg(ink(theme::PANEL, screen.depth))),
+        area,
+        &mut state,
+    );
+}
+
+// --- THE BROWSER END ---
 
 // --- MEASURING AND CUTTING START ---
 
