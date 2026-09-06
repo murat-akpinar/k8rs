@@ -672,6 +672,15 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   [D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15).
   Raised by `tester` and `k8s-admin` independently, 2026-09-06
 
+- **`just mutants` — the phase-close whole-file sweep — still names only the two files it
+  was written for.** The recipe is `--file src/rules.rs --file src/analysis.rs`, so
+  `theme.rs` (Phase 9) and `views.rs` (Phase 10) have never been in it; both were covered
+  only because a brand-new file's `mutants-diff` **is** its whole-file sweep, which stops
+  being true the first time either is edited. Phase 10 closed with `views.rs` at 112
+  mutants / 0 missed for exactly that reason, and the reason is a coincidence of timing
+  rather than a property of the gate. `tester` owns the `justfile`. Raised by the PM at
+  the Phase 10 close, 2026-09-06
+
 - **`scripts/certs-test.sh` has no `--self-test`.** It grew a second check this
   turn — the two files that pin an instant against the committed certificates —
   and its red was proven on scratch copies rather than by a self-test, which every
