@@ -266,6 +266,8 @@ its line moving with it.
 - [D242](#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05) — the Phase 9 review round: a test that accepted one letter, an `include_str!` that only breaks in the downloader's hands, and a comment that measured false
 - [D243](#d243--the-phase-9-close-the-constant-is-the-carrier-and-not-the-sentence-the-pairing-that-would-have-been-written-twice-and-a-comment-three-files-had-already-copied-2026-09-06) — the Phase 9 close: the constant is the carrier and not the sentence, the pairing that would have been written twice, and a comment three files had already copied
 - [D244](#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06) — Phase 10 opens on two gates that print the same thing whether they ran or not: a file the sweep cannot see, and a tarball nobody packed
+- [D245](#d245--the-browser-sorts-by-no-column-in-v1-because-nothing-typed-survives-the-fetch-and-the-file-that-could-change-that-is-frozen-2026-09-06) — the browser sorts by no column in v1, because nothing typed survives the fetch and the file that could change that is frozen
+- [D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) — the `views.rs` review round: a fraction whose halves count different things, a card that draws a count the screen ends without, and the freeze that was set one phase too early
 
 ## Why it exists — where the gap is
 
@@ -21367,3 +21369,183 @@ its build directory is used. **What is not measured is CI**, where `Swatinem/rus
 may or may not carry a nested build directory across pushes; if it does not, the
 `guards` step pays a runner-side cold build on every push, and the number to read is
 that step's duration on the first green run after this lands.
+
+### D245 — the browser sorts by no column in v1, because nothing typed survives the fetch and the file that could change that is frozen (2026-09-06)
+
+Phase 10's box demands a ruling and names two honest answers: the Resources view
+offers no column sort in v1, or every column type gets a named parse with the
+unparseable pinned last and a test of its own. Choosing neither is how
+[k9s#3793](https://github.com/derailed/k9s/issues/3793) stays open for a year
+([PRIOR-ART § F1](PRIOR-ART.md#f1--sorting)).
+
+**The ruling is the first: no column sort in the browser in v1.** It is not a
+preference between two designs — the second is not available to this phase, and the
+reason is a fact of the code rather than an argument about taste.
+
+**What a row actually holds.** `Row` (`k8s.rs`) is `cells: Vec<String>`, plus
+`namespace`, `name` and `uid` off the row's own `PartialObjectMetadata`. Nothing
+else. There is no `creationTimestamp` and no typed quantity anywhere in it:
+`MetadataResponse` names three fields and serde builds nothing it is not asked for.
+So the only thing a sort could compare is a **rendered cell** — `1Gi` against
+`999Mi`, `2d` against `10h`, `<none>` against `""` — which is F1's single stated
+cause, and the direct route to the defect class that gave k9s a panic when a row had
+fewer fields than the sort index ([#3926](https://github.com/derailed/k9s/pull/3926))
+and a comparator that was not a strict weak ordering
+([#4070](https://github.com/derailed/k9s/pull/4070)).
+
+**The obvious third answer was checked and it is closed.** Age *could* be typed
+rather than parsed — read `creationTimestamp` off the row's object instead of the
+rendered `2d` — and that needs no per-kind knowledge, because `metadata` is the one
+thing every kind has ([invariant 12](CLAUDE.md) is about columns, not about this).
+It needs one new field on `Row`, and **`k8s.rs` freezes at Phase 6's close**. A later
+step needing a frozen file changed is the plan being wrong, not a feature to squeeze
+in, and the fix for that is to stop and re-order rather than to reach back. Nothing
+in Phase 10 justifies re-opening the file, so the third answer is recorded here as
+available to whoever *does* re-open it, and not taken.
+
+**Nothing on screen has to change, which is how a v1 refusal stays honest.**
+`screens/resources.md` contains the string `sort` zero times, and
+[D12](#d12--the-key-map-and-two-keys-deleted)'s key map binds no sort key — the
+browser was drawn without one. `screens/analysis.md` § 3 already states the same
+principle for the page it governs: *`views.rs` never splits a rendered string back
+into values*. So this ruling writes down what the screens draw instead of
+contradicting them, and no `tui-designer` round is owed.
+
+**What the user gets instead, and it is not nothing.** The rows arrive in the order
+the API server sent them — the same rows in the same order `kubectl get` prints,
+because k8rs reorders nothing — and `/` filters the list by text while `n` filters by
+namespace ([D12](#d12--the-key-map-and-two-keys-deleted)). The typed sort this
+product actually sells is on **Alerts**, whose findings are ours: severity
+descending, then recency, over values that were never strings. The browser is a
+viewer, and *find the row* is a filter's job.
+
+**What would reverse it**, in this order and not one step fewer: a decision to
+re-open `k8s.rs`, a `Row` that carries the typed value a column is drawn from, and
+then the second answer whole — a named parse per column type, the unparseable pinned
+last, one test each. A sort added over the cells as they stand today would be the
+defect, not a smaller version of the feature.
+
+### D246 — the `views.rs` review round: a fraction whose halves count different things, a card that draws a count the screen ends without, and the freeze that was set one phase too early (2026-09-06)
+
+`views.rs` landed whole in one turn — the state file for Phase 11's renderer, 847 lines
+with 60 tests beside it, `just check` green and the author's own mutation sweep at
+107 mutants and 0 missed. `tester` and `k8s-admin` then read it in parallel and
+between them found five defects, four false claims in doc comments and three test
+holes each proved by mutating the code and watching all 60 stay green. The rulings
+below are the PM's; the first three are the ones the file could not be frozen with.
+
+**1. `2 of 1 pods` is reachable, and the fix is neither clamping nor printing it.**
+`affected` counts pod objects that exist and carry a finding; `total` is
+`WorkloadSnapshot::desired`, which is `spec.replicas` — *asked for*, and not an upper
+bound on *exists*. One replica, the old pod stuck `Terminating` behind a finalizer
+(rule 12) while its replacement is `ImagePullBackOff` (rule 3), is two pod objects
+under one owner at `desired: 1`; measured, the card reads `2 of 1 pods`. The author
+recorded not-clamping as deliberate and was right — clamping hides a pod that has a
+finding — but clamp-or-lie is a false pair, and the third answer was already one arm
+up in the same function. **Where `affected > total` the denominator is dropped and the
+card reads `n pods`**, which is exactly the move
+`screens/alerts.md` § *the third form* made for `unavailableReplicas`, for this reason
+in these words: *a denominator here would eventually print `2 of 1 pod not answering`*.
+[PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended) is tagged **covered** and
+calls it this product's founding argument — *never divide by a denominator that is not
+guaranteed complete*. The test that asserted `4 of 3 pods` asserted what the code did;
+it now asserts what the requirement says.
+
+**2. A card whose owner is the pod draws no count at all.** When nothing owns a pod,
+`owner == object` and both are kind `Pod`, so `affected` is 1 and the card reads
+`1 pods`. `screens/alerts.md` draws that card twice off committed captures —
+`default/broken-pending`, `default/broken-hostpath` — with the identity line ending
+after the name, and states the rule twice in prose: *"a bare pod, so there is no owner
+and no `n of m`"*. [D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)'s *a group with
+none of them has no `n of m`* is about **zero** pods and does not reach this shape, so
+this is the screen file adding a case the decision did not cover, not the two
+disagreeing. **`owner.kind == Pod` draws no count.** The mirror-pod card —
+`kube-system/etcd-k8rs-control-plane`, present on every kubeadm and kind cluster — was
+the second shape it fixes.
+
+**The wording question underneath it is separate and stays answered as drawn.**
+`1 pods` survives on an *owned* single-pod card whose workload could not be read.
+`screens/alerts.md:916` draws the identity line's count plural at one —
+`data/migrate-job · 1 of 1 pods` — while `:1042` says `pod` takes its singular at one
+about the **evidence** line's three forms, which is a different line. The identity
+line keeps the plural the mockup draws; that the two lines spell it differently is
+`tui-designer`'s to settle in `screens/`, and it is in `backlog.md` rather than being
+invented here.
+
+**3. The reversal: `views.rs` freezes at the close of Phase 11, not Phase 10.**
+`todo.md` said *Frozen after: `views.rs`* at Phase 10's foot. Both reviewers arrived at
+the same place from different directions: `screens/widgets.md` § 5 declares seven
+`Modal` variants and the file has two; `screens/context.md`'s switcher has a
+`may_switch_cluster()` and nothing to switch into; `screens/detail.md`'s pane has a
+`tab`, a `scroll` and a `following` flag and no object identity, no container
+selection and no way to say the pane is open at all; and a Phase 11 box already
+requires the dialog to hold the object's `uid`, which `Dialog` does not carry.
+
+**The pyramid's own rule is what settles it, and it says the freeze was the error.**
+*A step may create new files or shape **the current top layer**; files finished in
+earlier steps are frozen.* `views.rs` is the top layer only until `ui.rs` exists, and
+`ui.rs` is its only consumer — so freezing the state before the renderer that reads it
+guarantees the *later step needs a frozen file changed* case the rule exists to
+prevent. Phase 10 proves the state it could specify from `screens/`; Phase 11 finishes
+it against a renderer and freezes it there. **What this does not license** is Phase 11
+keeping detail-pane and picker state inside `ui.rs` — that deletes the phase goal —
+nor adding to `views.rs` anything a screen does not already draw.
+
+**4. A clock five minutes ahead erased the right-hand column and reordered the
+screen.** `rules::age` refuses a stamp more than `SKEW_ALLOWANCE` into the future
+([D55](#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) · [D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
+and returns `None`; `newest_first` compared the raw timestamp. So a skewed card drew a
+blank age and sorted to the **top** of its band, where `screens/alerts.md:120-126` says
+ageless cards sort **last** — *an unknown time cannot claim to be more recent than a
+known one*. The worse half is on one card: `Card::age` is `self.newest()?.age(now)`, so
+a single skewed finding suppressed a perfectly drawable age beside it, and a laptop
+resumed from suspend before NTP catches up reads **every** finding as future and loses
+the whole column while the order silently becomes `analyze()`'s. Root cause is that
+`cards()` took no `now` and could not apply the refusal the renderer applies. It takes
+one.
+
+**5. Four doc comments claimed things that are not true of the file.** *Anything left
+is a CRD* — `metrics.k8s.io`, `resource.k8s.io`, `apiserverinternal.k8s.io` and
+`storagemigration.k8s.io` are built-in aggregated groups and reach that arm; the
+`metrics.k8s.io` one matters, because its resource is spelled `pods`, is namespaced and
+is listable, so `workloads` drew **two adjacent rows both reading `pods`** on every
+cluster with metrics-server. *Two allocations per call* is two per **field**, measured
+at 1.12 ms per keystroke over 5000 rows × 5 cells — the number is fine and the sentence
+was wrong. *No mockup draws `1 pods`* — two do, and they draw nothing there (ruling 2).
+And `Input` was named in the module doc as *where what the user types is bounded*,
+which it was: in length only. **`Input::push` now refuses a control character**, because
+a bracketed paste is exactly the event the length bound was written for and
+`screens/widgets.md` § 7's *an escape sequence reaches the terminal and rewrites it* is
+the same mechanism on the same widget.
+
+**6. Three test holes, each proved by a mutation the 60 committed tests could not
+see.** The workload lookup keyed on `.id` where every fixture set `owner: id.clone()`,
+so `.id` and `.owner` were indistinguishable to the suite though they are different
+objects in real data (a ReplicaSet's `desired` borrowed for its Deployment's card).
+`sidebar()`'s `.enumerate().filter()` survived being swapped for `.filter().enumerate()`
+— a per-group index instead of a global one, which opens a **different kind** — because
+every assertion opened `workloads`, whose first kind is also index 0 of the whole list.
+And the core group's `_ => Cluster` fallback survived gaining the CRD last resort above
+it, because its only test fed a cluster-scoped kind, where the two arms agree. **All
+three are one shape** — a branch whose test passes because two rules happen to agree on
+every input fed — and it is the same shape the author had already found and fixed once
+for `apps`, which is what makes it worth naming rather than listing.
+
+**What was checked and found sound**, because a review that only lists faults reads as
+if nothing was verified: `Severity`'s declaration order against the ascending `cmp`;
+`newest_first`'s hand-written `(Some, None) => Less` against the derived `Ord` that
+gets it backwards; sort stability keeping `analyze()`'s order in ties; `affected` being
+distinct over the whole `ObjectId` and not `group_key()`; `sidebar()` enumerating
+before filtering so the index is the global one; `selectable()` keying on the variant
+and never on `jump.is_some()`; the filter refusing a cluster-scoped row under any
+namespace filter; `Input`'s bound reusing `k8s::IDENTIFIER` so a stripped name stays
+typeable back, and `push` refusing a whole `char` rather than splitting one. And
+**invariant 2 holds at this layer**: `armed()` cannot manufacture an `ops::Agreed`,
+`Agreed` is unconstructible outside `ops.rs`, and the duplicated empty-name guard is
+the correct duplication because the two answer different questions — *may the button
+light up* against *may this proceed* — with the failure direction on the safe side. No
+state sequence was found where `armed()` is true with a name that does not match.
+
+**Two costs measured rather than guessed, neither a finding:** `cards()` at 2000 cards
+is 17.2 ms, so the named O(n²) ceiling is honest and nowhere near biting; the filter is
+1.12 ms per keystroke at 5000 × 5.

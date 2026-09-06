@@ -629,6 +629,49 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   last word-spelled count on the analysis page.** Every other counted paragraph
   now spells the digit; this one was out of scope for the round that fixed the
   blocking budgets' line. Found by the author, 2026-08-21
+- **`1 of 1 pods` and `1 pod ready` are two spellings of one word on one screen.**
+  `screens/alerts.md:916` draws the identity line's count plural at one —
+  `data/migrate-job ·  1 of 1 pods` — while `:1042` says `pod` takes its singular at one
+  about the **evidence** line's three forms, and `widgets.md` § 1b's ladder gives the
+  general rule. `views.rs::count()` follows the identity-line mockup, so `1 pods` ships
+  on an owned single-pod card whose workload could not be read. The code is doing what
+  the screen draws; which of the two spellings is right is `tui-designer`'s, in
+  `screens/`, before Phase 11 draws either. Raised by the PM at the Phase 10 review,
+  2026-09-06 ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 2)
+
+- **The sidebar's fallback drawer is named `workloads`, and on a real cluster it is a
+  junk drawer.** `Group::of`'s last resort places an unknown namespaced kind in
+  `workloads`. Measured against the groups an operator actually installs —
+  `cert-manager.io/certificates`, `monitoring.coreos.com/servicemonitors`,
+  `networking.istio.io/virtualservices`, `argoproj.io/applications`,
+  `external-secrets.io/externalsecrets`, `kustomize.toolkit.fluxcd.io/kustomizations` —
+  all six land there, so a cluster with a normal operator ecosystem shows forty rows in
+  that drawer of which eight are workloads, and `Certificate` is not in `storage`,
+  `network` or `config` where anyone would look. Placing an unknown CRD in a **named**
+  bucket is right; naming that bucket `workloads` is what makes it dishonest. A sixth
+  group or a `custom` sub-heading is a `screens/` ruling, not a patch to `views.rs`.
+  Found by `k8s-admin` at the Phase 10 operator review, 2026-09-06
+
+- **Nothing resets `View::Resources(at)` when the cluster changes under it.** The index
+  is into the discovery list of the current connection, which is safe while discovery is
+  read once at connect — and [D16](NOTES.md#d16--the-context-switcher) ruling 4 makes a
+  switch *the startup path run again*, which rebuilds the whole `App`. So this is
+  Phase 11's to carry out rather than a defect today; what makes it worth writing down is
+  that `App::open` resets the content cursor only `if self.view != before`, and
+  `Resources(12) == Resources(12)`, so a switch that did **not** rebuild would leave an
+  operator browsing prod's `deployments` on staging's `ingresses` with the old row
+  anchor still set. Found by `k8s-admin`, 2026-09-06
+
+- **There is no committed discovery capture, so every `Browsable` in `views_tests.rs` is
+  hand-transcribed.** `Group::of`'s seventeen group strings and the core group's plural
+  table are written twice from the same memory, which makes the tests a check on the
+  code and not on the cluster. `kubectl api-resources -o json` — or the two discovery
+  calls `k8s.rs` already makes — would make it two independent sources, and it is what
+  would have caught `metrics.k8s.io/pods` sitting next to `v1/pods` in the same drawer
+  before a reviewer reasoned it out. Needs a cluster trip, so it is the PM's under
+  [D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15).
+  Raised by `tester` and `k8s-admin` independently, 2026-09-06
+
 - **`scripts/certs-test.sh` has no `--self-test`.** It grew a second check this
   turn — the two files that pin an instant against the committed certificates —
   and its red was proven on scratch copies rather than by a self-test, which every

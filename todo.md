@@ -4215,18 +4215,21 @@ keeps TUI code from rotting.
       unpacking and `cargo test --no-run` on the result runs inside `just check`,
       and the Phase 9 defect is replanted and seen red. `tester`'s box — landed
       2026-09-06, [D244](NOTES.md#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06)
-- [ ] `views.rs`: which view, which item selected, filters, scroll, detail tab
-- [ ] Sidebar model built from discovery — groups (workloads / network /
-      storage / config / cluster), not a hard-coded list
-- [ ] **Grouping by owner** — findings collapse to one card per owner with a
+- [x] `views.rs`: which view, which item selected, filters, scroll, detail tab —
+      landed 2026-09-06, [D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+- [x] Sidebar model built from discovery — groups (workloads / network /
+      storage / config / cluster), not a hard-coded list — the API group names the
+      topic, the core group is the one closed table, and anything left is placed by
+      `namespaced` ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 5)
+- [x] **Grouping by owner** — findings collapse to one card per owner with a
       count ("3 of 40 pods"); the detail view lists which pods. This is the
       single thing standing between Alerts and a 400-line lint report
       ([NOTES § D3](NOTES.md#d3--findings-group-by-owner-not-by-pod))
-- [ ] Sorting: severity desc, then recency. Filters: `/` text within the
+- [x] Sorting: severity desc, then recency. Filters: `/` text within the
       current list, `n` namespace substring. **No severity filter** — grouping
       by owner made the list short, and severity is already the sort order
       ([NOTES § D12](NOTES.md#d12--the-key-map-and-two-keys-deleted))
-- [ ] **The browser's columns are strings, so decide now whether they sort at
+- [x] **The browser's columns are strings, so decide now whether they sort at
       all** — the sort above is typed and ours. The Resources view is not:
       invariant 12 builds it from the API server's own `Table` output, which is
       **display text**, so a column sort there compares `1Gi` against `999Mi`,
@@ -4242,14 +4245,23 @@ keeps TUI code from rotting.
       the browser offers no column sort in v1, or each column type gets a named
       parse with the unparseable pinned last and a test of its own. Choosing
       neither is how #3793 stays open for a year
-      ([PRIOR-ART § F1](PRIOR-ART.md#f1--sorting))
-- [ ] Modal state: confirm dialog, typed-name confirmation, help overlay
-- [ ] Unit tests — selection and filtering are logic, and logic gets tests
-      even when it is "just UI"
+      ([PRIOR-ART § F1](PRIOR-ART.md#f1--sorting)) — **ruled 2026-09-06: no column
+      sort in v1**, [D245](NOTES.md#d245--the-browser-sorts-by-no-column-in-v1-because-nothing-typed-survives-the-fetch-and-the-file-that-could-change-that-is-frozen-2026-09-06)
+- [x] Modal state: confirm dialog, typed-name confirmation, help overlay — the
+      three `screens/widgets.md` declares beyond them are Phase 11's, with the freeze
+      moved to make that legal ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3)
+- [x] Unit tests — selection and filtering are logic, and logic gets tests
+      even when it is "just UI" — 71 of them, and the three holes two reviewers
+      proved with mutations are closed ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 6)
 
 **Done when:** every navigation and filter case is exercised by tests with no
 terminal involved.
-**Frozen after:** `views.rs`.
+**Frozen after:** nothing — **`views.rs` freezes at Phase 11's close, not here**
+([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3). It is the top layer only until `ui.rs` exists, and `ui.rs` is its
+only consumer: `screens/` declares seven `Modal` variants where this phase built two,
+the detail pane has no object identity yet and the dialog has no `uid`, all of which
+Phase 11 needs. The pyramid says a step may shape *the current top layer*; freezing
+state before its renderer exists is what manufactures a frozen-file violation.
 
 ## Phase 11 — The console
 
@@ -4356,7 +4368,7 @@ Secret is redrawn after the reveal is dismissed.
 
 **Done when:** the running screen matches [`screens/`](screens/README.md) at
 80×24; every key in the footer works.
-**Frozen after:** `ui.rs`.
+**Frozen after:** `ui.rs` **and `views.rs`** — the latter carried forward from Phase 10 ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3).
 
 ## Phase 12 — Final wiring · **milestone M3**
 
