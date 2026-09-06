@@ -629,21 +629,58 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   last word-spelled count on the analysis page.** Every other counted paragraph
   now spells the digit; this one was out of scope for the round that fixed the
   blocking budgets' line. Found by the author, 2026-08-21
-- **`just mutants-diff` cannot see an untracked product file.** It scopes to
-  `git diff HEAD`, which excludes untracked files, so a brand-new `src/*.rs` is
-  invisible to the per-turn gate until it is staged. Harmless for a test module;
-  a new product file would be a silent gap of exactly the kind
-  [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
-  and [D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21)
-  are both about. Found by the author, 2026-08-21. **The gap stopped being silent
-  on 2026-08-29 and is not otherwise smaller**: `just mutants-diff` now refuses a
-  diff it found no mutants in, so a turn whose only product change is an untracked
-  new `src/*.rs` exits 1 saying *nothing to gate* instead of passing quietly
-  ([D182](NOTES.md#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)).
-  The refusal's own text tells the reader to check whether the product change is
-  missing from `git diff HEAD`, which is exactly this. Still worth fixing at the
-  source — the reader is being asked to diagnose what the recipe could scope
-  correctly
+- **`1 of 1 pods` and `1 pod ready` are two spellings of one word on one screen.**
+  `screens/alerts.md:916` draws the identity line's count plural at one —
+  `data/migrate-job ·  1 of 1 pods` — while `:1042` says `pod` takes its singular at one
+  about the **evidence** line's three forms, and `widgets.md` § 1b's ladder gives the
+  general rule. `views.rs::count()` follows the identity-line mockup, so `1 pods` ships
+  on an owned single-pod card whose workload could not be read. The code is doing what
+  the screen draws; which of the two spellings is right is `tui-designer`'s, in
+  `screens/`, before Phase 11 draws either. Raised by the PM at the Phase 10 review,
+  2026-09-06 ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 2)
+
+- **The sidebar's fallback drawer is named `workloads`, and on a real cluster it is a
+  junk drawer.** `Group::of`'s last resort places an unknown namespaced kind in
+  `workloads`. Measured against the groups an operator actually installs —
+  `cert-manager.io/certificates`, `monitoring.coreos.com/servicemonitors`,
+  `networking.istio.io/virtualservices`, `argoproj.io/applications`,
+  `external-secrets.io/externalsecrets`, `kustomize.toolkit.fluxcd.io/kustomizations` —
+  all six land there, so a cluster with a normal operator ecosystem shows forty rows in
+  that drawer of which eight are workloads, and `Certificate` is not in `storage`,
+  `network` or `config` where anyone would look. Placing an unknown CRD in a **named**
+  bucket is right; naming that bucket `workloads` is what makes it dishonest. A sixth
+  group or a `custom` sub-heading is a `screens/` ruling, not a patch to `views.rs`.
+  Found by `k8s-admin` at the Phase 10 operator review, 2026-09-06
+
+- **Nothing resets `View::Resources(at)` when the cluster changes under it.** The index
+  is into the discovery list of the current connection, which is safe while discovery is
+  read once at connect — and [D16](NOTES.md#d16--the-context-switcher) ruling 4 makes a
+  switch *the startup path run again*, which rebuilds the whole `App`. So this is
+  Phase 11's to carry out rather than a defect today; what makes it worth writing down is
+  that `App::open` resets the content cursor only `if self.view != before`, and
+  `Resources(12) == Resources(12)`, so a switch that did **not** rebuild would leave an
+  operator browsing prod's `deployments` on staging's `ingresses` with the old row
+  anchor still set. Found by `k8s-admin`, 2026-09-06
+
+- **There is no committed discovery capture, so every `Browsable` in `views_tests.rs` is
+  hand-transcribed.** `Group::of`'s seventeen group strings and the core group's plural
+  table are written twice from the same memory, which makes the tests a check on the
+  code and not on the cluster. `kubectl api-resources -o json` — or the two discovery
+  calls `k8s.rs` already makes — would make it two independent sources, and it is what
+  would have caught `metrics.k8s.io/pods` sitting next to `v1/pods` in the same drawer
+  before a reviewer reasoned it out. Needs a cluster trip, so it is the PM's under
+  [D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15).
+  Raised by `tester` and `k8s-admin` independently, 2026-09-06
+
+- **`just mutants` — the phase-close whole-file sweep — still names only the two files it
+  was written for.** The recipe is `--file src/rules.rs --file src/analysis.rs`, so
+  `theme.rs` (Phase 9) and `views.rs` (Phase 10) have never been in it; both were covered
+  only because a brand-new file's `mutants-diff` **is** its whole-file sweep, which stops
+  being true the first time either is edited. Phase 10 closed with `views.rs` at 112
+  mutants / 0 missed for exactly that reason, and the reason is a coincidence of timing
+  rather than a property of the gate. `tester` owns the `justfile`. Raised by the PM at
+  the Phase 10 close, 2026-09-06
+
 - **`scripts/certs-test.sh` has no `--self-test`.** It grew a second check this
   turn — the two files that pin an instant against the committed certificates —
   and its red was proven on scratch copies rather than by a self-test, which every
@@ -2585,42 +2622,6 @@ long-form version and stays the authority.*
   screen, not in a mid-phase edit to another owner's document
   (CLAUDE.md § Every file here also has to get smaller). Found by the PM while
   briefing Phase 9, 2026-09-05
-
-- **`just mutants-diff` tests nothing on the first turn of a new file, and prints
-  green.** The recipe is `git diff HEAD > "$diff"`, and a **new file is untracked**,
-  so `git diff HEAD` holds not one byte of it. The sweep then runs against whatever
-  else happens to be in the tree — on 2026-09-05 that was the PM's `NOTES.md` and
-  `backlog.md` edits — and reports a clean pass having tested none of the box. **It
-  does not trip the recipe's own `0 mutants tested` guard**, because the diff is
-  not empty; it is just non-empty with somebody else's work, which is the one shape
-  that guard cannot see. This is
-  [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
-  shape again — the gate's failure and its pass print the same thing — on a
-  different input. `dev-ui` caught it and worked around it by hand
-  (`scripts/mutants.sh --gate --timeout 90 --in-diff` over a
-  `git diff --no-index /dev/null src/theme{,_tests}.rs`), so Phase 9's evidence is
-  sound: 3 caught, 2 unviable, 0 MISSED, both unviables naming a type. **Every
-  first turn of a new file has this hole, and Phase 10 (`views.rs`) and Phase 11
-  (`ui.rs`) walk straight into it** — which is why it is boxed at the head of
-  Phase 10 rather than fixed inside a running Phase 9. The obvious fix,
-  `git add -N`, is **not** obviously safe: the index belongs to the PM, an agent
-  must never write it, and `dev-ui` refused to run it for exactly that reason and
-  was right to. A fix that stages nothing — enumerating untracked files with
-  `git ls-files --others --exclude-standard` and appending
-  `git diff --no-index /dev/null <each>` — is the shape to try first. `tester` owns
-  the `justfile`. Found by `dev-ui`, confirmed by the PM, 2026-09-05
-
-- **`just check` has no `cargo package` step, so a defect that only exists in the
-  published crate is invisible to the whole gate.** Phase 9 shipped one and it was
-  caught by hand, not by CI:
-  [D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05)
-  finding 2 — `include_str!` reading a directory `Cargo.toml`'s `exclude` drops,
-  where `cargo publish`'s own verify step is a **build** and a build never compiles
-  a `#[cfg(test)]` module. `cargo package` + unpack + `cargo test --no-run` is the
-  step that would have seen it, and by *"`just check` is the whole of CI, or it is
-  a lie"* its absence is a gap rather than a preference. Phase 5's open box is the
-  crates.io release, which is what makes this worth a box rather than a note.
-  `tester` owns `justfile` and `scripts/`. Found by `tester`, 2026-09-05
 
 - **The Alerts and Analysis mockups mark no selected row, and `theme.rs` has
   already frozen the constant that would mark it.** Measured over `screens/`

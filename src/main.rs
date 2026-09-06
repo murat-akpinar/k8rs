@@ -43,6 +43,7 @@ mod k8s;
 mod ops;
 mod rules;
 mod theme;
+mod views;
 
 #[cfg(test)]
 #[path = "main_tests.rs"]

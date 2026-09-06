@@ -265,6 +265,10 @@ its line moving with it.
 - [D241](#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05) — the two rulings Phase 9 could not be briefed without: `theme.rs` names no ratatui type, and declaring a module is part of writing it
 - [D242](#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05) — the Phase 9 review round: a test that accepted one letter, an `include_str!` that only breaks in the downloader's hands, and a comment that measured false
 - [D243](#d243--the-phase-9-close-the-constant-is-the-carrier-and-not-the-sentence-the-pairing-that-would-have-been-written-twice-and-a-comment-three-files-had-already-copied-2026-09-06) — the Phase 9 close: the constant is the carrier and not the sentence, the pairing that would have been written twice, and a comment three files had already copied
+- [D244](#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06) — Phase 10 opens on two gates that print the same thing whether they ran or not: a file the sweep cannot see, and a tarball nobody packed
+- [D245](#d245--the-browser-sorts-by-no-column-in-v1-because-nothing-typed-survives-the-fetch-and-the-file-that-could-change-that-is-frozen-2026-09-06) — the browser sorts by no column in v1, because nothing typed survives the fetch and the file that could change that is frozen
+- [D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) — the `views.rs` review round: a fraction whose halves count different things, a card that draws a count the screen ends without, and the freeze that was set one phase too early
+- [D247](#d247--the-guard-that-read-a-colour-it-had-never-been-shown-and-the-second-one-beside-it-nobody-would-have-found-by-waiting-2026-09-06) — the guard that read a colour it had never been shown, and the second one beside it nobody would have found by waiting
 
 ## Why it exists — where the gap is
 
@@ -21271,3 +21275,348 @@ be the second copy this entry's finding 3 is about, and `INFO_SIGNAL`'s doc alre
 names both meanings it serves. What is genuinely open is which *colour* the healthy
 line takes, and `band` cannot answer it because the healthy line has no `Severity`
 at all. Boxed for Phase 11, where the renderer exists to make the choice.
+
+### D244 — Phase 10 opens on two gates that print the same thing whether they ran or not: a file the sweep cannot see, and a tarball nobody packed (2026-09-06)
+
+Phase 10's first two boxes are both `tester`'s and neither is product code. They are
+the same defect class in two tools — [D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s,
+where the gate's failure and its pass are indistinguishable from the outside — and
+they were boxed at the head of this phase because **every box under them creates a
+new file**, which is the input that defeats the first one.
+
+**1. `git diff HEAD` holds not one byte of an untracked file, so the first turn of
+a new file mutated nothing and said so in green.** Found by `dev-ui` on Phase 9's
+first turn and worked around by hand there. It is a *third* refusal shape and
+neither existing one covers it ([D182](#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)):
+the diff is not empty, it is non-empty with somebody else's work — on 2026-09-05,
+the PM's `NOTES.md` and `backlog.md` edits. `just mutants-diff` now enumerates
+untracked Rust with `git ls-files --others --exclude-standard -- '*.rs'` and appends
+`git diff --no-index -- /dev/null <each>`. **Nothing is staged**: `git add -N` is the
+obvious fix and it is refused, because the index is the PM's and a gate that stages
+the tree to measure it has changed the thing it measures. Proved by planting a test
+that cannot fail in a brand-new untracked `src/probe.rs` beside an unrelated tracked
+edit: **red** `1 mutant tested … 1 unviable`, exit 0, the new file named nowhere;
+**green** `6 mutants tested … 2 missed`, exit 2, both `MISSED` in `probe.rs`.
+Shapes fed beyond the one the box named ([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)):
+a whole untracked *directory* of them — invariant 11's `src/<name>_tests/`, which
+Phase 10 will produce — enumerated file by file; a name with a space; a tree whose
+only change is one untracked `.rs`, which used to be refused as empty and now runs;
+and a genuinely empty tree, which still refuses. **`--exclude-standard` is
+load-bearing rather than a default typed out**, and it became so in this same turn:
+`scripts/package-check.sh` unpacks 20-odd `.rs` files into `target/`, and only
+`.gitignore` plus that flag keep a second copy of the whole crate out of every
+per-turn sweep. **The printed list is not a canary** and the comment says so — a
+turn with no new file legitimately has none, so *found nothing* and *the enumeration
+broke* cannot be told apart here; the print only makes the positive case readable.
+
+**2. `cargo publish` verifies with a build, and a build never compiles a test
+module.** [D242](#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05)
+finding 2 shipped through `cargo test`, `clippy`, `cargo package` and `cargo publish`
+alike and would have failed in the downloader's hands. `scripts/package-check.sh`
+packs, unpacks and runs `cargo test --no-run` over the published bytes; **all three
+steps are load-bearing** — packing is what already missed it, and compiling the
+*repo* says nothing about the tarball. It is a line in `scripts/guards.sh` and not
+in the `check` recipe, for [D111](#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16)'s
+reason: CI runs that file, so there is no second copy in `ci.yml` to drift. Replanted
+and seen red — `error: couldn't read 'tests/../screens/alerts.md'`, exit 101, while
+the same tree's `cargo build` is exit 0.
+
+**The guard's own first draft failed the class it was written for, and that is the
+part worth keeping.** Sharing the repo's `target/` printed `Finished 'test' profile
+… in 0.17s`, exit 0, having compiled **nothing**: `cargo package` stamps every
+tarball entry `2006-07-24 04:21` for reproducibility, so the extracted sources are
+older than the repo's artifacts, cargo hands the unpacked crate the *same* unit hash
+(`k8rs-c969b5b7178e79b1`, read off both), and the mtime check passes. Three defences,
+each proven separately: `tar -xzm`, a build directory of the guard's own, and a
+`Compiling k8rs v` line the run refuses to finish without. The `-m` half was measured
+by taking it back out — a `compile_error!` appended to an *already packaged*
+`tests/binary.rs` came back `Finished … in 0.09s` with no `Compiling` line at all.
+
+**And the PM's second pass found the same class a fourth time, in the fix.**
+`cargo package` honours `CARGO_TARGET_DIR`; the script hardcoded `PKG_DIR=target/package`
+and read the tarball from there, so with that variable set the pack landed in
+`$CARGO_TARGET_DIR/package/` and the guard unpacked whatever an earlier run had left
+behind — right name, right version, wrong bytes, and `sole_crate`'s refusals cannot
+see it. **This is not exotic in this repo**: CLAUDE.md § *The one hard rule of
+concurrency* tells an agent that wants a clean tree to copy it and give the copy its
+own `CARGO_TARGET_DIR`, which `k8s-admin` and `dev-core` both already do. Measured
+with a `compile_error!` in the tree: **exit 0 with the variable set, exit 101
+without**, against a tarball 29 s stale — and `compiled_the_crate` did not catch it,
+because `-m` re-stamps the stale sources and cargo dutifully recompiles the wrong
+crate. Fixed with `--target-dir target` on the pack **and** a stamp file the tarball
+must not be older than, because a flag is only pinned while somebody keeps it: with
+`--target-dir` deleted the run now exits 1 naming the cause. Re-measured by the PM on
+the landed tree — plant red both ways, clean green both ways, `$CARGO_TARGET_DIR`
+never created.
+
+**What the author decided that no document had settled.** `--allow-dirty`, taken: it
+packs the *working tree* and not `HEAD`, which is what a per-change gate wants and is
+not what `cargo publish` does — the gap is work that is never committed, and CI
+re-runs the guard on the committed tree where the flag is a no-op. `--no-verify`,
+taken: verification is a `cargo build` of the unpacked crate, a strict subset of the
+`cargo test --no-run` that follows, so keeping it buys nothing and costs a second
+cold dependency build. Not-*older* rather than strictly-newer on the stamp, because a
+one-second-resolution filesystem can stamp both inside one tick and a false red on
+every honest run is how a gate gets waved through. And `scripts/e2e.sh:35` *does*
+derive `${CARGO_TARGET_DIR:-target}` while this one refuses to — recorded in the file
+rather than left as two guards disagreeing about one variable, because that is what a
+later reader "fixes" in the wrong direction: e2e **reads** a binary somebody else's
+cargo built under the caller's environment, this guard **writes** all four of its
+directories itself.
+
+**The cost, measured on the dev box:** `just check` **72 s** steady state, of which
+`package-check` is **6 s** warm (~4.7 s recompiling k8rs) and **1m17s** the first time
+its build directory is used. **What is not measured is CI**, where `Swatinem/rust-cache`
+may or may not carry a nested build directory across pushes; if it does not, the
+`guards` step pays a runner-side cold build on every push, and the number to read is
+that step's duration on the first green run after this lands.
+
+### D245 — the browser sorts by no column in v1, because nothing typed survives the fetch and the file that could change that is frozen (2026-09-06)
+
+Phase 10's box demands a ruling and names two honest answers: the Resources view
+offers no column sort in v1, or every column type gets a named parse with the
+unparseable pinned last and a test of its own. Choosing neither is how
+[k9s#3793](https://github.com/derailed/k9s/issues/3793) stays open for a year
+([PRIOR-ART § F1](PRIOR-ART.md#f1--sorting)).
+
+**The ruling is the first: no column sort in the browser in v1.** It is not a
+preference between two designs — the second is not available to this phase, and the
+reason is a fact of the code rather than an argument about taste.
+
+**What a row actually holds.** `Row` (`k8s.rs`) is `cells: Vec<String>`, plus
+`namespace`, `name` and `uid` off the row's own `PartialObjectMetadata`. Nothing
+else. There is no `creationTimestamp` and no typed quantity anywhere in it:
+`MetadataResponse` names three fields and serde builds nothing it is not asked for.
+So the only thing a sort could compare is a **rendered cell** — `1Gi` against
+`999Mi`, `2d` against `10h`, `<none>` against `""` — which is F1's single stated
+cause, and the direct route to the defect class that gave k9s a panic when a row had
+fewer fields than the sort index ([#3926](https://github.com/derailed/k9s/pull/3926))
+and a comparator that was not a strict weak ordering
+([#4070](https://github.com/derailed/k9s/pull/4070)).
+
+**The obvious third answer was checked and it is closed.** Age *could* be typed
+rather than parsed — read `creationTimestamp` off the row's object instead of the
+rendered `2d` — and that needs no per-kind knowledge, because `metadata` is the one
+thing every kind has ([invariant 12](CLAUDE.md) is about columns, not about this).
+It needs one new field on `Row`, and **`k8s.rs` freezes at Phase 6's close**. A later
+step needing a frozen file changed is the plan being wrong, not a feature to squeeze
+in, and the fix for that is to stop and re-order rather than to reach back. Nothing
+in Phase 10 justifies re-opening the file, so the third answer is recorded here as
+available to whoever *does* re-open it, and not taken.
+
+**Nothing on screen has to change, which is how a v1 refusal stays honest.**
+`screens/resources.md` contains the string `sort` zero times, and
+[D12](#d12--the-key-map-and-two-keys-deleted)'s key map binds no sort key — the
+browser was drawn without one. `screens/analysis.md` § 3 already states the same
+principle for the page it governs: *`views.rs` never splits a rendered string back
+into values*. So this ruling writes down what the screens draw instead of
+contradicting them, and no `tui-designer` round is owed.
+
+**What the user gets instead, and it is not nothing.** The rows arrive in the order
+the API server sent them — the same rows in the same order `kubectl get` prints,
+because k8rs reorders nothing — and `/` filters the list by text while `n` filters by
+namespace ([D12](#d12--the-key-map-and-two-keys-deleted)). The typed sort this
+product actually sells is on **Alerts**, whose findings are ours: severity
+descending, then recency, over values that were never strings. The browser is a
+viewer, and *find the row* is a filter's job.
+
+**What would reverse it**, in this order and not one step fewer: a decision to
+re-open `k8s.rs`, a `Row` that carries the typed value a column is drawn from, and
+then the second answer whole — a named parse per column type, the unparseable pinned
+last, one test each. A sort added over the cells as they stand today would be the
+defect, not a smaller version of the feature.
+
+### D246 — the `views.rs` review round: a fraction whose halves count different things, a card that draws a count the screen ends without, and the freeze that was set one phase too early (2026-09-06)
+
+`views.rs` landed whole in one turn — the state file for Phase 11's renderer, 847 lines
+with 60 tests beside it, `just check` green and the author's own mutation sweep at
+107 mutants and 0 missed. `tester` and `k8s-admin` then read it in parallel and
+between them found five defects, four false claims in doc comments and three test
+holes each proved by mutating the code and watching all 60 stay green. The rulings
+below are the PM's; the first three are the ones the file could not be frozen with.
+
+**1. `2 of 1 pods` is reachable, and the fix is neither clamping nor printing it.**
+`affected` counts pod objects that exist and carry a finding; `total` is
+`WorkloadSnapshot::desired`, which is `spec.replicas` — *asked for*, and not an upper
+bound on *exists*. One replica, the old pod stuck `Terminating` behind a finalizer
+(rule 12) while its replacement is `ImagePullBackOff` (rule 3), is two pod objects
+under one owner at `desired: 1`; measured, the card reads `2 of 1 pods`. The author
+recorded not-clamping as deliberate and was right — clamping hides a pod that has a
+finding — but clamp-or-lie is a false pair, and the third answer was already one arm
+up in the same function. **Where `affected > total` the denominator is dropped and the
+card reads `n pods`**, which is exactly the move
+`screens/alerts.md` § *the third form* made for `unavailableReplicas`, for this reason
+in these words: *a denominator here would eventually print `2 of 1 pod not answering`*.
+[PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended) is tagged **covered** and
+calls it this product's founding argument — *never divide by a denominator that is not
+guaranteed complete*. The test that asserted `4 of 3 pods` asserted what the code did;
+it now asserts what the requirement says.
+
+**2. A card whose owner is the pod draws no count at all.** When nothing owns a pod,
+`owner == object` and both are kind `Pod`, so `affected` is 1 and the card reads
+`1 pods`. `screens/alerts.md` draws that card twice off committed captures —
+`default/broken-pending`, `default/broken-hostpath` — with the identity line ending
+after the name, and states the rule twice in prose: *"a bare pod, so there is no owner
+and no `n of m`"*. [D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)'s *a group with
+none of them has no `n of m`* is about **zero** pods and does not reach this shape, so
+this is the screen file adding a case the decision did not cover, not the two
+disagreeing. **`owner.kind == Pod` draws no count.** The mirror-pod card —
+`kube-system/etcd-k8rs-control-plane`, present on every kubeadm and kind cluster — was
+the second shape it fixes.
+
+**The wording question underneath it is separate and stays answered as drawn.**
+`1 pods` survives on an *owned* single-pod card whose workload could not be read.
+`screens/alerts.md:916` draws the identity line's count plural at one —
+`data/migrate-job · 1 of 1 pods` — while `:1042` says `pod` takes its singular at one
+about the **evidence** line's three forms, which is a different line. The identity
+line keeps the plural the mockup draws; that the two lines spell it differently is
+`tui-designer`'s to settle in `screens/`, and it is in `backlog.md` rather than being
+invented here.
+
+**3. The reversal: `views.rs` freezes at the close of Phase 11, not Phase 10.**
+`todo.md` said *Frozen after: `views.rs`* at Phase 10's foot. Both reviewers arrived at
+the same place from different directions: `screens/widgets.md` § 5 declares seven
+`Modal` variants and the file has two; `screens/context.md`'s switcher has a
+`may_switch_cluster()` and nothing to switch into; `screens/detail.md`'s pane has a
+`tab`, a `scroll` and a `following` flag and no object identity, no container
+selection and no way to say the pane is open at all; and a Phase 11 box already
+requires the dialog to hold the object's `uid`, which `Dialog` does not carry.
+
+**The pyramid's own rule is what settles it, and it says the freeze was the error.**
+*A step may create new files or shape **the current top layer**; files finished in
+earlier steps are frozen.* `views.rs` is the top layer only until `ui.rs` exists, and
+`ui.rs` is its only consumer — so freezing the state before the renderer that reads it
+guarantees the *later step needs a frozen file changed* case the rule exists to
+prevent. Phase 10 proves the state it could specify from `screens/`; Phase 11 finishes
+it against a renderer and freezes it there. **What this does not license** is Phase 11
+keeping detail-pane and picker state inside `ui.rs` — that deletes the phase goal —
+nor adding to `views.rs` anything a screen does not already draw.
+
+**4. A clock five minutes ahead erased the right-hand column and reordered the
+screen.** `rules::age` refuses a stamp more than `SKEW_ALLOWANCE` into the future
+([D55](#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) · [D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
+and returns `None`; `newest_first` compared the raw timestamp. So a skewed card drew a
+blank age and sorted to the **top** of its band, where `screens/alerts.md:120-126` says
+ageless cards sort **last** — *an unknown time cannot claim to be more recent than a
+known one*. The worse half is on one card: `Card::age` is `self.newest()?.age(now)`, so
+a single skewed finding suppressed a perfectly drawable age beside it, and a laptop
+resumed from suspend before NTP catches up reads **every** finding as future and loses
+the whole column while the order silently becomes `analyze()`'s. Root cause is that
+`cards()` took no `now` and could not apply the refusal the renderer applies. It takes
+one.
+
+**5. Four doc comments claimed things that are not true of the file.** *Anything left
+is a CRD* — `metrics.k8s.io`, `resource.k8s.io`, `apiserverinternal.k8s.io` and
+`storagemigration.k8s.io` are built-in aggregated groups and reach that arm; the
+`metrics.k8s.io` one matters, because its resource is spelled `pods`, is namespaced and
+is listable, so `workloads` drew **two adjacent rows both reading `pods`** on every
+cluster with metrics-server. *Two allocations per call* is two per **field**, measured
+at 1.12 ms per keystroke over 5000 rows × 5 cells — the number is fine and the sentence
+was wrong. *No mockup draws `1 pods`* — two do, and they draw nothing there (ruling 2).
+And `Input` was named in the module doc as *where what the user types is bounded*,
+which it was: in length only. **`Input::push` now refuses a control character**, because
+a bracketed paste is exactly the event the length bound was written for and
+`screens/widgets.md` § 7's *an escape sequence reaches the terminal and rewrites it* is
+the same mechanism on the same widget.
+
+**6. Three test holes, each proved by a mutation the 60 committed tests could not
+see.** The workload lookup keyed on `.id` where every fixture set `owner: id.clone()`,
+so `.id` and `.owner` were indistinguishable to the suite though they are different
+objects in real data (a ReplicaSet's `desired` borrowed for its Deployment's card).
+`sidebar()`'s `.enumerate().filter()` survived being swapped for `.filter().enumerate()`
+— a per-group index instead of a global one, which opens a **different kind** — because
+every assertion opened `workloads`, whose first kind is also index 0 of the whole list.
+And the core group's `_ => Cluster` fallback survived gaining the CRD last resort above
+it, because its only test fed a cluster-scoped kind, where the two arms agree. **All
+three are one shape** — a branch whose test passes because two rules happen to agree on
+every input fed — and it is the same shape the author had already found and fixed once
+for `apps`, which is what makes it worth naming rather than listing.
+
+**What was checked and found sound**, because a review that only lists faults reads as
+if nothing was verified: `Severity`'s declaration order against the ascending `cmp`;
+`newest_first`'s hand-written `(Some, None) => Less` against the derived `Ord` that
+gets it backwards; sort stability keeping `analyze()`'s order in ties; `affected` being
+distinct over the whole `ObjectId` and not `group_key()`; `sidebar()` enumerating
+before filtering so the index is the global one; `selectable()` keying on the variant
+and never on `jump.is_some()`; the filter refusing a cluster-scoped row under any
+namespace filter; `Input`'s bound reusing `k8s::IDENTIFIER` so a stripped name stays
+typeable back, and `push` refusing a whole `char` rather than splitting one. And
+**invariant 2 holds at this layer**: `armed()` cannot manufacture an `ops::Agreed`,
+`Agreed` is unconstructible outside `ops.rs`, and the duplicated empty-name guard is
+the correct duplication because the two answer different questions — *may the button
+light up* against *may this proceed* — with the failure direction on the safe side. No
+state sequence was found where `armed()` is true with a name that does not match.
+
+**Two costs measured rather than guessed, neither a finding:** `cards()` at 2000 cards
+is 17.2 ms, so the named O(n²) ceiling is honest and nowhere near biting; the filter is
+1.12 ms per keystroke at 5000 × 5.
+
+### D247 — the guard that read a colour it had never been shown, and the second one beside it nobody would have found by waiting (2026-09-06)
+
+Phase 10's close PR went red on CI with `just check` green on the dev box — the
+divergence *"`just check` is the whole of CI, or it is a lie"* exists to catch, and the
+first time it has fired in a **guard's own parsing** rather than in a compiler's answer.
+
+**What the runner printed, and what the guard said about it.** `scripts/package-check.sh`
+refuses to finish without a `Compiling k8rs v` line, because a run that hands back an
+earlier build reports success having vetted nothing
+([D244](#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06)).
+The runner compiled the unpacked crate for **1m17s from a cold build directory** and the
+guard called it a no-op. `.github/workflows/ci.yml` sets `CARGO_TERM_COLOR: always`
+job-wide, and **cargo colours its status words with no tty in sight** — the bytes,
+captured off the run with `cat -v` rather than reconstructed:
+
+```
+^[[1m^[[92m   Compiling^[[0m k8rs v0.0.0 (…/target/package-check/k8rs-0.0.0)
+```
+
+The reset sits *between* the two words of the anchor and the bold/green prefix sits
+*before* the leading spaces, so neither half of `^[[:space:]]*Compiling k8rs v` can match.
+`grep -n 'Compiling k8rs'` over the whole 5434-line CI log matches exactly **one** line:
+the guard's own error message. Locally there is no tty and no `CARGO_TERM_COLOR`, the
+line is plain, and the same pattern matches — so the gate had never once run against the
+output CI produces. [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)
+in a shape nobody had listed: not *which objects* reach the check, but which
+**environment** the tool it reads is answering in.
+
+**The fix is a flag and not a parser.** One `export CARGO_TERM_COLOR=never` at the top of
+the script, so a third cargo line added later inherits it rather than having to remember
+it. Stripping escapes before the grep is the other honest answer and it is the worse one:
+an ANSI parser inside a guard is a thing that can be wrong, and a flag cannot. The price
+is that a compile failure's trace is uncoloured, and it is `tee`'d whole either way.
+
+**The self-test case runs cargo instead of quoting it, and that is the part to copy.**
+The five existing cases prove the pattern against output somebody transcribed, and
+transcription is exactly how this shipped. The new case builds a throwaway crate named
+`k8rs 0.0.0` and runs cargo **twice** — once under `CARGO_TERM_COLOR=always` as a canary
+that cargo still colours at all, once inheriting the script's own environment — because
+what has to be true is not *the pattern reads the line I typed* but *the cargo this
+script runs prints a line this pattern reads*. 0.20 s for the pair, timed rather than
+recalled. Beside it an assertion on the variable itself, so dropping the export is red on
+the dev box and not only on the runner: **a gate that defers its own regression to CI is
+the lie again, one level up.**
+
+**The second instance, which no amount of waiting would have surfaced.** Asked whether
+anything else parses output the setting changes, `tester` measured rather than reasoned
+and found `scripts/mutants.sh`'s `lint_denied_logs` — it keys on `/^error/` and
+`/^warning/` at column 0, and **cargo-mutants passes `CARGO_TERM_COLOR` straight through
+into every per-mutant build log**. Under `always` the awk's state never leaves `err=0`,
+nothing prints, and the check reports clean over a run where every mutant was
+lint-denied — D133's silent pass in a third coat. **CI never reaches it**: the workflow
+runs `--self-test` only, over hand-built plain logs, and the firing path is a human's
+sweep, so this one had to be looked for. `enospc_logs` in the same file is *not*
+affected and that was checked rather than assumed — it greps `No space left on device`
+inside a message body, and colour wraps the prefix.
+
+**Everything else that parses a tool's output was measured under `CARGO_TERM_COLOR=always`
+and carries zero escapes**, each for a stated reason rather than by inspection:
+`test-guard.py` reads libtest's `--list` on stdout while cargo's coloured status goes to
+stderr; `write-guard.py` reads `cargo metadata`'s JSON, which is never coloured, and
+`clippy-driver -W help`, which is not run through cargo at all; `toolchain-guard.py` reads
+`--version`; `just cross` reads `rustc --print target-libdir`. The rest parse openssl, jq,
+our own binary, or files.
+
+**The two facts a future guard author cannot guess**, and the reason this is an entry
+rather than a commit message: cargo colours with no tty whenever `CARGO_TERM_COLOR` says
+to, and cargo-mutants propagates that variable into the child builds whose logs the gate
+reads.

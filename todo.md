@@ -3265,14 +3265,17 @@ public release.
       **This is the first unchecked box in the file and it is not the next one to
       work.** Nothing here can move until the user runs `cargo publish` and until
       Phase 13 writes the README. **The next box is the first unchecked one in the
-      lowest open phase below this one — Phase 9 today** (Phase 8 closed
-      2026-09-05, the same day as Phase 7), and that phase's head note says why a
+      lowest open phase below this one — Phase 10 today** (Phase 9 closed
+      2026-09-06), and that phase's head note says why a
       later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
       [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)).
       **This line names a phase and so it goes stale at every close** — it has now
-      done so three times, the third caught during Phase 8's own close ritual and
-      not afterwards. The note itself moves forward with whichever phase is open,
-      and moving it is part of the close ritual rather than a thing to notice later
+      done so four times. The third was caught during Phase 8's own close ritual;
+      the fourth was caught at Phase 9's close, but only in the last check before
+      the context was cleared, *after* the phase-close ritual had already run and
+      the PR had merged. **The head note above the open phase and this line are two
+      copies of one fact, which is why one of them keeps going stale** — moving
+      both is part of the close ritual, not a thing to notice later
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
 kubeconfig sets `insecure-skip-tls-verify` it is honoured *and surfaced*, not
@@ -4129,10 +4132,16 @@ Goal: learn the ratatui event loop without touching product files.
 
 ## Phase 9 — Theme
 
-> **Closed 2026-09-05.** `theme.rs` is frozen. What the review round found — a
-> test that accepted a mark truncated to one letter, an `include_str!` that only
-> breaks in the downloader's hands, and a comment that measured false — is
-> [D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05).
+> **Closed 2026-09-06.** `theme.rs` is frozen, and it names no `ratatui` type —
+> the ruling that made the freeze survivable
+> ([D241](NOTES.md#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05)).
+> The review round found a test that accepted a mark truncated to one letter, an
+> `include_str!` that only breaks in the downloader's hands, and a comment that
+> measured false
+> ([D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05));
+> the close took four more, **because "box it in Phase 10" and "unfreeze
+> `theme.rs`" are the same sentence**
+> ([D243](NOTES.md#d243--the-phase-9-close-the-constant-is-the-carrier-and-not-the-sentence-the-pairing-that-would-have-been-written-twice-and-a-comment-three-files-had-already-copied-2026-09-06)).
 
 *Also read: [PRIOR-ART § D2](PRIOR-ART.md#d2--do-not-fight-the-users-terminal) (the user's own 16 colours win; bold is a per-emulator setting) and [§ K](PRIOR-ART.md#k-accessibility) (colour is never the only carrier of meaning — every state, not just severity).*
 
@@ -4170,7 +4179,7 @@ looking broken.
 > ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
 > It is the first unchecked box in this file, so a cold session lands on it. This
 > note moves forward with whichever phase is open and **has now moved four
-> times** — from Phase 6, Phase 7, Phase 8, and Phase 9, which closed 2026-09-05.
+> times** — from Phase 6, Phase 7, Phase 8, and Phase 9, which closed 2026-09-06.
 > Running a later phase over a deliberately open earlier one is
 > [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
 > [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
@@ -4184,7 +4193,7 @@ looking broken.
 Goal: `ui.rs` can be a pure function of state, which is the only thing that
 keeps TUI code from rotting.
 
-- [ ] **`just mutants-diff` must see a new file, because `views.rs` is one.** The
+- [x] **`just mutants-diff` must see a new file, because `views.rs` is one.** The
       recipe is `git diff HEAD`, and an untracked file is not in it — so the sweep
       runs against whatever else is in the tree and prints green having tested none
       of the box. It does not trip the recipe's own `0 mutants tested` guard,
@@ -4195,8 +4204,8 @@ keeps TUI code from rotting.
       `git diff --no-index /dev/null <each>` appended to the diff, which stages
       nothing. **Done when** a deliberately weak test in a brand-new untracked file
       is reported `MISSED`. `tester`'s box, and it comes first because every box
-      under it is a new file
-- [ ] **`just check` gains a `cargo package` step.** Phase 9 shipped a defect that
+      under it is a new file — landed 2026-09-06, [D244](NOTES.md#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06)
+- [x] **`just check` gains a `cargo package` step.** Phase 9 shipped a defect that
       exists only in the published crate — `include_str!` reading a directory
       `exclude` drops, where `cargo publish` verifies with a build and a build never
       compiles a test module
@@ -4204,19 +4213,23 @@ keeps TUI code from rotting.
       finding 2). It was caught by hand; no gate could see it, which by *`just
       check` is the whole of CI, or it is a lie* is a gap. **Done when** packing,
       unpacking and `cargo test --no-run` on the result runs inside `just check`,
-      and the Phase 9 defect is replanted and seen red. `tester`'s box
-- [ ] `views.rs`: which view, which item selected, filters, scroll, detail tab
-- [ ] Sidebar model built from discovery — groups (workloads / network /
-      storage / config / cluster), not a hard-coded list
-- [ ] **Grouping by owner** — findings collapse to one card per owner with a
+      and the Phase 9 defect is replanted and seen red. `tester`'s box — landed
+      2026-09-06, [D244](NOTES.md#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06)
+- [x] `views.rs`: which view, which item selected, filters, scroll, detail tab —
+      landed 2026-09-06, [D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+- [x] Sidebar model built from discovery — groups (workloads / network /
+      storage / config / cluster), not a hard-coded list — the API group names the
+      topic, the core group is the one closed table, and anything left is placed by
+      `namespaced` ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 5)
+- [x] **Grouping by owner** — findings collapse to one card per owner with a
       count ("3 of 40 pods"); the detail view lists which pods. This is the
       single thing standing between Alerts and a 400-line lint report
       ([NOTES § D3](NOTES.md#d3--findings-group-by-owner-not-by-pod))
-- [ ] Sorting: severity desc, then recency. Filters: `/` text within the
+- [x] Sorting: severity desc, then recency. Filters: `/` text within the
       current list, `n` namespace substring. **No severity filter** — grouping
       by owner made the list short, and severity is already the sort order
       ([NOTES § D12](NOTES.md#d12--the-key-map-and-two-keys-deleted))
-- [ ] **The browser's columns are strings, so decide now whether they sort at
+- [x] **The browser's columns are strings, so decide now whether they sort at
       all** — the sort above is typed and ours. The Resources view is not:
       invariant 12 builds it from the API server's own `Table` output, which is
       **display text**, so a column sort there compares `1Gi` against `999Mi`,
@@ -4232,14 +4245,23 @@ keeps TUI code from rotting.
       the browser offers no column sort in v1, or each column type gets a named
       parse with the unparseable pinned last and a test of its own. Choosing
       neither is how #3793 stays open for a year
-      ([PRIOR-ART § F1](PRIOR-ART.md#f1--sorting))
-- [ ] Modal state: confirm dialog, typed-name confirmation, help overlay
-- [ ] Unit tests — selection and filtering are logic, and logic gets tests
-      even when it is "just UI"
+      ([PRIOR-ART § F1](PRIOR-ART.md#f1--sorting)) — **ruled 2026-09-06: no column
+      sort in v1**, [D245](NOTES.md#d245--the-browser-sorts-by-no-column-in-v1-because-nothing-typed-survives-the-fetch-and-the-file-that-could-change-that-is-frozen-2026-09-06)
+- [x] Modal state: confirm dialog, typed-name confirmation, help overlay — the
+      three `screens/widgets.md` declares beyond them are Phase 11's, with the freeze
+      moved to make that legal ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3)
+- [x] Unit tests — selection and filtering are logic, and logic gets tests
+      even when it is "just UI" — 71 of them, and the three holes two reviewers
+      proved with mutations are closed ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 6)
 
 **Done when:** every navigation and filter case is exercised by tests with no
 terminal involved.
-**Frozen after:** `views.rs`.
+**Frozen after:** nothing — **`views.rs` freezes at Phase 11's close, not here**
+([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3). It is the top layer only until `ui.rs` exists, and `ui.rs` is its
+only consumer: `screens/` declares seven `Modal` variants where this phase built two,
+the detail pane has no object identity yet and the dialog has no `uid`, all of which
+Phase 11 needs. The pyramid says a step may shape *the current top layer*; freezing
+state before its renderer exists is what manufactures a frozen-file violation.
 
 ## Phase 11 — The console
 
@@ -4346,7 +4368,7 @@ Secret is redrawn after the reveal is dismissed.
 
 **Done when:** the running screen matches [`screens/`](screens/README.md) at
 80×24; every key in the footer works.
-**Frozen after:** `ui.rs`.
+**Frozen after:** `ui.rs` **and `views.rs`** — the latter carried forward from Phase 10 ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3).
 
 ## Phase 12 — Final wiring · **milestone M3**
 

@@ -135,3 +135,11 @@ python3 scripts/twin-guard.py
 # a convention until this ran. rustfmt's own options for it are nightly-only.
 python3 scripts/width-guard.py --self-test
 python3 scripts/width-guard.py
+# **Last, and for `just cross`'s reason.** It is the only guard here that compiles
+# anything, so it is the one whose cost is worth paying after everything cheap has
+# already reported. What the downloader gets is packed, unpacked and has its own
+# tests compiled — the step that would have caught NOTES § D242's `include_str!`
+# reading a directory `Cargo.toml`'s `exclude` drops, where `cargo publish`
+# verifies with a build and a build never compiles a test module.
+bash scripts/package-check.sh --self-test
+bash scripts/package-check.sh

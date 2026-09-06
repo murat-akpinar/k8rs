@@ -191,16 +191,60 @@ mutants *ARGS:
 # which is D133's subject in a second shape, a gate passing a diff with nothing in
 # it to mutate.
 #
+# **And a third shape, which neither of those two refusals can see: a diff that is
+# non-empty with somebody else's work in it.** `git diff HEAD` holds not one byte
+# of an untracked file, so the first turn of a *new* file mutated nothing and said
+# so in a green run — on 2026-09-05 the sweep ran over the PM's `NOTES.md` and
+# `backlog.md` edits and reported a clean pass having tested none of the box
+# (found by `dev-ui` on Phase 9's first turn, worked around by hand there). Every
+# phase that starts a file walks into it, and Phase 10 and 11 each start one. So
+# the untracked Rust is enumerated and appended as its own `--no-index` diff.
+#
+# **`git add -N` is the fix this does not use**: the index belongs to the PM
+# (CLAUDE.md § Agent workflow), an agent may not write it, and a gate that stages
+# the tree to measure it changes the thing it is measuring. Nothing here writes to
+# git at all.
+#
+# **The `*.rs` filter drops no mutant and is not the `--file` above.** `--file`
+# filters *Rust* files, which is why it is refused; cargo-mutants mutates nothing
+# but Rust, so an untracked fixture or a stray binary appended here could only
+# bloat the diff or break its parse.
+#
+# **`--exclude-standard` is load-bearing, not a default typed out.** `.gitignore`
+# carries `/target/`, and `scripts/package-check.sh` unpacks the published crate
+# to `target/package-check/` — measured 2026-09-06: 20-odd `.rs` files, a second
+# copy of this whole crate, which without the flag this loop would append to every
+# per-turn gate.
+#
+# **The list is printed, and printing is not a canary.** A turn with no new file
+# legitimately has none, so "found no untracked Rust" and "the enumeration broke"
+# cannot be told apart here and nothing below pretends to; what the print buys is
+# that the *positive* case is readable in the run's own output instead of being
+# inferred from a mutant count (CLAUDE.md § A derived list asserts it found
+# something). The shapes fed to it: one new file, a whole untracked *directory* of
+# them — `src/<name>_tests/`, which invariant 11 makes and Phase 10 will produce,
+# enumerated file by file rather than collapsed — and a name with a space in it.
+#
 # Mutation testing over the author's own diff — the per-turn gate, not the sweep
 mutants-diff:
     #!/usr/bin/env bash
     set -euo pipefail
     diff=$(mktemp); trap 'rm -f "$diff"' EXIT
     git diff HEAD > "$diff"
+    new=$(git ls-files --others --exclude-standard -- '*.rs')
+    if [ -n "$new" ]; then
+      echo "mutants-diff: untracked Rust, in no 'git diff HEAD' and appended here so the sweep can see it:"
+      sed 's/^/           /' <<<"$new"
+      while IFS= read -r f; do
+        # `--no-index` exits 1 when the two differ, which is every time here; any
+        # other status is a real failure and still stops the recipe.
+        git diff --no-index -- /dev/null "$f" >> "$diff" || [ $? -eq 1 ]
+      done <<<"$new"
+    fi
     # An empty diff yields `0 mutants tested` and exit 0, which is this file's own
     # subject wearing a different hat: nothing to test reads exactly like nothing
     # got past. Refuse instead.
-    [ -s "$diff" ] || { echo "mutants-diff: 'git diff HEAD' is empty, so there are no mutants to run and a green run would prove nothing (NOTES § D26, § D133)" >&2; exit 1; }
+    [ -s "$diff" ] || { echo "mutants-diff: 'git diff HEAD' is empty and there is no untracked Rust beside it, so there are no mutants to run and a green run would prove nothing (NOTES § D26, § D133)" >&2; exit 1; }
     bash scripts/mutants.sh --gate --timeout 90 --in-diff "$diff"
 
 # --- the test cluster (scripts/cluster.sh does the work) ---

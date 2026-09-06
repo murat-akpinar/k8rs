@@ -44,6 +44,29 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# **The per-mutant logs this file greps are cargo's output, so they are forced
+# plain — the same defect `scripts/package-check.sh` was red on in CI on
+# 2026-09-06, found here by looking for it.** `lint_denied_logs` below keys on
+# `^error` and `^warning` at column 0, and cargo colours exactly those two words
+# whenever it is told to. Measured the same day with a one-mutant sweep run as
+# `CARGO_TERM_COLOR=always cargo mutants`: **cargo-mutants passes the variable
+# straight through to the child cargo**, so every file in `mutants.out/log/`
+# came back carrying `^[[1m^[[33mwarning^[[0m^[[1m: unused variable…`, the awk's
+# state never left `err=0`, and the check would have reported clean over logs
+# that were all lint-denied — D133's silent pass in a third coat.
+#
+# CI never reaches it today (it runs `--self-test` only, over hand-built plain
+# logs), which is exactly why it had to be looked for rather than waited for: the
+# path that fires is a human's sweep, and a guard that reports clean is
+# indistinguishable from one that ran.
+#
+# The price is that cargo-mutants' own `ok`/`MISSED` console words lose their
+# colour, because `--colors` reads this variable too. A caller who wants them
+# back passes `--colors always`; `"$@"` reaches clap after the flag on the run
+# line and clap takes the last, and it changes only the console — the child
+# cargo still reads the environment, so the logs stay plain either way.
+export CARGO_TERM_COLOR=never
+
 # The scratch volume. `$HOME` rather than a path off a mount table, because it is
 # the one directory guaranteed to exist and to be writable on every machine this
 # runs on — this box, the LAN host, and CI — and on none of them is it a tmpfs.
@@ -292,6 +315,13 @@ self_test() {
   # The two scans answer different questions and neither may answer the other's —
   # a pattern loose enough to catch both would report the wrong remedy for both.
   lint_denied_logs "$d/full" >/dev/null && { echo "FAIL  self-test: a disk failure was reported as a lint denial"; fail=1; }
+  # **And the one condition every case above silently assumes: that the real logs
+  # look like the hand-built ones.** They are plain here because they were typed
+  # plain; cargo's are plain only because of the export at the top of this file
+  # (see it for the measured coloured bytes). That cargo *honours* that variable
+  # is not asserted here — `scripts/package-check.sh --self-test` proves it
+  # against cargo itself, and `guards.sh` runs the two side by side.
+  [ "${CARGO_TERM_COLOR:-}" = never ] || { echo "FAIL  self-test: this script no longer forces CARGO_TERM_COLOR=never (it reads '${CARGO_TERM_COLOR:-<unset>}'), so a caller with colour on gets '^[[1m^[[33mwarning^[[0m' in every log, the column-0 anchors above match nothing, and lint_denied_logs reports clean over a run where every mutant was lint-denied (NOTES § D133)"; fail=1; }
   enospc_logs "$d/lint" >/dev/null && { echo "FAIL  self-test: a lint denial was reported as a disk failure"; fail=1; }
 
   # The other framing: the string inside a longer rustc line rather than alone on
@@ -405,7 +435,7 @@ self_test() {
   enough_room 915 2 || { echo "FAIL  self-test: an empty disk was refused"; fail=1; }
 
   [ $fail -eq 0 ] || return 1
-  echo "mutants: self-test passed — both spellings of the filesystem's message are refused, alone on a line and inside one; all three spellings of a denied lint are refused while the same note under a 'warning:' header is not, and neither scan answers the other's question; an honest unviable, a real compiler error with an E-code and one without, an empty log directory and a missing one are refused by neither; the headroom reader turns a captured df line into $roomy GiB and a 94%-full tmpfs into $tight; and the refusal fires below the requirement and not at it; a report whose lock stamp did not move across the run is refused as this run's while a stamp that moved and a first run in an empty tree are not, and neither is a report that vanished; a real outcomes.json reads 20 while a directory with no result in it, a missing one, an empty one and a truncated one all read 'none'; and the gate passes a count and refuses zero, no report, an empty reading and a non-number"
+  echo "mutants: self-test passed — both spellings of the filesystem's message are refused, alone on a line and inside one; all three spellings of a denied lint are refused while the same note under a 'warning:' header is not, and neither scan answers the other's question; an honest unviable, a real compiler error with an E-code and one without, an empty log directory and a missing one are refused by neither; the headroom reader turns a captured df line into $roomy GiB and a 94%-full tmpfs into $tight; and the refusal fires below the requirement and not at it; a report whose lock stamp did not move across the run is refused as this run's while a stamp that moved and a first run in an empty tree are not, and neither is a report that vanished; a real outcomes.json reads 20 while a directory with no result in it, a missing one, an empty one and a truncated one all read 'none'; and the gate passes a count and refuses zero, no report, an empty reading and a non-number; and this script's own environment still forces cargo's logs plain"
 }
 
 # `--gate` is read here and not passed on, because it is the *caller's* policy and
