@@ -11,7 +11,7 @@
 //! evidence quotes are the committed capture's bytes as that file prints them.
 
 use super::*;
-use crate::rules::{Finding, ObjectId, ObjectKind};
+use crate::rules::{ClusterSnapshot, Finding, NodeSnapshot, ObjectId, ObjectKind, PodSnapshot};
 use crate::views::Group;
 use k8s_openapi::jiff::Timestamp;
 use ratatui::Terminal;
@@ -90,6 +90,21 @@ fn cordon(added: Option<Time>) -> Card {
 
 fn app() -> App {
     App::default()
+}
+
+/// **A report with nothing in it but its badge** — what the sidebar reads off one. Constructed
+/// and not computed, because what the two sidebar tests below measure is that column's
+/// arithmetic; every test that draws a *pane* uses a real producer over a committed capture
+/// ([`reported`]).
+fn badged(value: &str, severity: Severity) -> Report {
+    Report {
+        title: "what this report answers".to_owned(),
+        badge: Some(Badge {
+            value: value.to_owned(),
+            severity,
+        }),
+        rows: Vec::new(),
+    }
 }
 
 /// The browser pane a test that is not about the browser hands over: still loading, which is
@@ -593,18 +608,16 @@ fn the_alerts_badge_counts_owners_in_the_bands_that_have_one() {
 fn a_count_badge_takes_a_glyph_and_a_duration_does_not() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
-    let overcommitted = Badge {
-        value: "1".to_owned(),
-        severity: Severity::Warn,
-    };
-    let expiring = Badge {
-        value: "30d".to_owned(),
-        severity: Severity::Warn,
+    let overcommitted = badged("1", Severity::Warn);
+    let expiring = badged("30d", Severity::Warn);
+    let quiet = Report {
+        badge: None,
+        ..badged("", Severity::Info)
     };
     let reports = [
         ("capacity", Some(&overcommitted)),
         ("certificates", Some(&expiring)),
-        ("drain safety", None),
+        ("drain safety", Some(&quiet)),
     ];
     let mut with_reports = screen(&alerts, &now);
     with_reports.reports = &reports;
@@ -2150,6 +2163,661 @@ fn a_refused_alerts_pane_marks_whatever_did_come_back() {
     assert!(holds(&drawn, "1 ●"), "and the badge counts the same card");
 }
 
+// --- THE ANALYSIS PANE ---
+//
+// **Every pane below is computed, never built** — `analysis.rs`'s own seven producers over the
+// committed captures, driven the way `analysis_tests` drives them (NOTES § D53). A pane written
+// out by hand here would prove that the renderer draws what this file typed, which is the one
+// thing nobody needs to know; what it has to prove is that one code path draws all seven.
+//
+// **The loaders are this module's own.** `analysis_tests` has the same ones and they are
+// `pub(super)` to its own tree, out of reach from here, and no `lib.rs` exists to share them
+// through (invariant 11, NOTES § D50).
+
+/// The instant `analysis_tests` builds its snapshot at, so a capture's own timestamps read the
+/// same here as they do one layer down.
+fn pinned() -> Time {
+    Time(
+        "2026-08-23T00:00:00Z"
+            .parse()
+            .expect("the pin is a timestamp"),
+    )
+}
+
+fn capture(name: &str) -> serde_json::Value {
+    let path = format!("{}/tests/fixtures/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("fixture {path} could not be read: {e}"));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("fixture {path} is not JSON: {e}"))
+}
+
+/// `kubectl get -A` answers with `kind: List`, which `k8s_openapi::List<T>` refuses — it wants
+/// `PodList` — so the items come out by hand.
+fn captured_items<T: k8s_openapi::serde::de::DeserializeOwned>(name: &str) -> Vec<T> {
+    capture(name)["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{name}.json has no items array"))
+        .iter()
+        .map(|value| {
+            serde_json::from_value(value.clone())
+                .unwrap_or_else(|e| panic!("{name}.json item does not decode: {e}"))
+        })
+        .collect()
+}
+
+fn captured_pod(name: &str) -> PodSnapshot {
+    let pod: k8s_openapi::api::core::v1::Pod = serde_json::from_value(capture(name))
+        .unwrap_or_else(|e| panic!("{name}.json is not a Pod: {e}"));
+    PodSnapshot::from(pod)
+}
+
+/// **One cluster, all seven reports** — the union of the slices `analysis_tests` hands each
+/// producer, so no pane below is empty for want of a list nobody fetched. It is one snapshot and
+/// not seven because what is being drawn is one code path: seven snapshots would let a pane be
+/// interesting for a reason the renderer had nothing to do with.
+///
+/// Every field is spelled, so a sixteenth on `ClusterSnapshot` cannot arrive here in silence.
+fn cluster() -> ClusterSnapshot {
+    let mut pods: Vec<PodSnapshot> = [
+        // Capacity's limits row, and the four pods that break a naive version of it.
+        "overhead",
+        "nolimits",
+        "podlimit",
+        "healthy",
+        "healthy-podlevel",
+        // Drain safety: the Deployment pods a budget protects live in their own capture.
+        "gang",
+        "restarts",
+        // Posture's host mounts.
+        "hostpath",
+        "socket",
+        "healthy-hostpath",
+        // Waste's two pileups.
+        "succeeded",
+        "failed",
+        "evicted",
+        "healthy-disk",
+        // Restarts: a container serving now that has died often enough to be worth a row.
+        "restarts10serving",
+        "crashloop",
+        "oomserving",
+    ]
+    .iter()
+    .map(|name| captured_pod(name))
+    .collect();
+    pods.extend(
+        captured_items::<k8s_openapi::api::core::v1::Pod>("kube-system-pods")
+            .into_iter()
+            .map(PodSnapshot::from),
+    );
+    pods.extend(
+        captured_items::<k8s_openapi::api::core::v1::Pod>("healthy-deploy-pods")
+            .into_iter()
+            .map(PodSnapshot::from),
+    );
+    let mut nodes: Vec<NodeSnapshot> = captured_items::<k8s_openapi::api::core::v1::Node>("nodes")
+        .into_iter()
+        .map(NodeSnapshot::from)
+        .collect();
+    // **One machine promised more than it has.** Every node in the capture has room — a kind
+    // cluster nobody has loaded does — so the state `screens/analysis.md` § Capacity opens on is
+    // planted, one field moved on the way in (NOTES § D40), and nothing on disk is touched. What
+    // the plant is for is the renderer: a pane needs a banded row and a plain one to show that
+    // both start in the same column.
+    nodes[0].allocatable_cpu = Some("100m".to_owned());
+    ClusterSnapshot {
+        now: pinned(),
+        pods,
+        nodes,
+        workloads: Vec::new(),
+        server_version: Some(
+            std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/K8S_VERSION"
+            ))
+            .expect("the capture stamps the version it came from")
+            .trim()
+            .to_owned(),
+        ),
+        context: Some("kind-k8rs".to_owned()),
+        // **No kubeconfig certificate here, and that is a guard's ruling and not a gap.**
+        // `scripts/certs-test.sh` admits three files as readers of the committed certificates and
+        // takes each one's instant from its own `fn now() -> Time`; this file's `now` is the
+        // Alerts card ladder's moment, and a second instant in it is exactly what that guard
+        // exists to refuse. So the Certificates pane below draws its other row, and C1's own is
+        // `analysis_tests`' to prove — what this file is about is the drawing.
+        client_certificate: None,
+        namespace_scope: None,
+        replica_sets: Some(
+            captured_items::<k8s_openapi::api::apps::v1::ReplicaSet>("healthy-replicasets")
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
+        services: Some(
+            captured_items::<k8s_openapi::api::core::v1::Service>("services")
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
+        endpoint_slices: Some(
+            captured_items::<k8s_openapi::api::discovery::v1::EndpointSlice>("endpointslices")
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
+        claims: Some(
+            captured_items::<k8s_openapi::api::core::v1::PersistentVolumeClaim>(
+                "persistentvolumeclaims",
+            )
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        ),
+        disruption_budgets: Some(
+            captured_items::<k8s_openapi::api::policy::v1::PodDisruptionBudget>(
+                "poddisruptionbudgets",
+            )
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        ),
+        // **The signer moved on the way in** — the D40 plant `analysis_tests` uses for this row,
+        // because `csr-pending.json` is a *human* asking for a kubeconfig and the row is about
+        // machines. Nothing on disk is touched.
+        certificate_requests: Some(
+            vec![capture("csr-pending")]
+                .into_iter()
+                .map(|value| {
+                    let mut object: k8s_openapi::api::certificates::v1::CertificateSigningRequest =
+                        serde_json::from_value(value)
+                            .expect("csr-pending.json is a CertificateSigningRequest");
+                    object.spec.signer_name =
+                        "kubernetes.io/kube-apiserver-client-kubelet".to_owned();
+                    object.into()
+                })
+                .collect(),
+        ),
+        metrics: None,
+    }
+}
+
+/// **The seven, in sidebar order, each from its own producer over [`cluster`]** — and the
+/// findings the rule engine returned for that same snapshot, because two of them restate a card
+/// a rule already made.
+fn reported() -> Vec<(&'static str, Report)> {
+    let cluster = cluster();
+    let findings = crate::rules::analyze(&cluster);
+    vec![
+        ("capacity", crate::analysis::capacity(&cluster, &findings)),
+        (
+            "certificates",
+            crate::analysis::certificates(&cluster, &findings),
+        ),
+        (
+            "drain safety",
+            crate::analysis::drain_safety(&cluster, &findings),
+        ),
+        ("posture", crate::analysis::posture(&cluster, &findings)),
+        ("restarts", crate::analysis::restarts(&cluster, &findings)),
+        ("waste", crate::analysis::waste(&cluster, &findings)),
+        ("versions", crate::analysis::versions(&cluster, &findings)),
+    ]
+}
+
+/// The sidebar as the caller builds it: every report named, every one of them computed.
+fn entries<'a>(reports: &'a [(&'static str, Report)]) -> Vec<(&'a str, Option<&'a Report>)> {
+    reports
+        .iter()
+        .map(|(label, report)| (*label, Some(report)))
+        .collect()
+}
+
+/// An `App` looking at the nth report, with the sidebar cursor on its entry — which is what every
+/// frame in `screens/analysis.md` draws.
+fn opened_report(nth: usize) -> App {
+    let mut app = app();
+    app.view = View::Analysis(nth);
+    let rows = views::sidebar(&[], 7, None);
+    let picks = views::selectable(&rows, |item| item.selectable());
+    let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+    let at = picks
+        .iter()
+        .position(|row| rows[*row] == NavItem::Report(nth))
+        .expect("the sidebar names every report");
+    app.nav.select(at, &anchors);
+    app
+}
+
+/// The body of the content pane, one string per line, with the pad kept — every column assertion
+/// below counts from the pane's own left edge.
+///
+/// Rows 2 to 17 are the 16 body lines at the floor: row 0 is the header, row 1 opens the frame and
+/// row 18 is the rule under the body, which is what
+/// [`the_frame_spends_the_rows_the_way_the_screen_file_does`] asserts for itself.
+fn body(buffer: &Buffer) -> Vec<String> {
+    rows(buffer)[2..18]
+        .iter()
+        .map(|line| pane(line).trim_end_matches('\u{2502}').to_owned())
+        .collect()
+}
+
+/// **The title is the pane's first line, and it is not a row** (`screens/analysis.md` rule 5), so
+/// whatever the reader has scrolled to it is still there. Both halves are asserted: the title on
+/// the first line before the scroll, and the same line after the cursor has walked the pane to
+/// its end.
+#[test]
+fn the_title_is_on_the_first_line_and_does_not_scroll_with_the_rows() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let reports = reported();
+    let entries = entries(&reports);
+
+    for (nth, (label, report)) in reports.iter().enumerate() {
+        let mut screen = screen(&alerts, &now);
+        screen.reports = &entries;
+        let mut app = opened_report(nth);
+        let first = render(&app, &screen);
+        assert_eq!(
+            body(&first)[0].trim_end(),
+            format!("  {}", fits(&report.title, 55)),
+            "{label} opens on its own heading"
+        );
+
+        // The cursor walked to the last answer on the pane, which is what scrolls the list.
+        let picks = views::selectable(&report.rows, views::answers);
+        let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+        app.content.select(picks.len().saturating_sub(1), &anchors);
+        let scrolled = render(&app, &screen);
+        assert_eq!(
+            body(&scrolled)[0].trim_end(),
+            format!("  {}", fits(&report.title, 55)),
+            "{label} still says what it is after the reader has scrolled:\n{}",
+            rows(&scrolled).join("\n")
+        );
+    }
+}
+
+/// **The gutter is two columns whether or not the row has a glyph** (rule 2), so a banded row and
+/// a plain one start at the same column — and the glyph itself comes from `theme::band` and from
+/// nothing written in `ui.rs` (rule 1).
+#[test]
+fn a_row_pays_the_band_gutter_whether_or_not_it_has_a_glyph() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let reports = reported();
+    let entries = entries(&reports);
+    let (nth, (_, capacity)) = reports
+        .iter()
+        .enumerate()
+        .find(|(_, (label, _))| *label == "capacity")
+        .expect("capacity is one of the seven");
+    let mut screen = screen(&alerts, &now);
+    screen.reports = &entries;
+    let drawn = render(&opened_report(nth), &screen);
+    println!("{}", rows(&drawn).join("\n"));
+
+    // One banded row and one plain one, taken off the report rather than off the screen: what is
+    // asserted is that the *renderer* put them in the same column.
+    let banded = capacity
+        .rows
+        .iter()
+        .find_map(|row| match row {
+            ReportRow::Answer {
+                severity: Some(severity),
+                text,
+                ..
+            } => Some((*severity, text.as_str())),
+            _ => None,
+        })
+        .expect("the corpus overcommits a node");
+    let plain = capacity
+        .rows
+        .iter()
+        .find_map(|row| match row {
+            ReportRow::Answer {
+                severity: None,
+                text,
+                ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .expect("and leaves the others alone");
+
+    // The first line of each, wrapped the way the pane wraps it — a node name plus its numbers
+    // is wider than the 51 columns a row has once the gutter is paid.
+    let opens = |text: &str| wrapped(text, 51).first().expect("a row has text").clone();
+    let with = row(&drawn, &opens(banded.1));
+    let without = row(&drawn, &opens(plain));
+    let (colour, signal) = theme::band(banded.0);
+    assert_eq!(
+        column(&pane(&with), PAD.into()),
+        mark(signal).chars().next().expect("a band has a mark"),
+        "the band's own glyph, in the gutter's first column: {with:?}"
+    );
+    // **And its colour is that band's too** — both come from `theme::band` together, so the two
+    // carriers cannot disagree (`ui.rs`'s own module doc). The cell is read rather than the
+    // string: a glyph drawn in the wrong ink prints identically.
+    let y = rows(&drawn)
+        .iter()
+        .position(|line| *line == with)
+        .expect("the row is on the screen");
+    let x = 1 + SIDEBAR + 1 + PAD;
+    assert_eq!(
+        drawn
+            .cell((x, u16::try_from(y).expect("a row index")))
+            .expect("the gutter's first column is inside the frame")
+            .fg,
+        ink(colour, Depth::TrueColor),
+        "the glyph is drawn in its band's colour"
+    );
+    assert_eq!(
+        column(&pane(&with), (PAD + 1).into()),
+        ' ',
+        "and the column that keeps it off the name"
+    );
+    // **Not a byte slice**: the row above opens on a glyph, and `&line[..4]` lands inside it.
+    let after = |line: &str, columns: usize| -> String { line.chars().skip(columns).collect() };
+    assert_eq!(
+        pane(&without)
+            .chars()
+            .take(usize::from(PAD) + GUTTER)
+            .collect::<String>(),
+        "    ",
+        "a row that makes no judgement pays the same two columns: {without:?}"
+    );
+    assert_eq!(
+        pane(&with).chars().nth(usize::from(PAD) + GUTTER),
+        pane(&without).chars().nth(usize::from(PAD) + GUTTER),
+        "so both names start in the same column"
+    );
+    assert!(
+        after(&pane(&with), usize::from(PAD) + GUTTER).starts_with(&opens(banded.1)),
+        "and the row's text follows the gutter: {with:?}"
+    );
+}
+
+/// **Rows wrap and never clip** (rule 4) — the one place this page differs from an Alerts card,
+/// where the name clips and the age keeps its columns. The paragraph asserted here is 63 columns
+/// against a 49-column measure, so it cannot survive on one line.
+#[test]
+fn a_row_wraps_onto_a_second_line_and_nothing_on_the_pane_is_cut() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let reports = reported();
+    let entries = entries(&reports);
+    let (nth, _) = reports
+        .iter()
+        .enumerate()
+        .find(|(_, (label, _))| *label == "waste")
+        .expect("waste is one of the seven");
+    let mut screen = screen(&alerts, &now);
+    screen.reports = &entries;
+    let drawn = render(&opened_report(nth), &screen);
+    println!("{}", rows(&drawn).join("\n"));
+
+    let said = "This Service points at nothing. Anything calling it gets a 503.";
+    let wrapped = wrapped(said, 49);
+    assert!(wrapped.len() > 1, "the fixture sentence is what wraps it");
+    for line in &wrapped {
+        let drawn_line = pane(&row(&drawn, line));
+        assert!(
+            drawn_line.starts_with(&format!("      {line}")),
+            "every part of it is drawn whole, indented under the row: {drawn_line:?}"
+        );
+    }
+    assert!(
+        !holds(&drawn, CUT),
+        "and nothing on this page is shortened:\n{}",
+        rows(&drawn).join("\n")
+    );
+}
+
+/// **The cursor lands on an `Answer` and skips a `Prose` and a `NotComputed`** (NOTES § D127) —
+/// the variant decides it, never a field.
+///
+/// It is read off the **scroll**, which is the only thing a selection moves on this pane: the
+/// drain pane opens on a `Prose`, so a cursor walking the raw rows and one walking
+/// [`views::selectable`]'s answer are one row apart, and at the foot of a list taller than the
+/// body that is the difference between the last answer being on screen and being off it.
+#[test]
+fn the_cursor_lands_only_on_an_answer() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let reports = reported();
+    let entries = entries(&reports);
+    let (nth, (_, drain)) = reports
+        .iter()
+        .enumerate()
+        .find(|(_, (label, _))| *label == "drain safety")
+        .expect("drain safety is one of the seven");
+    assert!(
+        matches!(drain.rows.first(), Some(ReportRow::Prose(_))),
+        "the pane opens on the line that says a drain assumes --ignore-daemonsets"
+    );
+
+    let picks = views::selectable(&drain.rows, views::answers);
+    assert_eq!(
+        picks.first(),
+        Some(&1),
+        "so the first row the cursor may land on is the second row"
+    );
+    let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+    let mut screen = screen(&alerts, &now);
+    screen.reports = &entries;
+    let mut app = opened_report(nth);
+    app.content.select(picks.len() - 1, &anchors);
+    let drawn = render(&app, &screen);
+    println!("{}", rows(&drawn).join("\n"));
+
+    let last = drain.rows.last().expect("the pane has rows").clone();
+    let ReportRow::Answer { text, .. } = last else {
+        panic!("the drain pane ends on an answer")
+    };
+    assert!(
+        holds(&drawn, fits(&text, 51)),
+        "the last answer is what the cursor reached:\n{}",
+        rows(&drawn).join("\n")
+    );
+}
+
+/// **The blank lines are the block structure**: a `NotComputed` stands off from the answers
+/// around it and keeps one between its two sentences, while the answers themselves pack — which
+/// is `screens/analysis.md` § *Live usage, and the one place a missing metrics-server is said*
+/// drawn at the real 53-column region, and § *Capacity* above it, where the node rows follow one
+/// another with nothing between.
+#[test]
+fn a_check_that_could_not_run_stands_off_from_the_answers_and_they_pack() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let reports = reported();
+    let entries = entries(&reports);
+    let (nth, (_, capacity)) = reports
+        .iter()
+        .enumerate()
+        .find(|(_, (label, _))| *label == "capacity")
+        .expect("capacity is one of the seven");
+    let (reason, ask_for) = capacity
+        .rows
+        .iter()
+        .find_map(|row| match row {
+            ReportRow::NotComputed { reason, ask_for } => Some((reason.as_str(), ask_for.as_str())),
+            _ => None,
+        })
+        .expect("this cluster was never asked what it is using, and the pane says so");
+
+    // The foot of the pane, where the row that could not be computed sits.
+    let picks = views::selectable(&capacity.rows, views::answers);
+    let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+    let mut app = opened_report(nth);
+    app.content.select(picks.len() - 1, &anchors);
+    let mut screen = screen(&alerts, &now);
+    screen.reports = &entries;
+    let drawn = render(&app, &screen);
+    let lines = body(&drawn);
+    println!("{}", rows(&drawn).join("\n"));
+
+    let at = |needle: &str| {
+        let first = wrapped(needle, 53).first().expect("a sentence").clone();
+        lines
+            .iter()
+            .position(|line| line.trim_end() == format!("  {first}"))
+            .unwrap_or_else(|| panic!("no line opens {first:?}:\n{}", lines.join("\n")))
+    };
+    let blank = |nth: usize| lines[nth].trim().is_empty();
+
+    let opens = at(reason);
+    let way_out = at(ask_for);
+    assert!(
+        blank(opens - 1),
+        "a blank line above it:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        way_out > opens && blank(way_out - 1),
+        "one between the reason and the way out"
+    );
+    let ends = way_out + wrapped(ask_for, 53).len();
+    assert!(blank(ends), "and one under it, before the answers resume");
+    assert!(
+        !lines[ends + 1].trim().is_empty(),
+        "which is one blank line and not two:\n{}",
+        lines.join("\n")
+    );
+
+    // **And the answers pack.** Two node rows in a row, drawn one under the other.
+    let node_rows: Vec<usize> = capacity
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            ReportRow::Answer {
+                text,
+                detail,
+                action,
+                ..
+            } if detail.is_empty() && action.is_empty() => Some(text.as_str()),
+            _ => None,
+        })
+        .map(|text| {
+            let first = wrapped(text, 51).first().expect("a row").clone();
+            lines
+                .iter()
+                .position(|line| line.contains(&first))
+                .unwrap_or_else(|| panic!("no line holds {first:?}"))
+        })
+        .collect();
+    assert!(
+        node_rows.len() > 1,
+        "the pane draws more than one plain node row, or this proves nothing"
+    );
+    for pair in node_rows.windows(2) {
+        assert_eq!(
+            pair[1],
+            pair[0] + 1,
+            "nothing sits between two answers:\n{}",
+            lines.join("\n")
+        );
+    }
+}
+
+/// **The `→ ` action sits under its row, its continuation under the words after the arrow, and
+/// it wraps at 47 columns** — the last two lines of `screens/analysis.md` § *How a report is
+/// drawn*'s column table, which is 49 for the action line and 47 for what follows it.
+///
+/// **Two actions, because one cannot see its own measure.** A sentence that breaks in the same
+/// place at 45, 47 and 49 columns says nothing about which of the three the renderer used, and
+/// most of them do; the pair below is the one that brackets it — the first breaks differently at
+/// 45, the second at 49. Both are searched for rather than named, and the search asserting it
+/// found each is the point (CLAUDE.md § *a derived list asserts it found something*).
+#[test]
+fn an_action_indents_under_its_row_and_wraps_at_the_columns_the_table_gives_it() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let reports = reported();
+    let entries = entries(&reports);
+    let narrower = |action: &str| wrapped(action, 45) != wrapped(action, 47);
+    let wider = |action: &str| wrapped(action, 49) != wrapped(action, 47);
+
+    for (which, tells) in [
+        (
+            "a measure two columns narrower",
+            &narrower as &dyn Fn(&str) -> bool,
+        ),
+        ("a measure two columns wider", &wider),
+    ] {
+        let (nth, label, action) = reports
+            .iter()
+            .enumerate()
+            .find_map(|(nth, (label, report))| {
+                report.rows.iter().find_map(|row| match row {
+                    ReportRow::Answer { action, .. } if tells(action) => {
+                        Some((nth, *label, action.clone()))
+                    }
+                    _ => None,
+                })
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "no way out on this screen tells 47 columns from {which}, so this test \
+                        would pass whatever the renderer measured"
+                )
+            });
+        let mut screen = screen(&alerts, &now);
+        screen.reports = &entries;
+        let drawn = render(&opened_report(nth), &screen);
+        println!("{}", rows(&drawn).join("\n"));
+
+        let mut lines = wrapped(&action, 47).into_iter();
+        let opens = lines.next().expect("an action has a first line");
+        assert!(
+            pane(&row(&drawn, &opens)).starts_with(&format!("      → {opens}")),
+            "{label} ({which}): the arrow four columns into the region, the words two further in"
+        );
+        for line in lines {
+            assert!(
+                pane(&row(&drawn, &line)).starts_with(&format!("        {line}")),
+                "{label} ({which}): a continuation sits under the words, not under the arrow"
+            );
+        }
+    }
+}
+
+/// **A report the store has not answered for yet draws the block every waiting pane draws**, and
+/// the sidebar still names it — `screens/states.md` § *Still loading* draws seven ANALYSIS
+/// entries with a value beside only the one that reads a file on disk.
+#[test]
+fn a_report_that_is_not_computed_yet_is_named_in_the_sidebar_and_waits_in_the_pane() {
+    let now = now();
+    let alerts = Pane::Loading;
+    let certificates = badged("13d", Severity::Warn);
+    let reports = [
+        ("capacity", None),
+        ("certificates", Some(&certificates)),
+        ("drain safety", None),
+    ];
+    let mut screen = screen(&alerts, &now);
+    screen.reports = &reports;
+    let drawn = render(&opened_report(0), &screen);
+    println!("{}", rows(&drawn).join("\n"));
+
+    assert!(
+        holds(&drawn, "reading the cluster…"),
+        "the pane says it is still reading, not that there is nothing"
+    );
+    assert!(
+        row(&drawn, "capacity").contains("capacity"),
+        "and the sidebar still names the report"
+    );
+    assert!(
+        !row(&drawn, "capacity").contains('▲'),
+        "with no value beside it, because there is nothing to count yet"
+    );
+    assert!(
+        row(&drawn, "certificates").contains("13d"),
+        "while the one report that reads a file on disk already has its own"
+    );
+}
+
 // --- MEASURING AND CUTTING ---
 
 #[test]
@@ -2273,6 +2941,27 @@ fn the_cut_walks_back_to_a_whole_word_before_it_marks() {
     }
 }
 
+/// **The space between two words is the caller's** — an analysis row spells its own gap and the
+/// wrap keeps it, because normalising one is redrawing a line a lower layer already decided
+/// (`screens/analysis.md` § Capacity). What is dropped is only the space a line breaks on.
+#[test]
+fn a_wrap_keeps_the_spacing_inside_a_line_and_drops_the_one_it_breaks_on() {
+    // The row `analysis.rs` builds: the name, three columns, then the numbers.
+    let node = "k8rs-worker   0.45 of 12 cpu · 234Mi of 23.1Gi";
+    assert_eq!(wrapped(node, 51), [node], "one line, spelled as it arrived");
+    let broken = wrapped(node, 30);
+    assert_eq!(
+        broken,
+        ["k8rs-worker   0.45 of 12 cpu ·", "234Mi of 23.1Gi"],
+        "the three columns after the name survive the break; the space it broke on does not"
+    );
+    for line in &broken {
+        assert!(width(line) <= 30, "{broken:?}");
+    }
+    // Leading and trailing whitespace is nobody's alignment.
+    assert_eq!(wrapped("  padded  ", 10), ["padded"]);
+}
+
 // --- WHAT THE SCREEN ACTUALLY LOOKS LIKE ---
 
 /// Not an assertion about a column — the whole screen, printed, so a reader of the report can
@@ -2282,14 +2971,8 @@ fn the_alerts_screen_at_the_floor() {
     let now = now();
     let cards = vec![oom(), cordon(Some(at(0))), cordon(None)];
     let alerts = Pane::Ready(cards);
-    let capacity = Badge {
-        value: "1".to_owned(),
-        severity: Severity::Warn,
-    };
-    let certificates = Badge {
-        value: "30d".to_owned(),
-        severity: Severity::Warn,
-    };
+    let capacity = badged("1", Severity::Warn);
+    let certificates = badged("30d", Severity::Warn);
     let reports = [
         ("capacity", Some(&capacity)),
         ("certificates", Some(&certificates)),
@@ -2424,4 +3107,79 @@ fn rows_with_no_plain_column_draw_nothing_and_do_not_panic() {
         "no marker over a row with nothing in it:\n{}",
         rows(&drawn).join("\n")
     );
+}
+
+/// **All seven reports, each at the 80×24 floor, printed** — the box's own claim, which is that
+/// one code path draws every one of them and no line of `ui.rs` names a report. Not an assertion
+/// about a column: a reader of the report compares these with `screens/analysis.md` pane by pane.
+/// `cargo test -- --nocapture`.
+///
+/// What is asserted is only what a printed pane cannot show by itself: that the seven came from
+/// seven different producers over one snapshot, and that every one of them drew something.
+#[test]
+fn every_analysis_pane_at_the_floor() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let log = ["$ kubectl get nodes -o json".to_owned()];
+    let reports = reported();
+    let entries = entries(&reports);
+    assert_eq!(reports.len(), 7, "seven reports, seven sidebar entries");
+
+    for (nth, (label, report)) in reports.iter().enumerate() {
+        let mut screen = screen(&alerts, &now);
+        screen.reports = &entries;
+        screen.log = &log;
+        let drawn = render(&opened_report(nth), &screen);
+        println!("=== {label} ===\n{}\n", rows(&drawn).join("\n"));
+
+        assert!(
+            !report.rows.is_empty(),
+            "{label} has something to say, or this pane proves nothing"
+        );
+        // **A line of this report's own**, and not merely a pane with something in it.
+        //
+        // **The row asserted is the first one the cursor lands on, not the first one in the
+        // list**, and the difference is real: a `List` scrolls to keep the selected item whole, so
+        // a report that opens on a `Prose` followed by an answer as tall as the whole body draws
+        // the answer and not the preamble. The drain pane in this corpus is exactly that — one
+        // node carrying three stacked problems — and it is a fixture at an extreme rather than
+        // the state `screens/analysis.md` draws, where the same preamble sits above a four-line
+        // answer and stays on screen.
+        let first = report
+            .rows
+            .iter()
+            .find_map(|row| match row {
+                ReportRow::Answer { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .or_else(|| {
+                report.rows.first().map(|row| match row {
+                    ReportRow::Answer { text, .. } | ReportRow::Prose(text) => text.as_str(),
+                    ReportRow::NotComputed { reason, .. } => reason.as_str(),
+                })
+            })
+            .expect("a report with rows has a first row");
+        let opens = wrapped(first, 51).first().expect("a row has text").clone();
+        assert!(
+            holds(&drawn, &opens),
+            "{label} drew its own first row:\n{}",
+            rows(&drawn).join("\n")
+        );
+
+        // **What is under the fold, for the panes that have one** — and the same frame is rule 5
+        // printed: the heading is still on the first line after the list has scrolled.
+        let picks = views::selectable(&report.rows, views::answers);
+        let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+        let mut deeper = opened_report(nth);
+        deeper
+            .content
+            .select(picks.len().saturating_sub(1), &anchors);
+        let scrolled = render(&deeper, &screen);
+        if rows(&scrolled) != rows(&drawn) {
+            println!(
+                "=== {label}, at the last row the cursor can reach ===\n{}\n",
+                rows(&scrolled).join("\n")
+            );
+        }
+    }
 }

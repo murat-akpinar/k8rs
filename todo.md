@@ -4319,7 +4319,13 @@ string and key was settled in the design phase, so this phase is drawing.
       under the table about the selected row, whose name gives way behind a
       visible mark
       ([D251](NOTES.md#d251--the-bleed-through-one-line-about-the-selected-row-a-count-that-is-asked-and-not-re-derived-and-the-third-silent-cut-the-mark-went-looking-for-2026-09-06))
-- [ ] **Analysis view**: the Phase 4 reports, one pane each
+- [x] **Analysis view**: the Phase 4 reports, one pane each — landed
+      2026-09-06 as **one renderer for all seven**: the grammar of
+      [screens/analysis.md § How a report is drawn](screens/analysis.md), the
+      cursor on `Row::Answer` alone through `views::selectable`, and a report
+      that reaches the screen without a `Pane` because its three answers are
+      already inside it
+      ([D252](NOTES.md#d252--the-analysis-pane-one-renderer-for-seven-reports-a-shared-wrap-that-had-been-respelling-its-input-and-two-mutants-that-were-infinite-loops-2026-09-06))
 - [ ] Detail tabs per object: logs · describe · yaml · events, `[` / `]`
 - [ ] Command log panel — always visible, showing what k8rs ran
 - [ ] Context-sensitive key footer + `?` full key map, keys exactly as

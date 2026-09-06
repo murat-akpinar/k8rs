@@ -22,9 +22,8 @@
 //! What this file does owe is not *building* a string that escapes that guarantee, which is why
 //! every span below is either a literal or a value that arrived stripped.
 //!
-//! **What it does not draw yet**: the Analysis pane, the detail tabs, the modal layer and the
-//! `?` overlay. [`content`] dispatches on [`crate::views::View`] and has two arms built of the
-//! three, so an open report draws the Alerts pane until the box that writes its own.
+//! **What it does not draw yet**: the detail tabs, the modal layer and the `?` overlay.
+//! [`content`] dispatches on [`crate::views::View`] and now has one arm per view.
 
 // Nothing outside `#[cfg(test)]` calls this file yet: the event loop that will is Phase 12's
 // `main.rs`. Same attribute, same position and same accepted blind spot as `theme.rs`'s and
@@ -38,7 +37,7 @@
     )
 )]
 
-use crate::analysis::Badge;
+use crate::analysis::{Badge, Report, Row as ReportRow};
 use crate::k8s::Browsable;
 use crate::rules::{Finding, Severity};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
@@ -168,12 +167,41 @@ pub struct Screen<'a> {
     /// Every browsable kind the cluster said it serves, for the sidebar's rows under an open
     /// group. **Never a list written here** (invariant 12).
     pub kinds: &'a [Browsable],
-    /// One entry per analysis report, in sidebar order: its label and its badge.
+    /// One entry per analysis report, in sidebar order: its label, and the report itself once
+    /// there is one.
     ///
-    /// **The label is not on [`crate::analysis::Report`] on purpose** — that type's own doc says
-    /// so — and `views.rs` does not hold one either, so it arrives from the caller until
-    /// somebody gives it a home.
-    pub reports: &'a [(&'a str, Option<&'a Badge>)],
+    /// **The label is not on [`Report`] on purpose** — that type's own doc says so — and
+    /// `views.rs` does not hold one either, so it arrives from the caller until somebody gives it
+    /// a home. **The badge is not carried beside it** and is read off [`Report::badge`], so the
+    /// sidebar's value and the pane under it are one claim seen twice, the way [`found`] already
+    /// makes the Alerts badge and the browser's marks one.
+    ///
+    /// **`None` is *the store has not answered yet*, and it is the only pane state this level
+    /// carries** — there is no [`Pane`] here, because a report is a pure function of the
+    /// snapshot and not a fetch of its own: *we were not allowed to look* is already inside the
+    /// report as a [`ReportRow::NotComputed`], in that report's own words
+    /// (`screens/analysis.md` § What each report needs), and *there is nothing to say* is
+    /// already inside it as one [`ReportRow::Prose`] (that file's rule 8). What is left is the
+    /// moment before the first LIST returns, which no snapshot can express, and the caller says
+    /// it by having no report to hand over.
+    ///
+    /// **The label survives that moment and the badge does not**, which is what
+    /// `screens/states.md` § *Still loading* draws: seven ANALYSIS entries, `certificates  30d`
+    /// beside one of them because C1 reads a file on disk, and no value beside the six that need
+    /// the cluster.
+    ///
+    /// **One entry, one pane — and `screens/analysis.md` draws six panes for seven entries**:
+    /// Versions is drawn at the foot of the Certificates pane, keeps its own sidebar entry, and
+    /// its own `title` is never drawn (that file's head, and § *Certificates and Versions*). This
+    /// slice cannot say that yet, and it is not this file's to say: *which panes exist, and which
+    /// of them share one*, is `screens/`'s ruling
+    /// ([`crate::analysis::Report`]'s own doc), and the labels beside these badges have no home
+    /// either. Both are the same missing piece — which entries exist, what each is called, and
+    /// which pane it opens — and it is one ruling away, not one field. **Nothing below needs
+    /// changing when it lands**: a pane is whatever rows arrive, so two reports sharing one is a
+    /// longer `rows` and a title taken from the first, which is exactly what [`analysis`] already
+    /// draws.
+    pub reports: &'a [(&'a str, Option<&'a Report>)],
     /// The command log, oldest first. The strip draws the last [`LOG_LINES`] of it — display
     /// text, never executed and never fed back into a process (invariant 4).
     pub log: &'a [String],
@@ -487,7 +515,12 @@ fn sidebar(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
                     Vec::new(),
                 ),
                 NavItem::Report(nth) => match screen.reports.get(nth) {
-                    Some((label, badge)) => (1, *label, theme::TEXT, value(*badge, screen)),
+                    Some((label, report)) => (
+                        1,
+                        *label,
+                        theme::TEXT,
+                        value(report.and_then(|report| report.badge.as_ref()), screen),
+                    ),
                     None => (1, "", theme::TEXT, Vec::new()),
                 },
             };
@@ -571,15 +604,20 @@ fn value<'a>(badge: Option<&'a Badge>, screen: &Screen) -> Vec<Span<'a>> {
 /// allowed to look*. The three-arm match is what makes the second unreachable from the other two,
 /// and each pane repeats it rather than sharing a two-state helper that could collapse them.
 ///
-/// **[`View::Analysis`] draws the Alerts pane, because the Analysis pane is the next box**
-/// (todo.md § Phase 11) — which is the behaviour this file already had when it dispatched on
-/// nothing at all. It shares an arm with [`View::Alerts`] rather than falling into a `_`, so the
-/// box that writes that pane finds the arm it has to split instead of a wildcard that swallowed
-/// it.
+/// **[`View::Analysis`] has two answers and not three**, which is the one place this file's
+/// three-answer rule genuinely does not apply: a report is computed from the snapshot rather than
+/// fetched, so *we were not allowed to look* and *there is nothing to say* are both inside the
+/// report already ([`Screen::reports`]). What is left is *nothing came back yet*, and it draws
+/// [`note`] — the same block the other two panes draw while they wait, because it is the same
+/// wait.
 fn content(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     match app.view {
         View::Resources(nth) => browser(frame, area, app, screen, screen.kinds.get(nth)),
-        View::Alerts | View::Analysis(_) => match screen.alerts {
+        View::Analysis(nth) => match screen.reports.get(nth).and_then(|(_, report)| *report) {
+            None => note(frame, area, screen, false),
+            Some(report) => analysis(frame, area, app, screen, report),
+        },
+        View::Alerts => match screen.alerts {
             Pane::Loading => note(frame, area, screen, false),
             Pane::Denied(said, cards) => {
                 let rest = banner(frame, area, screen, said);
@@ -1220,6 +1258,184 @@ fn problems(frame: &mut Frame, area: Rect, screen: &Screen, card: &Card, name: &
 
 // --- THE BROWSER END ---
 
+// --- THE ANALYSIS PANE START ---
+
+/// **One report, and one code path for all seven** (`screens/analysis.md` § *How a report is
+/// drawn*, invariant 12's spirit one file over). Nothing below names a report, reads its label or
+/// branches on one: a pane is a title and a list of [`ReportRow`]s, and a report with nothing to
+/// say says so in its own words as one [`ReportRow::Prose`] — which is that section's rule 8 and
+/// the reason no per-report sentence lives here.
+///
+/// **The title is not a row, so it does not scroll** (rule 5): it is laid out above the list, the
+/// way the browser's own heading is, and whatever the reader has scrolled to, the sentence that
+/// says what they are looking at is still on the first line. It clips at the pane edge like every
+/// other one-line fact k8rs draws (`screens/widgets.md` § 7); the rows below it never do (rule 4).
+///
+/// **The cursor lands on [`ReportRow::Answer`] and nothing else** (NOTES § D127) — through
+/// [`views::selectable`] and [`views::answers`], which is the sidebar's own mechanism for its
+/// section headers, so the two lists skip their unselectable rows the same way. No row carries a
+/// selection marker, exactly as no card does: the two-column band gutter is the glyph's, and a
+/// `▸` in it would be a fourth thing that column can mean.
+fn analysis(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, report: &Report) {
+    let [head, _, body] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    frame.render_widget(
+        Paragraph::new(Line::styled(report.title.as_str(), screen.fg(theme::TEXT))),
+        padded(head),
+    );
+    let body = padded(body);
+    let region = usize::from(body.width);
+    let items: Vec<ListItem> = report
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(nth, row)| {
+            let above = nth
+                .checked_sub(1)
+                .and_then(|before| report.rows.get(before));
+            ListItem::new(Text::from(drawn(row, above, screen, region)))
+        })
+        .collect();
+    let picks = views::selectable(&report.rows, views::answers);
+    // One anchor slot per selectable row and none of them read, the same as the sidebar's: which
+    // row the cursor is on is the state, and following an object is the key handler's business.
+    let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+    let at = app
+        .content
+        .selected(&anchors)
+        .and_then(|nth| picks.get(nth))
+        .copied();
+    let mut state = ListState::default().with_selected(at);
+    frame.render_stateful_widget(List::new(items), body, &mut state);
+}
+
+/// **One row, as the lines it draws** — and the whole of the grammar
+/// (`screens/analysis.md` § *How a report is drawn*), at the widths that section's table gives at
+/// the 80×24 floor: 51 columns of row text after the gutter, 49 for a `detail` and for the `→ `
+/// action, 47 for an action continuation. Every one of them is the region less a constant, so a
+/// wider terminal widens all four together.
+///
+/// **The gutter is [`GUTTER`] columns whether or not there is a glyph** (rule 2), which is why a
+/// row with no band draws spaces there rather than nothing: a banded row and a plain one start at
+/// the same column, and the eye reads a straight left edge of names. The glyph and its colour come
+/// from `theme::band` and from nowhere else (rule 1) — no string on this page contains one, and a
+/// wrapped row's continuation indents under its own text so it can never be read as a second,
+/// unbanded row.
+///
+/// **A row wraps and never clips** (rule 4). This is the one place the page differs from an Alerts
+/// card, where an age is right-aligned and the name clips: there are two zones there and one here.
+///
+/// **The blank lines are the block structure and nothing else.** A [`ReportRow::Prose`] or a
+/// [`ReportRow::NotComputed`] is separated from the answers above it by one blank line — never at
+/// the top of the body, and never after a `NotComputed`, which already closed with one. Answers
+/// pack, so a list of nodes reads as a list. `above` is the row before this one, which is all that
+/// is needed to know which of those it is.
+fn drawn<'a>(
+    row: &ReportRow,
+    above: Option<&ReportRow>,
+    screen: &Screen,
+    region: usize,
+) -> Vec<Line<'a>> {
+    let ink = screen.fg(theme::TEXT);
+    let dim = screen.fg(theme::DIM);
+    // **The grammar's own table, each measure the one above it less [`PAD`]**: 51 columns of row
+    // text after the gutter, 49 for a `detail` and for the `→ ` action, 47 for an action
+    // continuation, at the 80×24 floor (`screens/analysis.md` § *How a report is drawn*). Named
+    // and subtracted in one place, so the four cannot drift apart and a wider terminal widens
+    // all of them.
+    let step = usize::from(PAD);
+    let says = region.saturating_sub(GUTTER);
+    let under = says.saturating_sub(step);
+    let after = under.saturating_sub(step);
+    let space = match above {
+        None => false,
+        Some(ReportRow::NotComputed { .. }) => false,
+        Some(_) => true,
+    };
+    let set = |text: &str, columns: usize, style: Style| -> Vec<Line<'a>> {
+        wrapped(text, columns)
+            .into_iter()
+            .map(|line| Line::styled(line, style))
+            .collect()
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+    match row {
+        ReportRow::Answer {
+            severity,
+            text,
+            detail,
+            action,
+            jump: _,
+        } => {
+            let band = match severity {
+                Some(severity) => {
+                    let (colour, signal) = theme::band(*severity);
+                    Span::styled(glyph(signal), screen.fg(colour))
+                }
+                // **A row that makes no judgement is still a row** (`crate::analysis::Row::Answer`
+                // — `None` is not a fourth band), so it pays the gutter and draws nothing in it.
+                None => Span::raw(" ".repeat(GUTTER)),
+            };
+            let mut text = wrapped(text, says).into_iter();
+            lines.push(Line::from(vec![
+                band,
+                Span::styled(text.next().unwrap_or_default(), ink),
+            ]));
+            lines.extend(indent(text.collect(), "  ", ink));
+            // **One element per paragraph, and no blank line between them** — two adjacent
+            // paragraphs are what Capacity's flagged node draws (the measurement, then what the
+            // numbers mean) and what a drain row folds a second reason into, and both are drawn
+            // solid (`screens/analysis.md` §§ Capacity, A node that would throw away files).
+            for paragraph in detail {
+                lines.extend(indent(wrapped(paragraph, under), "    ", ink));
+            }
+            // **The action is never cut and its continuation sits under the text after the
+            // arrow**, the same as a card's — `views.rs` draws the `→ `, so the value starts at
+            // the word (`crate::analysis::Row::Answer::action`).
+            let mut action = wrapped(action, after).into_iter();
+            if let Some(first) = action.next() {
+                lines.push(Line::from(vec![
+                    Span::styled("    → ", screen.fg(theme::ACCENT)),
+                    Span::styled(first, ink),
+                ]));
+                lines.extend(indent(action.collect(), "      ", ink));
+            }
+        }
+        // **No gutter and no band**: a line the cursor cannot reach cannot be acted on, so it
+        // starts at the region's own left edge and is dim, like every other line on this screen
+        // that is context rather than an answer — the sidebar's section headers, [`note`]'s
+        // paragraphs, [`empty`]'s sentence.
+        ReportRow::Prose(said) => {
+            if space {
+                lines.push(Line::default());
+            }
+            lines.extend(set(said, region, dim));
+        }
+        // **The reason, then the way out, and both are the pane's answer** — so they are drawn in
+        // the same ink as an answer and not dimmed away. A report that names the check without
+        // naming the way out is the half a reader cannot act on
+        // (`crate::analysis::Row::NotComputed::ask_for`), and the blank between them is what keeps
+        // the two sentences from reading as one paragraph.
+        ReportRow::NotComputed { reason, ask_for } => {
+            if space {
+                lines.push(Line::default());
+            }
+            lines.extend(set(reason, region, ink));
+            lines.push(Line::default());
+            lines.extend(set(ask_for, region, ink));
+            lines.push(Line::default());
+        }
+    }
+    lines
+}
+
+// --- THE ANALYSIS PANE END ---
+
 // --- MEASURING AND CUTTING START ---
 
 /// How many columns a string occupies, measured the way ratatui measures it — wide CJK included.
@@ -1257,12 +1473,35 @@ fn fits(text: &str, columns: usize) -> &str {
 /// `"https://registry.invalid/v2/does-not-exist/manifests/v9":`, 58 columns, which is wider than
 /// the 51 a card has at the floor. Wrapping alone cannot make that line fit
 /// (`screens/alerts.md` § How wide a card is, and how tall).
+///
+/// **The space *between* two words is the caller's and is kept verbatim.** An analysis row is one
+/// string that reads left to right — `k8rs-worker   0.45 of 12 cpu · 234Mi of 23.1Gi`, three
+/// columns after the name — and a wrap that normalised runs of spaces would quietly redraw a line
+/// `analysis.rs` had already spelled (`screens/analysis.md` § Capacity, its rule 3: this file
+/// never splits a rendered string back into values, and rejoining one differently is the same
+/// mistake from the other end). Single-spaced text is unaffected, which is every other caller.
+/// What is still dropped is the space a line *breaks* on, at both ends: a continuation starts at
+/// its word.
 fn wrapped(text: &str, columns: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut line = String::new();
-    for word in text.split_whitespace() {
-        if !line.is_empty() && width(&line) + 1 + width(word) <= columns {
-            line.push(' ');
+    let mut left = text;
+    while let Some(at) = left.find(|character: char| !character.is_whitespace()) {
+        let (gap, tail) = left.split_at(at);
+        // **The word runs to the first whitespace *after* its first character**, so it is never
+        // empty, `left` is strictly shorter every turn, and this loop cannot spin. Stated where it
+        // is relied on, and written with no arithmetic in it on purpose: a word end computed as an
+        // offset plus a head is one `+` away from being 0, and a renderer that spins takes the
+        // terminal with it.
+        let end = tail
+            .char_indices()
+            .skip(1)
+            .find(|(_, character)| character.is_whitespace())
+            .map_or(tail.len(), |(at, _)| at);
+        let (word, next) = tail.split_at(end);
+        left = next;
+        if !line.is_empty() && width(&line) + width(gap) + width(word) <= columns {
+            line.push_str(gap);
             line.push_str(word);
             continue;
         }

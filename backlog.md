@@ -698,7 +698,11 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   family one more time: the failure and its explanation print the same regardless of
   which failure it was. `tester` owns `scripts/` and could not fix it in the round that
   found it, because the other session's process was executing that exact file. Found by
-  `tester`, 2026-09-06
+  `tester`, 2026-09-06. **It happened a second time on the same day, from one agent rather
+  than two sessions** — `dev-ui` started a second background gate while its first was still
+  running and the two collided over `mutants.out` in exactly this way. So the remedy is not
+  only a better sentence: `scripts/mutants.sh` can see the lock it already reads and refuse to
+  start beside a live run, which is a smaller change than teaching the message a third cause
 
 - **A second Claude session held `src/` for most of 2026-09-06, and only mtimes said
   so.** While this session closed Phase 10 and drove Phase 11's first drawing turn,
@@ -2769,3 +2773,26 @@ long-form version and stays the authority.*
   box's last round while implementing the *other* two cuts, confirmed by the PM against
   `alerts.md`:963–966 and `ui.rs`'s `identity`. `tui-designer` first, then `dev-ui`.
   2026-09-06
+
+- **Three frames in `screens/analysis.md` contradict that file's own grammar section, which
+  says every pane below obeys it.** Measured while drawing the pane, 2026-09-06: Posture and
+  Restarts draw a blank line after their opening `Row::Prose`, where scoped Capacity's `Prose`
+  (*"Still counted, from what you can see:"*) must hug the row beneath it — no rule satisfies
+  both without per-report knowledge, which rule 8 exists to forbid; and Certificates and
+  Restarts wrap a row's continuation back to region column 0, into the two-column band gutter,
+  where it reads as a second unbanded row. The renderer follows the **grammar section**, which
+  is the normative half and says so
+  ([D252](NOTES.md#d252--the-analysis-pane-one-renderer-for-seven-reports-a-shared-wrap-that-had-been-respelling-its-input-and-two-mutants-that-were-infinite-loops-2026-09-06)
+  ruling 3), so the frames are what is wrong. `tui-designer`'s: three frames to redraw, no
+  code change behind it. Found by `dev-ui`, confirmed by the PM against the section's own
+  *"every pane below obeys all eight"*, 2026-09-06
+
+- **`screens/analysis.md` draws six panes for seven sidebar entries, and nothing says which
+  ruling that is.** Versions sits at the foot of the Certificates pane while keeping its own
+  sidebar row and its own badge, and its `title` is never drawn. **Which panes exist and which
+  share one is `screens/`'s ruling**, not the renderer's — `analysis::Report`'s own doc says
+  so — and the two labels beside those badges still have no home in any type. Nothing in the
+  code changes when it lands: a shared pane is a longer `rows` and a title taken from the
+  first, which is what the renderer already draws. **Wanted before Phase 12 wires the sidebar
+  to the panes**, because a badge drawn for a pane that is not there is a wrong sidebar and
+  not a wrong report. Raised by `dev-ui` at the Analysis box, 2026-09-06

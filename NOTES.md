@@ -273,6 +273,7 @@ its line moving with it.
 - [D249](#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06) — the layout box lands from a second session: the header gives way from its front, and a refusal keeps the list it is about
 - [D250](#d250--the-browser-pane-a-width-rule-that-is-not-widgetsmds-sentence-an-empty-list-that-is-not-nothing-is-broken-and-a-test-that-passed-on-the-screen-it-forbids-2026-09-06) — the browser pane: a width rule that is not `widgets.md`'s sentence, an empty list that is not *nothing is broken*, and a test that passed on the screen it forbids
 - [D251](#d251--the-bleed-through-one-line-about-the-selected-row-a-count-that-is-asked-and-not-re-derived-and-the-third-silent-cut-the-mark-went-looking-for-2026-09-06) — the bleed-through: one line about the selected row, a count that is asked and not re-derived, and the third silent cut the mark went looking for
+- [D252](#d252--the-analysis-pane-one-renderer-for-seven-reports-a-shared-wrap-that-had-been-respelling-its-input-and-two-mutants-that-were-infinite-loops-2026-09-06) — the analysis pane: one renderer for seven reports, a shared wrap that had been respelling its input, and two mutants that were infinite loops
 
 ## Why it exists — where the gap is
 
@@ -21933,3 +21934,76 @@ measured, and it costs `⏎ to see` its last column on the way. The test therefo
 in `ui_tests.rs` that does not go through `draw`**, and it says so in its own doc comment so
 the next reader does not have to work out whether it was a shortcut. 39 mutants, 37 caught, 2
 unviable naming a type with no `Default`, 0 missed.
+
+### D252 — the analysis pane: one renderer for seven reports, a shared wrap that had been respelling its input, and two mutants that were infinite loops (2026-09-06)
+
+Phase 11's Analysis box. `screens/analysis.md` is 2309 lines and the pane is **one code
+path**: its § *How a report is drawn* fixes a grammar every report obeys — a title that is
+not a row, rows whose *variant* says whether the cursor may land on them, a two-column band
+gutter whether or not there is a glyph, and text that wraps and never clips — so `ui.rs`
+names no report, reads no label and branches on none. A report with nothing to say says it in
+its own words as one `Row::Prose` (that section's rule 8), which is why no per-report
+sentence lives in the renderer. Seven panes were printed at the 80×24 floor from the
+committed captures and read against their own sections. `just check` green at 1214 tests;
+`just mutants-diff` **16 mutants, 16 caught, 0 missed**.
+
+**1. A report reaches the screen without a `Pane`, and that is a claim about what `Pane` is
+for.** `Screen::reports` is `&[(&str, Option<&Report>)]`. `Pane`'s three answers are about a
+*fetch*: *we were not allowed to look* is already inside a report as a `Row::NotComputed` in
+that report's own words, and *there is nothing* is already inside it as a `Row::Prose`. What
+is left is the moment before the first LIST returns, which no snapshot can express — so the
+caller hands over no report at all and the pane draws the same `reading the cluster…` block
+the other two panes draw. **The badge comes off `Report::badge`** rather than travelling
+beside the label, so the sidebar's value and the pane are one claim and cannot disagree; the
+label surviving that moment while the badge does not is exactly what `screens/states.md`
+§ *Still loading* draws.
+
+**2. `wrapped` stopped normalising runs of spaces, and this is the shared-helper change the
+turn owed a review** (CLAUDE.md step 6 — a helper's blast radius is not a family). It split
+on `split_whitespace` and rejoined with a single space, so `analysis.rs`'s
+`format!("{name}   {…}")` was drawn as `k8rs-worker 0.45 of 12 cpu`: **the renderer silently
+respelling a string a lower layer had already spelled.** It now keeps the run it found. The
+review that matters is *what else can now reach a drawn line*, and the answer is nothing new:
+`k8s::text` turns every unprintable character — `\n` and `\t` included — into a single space
+at ingest, and no product string in `rules.rs` or `analysis.rs` carries a literal newline, so
+a preserved gap can only ever be spacing a rule author typed on purpose. Single-spaced text
+is byte-identical before and after, which is what the Alerts and browser tests pinning exact
+strings assert for it.
+
+**3. Three of that file's own frames contradict its grammar section, and the code follows the
+grammar.** The section says *"every pane below obeys all eight"*; Posture and Restarts draw a
+blank line after their opening `Prose`, Certificates and Restarts wrap a row's continuation
+back to column 0 — into the band gutter, where it reads as a second unbanded row — and no
+rule can satisfy both those frames and scoped Capacity's `Prose`, which must hug the row
+beneath it, without per-report knowledge. **The frames are wrong by the file's own sentence**,
+they are `tui-designer`'s, and they are in [`backlog.md`](backlog.md) rather than fixed here,
+because redrawing report mockups is not this box
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+
+**4. The page's colours were nobody's, so they are the renderer's and they are written down.**
+`screens/analysis.md` says nothing about colour. The glyph takes `theme::band`; row text, a
+`detail` and an action take `TEXT`; the arrow takes `ACCENT`; `Prose` takes `DIM` — it is
+unselectable context, like the sidebar's section headers and the empty pane's paragraphs — and
+`NotComputed` takes `TEXT`, because it is the pane's answer and carries a way out, like the
+refusal banner's sentence. **No row carries a selection marker**, exactly as no card does: the
+gutter belongs to the glyph and a `▸` there would be a fourth meaning for that column. The
+consequence is that the cursor is invisible until it scrolls, which is already true of Alerts.
+
+**5. Two of the first run's mutants came back as 90-second timeouts, and a timeout there means
+the renderer spins.** `delete !` and `replace + with -` inside `wrapped`'s loop each produced
+an infinite loop — a word that measures empty, an index that never advances — and a renderer
+that spins takes the terminal with it. The loop is now written with **no arithmetic in it**:
+a word runs to the first whitespace *after* its first character, found by `char_indices()
+.skip(1)`, so it can never be empty and the remainder is strictly shorter every turn. Both
+mutants are now caught in 0.00s. **A `timeout` in a mutation report is not a slow test; it is
+the shape of a defect this file can have.**
+
+**6. What the box could not prove, and one ruling it is waiting on.** The Certificates pane
+draws no C1 row: `scripts/certs-test.sh` admits exactly three files as readers of the
+committed certificates and derives each one's instant from its own `now()`, and a second
+instant in `ui_tests.rs` is what that guard exists to refuse — so C1 stays `analysis_tests`'
+to prove. And `screens/analysis.md` draws **six panes for seven entries**, Versions sharing
+Certificates' pane while keeping its own sidebar row: which panes exist and which share one is
+`screens/`'s ruling, not the renderer's, and nothing in the code changes when it lands — a
+shared pane is a longer `rows` and a title taken from the first. Both are in
+[`backlog.md`](backlog.md).
