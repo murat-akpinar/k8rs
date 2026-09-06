@@ -338,11 +338,21 @@ drops_the_canary "$src" || {
 # **The price, measured on this box 2026-09-06:** 1m17s the first time this
 # directory is used, because every dependency is built into it; 6s on every run
 # after that, of which ~4.7s is recompiling k8rs itself. `just check` whole is
-# 71s steady-state with this guard in it. **What is not measured is CI**, where
-# `Swatinem/rust-cache` may or may not carry a nested build directory across
-# pushes — if it does not, the `guards` step pays the 1m17s (a runner's own
-# figure, not this one) on every push, and the number to read is that step's
-# duration on the first green run after this lands.
+# 71s steady-state with this guard in it. **The CI number came back on run
+# 34013476688**, the first green run after this landed, job
+# `fmt · clippy · test · guards`: **78s** of that step's 2m25s, 05:17:08 to
+# 05:18:26, and cargo's own `Finished` line there reads `1m 17s` — the same cold
+# figure as this box, because 47s of the 78 is rebuilding every dependency into
+# the nested directory (`Compiling proc-macro2` is in that log). The red run
+# before it, 34012412083, spent the same 47s off an identical cache hit, so
+# `Swatinem/rust-cache` does not hand `target/package-check-build` back across
+# pushes and the `guards` step pays the cold build every time. What those two
+# runs do *not* settle is whether it ever could: both hit the cache key exactly,
+# so neither wrote a cache back at all — the green run's post step logged `Cache
+# up-to-date` and the red run, having failed, never reached its post step. The
+# run to read is the first one after a `Cargo.lock` or toolchain bump: a new key
+# forces a real save, and if the run after *that* still compiles proc-macro2
+# here, the directory is being pruned rather than merely never saved.
 log=$(mktemp); trap 'rm -f "$log"' EXIT
 set +e
 CARGO_TARGET_DIR="$BUILD" cargo test --locked --no-run --manifest-path "$src/Cargo.toml" 2>&1 | tee "$log"
