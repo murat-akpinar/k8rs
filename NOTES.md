@@ -274,6 +274,7 @@ its line moving with it.
 - [D250](#d250--the-browser-pane-a-width-rule-that-is-not-widgetsmds-sentence-an-empty-list-that-is-not-nothing-is-broken-and-a-test-that-passed-on-the-screen-it-forbids-2026-09-06) — the browser pane: a width rule that is not `widgets.md`'s sentence, an empty list that is not *nothing is broken*, and a test that passed on the screen it forbids
 - [D251](#d251--the-bleed-through-one-line-about-the-selected-row-a-count-that-is-asked-and-not-re-derived-and-the-third-silent-cut-the-mark-went-looking-for-2026-09-06) — the bleed-through: one line about the selected row, a count that is asked and not re-derived, and the third silent cut the mark went looking for
 - [D252](#d252--the-analysis-pane-one-renderer-for-seven-reports-a-shared-wrap-that-had-been-respelling-its-input-and-two-mutants-that-were-infinite-loops-2026-09-06) — the analysis pane: one renderer for seven reports, a shared wrap that had been respelling its input, and two mutants that were infinite loops
+- [D253](#d253--the-mutation-gates-jobs-measured-the-premise-was-wrong-four-is-the-number-and-the-headroom-check-had-been-sized-for-a-build-that-no-longer-exists-2026-09-06) — the mutation gate's jobs, measured: the premise was wrong, four is the number, and the headroom check had been sized for a build that no longer exists
 
 ## Why it exists — where the gap is
 
@@ -22007,3 +22008,60 @@ Certificates' pane while keeping its own sidebar row: which panes exist and whic
 `screens/`'s ruling, not the renderer's, and nothing in the code changes when it lands — a
 shared pane is a longer `rows` and a title taken from the first. Both are in
 [`backlog.md`](backlog.md).
+
+### D253 — the mutation gate's jobs, measured: the premise was wrong, four is the number, and the headroom check had been sized for a build that no longer exists (2026-09-06)
+
+**The PM's brief said eleven of twelve cores sat idle while the gate ran, and that was
+wrong.** Measured on this box, same diff throughout (55 mutants, `--timeout 90`): load
+average was ~7 at `--jobs 1`, 23 at four and 30 at six, because **a mutant's own build is
+already parallel** — `--jobs` multiplies a machine that was never idle. The gain is **1.21×
+at four** (1247s → 1031s) and **1.03× at six**, which came back *slower* than four (1207s). A
+repeat baseline at one job — 1234s against 1247s, 1% apart — is what makes the 216s a gap
+rather than spread. The number worth keeping from this is not the speed; it is that *eleven
+cores are idle* was a claim reasoned from `nproc`, and one command disproved it.
+
+**1. What decides the number is the timeout margin, not the clock.** The verdicts were
+identical across all three settings — 53 caught, 2 unviable, 0 missed, 0 timeout, the same
+two unviable by name — so on counts alone six would have been allowed. But the slowest **Test
+phase** is 18% of the 90-second budget at one job, 47% at four and **73% at six**. A
+`timeout` in a mutation report reads exactly like a result, and at six a busier box turns a
+`caught` into one: the gate would get faster and less honest at the same time. Four keeps a
+2.1× margin. **Landed four, refused six**, and it is the margin that says so.
+
+**2. The verdict comparison agreed the first time because both files were empty.** The `jq`
+derived `.scenario.Mutant`, and `.scenario` is the bare string `"Baseline"` for one outcome —
+so `jq` aborted the stream, wrote nothing, and `diff` reported the two nothings identical.
+Caught by asserting the line counts (55/55/55) *before* reading the diff. That is
+`write-guard.py`'s `CANARIES` rule wearing different clothes and it is the third time this
+repo has paid for it: **a derived list asserts it found something, or it degrades in
+silence.**
+
+**3. The headroom check had not covered even one job for some time, and that is a
+D133-family hole this box only happened to close.** `NEED_GIB=2` was written against a build
+tree the comment measured at 499–510 MB on 2026-08-21; **one tree is 3.12 GiB today**. The
+tree grew ~6× and the guard did not, so the refusal that exists to stop a shard dying for
+space — printing no `MISSED` line, which is what a passing shard also prints — could not have
+fired. Scaling is exactly linear (3.12 / 12.31 / 18.20 GiB for one, four and six trees), so
+the requirement is now `4 × JOBS` GiB, computed at the use site from the run's **real** job
+count: `jobs_of` reads a flag first, then `CARGO_MUTANTS_JOBS`, then the built-in — every
+spelling clap accepts, last flag winning — because a hand-typed `--jobs 12` the script could
+not see would otherwise pass a check sized for four.
+
+**4. The concurrency refusal, and why cargo-mutants' own lock was never enough.** That lock is
+released when the tool exits, and everything `scripts/mutants.sh` reads *about* the run — the
+logs, the mutant count, `unviable.txt` — is read after it exits. **Both of 2026-09-06's
+collisions landed in exactly that window**: one between two sessions, one inside a single
+agent that started a second background gate beside its first. The refusal is `flock -n` on the
+script's own file, held for the whole process — not on `mutants.out`, which cargo-mutants
+rotates, so a lock riding that inode into `.old` is one the next run cannot see, and not on
+the scratch volume, which is the wrong scope. `--self-test` deliberately does not take it, so
+`just check` still runs beside a live sweep.
+
+**5. What is not proven, and one thing to re-measure.** Four is *this box's* number, from one
+diff; verdict agreement was measured over the `ui.rs` diff alone, and the `rules.rs` and
+`analysis.rs` tests are faster, so their margin is probably wider — probably, unmeasured.
+`flock` is advisory and binds only callers that come through the script: a hand-typed
+`cargo mutants` still collides. And
+[D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)
+sharded the phase-close sweep because four shards at ~2m50s each exceed the ten-minute call
+cap — **measured at one job**, so that rationale may no longer hold and nobody has re-run it.

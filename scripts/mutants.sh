@@ -37,11 +37,19 @@
 # Every caller goes through here — `just mutants` (whole, or `--shard k/4`, D118)
 # and `just mutants-diff` (the per-turn `--in-diff` gate). A flag typed at the
 # gate reaches cargo-mutants unchanged; what it cannot do is inherit a tmpfs. The
-# **one** exception is `--gate`, which is this file's own and is consumed here:
+# exceptions are two. `--jobs` is passed through *and* read here, because the
+# headroom check below is per job and has to be sized for the run that is about to
+# happen rather than for this file's default. The other is `--gate`, which is this
+# file's own and is consumed here:
 # whether a run that mutated nothing is a failure belongs to the caller, and only
 # `just mutants-diff` says yes (NOTES § D182).
 set -euo pipefail
 
+# Resolved **before** the `cd`, which is what would leave a relative `$0` pointing
+# somewhere else. It is the file `lock_tree` below holds: in this tree, never
+# rotated, and already open — so one run per tree costs no new path and puts
+# nothing untracked beside `git status`.
+SELF=$(realpath "$0")
 cd "$(dirname "$0")/.."
 
 # **The per-mutant logs this file greps are cargo's output, so they are forced
@@ -74,11 +82,6 @@ export CARGO_TERM_COLOR=never
 # whatever this resolves to, so a `$XDG_CACHE_HOME` that is itself small is
 # refused like any other.
 SCRATCH="${K8RS_MUTANTS_TMPDIR:-${XDG_CACHE_HOME:-$HOME/.cache}/k8rs-mutants}"
-# Four times the largest scratch tree measured on 2026-08-21 (510 MB), which
-# leaves room for a `--jobs` above 1 without the number having to know about it.
-# Move it with a measurement, not a hunch: `du -sh "$SCRATCH"/cargo-mutants-*`
-# during a run is where the 510 MB came from.
-NEED_GIB="${K8RS_MUTANTS_NEED_GIB:-2}"
 # cargo-mutants' default report directory. Nothing in it is read below until
 # `own_report` says this run wrote it (NOTES § D182).
 #
@@ -151,6 +154,70 @@ lint_denied_logs() { # $1 = a mutants.out directory
 # does, and it is one character.
 enough_room() { [ "$1" -ge "$2" ]; } # $1 GiB available  $2 GiB required
 
+# **What `--jobs` this run will actually use** — read out of the caller's argv and
+# not merely defaulted, because the headroom check has to be sized for the run
+# that is about to happen. A flag typed at the gate beats the default (clap takes
+# the last, the same property `--cap-lints` relies on), so a hand-typed
+# `--jobs 12` that this function could not see would be checked against the
+# default's headroom and pass on a volume that cannot hold it. All four spellings
+# clap accepts, and the *last* of them, for that reason (NOTES § D29).
+#
+# **`CARGO_MUTANTS_JOBS` is a third source and it is read here too**, because
+# cargo-mutants declares it (`cargo mutants --help`: `-j, --jobs <JOBS> [env:
+# CARGO_MUTANTS_JOBS=]`) and the run line below passes an explicit `--jobs`, which
+# on its own would silently beat that variable while the headroom was sized for
+# the number it beat. Same precedence clap uses — flag, then environment, then the
+# built-in default — so the knob keeps working and the check keeps matching it.
+#
+# A value that is not a positive integer, from either source, falls back to the
+# built-in default: cargo-mutants refuses it a second later, so nothing runs on
+# the wrong number, and the `$((4 * JOBS))` at the use site must not die under
+# `set -e` before it can say so.
+jobs_of() { # $1 = the built-in default, then the caller's argv
+  local def="$1" j="${CARGO_MUTANTS_JOBS:-$1}" prev= a
+  shift
+  for a in "$@"; do
+    case "$prev" in --jobs|-j) j="$a" ;; esac
+    case "$a" in
+      --jobs=*) j="${a#--jobs=}" ;;
+      -j) ;;   # its value is the next argument, read at the top of the next pass;
+               # matching it as `-j*` here would blank a number already read
+      -j*) j="${a#-j}" ;;
+    esac
+    prev="$a"
+  done
+  case "$j" in ''|*[!0-9]*|0) j="$def" ;; esac
+  printf '%s' "$j"
+}
+
+# **One run of this script per tree, refused and never queued.** cargo-mutants
+# takes its own lock, and that lock is not enough: it covers the sweep and is
+# released when the tool exits, while everything this file reads about the run —
+# the logs, the count, `unviable.txt` — is read *after* that. Two runs collided in
+# exactly that window twice on 2026-09-06, once between two sessions and once
+# inside one agent that started a second background gate beside its first: the
+# second run rotated `mutants.out` to `mutants.out.old` between the first run's
+# exit and the first run's report read, `own_report` correctly said *not mine*,
+# and the gate printed its `nothing to gate` refusal — a true refusal under a
+# sentence written for a different cause, which is NOTES § D133's family again.
+#
+# The lock is held on a file **in this tree** and not on `$OUT`, which is the
+# thing being protected but is also the thing cargo-mutants rotates: a lock that
+# rides an inode into `mutants.out.old` is a lock the next run does not see. This
+# file is in the tree, is never rotated, and is already open — so there is no new
+# path, and nothing untracked appears beside `git status`.
+#
+# Ceiling: two *different* checkouts sharing one `$SCRATCH` lock different files
+# and both start, and the headroom each reads is then a number the other is
+# spending. There is one checkout on this box; if there is ever a second, this is
+# the line to widen.
+lock_tree() { # $1 = a path in this tree; fd 9 holds it for the rest of the process
+  # `[ -r ]` first so an unopenable path is a quiet refusal: `exec 9<` on a
+  # missing file prints bash's own error, and `2>/dev/null` on an `exec` that
+  # carries a redirection redirects this whole script's stderr for good.
+  [ -r "$1" ] && exec 9<"$1" && flock -n 9
+}
+
 # **Whose report is sitting in `$OUT`.** cargo-mutants writes no report at all
 # when it finds no mutants — measured 2026-08-29 for both spellings it prints,
 # `Diff changes no Rust source files` and `No mutants to filter` — so the previous
@@ -219,8 +286,10 @@ gated_ok() { # $1 = a mutant_count reading
 }
 
 self_test() {
-  local d fail=0
-  d=$(mktemp -d); trap 'rm -rf "$d"' RETURN
+  local d fail=0 holder=
+  # `kill` in the trap and not on the last line: a self-test that dies in the
+  # middle otherwise leaves the lock holder below running (NOTES § D185).
+  d=$(mktemp -d); trap 'kill $holder 2>/dev/null || :; rm -rf "$d"' RETURN
   mkdir -p "$d/honest/log" "$d/full/log" "$d/empty/log"
   # An unviable that is telling the truth: a type error, which is a mutation
   # result. Cut from mutants.out/log on 2026-08-21.
@@ -434,8 +503,51 @@ self_test() {
   enough_room 2 2 || { echo "FAIL  self-test: exactly the required space was refused, so the gate is off by one"; fail=1; }
   enough_room 915 2 || { echo "FAIL  self-test: an empty disk was refused"; fail=1; }
 
+  # --- how many jobs this run will use, which is what the headroom is sized for ---
+  # Every spelling clap takes, plus the two that decide whether the *headroom* is
+  # right: the last flag wins, and a caller who types nothing gets the default.
+  [ "$(jobs_of 4)" = 4 ] || { echo "FAIL  self-test: no --jobs in the argv did not read as the default"; fail=1; }
+  [ "$(jobs_of 4 --timeout 90 --in-diff /x)" = 4 ] || { echo "FAIL  self-test: an argv with no --jobs in it did not read as the default"; fail=1; }
+  [ "$(jobs_of 4 --jobs 6)" = 6 ] || { echo "FAIL  self-test: '--jobs 6' read as $(jobs_of 4 --jobs 6), so a run of six trees would be checked against the default's headroom"; fail=1; }
+  [ "$(jobs_of 4 --jobs=6)" = 6 ] || { echo "FAIL  self-test: the '--jobs=6' spelling was not read"; fail=1; }
+  [ "$(jobs_of 4 -j 6)" = 6 ] || { echo "FAIL  self-test: the '-j 6' spelling was not read"; fail=1; }
+  [ "$(jobs_of 4 -j6)" = 6 ] || { echo "FAIL  self-test: the '-j6' spelling was not read"; fail=1; }
+  [ "$(jobs_of 4 --jobs 6 --jobs 1)" = 1 ] || { echo "FAIL  self-test: two --jobs flags did not resolve to the last one, which is the one cargo-mutants obeys"; fail=1; }
+  [ "$(jobs_of 4 --in-diff --jobs)" = 4 ] || { echo "FAIL  self-test: a trailing '--jobs' with no value did not fall back to the default"; fail=1; }
+  [ "$(jobs_of 4 --jobs all)" = 4 ] || { echo "FAIL  self-test: a non-numeric --jobs did not fall back to the default, so the headroom arithmetic below would die on it before cargo-mutants could refuse it"; fail=1; }
+  [ "$(jobs_of 4 --jobs 0)" = 4 ] || { echo "FAIL  self-test: '--jobs 0' did not fall back to the default, so the headroom would be 0 GiB and the check could never refuse"; fail=1; }
+  # The environment source, at its own precedence. Each in a `$(…)` subshell, so
+  # the assignment cannot outlive the call and colour the arm after it.
+  [ "$(CARGO_MUTANTS_JOBS=6 jobs_of 4)" = 6 ] || { echo "FAIL  self-test: CARGO_MUTANTS_JOBS was ignored, so cargo-mutants' own env knob would run a number this file never sized the scratch volume for"; fail=1; }
+  [ "$(CARGO_MUTANTS_JOBS=6 jobs_of 4 --jobs 2)" = 2 ] || { echo "FAIL  self-test: the environment beat an explicit --jobs, which is not the precedence clap gives them"; fail=1; }
+  [ "$(CARGO_MUTANTS_JOBS=nonsense jobs_of 4)" = 4 ] || { echo "FAIL  self-test: a non-numeric CARGO_MUTANTS_JOBS did not fall back to the default"; fail=1; }
+  [ "$(jobs_of 4 --jobs 6 -j)" = 6 ] || { echo "FAIL  self-test: a bare '-j' after a good --jobs blanked the number already read, so the headroom would be the default's while the run is not"; fail=1; }
+  # And the thing the parse exists for: the requirement moves with the answer.
+  [ $((4 * $(jobs_of 4 --jobs 6))) -gt $((4 * $(jobs_of 4 --jobs 1))) ] || { echo "FAIL  self-test: six jobs did not ask for more room than one, which is the whole reason this is parsed rather than defaulted"; fail=1; }
+
+  # --- one run per tree (2026-09-06: two collisions over mutants.out in one day) ---
+  # Planted live, watched refuse, released, watched pass — the red every guard here
+  # owes. The holder is a real second process, because that is the only thing
+  # `flock -n` can be shown to refuse.
+  printf 'x\n' > "$d/tree"
+  ( flock -n 9 && touch "$d/held" && sleep 60 ) 9<"$d/tree" &
+  holder=$!
+  for _ in $(seq 200); do [ -e "$d/held" ] && break; sleep 0.05; done
+  if [ ! -e "$d/held" ]; then
+    echo "FAIL  self-test: could not plant a live lock, so the refusal below proves nothing"; fail=1
+  else
+    lock_tree "$d/tree" && { echo "FAIL  self-test: a second run took the lock while another process held it — that is the 2026-09-06 collision, where the second run rotated the first's mutants.out out from under it and the gate blamed a missing product change"; fail=1; }
+  fi
+  # `|| :` on both: the holder exits 143 because we just SIGTERMed it, and `set -e`
+  # takes a bare `wait` on that as the self-test failing.
+  kill "$holder" 2>/dev/null || :; wait "$holder" 2>/dev/null || :; holder=
+  lock_tree "$d/tree" || { echo "FAIL  self-test: the lock was refused with nothing holding it, so no run would ever start"; fail=1; }
+  # The half a `flock -n` that always fails would still pass: the file has to be
+  # openable, and the refusal must not come from the path being wrong.
+  lock_tree "$d/does-not-exist" && { echo "FAIL  self-test: lock_tree reported success for a path it could not open"; fail=1; }
+
   [ $fail -eq 0 ] || return 1
-  echo "mutants: self-test passed — both spellings of the filesystem's message are refused, alone on a line and inside one; all three spellings of a denied lint are refused while the same note under a 'warning:' header is not, and neither scan answers the other's question; an honest unviable, a real compiler error with an E-code and one without, an empty log directory and a missing one are refused by neither; the headroom reader turns a captured df line into $roomy GiB and a 94%-full tmpfs into $tight; and the refusal fires below the requirement and not at it; a report whose lock stamp did not move across the run is refused as this run's while a stamp that moved and a first run in an empty tree are not, and neither is a report that vanished; a real outcomes.json reads 20 while a directory with no result in it, a missing one, an empty one and a truncated one all read 'none'; and the gate passes a count and refuses zero, no report, an empty reading and a non-number; and this script's own environment still forces cargo's logs plain"
+  echo "mutants: self-test passed — both spellings of the filesystem's message are refused, alone on a line and inside one; all three spellings of a denied lint are refused while the same note under a 'warning:' header is not, and neither scan answers the other's question; an honest unviable, a real compiler error with an E-code and one without, an empty log directory and a missing one are refused by neither; the headroom reader turns a captured df line into $roomy GiB and a 94%-full tmpfs into $tight; and the refusal fires below the requirement and not at it; a report whose lock stamp did not move across the run is refused as this run's while a stamp that moved and a first run in an empty tree are not, and neither is a report that vanished; a real outcomes.json reads 20 while a directory with no result in it, a missing one, an empty one and a truncated one all read 'none'; and the gate passes a count and refuses zero, no report, an empty reading and a non-number; and this script's own environment still forces cargo's logs plain; --jobs is read out of the argv in all four spellings and the last one wins, CARGO_MUTANTS_JOBS is read under an explicit flag and over the default, and the headroom moves with the answer; and a second run in a tree another process holds is refused while a free tree and a missing path are not confused for each other"
 }
 
 # `--gate` is read here and not passed on, because it is the *caller's* policy and
@@ -443,13 +555,71 @@ self_test() {
 # names, and a green exit over zero mutants is D26's green build; `just mutants`
 # whole or sharded, and a hand-typed call, only want the statement. That split is
 # NOTES § D182's ruling, and this variable is the whole of it. **First argument** —
-# everything after it belongs to cargo-mutants and is passed through untouched.
+# everything after it belongs to cargo-mutants. It is passed through, but not
+# quite untouched: `jobs_of` below reads a `--jobs` out of it and the run line
+# adds one, for the reason written there.
 REQUIRE_MUTANTS=0
 case "${1:-}" in
   --self-test) self_test; exit $? ;;
   --gate) REQUIRE_MUTANTS=1; shift ;;
 esac
 
+# A missing `flock` must say so rather than arrive as the refusal below: a `||`
+# over a 127 would print *another run is in progress* on a box that has none, and
+# a failure explained by the wrong sentence is what this whole file is about.
+command -v flock >/dev/null || {
+  echo "mutants: flock (util-linux) is not installed, so this run cannot tell whether another" >&2
+  echo "         one is already going in this tree. Refusing rather than racing it." >&2
+  exit 1; }
+if ! lock_tree "$SELF"; then
+  echo "mutants: another run of this script is already going in $PWD — refusing to start beside it." >&2
+  echo "         cargo-mutants' own lock covers its sweep and is released before the report in" >&2
+  echo "         $PWD/$OUT is read, so a second run rotates that report to $OUT.old inside the" >&2
+  echo "         window the first one reads it, and the first one then reports that it gated" >&2
+  echo "         nothing (measured twice on 2026-09-06, from two sessions and from one agent" >&2
+  echo "         that backgrounded a second gate beside its first)." >&2
+  echo "         Wait for it, or read its output — do not start a second." >&2
+  exit 1
+fi
+
+JOBS=$(jobs_of 4 "$@")
+# **Four, and the three runs it came from.** Measured 2026-09-06 on this box (12
+# cores, 23 GiB), the same 55-mutant `--in-diff` sweep over `src/ui.rs` three
+# times, nothing else changed:
+#
+#   --jobs 1   20m47s   53 caught / 2 unviable    3.1 GiB scratch, 1 tree
+#   --jobs 4   17m11s   identical, mutant by mutant   12.3 GiB, 4 trees
+#   --jobs 6   20m07s   identical, mutant by mutant   18.2 GiB, 6 trees
+#
+# Six does not buy half again what four does: it came back **slower than four**,
+# at load 30 on twelve cores. A mutant's build is already parallel, so `--jobs`
+# multiplies a machine that was never idle — the eleven idle cores this was
+# expected to reclaim were never idle. The gain at four is **1.21x** and there is
+# no more of it to have; the one-job run repeated at 20m34s against 20m47s, so
+# that 1.21x is a gap and not the spread between two runs.
+#
+# **And what settles it is not the clock, it is the timeout.** cargo-mutants gives
+# a mutant the `--timeout 90` both justfile recipes pass, and the slowest Test
+# phase of the sweep ran **16.2s at one job, 42.7s at four, 66.1s at six** — 18%,
+# 47% and **73%** of that budget. All three agreed today; at six, a busier box or
+# a heavier test turns a `caught` into a `timeout`, which is the gate getting less
+# honest as it gets faster, and a `timeout` reads like a result. Four keeps a 2.1x
+# margin and is where this stops.
+#
+# A `--jobs` typed at the gate still wins, and so does `CARGO_MUTANTS_JOBS` over
+# this default — `jobs_of` above reads both, so the headroom below is sized for
+# whichever one the run will actually use.
+
+# **Per job, because N jobs is N build trees**, and the number is the same day's
+# measurement: `du -sk "$SCRATCH"` every 10s through those three sweeps peaked at
+# **3.1 GiB with one tree alive, 12.3 with four, 18.2 with six** — linear, one
+# tree per job. **The 510 MB that the flat 2 GiB here used to be four times of was
+# 2026-08-21's tree, and the tree is six times that now**, so before this line
+# moved the check could not have refused a volume with no room for even *one*
+# job: D133's guard, sized for a build that no longer exists. 4 GiB a job is the
+# measured tree plus a margin. Move it the way it got here — `du -sk "$SCRATCH"`
+# during a run — and not by reasoning about what a build ought to weigh.
+NEED_GIB="${K8RS_MUTANTS_NEED_GIB:-$((4 * JOBS))}"
 mkdir -p "$SCRATCH"
 have=$(avail_gib "$SCRATCH")
 case "$have" in ''|*[!0-9]*)
@@ -459,13 +629,15 @@ case "$have" in ''|*[!0-9]*)
 esac
 if ! enough_room "$have" "$NEED_GIB"; then
   echo "mutants: refusing to start — $SCRATCH has ${have} GiB free and the gate needs ${NEED_GIB}." >&2
-  echo "         cargo-mutants builds a whole copy of the tree per mutant (measured 499-510 MB" >&2
-  echo "         each) and files a failed build as 'unviable', so a run that fills this volume" >&2
-  echo "         reports untested mutants as a word that reads like a pass (NOTES § D133)." >&2
-  echo "         Free space here, or point K8RS_MUTANTS_TMPDIR at a volume that has it." >&2
+  echo "         cargo-mutants builds a whole copy of the tree per job (measured 3.1 GiB on" >&2
+  echo "         2026-09-06, against 510 MB on 2026-08-21 — it grows with the tree) and files a" >&2
+  echo "         failed build as 'unviable', so a run that fills this volume reports untested" >&2
+  echo "         mutants as a word that reads like a pass (NOTES § D133)." >&2
+  echo "         Free space here, point K8RS_MUTANTS_TMPDIR at a volume that has it, or run" >&2
+  echo "         fewer jobs — the requirement is 4 GiB per --jobs." >&2
   exit 1
 fi
-echo "mutants: scratch $SCRATCH (${have} GiB free, ${NEED_GIB} required)"
+echo "mutants: scratch $SCRATCH (${have} GiB free, ${NEED_GIB} required for ${JOBS} job(s))"
 
 export TMPDIR="$SCRATCH"
 # `--cap-lints=true` is cargo-mutants' own flag for the class `lint_denied_logs`
@@ -481,7 +653,10 @@ export TMPDIR="$SCRATCH"
 # the two differ (NOTES § D182).
 before_lock=$(lock_id "$OUT")
 rc=0
-cargo mutants --cap-lints=true "$@" || rc=$?
+# `--jobs` reaches clap twice whenever the caller typed one, and both are the same
+# number: `jobs_of` read theirs out of `"$@"` above, so the headroom just checked
+# and the run about to happen cannot disagree.
+cargo mutants --cap-lints=true --jobs "$JOBS" "$@" || rc=$?
 
 # **Nothing in $OUT is read until it is this run's.** cargo-mutants leaves the
 # previous report exactly where it was whenever it starts nothing here — a diff

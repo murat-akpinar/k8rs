@@ -681,29 +681,6 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   rather than a property of the gate. `tester` owns the `justfile`. Raised by the PM at
   the Phase 10 close, 2026-09-06
 
-- **`just mutants-diff`'s *nothing to gate* refusal names two causes and there is a
-  third, which is the one that actually fired.** `scripts/mutants.sh` tells the reader
-  the turn changed only tests, or the product change is missing from `git diff HEAD`.
-  Measured 2026-09-06: `tester`'s run completed and printed `114 mutants tested in 44m:
-  1 missed, 113 caught` — and the script then refused with that sentence, contradicting
-  its own output four lines above. The real cause was a **second session** starting
-  `just mutants-diff` at 11:36 and rotating `mutants.out` → `mutants.out.old` one minute
-  before the first run read its own report. `own_report` compares the lock stamp before
-  against after, so *my run wrote this* and *somebody else's run replaced it after mine*
-  read the same; `mutant_count` then found no `outcomes.json` and the gate printed the
-  only diagnosis it has. **The refusal is correct — the sentence explaining it is written
-  for one cause and stated as the only one**, and a reader following it goes hunting for
-  a missing product change in a diff that is fine. This is
-  [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
-  family one more time: the failure and its explanation print the same regardless of
-  which failure it was. `tester` owns `scripts/` and could not fix it in the round that
-  found it, because the other session's process was executing that exact file. Found by
-  `tester`, 2026-09-06. **It happened a second time on the same day, from one agent rather
-  than two sessions** — `dev-ui` started a second background gate while its first was still
-  running and the two collided over `mutants.out` in exactly this way. So the remedy is not
-  only a better sentence: `scripts/mutants.sh` can see the lock it already reads and refuse to
-  start beside a live run, which is a smaller change than teaching the message a third cause
-
 - **A second Claude session held `src/` for most of 2026-09-06, and only mtimes said
   so.** While this session closed Phase 10 and drove Phase 11's first drawing turn,
   another session landed the fix round for the same review findings — `src/views.rs` at
