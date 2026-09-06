@@ -4300,8 +4300,15 @@ string and key was settled in the design phase, so this phase is drawing.
       gained the partial list its banner sits over, and `ratatui` moved into
       `[dependencies]`
       ([D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06))
-- [ ] **Alerts view** (the default on startup): findings list, severity symbol,
-      title bright / evidence dim, blank line between findings
+- [x] **Alerts view** (the default on startup): findings list, severity symbol,
+      title bright / evidence dim, blank line between findings — **landed with
+      the layout box** (`8135cab`), which drew the pane it lives in: `View`'s
+      `#[default]` is `Alerts`, `ui::alerts` is one multi-line `ListItem` per
+      card with the blank line between them, and the four clauses are pinned by
+      `a_severity_is_a_symbol_and_a_colour`,
+      `the_bands_survive_a_sixteen_colour_terminal`,
+      `the_title_and_the_action_are_drawn_whole` and
+      `an_empty_evidence_leaves_the_line_out`
 - [ ] **Resources view**: generic table driven by server-side columns; works
       for a CRD without a line of code written for it
 - [ ] **Analysis view**: the Phase 4 reports, one pane each
