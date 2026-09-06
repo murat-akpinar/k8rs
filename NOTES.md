@@ -268,6 +268,7 @@ its line moving with it.
 - [D244](#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06) — Phase 10 opens on two gates that print the same thing whether they ran or not: a file the sweep cannot see, and a tarball nobody packed
 - [D245](#d245--the-browser-sorts-by-no-column-in-v1-because-nothing-typed-survives-the-fetch-and-the-file-that-could-change-that-is-frozen-2026-09-06) — the browser sorts by no column in v1, because nothing typed survives the fetch and the file that could change that is frozen
 - [D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) — the `views.rs` review round: a fraction whose halves count different things, a card that draws a count the screen ends without, and the freeze that was set one phase too early
+- [D247](#d247--the-guard-that-read-a-colour-it-had-never-been-shown-and-the-second-one-beside-it-nobody-would-have-found-by-waiting-2026-09-06) — the guard that read a colour it had never been shown, and the second one beside it nobody would have found by waiting
 
 ## Why it exists — where the gap is
 
@@ -21549,3 +21550,73 @@ state sequence was found where `armed()` is true with a name that does not match
 **Two costs measured rather than guessed, neither a finding:** `cards()` at 2000 cards
 is 17.2 ms, so the named O(n²) ceiling is honest and nowhere near biting; the filter is
 1.12 ms per keystroke at 5000 × 5.
+
+### D247 — the guard that read a colour it had never been shown, and the second one beside it nobody would have found by waiting (2026-09-06)
+
+Phase 10's close PR went red on CI with `just check` green on the dev box — the
+divergence *"`just check` is the whole of CI, or it is a lie"* exists to catch, and the
+first time it has fired in a **guard's own parsing** rather than in a compiler's answer.
+
+**What the runner printed, and what the guard said about it.** `scripts/package-check.sh`
+refuses to finish without a `Compiling k8rs v` line, because a run that hands back an
+earlier build reports success having vetted nothing
+([D244](#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06)).
+The runner compiled the unpacked crate for **1m17s from a cold build directory** and the
+guard called it a no-op. `.github/workflows/ci.yml` sets `CARGO_TERM_COLOR: always`
+job-wide, and **cargo colours its status words with no tty in sight** — the bytes,
+captured off the run with `cat -v` rather than reconstructed:
+
+```
+^[[1m^[[92m   Compiling^[[0m k8rs v0.0.0 (…/target/package-check/k8rs-0.0.0)
+```
+
+The reset sits *between* the two words of the anchor and the bold/green prefix sits
+*before* the leading spaces, so neither half of `^[[:space:]]*Compiling k8rs v` can match.
+`grep -n 'Compiling k8rs'` over the whole 5434-line CI log matches exactly **one** line:
+the guard's own error message. Locally there is no tty and no `CARGO_TERM_COLOR`, the
+line is plain, and the same pattern matches — so the gate had never once run against the
+output CI produces. [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)
+in a shape nobody had listed: not *which objects* reach the check, but which
+**environment** the tool it reads is answering in.
+
+**The fix is a flag and not a parser.** One `export CARGO_TERM_COLOR=never` at the top of
+the script, so a third cargo line added later inherits it rather than having to remember
+it. Stripping escapes before the grep is the other honest answer and it is the worse one:
+an ANSI parser inside a guard is a thing that can be wrong, and a flag cannot. The price
+is that a compile failure's trace is uncoloured, and it is `tee`'d whole either way.
+
+**The self-test case runs cargo instead of quoting it, and that is the part to copy.**
+The five existing cases prove the pattern against output somebody transcribed, and
+transcription is exactly how this shipped. The new case builds a throwaway crate named
+`k8rs 0.0.0` and runs cargo **twice** — once under `CARGO_TERM_COLOR=always` as a canary
+that cargo still colours at all, once inheriting the script's own environment — because
+what has to be true is not *the pattern reads the line I typed* but *the cargo this
+script runs prints a line this pattern reads*. 0.20 s for the pair, timed rather than
+recalled. Beside it an assertion on the variable itself, so dropping the export is red on
+the dev box and not only on the runner: **a gate that defers its own regression to CI is
+the lie again, one level up.**
+
+**The second instance, which no amount of waiting would have surfaced.** Asked whether
+anything else parses output the setting changes, `tester` measured rather than reasoned
+and found `scripts/mutants.sh`'s `lint_denied_logs` — it keys on `/^error/` and
+`/^warning/` at column 0, and **cargo-mutants passes `CARGO_TERM_COLOR` straight through
+into every per-mutant build log**. Under `always` the awk's state never leaves `err=0`,
+nothing prints, and the check reports clean over a run where every mutant was
+lint-denied — D133's silent pass in a third coat. **CI never reaches it**: the workflow
+runs `--self-test` only, over hand-built plain logs, and the firing path is a human's
+sweep, so this one had to be looked for. `enospc_logs` in the same file is *not*
+affected and that was checked rather than assumed — it greps `No space left on device`
+inside a message body, and colour wraps the prefix.
+
+**Everything else that parses a tool's output was measured under `CARGO_TERM_COLOR=always`
+and carries zero escapes**, each for a stated reason rather than by inspection:
+`test-guard.py` reads libtest's `--list` on stdout while cargo's coloured status goes to
+stderr; `write-guard.py` reads `cargo metadata`'s JSON, which is never coloured, and
+`clippy-driver -W help`, which is not run through cargo at all; `toolchain-guard.py` reads
+`--version`; `just cross` reads `rustc --print target-libdir`. The rest parse openssl, jq,
+our own binary, or files.
+
+**The two facts a future guard author cannot guess**, and the reason this is an entry
+rather than a commit message: cargo colours with no tty whenever `CARGO_TERM_COLOR` says
+to, and cargo-mutants propagates that variable into the child builds whose logs the gate
+reads.

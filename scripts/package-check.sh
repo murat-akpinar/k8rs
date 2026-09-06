@@ -29,6 +29,30 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# **Cargo's output below is this guard's instrument, not something a human reads
+# for colour, so it is forced plain rather than parsed for escapes.**
+# `.github/workflows/ci.yml` sets `CARGO_TERM_COLOR: always` job-wide, and cargo
+# then colours its status words with no tty in sight — the line PR #16's run
+# 34012412083 actually printed, captured with `cat -v`, was
+#
+#     ^[[1m^[[92m   Compiling^[[0m k8rs v0.0.0 (…/target/package-check/k8rs-0.0.0)
+#
+# The reset sits *between* `Compiling` and `k8rs` and the bold/green prefix sits
+# *before* the leading spaces, so neither half of `compiled_the_crate`'s anchor
+# can match. That run compiled the crate for 1m17s from a cold build directory
+# and the guard called it a no-op. Locally there is no tty and no
+# `CARGO_TERM_COLOR`, the line is plain, and the same pattern matches — so the
+# gate had never once run against the output CI produces (NOTES § D29).
+#
+# One `export` rather than a prefix on each cargo line: a third cargo line added
+# later inherits it instead of having to remember it. The other honest fix is
+# stripping escapes before the grep, and it is the worse one — an ANSI parser
+# inside a guard is a thing that can be wrong, and a flag cannot. The price is
+# that a compile failure's trace below is uncoloured; it is `tee`'d whole either
+# way. `self_test` runs cargo twice over a throwaway crate to prove this line
+# still wins over an inherited `always`.
+export CARGO_TERM_COLOR=never
+
 # Where `cargo package` writes, where this unpacks, where it builds, and the
 # stamp that says which run packed. All four under `target/`, so `cargo clean`
 # sweeps them and `.gitignore`'s `/target/` already covers them — and all four
@@ -172,8 +196,57 @@ self_test() {
   compiled_the_crate '   Compiling kube v4.2.0' && { echo "FAIL  self-test: a *dependency* compiling was read as the crate under test compiling"; fail=1; }
   compiled_the_crate '   Compiling k8s-openapi v0.28.0' && { echo "FAIL  self-test: 'k8s-openapi' satisfied a pattern meant for 'k8rs' — the version marker is what separates the package name from anything that starts with it"; fail=1; }
 
+  # --- and the same words as cargo itself prints them, in this script's own
+  # environment ---
+  # **The only case here that reads the instrument instead of a string.** The
+  # five above prove the pattern against output somebody transcribed; PR #16 was
+  # red because the output CI produces is not the output anybody transcribed —
+  # `CARGO_TERM_COLOR: always` is set job-wide, cargo colours its status words
+  # with no tty in sight, and the escapes land inside the anchor (see the export
+  # at the top of this file for the captured bytes). What has to be true is not
+  # "the pattern reads the line I typed" but "the cargo this script runs prints a
+  # line this pattern reads", and only cargo can say that.
+  #
+  # A throwaway crate, built twice. Named `k8rs 0.0.0` because that name is what
+  # makes `compiled_the_crate` applicable to it; two target directories because a
+  # second build into the first one prints `Finished` and no `Compiling` at all.
+  # Cost, timed on this box rather than guessed: **0.20s** for the pair, against
+  # a guard whose real run is 6s warm. It is also green under CI's whole
+  # environment and not just its colour setting — `RUSTFLAGS=-D warnings`,
+  # `CARGO_TERM_COLOR=always` and `CARGO_NET_OFFLINE=true` together, checked
+  # because a scratch crate that needed the network or tripped a denied lint
+  # would be a guard that only fails on the runner.
+  # The setting itself, asserted before the pair below, because the pair alone
+  # only goes red in a caller that asks for colour — which is CI and is not
+  # `just check` on this box. A gate that defers its own regression to the
+  # runner is the thing this repo calls a lie; this line is red locally the
+  # moment the export at the top is dropped, and the pair below is what says
+  # the setting still *does* something.
+  [ "${CARGO_TERM_COLOR:-}" = never ] || { echo "FAIL  self-test: this script no longer forces CARGO_TERM_COLOR=never (it reads '${CARGO_TERM_COLOR:-<unset>}'), so under CI's job-wide 'always' cargo colours its status words and compiled_the_crate's anchor matches nothing — PR #16, run 34012412083"; fail=1; }
+  local scratch out
+  scratch="$d/scratch"; mkdir -p "$scratch/src"
+  printf '[package]\nname = "k8rs"\nversion = "0.0.0"\nedition = "2021"\n' > "$scratch/Cargo.toml"
+  echo 'fn main() {}' > "$scratch/src/main.rs"
+  # The canary, and it is load-bearing: cargo still colours when it is told to.
+  # A future cargo that refused colour on a pipe would leave the case below
+  # passing having proved nothing (CLAUDE.md § A derived list asserts it found
+  # something).
+  out=$(CARGO_TERM_COLOR=always CARGO_TARGET_DIR="$d/coloured" cargo build --manifest-path "$scratch/Cargo.toml" 2>&1) || true
+  case $out in
+    *$'\033'*) ;;
+    *) echo "FAIL  self-test: cargo printed no ANSI escape at all under CARGO_TERM_COLOR=always, so the case below cannot tell a forced-plain run from a coloured one and would pass either way"; fail=1 ;;
+  esac
+  # And the run this guard actually reads: nothing is set here, so it inherits
+  # this script's environment — the export at the top, over whatever the caller
+  # had. Run this file under `CARGO_TERM_COLOR=always` and it is CI exactly.
+  out=$(CARGO_TARGET_DIR="$d/plain" cargo build --manifest-path "$scratch/Cargo.toml" 2>&1) || true
+  case $out in
+    *$'\033'*) echo "FAIL  self-test: cargo's output carries ANSI escapes in this script's own environment, so 'export CARGO_TERM_COLOR=never' at the top is gone or is being overridden — that is PR #16's red (run 34012412083): a 1m17s compile the guard called a no-op"; fail=1 ;;
+  esac
+  compiled_the_crate "$out" || { echo "FAIL  self-test: no line this guard reads came back from a cargo run in this script's own environment — $(grep -a Compiling <<<"$out" | cat -v || printf 'and cargo printed no Compiling line at all: %s' "$(cat -v <<<"$out" | tail -3)")"; fail=1; }
+
   [ $fail -eq 0 ] || return 1
-  echo "package-check: self-test passed — exactly one .crate is accepted while none, two and a missing directory are refused; a .crate older than this run's stamp is refused while a newer one and a same-tick one are not; an unpacked crate that still carries $CANARY, as a directory or as a file, is refused while one that drops it is not; and cargo's own words for a run that compiled the crate are told from the measured 0.17s no-op, from empty output, and from a dependency compiling"
+  echo "package-check: self-test passed — exactly one .crate is accepted while none, two and a missing directory are refused; a .crate older than this run's stamp is refused while a newer one and a same-tick one are not; an unpacked crate that still carries $CANARY, as a directory or as a file, is refused while one that drops it is not; and cargo's own words for a run that compiled the crate are told from the measured 0.17s no-op, from empty output, and from a dependency compiling; this script's own environment still forces CARGO_TERM_COLOR=never, and cargo, run twice over a throwaway crate, still colours when told to and still prints a line this guard reads when run in this script's own environment"
 }
 
 case "${1:-}" in
