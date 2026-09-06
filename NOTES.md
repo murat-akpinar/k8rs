@@ -265,6 +265,7 @@ its line moving with it.
 - [D241](#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05) — the two rulings Phase 9 could not be briefed without: `theme.rs` names no ratatui type, and declaring a module is part of writing it
 - [D242](#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05) — the Phase 9 review round: a test that accepted one letter, an `include_str!` that only breaks in the downloader's hands, and a comment that measured false
 - [D243](#d243--the-phase-9-close-the-constant-is-the-carrier-and-not-the-sentence-the-pairing-that-would-have-been-written-twice-and-a-comment-three-files-had-already-copied-2026-09-06) — the Phase 9 close: the constant is the carrier and not the sentence, the pairing that would have been written twice, and a comment three files had already copied
+- [D244](#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06) — Phase 10 opens on two gates that print the same thing whether they ran or not: a file the sweep cannot see, and a tarball nobody packed
 
 ## Why it exists — where the gap is
 
@@ -21271,3 +21272,98 @@ be the second copy this entry's finding 3 is about, and `INFO_SIGNAL`'s doc alre
 names both meanings it serves. What is genuinely open is which *colour* the healthy
 line takes, and `band` cannot answer it because the healthy line has no `Severity`
 at all. Boxed for Phase 11, where the renderer exists to make the choice.
+
+### D244 — Phase 10 opens on two gates that print the same thing whether they ran or not: a file the sweep cannot see, and a tarball nobody packed (2026-09-06)
+
+Phase 10's first two boxes are both `tester`'s and neither is product code. They are
+the same defect class in two tools — [D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s,
+where the gate's failure and its pass are indistinguishable from the outside — and
+they were boxed at the head of this phase because **every box under them creates a
+new file**, which is the input that defeats the first one.
+
+**1. `git diff HEAD` holds not one byte of an untracked file, so the first turn of
+a new file mutated nothing and said so in green.** Found by `dev-ui` on Phase 9's
+first turn and worked around by hand there. It is a *third* refusal shape and
+neither existing one covers it ([D182](#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)):
+the diff is not empty, it is non-empty with somebody else's work — on 2026-09-05,
+the PM's `NOTES.md` and `backlog.md` edits. `just mutants-diff` now enumerates
+untracked Rust with `git ls-files --others --exclude-standard -- '*.rs'` and appends
+`git diff --no-index -- /dev/null <each>`. **Nothing is staged**: `git add -N` is the
+obvious fix and it is refused, because the index is the PM's and a gate that stages
+the tree to measure it has changed the thing it measures. Proved by planting a test
+that cannot fail in a brand-new untracked `src/probe.rs` beside an unrelated tracked
+edit: **red** `1 mutant tested … 1 unviable`, exit 0, the new file named nowhere;
+**green** `6 mutants tested … 2 missed`, exit 2, both `MISSED` in `probe.rs`.
+Shapes fed beyond the one the box named ([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)):
+a whole untracked *directory* of them — invariant 11's `src/<name>_tests/`, which
+Phase 10 will produce — enumerated file by file; a name with a space; a tree whose
+only change is one untracked `.rs`, which used to be refused as empty and now runs;
+and a genuinely empty tree, which still refuses. **`--exclude-standard` is
+load-bearing rather than a default typed out**, and it became so in this same turn:
+`scripts/package-check.sh` unpacks 20-odd `.rs` files into `target/`, and only
+`.gitignore` plus that flag keep a second copy of the whole crate out of every
+per-turn sweep. **The printed list is not a canary** and the comment says so — a
+turn with no new file legitimately has none, so *found nothing* and *the enumeration
+broke* cannot be told apart here; the print only makes the positive case readable.
+
+**2. `cargo publish` verifies with a build, and a build never compiles a test
+module.** [D242](#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05)
+finding 2 shipped through `cargo test`, `clippy`, `cargo package` and `cargo publish`
+alike and would have failed in the downloader's hands. `scripts/package-check.sh`
+packs, unpacks and runs `cargo test --no-run` over the published bytes; **all three
+steps are load-bearing** — packing is what already missed it, and compiling the
+*repo* says nothing about the tarball. It is a line in `scripts/guards.sh` and not
+in the `check` recipe, for [D111](#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16)'s
+reason: CI runs that file, so there is no second copy in `ci.yml` to drift. Replanted
+and seen red — `error: couldn't read 'tests/../screens/alerts.md'`, exit 101, while
+the same tree's `cargo build` is exit 0.
+
+**The guard's own first draft failed the class it was written for, and that is the
+part worth keeping.** Sharing the repo's `target/` printed `Finished 'test' profile
+… in 0.17s`, exit 0, having compiled **nothing**: `cargo package` stamps every
+tarball entry `2006-07-24 04:21` for reproducibility, so the extracted sources are
+older than the repo's artifacts, cargo hands the unpacked crate the *same* unit hash
+(`k8rs-c969b5b7178e79b1`, read off both), and the mtime check passes. Three defences,
+each proven separately: `tar -xzm`, a build directory of the guard's own, and a
+`Compiling k8rs v` line the run refuses to finish without. The `-m` half was measured
+by taking it back out — a `compile_error!` appended to an *already packaged*
+`tests/binary.rs` came back `Finished … in 0.09s` with no `Compiling` line at all.
+
+**And the PM's second pass found the same class a fourth time, in the fix.**
+`cargo package` honours `CARGO_TARGET_DIR`; the script hardcoded `PKG_DIR=target/package`
+and read the tarball from there, so with that variable set the pack landed in
+`$CARGO_TARGET_DIR/package/` and the guard unpacked whatever an earlier run had left
+behind — right name, right version, wrong bytes, and `sole_crate`'s refusals cannot
+see it. **This is not exotic in this repo**: CLAUDE.md § *The one hard rule of
+concurrency* tells an agent that wants a clean tree to copy it and give the copy its
+own `CARGO_TARGET_DIR`, which `k8s-admin` and `dev-core` both already do. Measured
+with a `compile_error!` in the tree: **exit 0 with the variable set, exit 101
+without**, against a tarball 29 s stale — and `compiled_the_crate` did not catch it,
+because `-m` re-stamps the stale sources and cargo dutifully recompiles the wrong
+crate. Fixed with `--target-dir target` on the pack **and** a stamp file the tarball
+must not be older than, because a flag is only pinned while somebody keeps it: with
+`--target-dir` deleted the run now exits 1 naming the cause. Re-measured by the PM on
+the landed tree — plant red both ways, clean green both ways, `$CARGO_TARGET_DIR`
+never created.
+
+**What the author decided that no document had settled.** `--allow-dirty`, taken: it
+packs the *working tree* and not `HEAD`, which is what a per-change gate wants and is
+not what `cargo publish` does — the gap is work that is never committed, and CI
+re-runs the guard on the committed tree where the flag is a no-op. `--no-verify`,
+taken: verification is a `cargo build` of the unpacked crate, a strict subset of the
+`cargo test --no-run` that follows, so keeping it buys nothing and costs a second
+cold dependency build. Not-*older* rather than strictly-newer on the stamp, because a
+one-second-resolution filesystem can stamp both inside one tick and a false red on
+every honest run is how a gate gets waved through. And `scripts/e2e.sh:35` *does*
+derive `${CARGO_TARGET_DIR:-target}` while this one refuses to — recorded in the file
+rather than left as two guards disagreeing about one variable, because that is what a
+later reader "fixes" in the wrong direction: e2e **reads** a binary somebody else's
+cargo built under the caller's environment, this guard **writes** all four of its
+directories itself.
+
+**The cost, measured on the dev box:** `just check` **72 s** steady state, of which
+`package-check` is **6 s** warm (~4.7 s recompiling k8rs) and **1m17s** the first time
+its build directory is used. **What is not measured is CI**, where `Swatinem/rust-cache`
+may or may not carry a nested build directory across pushes; if it does not, the
+`guards` step pays a runner-side cold build on every push, and the number to read is
+that step's duration on the first green run after this lands.

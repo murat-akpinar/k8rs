@@ -4193,7 +4193,7 @@ looking broken.
 Goal: `ui.rs` can be a pure function of state, which is the only thing that
 keeps TUI code from rotting.
 
-- [ ] **`just mutants-diff` must see a new file, because `views.rs` is one.** The
+- [x] **`just mutants-diff` must see a new file, because `views.rs` is one.** The
       recipe is `git diff HEAD`, and an untracked file is not in it — so the sweep
       runs against whatever else is in the tree and prints green having tested none
       of the box. It does not trip the recipe's own `0 mutants tested` guard,
@@ -4204,8 +4204,8 @@ keeps TUI code from rotting.
       `git diff --no-index /dev/null <each>` appended to the diff, which stages
       nothing. **Done when** a deliberately weak test in a brand-new untracked file
       is reported `MISSED`. `tester`'s box, and it comes first because every box
-      under it is a new file
-- [ ] **`just check` gains a `cargo package` step.** Phase 9 shipped a defect that
+      under it is a new file — landed 2026-09-06, [D244](NOTES.md#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06)
+- [x] **`just check` gains a `cargo package` step.** Phase 9 shipped a defect that
       exists only in the published crate — `include_str!` reading a directory
       `exclude` drops, where `cargo publish` verifies with a build and a build never
       compiles a test module
@@ -4213,7 +4213,8 @@ keeps TUI code from rotting.
       finding 2). It was caught by hand; no gate could see it, which by *`just
       check` is the whole of CI, or it is a lie* is a gap. **Done when** packing,
       unpacking and `cargo test --no-run` on the result runs inside `just check`,
-      and the Phase 9 defect is replanted and seen red. `tester`'s box
+      and the Phase 9 defect is replanted and seen red. `tester`'s box — landed
+      2026-09-06, [D244](NOTES.md#d244--phase-10-opens-on-two-gates-that-print-the-same-thing-whether-they-ran-or-not-a-file-the-sweep-cannot-see-and-a-tarball-nobody-packed-2026-09-06)
 - [ ] `views.rs`: which view, which item selected, filters, scroll, detail tab
 - [ ] Sidebar model built from discovery — groups (workloads / network /
       storage / config / cluster), not a hard-coded list

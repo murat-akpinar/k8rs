@@ -629,21 +629,6 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   last word-spelled count on the analysis page.** Every other counted paragraph
   now spells the digit; this one was out of scope for the round that fixed the
   blocking budgets' line. Found by the author, 2026-08-21
-- **`just mutants-diff` cannot see an untracked product file.** It scopes to
-  `git diff HEAD`, which excludes untracked files, so a brand-new `src/*.rs` is
-  invisible to the per-turn gate until it is staged. Harmless for a test module;
-  a new product file would be a silent gap of exactly the kind
-  [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
-  and [D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21)
-  are both about. Found by the author, 2026-08-21. **The gap stopped being silent
-  on 2026-08-29 and is not otherwise smaller**: `just mutants-diff` now refuses a
-  diff it found no mutants in, so a turn whose only product change is an untracked
-  new `src/*.rs` exits 1 saying *nothing to gate* instead of passing quietly
-  ([D182](NOTES.md#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)).
-  The refusal's own text tells the reader to check whether the product change is
-  missing from `git diff HEAD`, which is exactly this. Still worth fixing at the
-  source — the reader is being asked to diagnose what the recipe could scope
-  correctly
 - **`scripts/certs-test.sh` has no `--self-test`.** It grew a second check this
   turn — the two files that pin an instant against the committed certificates —
   and its red was proven on scratch copies rather than by a self-test, which every
@@ -2585,42 +2570,6 @@ long-form version and stays the authority.*
   screen, not in a mid-phase edit to another owner's document
   (CLAUDE.md § Every file here also has to get smaller). Found by the PM while
   briefing Phase 9, 2026-09-05
-
-- **`just mutants-diff` tests nothing on the first turn of a new file, and prints
-  green.** The recipe is `git diff HEAD > "$diff"`, and a **new file is untracked**,
-  so `git diff HEAD` holds not one byte of it. The sweep then runs against whatever
-  else happens to be in the tree — on 2026-09-05 that was the PM's `NOTES.md` and
-  `backlog.md` edits — and reports a clean pass having tested none of the box. **It
-  does not trip the recipe's own `0 mutants tested` guard**, because the diff is
-  not empty; it is just non-empty with somebody else's work, which is the one shape
-  that guard cannot see. This is
-  [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
-  shape again — the gate's failure and its pass print the same thing — on a
-  different input. `dev-ui` caught it and worked around it by hand
-  (`scripts/mutants.sh --gate --timeout 90 --in-diff` over a
-  `git diff --no-index /dev/null src/theme{,_tests}.rs`), so Phase 9's evidence is
-  sound: 3 caught, 2 unviable, 0 MISSED, both unviables naming a type. **Every
-  first turn of a new file has this hole, and Phase 10 (`views.rs`) and Phase 11
-  (`ui.rs`) walk straight into it** — which is why it is boxed at the head of
-  Phase 10 rather than fixed inside a running Phase 9. The obvious fix,
-  `git add -N`, is **not** obviously safe: the index belongs to the PM, an agent
-  must never write it, and `dev-ui` refused to run it for exactly that reason and
-  was right to. A fix that stages nothing — enumerating untracked files with
-  `git ls-files --others --exclude-standard` and appending
-  `git diff --no-index /dev/null <each>` — is the shape to try first. `tester` owns
-  the `justfile`. Found by `dev-ui`, confirmed by the PM, 2026-09-05
-
-- **`just check` has no `cargo package` step, so a defect that only exists in the
-  published crate is invisible to the whole gate.** Phase 9 shipped one and it was
-  caught by hand, not by CI:
-  [D242](NOTES.md#d242--the-phase-9-review-round-a-test-that-accepted-one-letter-an-includestr-that-only-breaks-in-the-downloaders-hands-and-a-comment-that-measured-false-2026-09-05)
-  finding 2 — `include_str!` reading a directory `Cargo.toml`'s `exclude` drops,
-  where `cargo publish`'s own verify step is a **build** and a build never compiles
-  a `#[cfg(test)]` module. `cargo package` + unpack + `cargo test --no-run` is the
-  step that would have seen it, and by *"`just check` is the whole of CI, or it is
-  a lie"* its absence is a gap rather than a preference. Phase 5's open box is the
-  crates.io release, which is what makes this worth a box rather than a note.
-  `tester` owns `justfile` and `scripts/`. Found by `tester`, 2026-09-05
 
 - **The Alerts and Analysis mockups mark no selected row, and `theme.rs` has
   already frozen the constant that would mark it.** Measured over `screens/`
