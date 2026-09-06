@@ -4291,6 +4291,10 @@ string and key was settled in the design phase, so this phase is drawing.
       *never a hard-coded list* holds for the kinds and cannot be made to hold
       for the sections by that call. **Rule it before briefing this box**
       ([D152](NOTES.md#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22))
+      — **ruled 2026-09-06: the sections are k8rs's own vocabulary and were never
+      going to come from the wire; the kinds are discovery's and the join is
+      `views::Group::of`**
+      ([D248](NOTES.md#d248--the-sidebars-five-sections-are-k8rss-vocabulary-and-not-the-clusters-and-invariant-12-is-untouched-by-that-2026-09-06))
 - [ ] **Alerts view** (the default on startup): findings list, severity symbol,
       title bright / evidence dim, blank line between findings
 - [ ] **Resources view**: generic table driven by server-side columns; works

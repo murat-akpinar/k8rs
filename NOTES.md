@@ -269,6 +269,7 @@ its line moving with it.
 - [D245](#d245--the-browser-sorts-by-no-column-in-v1-because-nothing-typed-survives-the-fetch-and-the-file-that-could-change-that-is-frozen-2026-09-06) — the browser sorts by no column in v1, because nothing typed survives the fetch and the file that could change that is frozen
 - [D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) — the `views.rs` review round: a fraction whose halves count different things, a card that draws a count the screen ends without, and the freeze that was set one phase too early
 - [D247](#d247--the-guard-that-read-a-colour-it-had-never-been-shown-and-the-second-one-beside-it-nobody-would-have-found-by-waiting-2026-09-06) — the guard that read a colour it had never been shown, and the second one beside it nobody would have found by waiting
+- [D248](#d248--the-sidebars-five-sections-are-k8rss-vocabulary-and-not-the-clusters-and-invariant-12-is-untouched-by-that-2026-09-06) — the sidebar's five sections are k8rs's vocabulary and not the cluster's, and invariant 12 is untouched by that
 
 ## Why it exists — where the gap is
 
@@ -21620,3 +21621,43 @@ our own binary, or files.
 rather than a commit message: cargo colours with no tty whenever `CARGO_TERM_COLOR` says
 to, and cargo-mutants propagates that variable into the child builds whose logs the gate
 reads.
+
+### D248 — the sidebar's five sections are k8rs's vocabulary and not the cluster's, and invariant 12 is untouched by that (2026-09-06)
+
+Phase 11's layout box says *rule it before briefing this box*, and
+[D152](#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22)
+wrote the finding down so it would not be discovered there:
+**`categories` is the closest thing on the wire to *workloads / network / storage /
+config / cluster*, and kube drops it in `parse.rs` along with `shortNames` and
+`singularResource`.** So the sections cannot come from discovery by that call.
+
+**The ruling: they were never going to.** The five sections are five words on a screen,
+and a screen's vocabulary is k8rs's own — `screens/resources.md` draws them, every other
+mockup in the directory draws them closed beside `ALERTS`, and a newcomer reads them
+without a glossary, which is [invariant 14](CLAUDE.md)'s test and not the API's job to
+pass. Even had `categories` survived the parse it would not have been this: it is a flat
+list of tags the API server publishes so `kubectl get <category>` can expand, not a
+partition of every kind into topics — *reasoned from the field's shape and its one
+well-known member `all`, not measured against a cluster*, which is the honest standing
+for a claim nothing here depends on.
+
+**What invariant 12 actually forbids is per-kind code**, and none is added by this. The
+join between the cluster's kinds and our five words is `views::Group::of`, ruled at
+Phase 10's review
+([D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+ruling 5) and built in three steps: the API **group** names the topic where it has one;
+the core group `""` is the one closed table of plurals, because it predates group naming
+and holds four topics at once; anything left is placed by `namespaced`. **The only list
+of kinds in the product is that core table, and it cannot grow** — a
+CustomResourceDefinition's group must contain a dot, checked against apiextensions'
+own validation, so no custom resource can ever reach it, and the set of core kinds
+changes only when Kubernetes itself does. A kind nobody has heard of still gets a row;
+that is invariant 12's actual requirement and it holds.
+
+**What is open, and what it does not block.** An unknown *namespaced* CRD lands in
+`workloads`, and on a cluster with a normal operator ecosystem that drawer fills with
+certificates, service monitors, virtual services and applications — measured at the
+Phase 10 review, six for six. That is a question about **which drawer a row is in**, not
+about whether the sidebar has sections, so it does not block the layout box; it is in
+[`backlog.md`](backlog.md) as a `screens/` ruling, because a sixth group or a `custom`
+sub-heading is a change to eleven mockups before it is a change to a `match`.
