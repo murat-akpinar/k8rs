@@ -1,0 +1,1326 @@
+//! Tests for [`super`] — the whole frame and the Alerts pane, rendered into a `Buffer` with no
+//! terminal in the room. `TestBackend` is the entire reason this file can be tested at all.
+//!
+//! **The fixtures here are constructed, and that is not a breach of NOTES § D53**, for the reason
+//! `views_tests.rs` states one layer down: that rule is about *captures*, and [`Card`] and
+//! [`Finding`] are k8rs's own types, produced from captures that are tested where they are
+//! decoded. What this file proves is what the renderer does with them once they exist.
+//!
+//! **The strings that measure things are the screen file's own**, not a shape that happens to be
+//! long: `screens/alerts.md` § The columns is what every column number below is read off, and the
+//! evidence quotes are the committed capture's bytes as that file prints them.
+
+use super::*;
+use crate::rules::{Finding, ObjectId, ObjectKind};
+use crate::views::Group;
+use k8s_openapi::jiff::Timestamp;
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
+
+// --- BUILDING A SCREEN ---
+
+/// A moment, `n` seconds after a fixed epoch, so an age is arithmetic and not a clock read.
+fn at(second: i64) -> Time {
+    Time(Timestamp::from_second(1_700_000_000 + second).expect("a representable second"))
+}
+
+/// The reader's moment: four minutes after every stamp below, which is `4 min ago` on the ladder.
+fn now() -> Time {
+    at(240)
+}
+
+fn id(kind: ObjectKind, namespace: Option<&str>, name: &str) -> ObjectId {
+    ObjectId {
+        kind,
+        namespace: namespace.map(str::to_owned),
+        name: name.to_owned(),
+        uid: Some("u-1".to_owned()),
+    }
+}
+
+fn finding(severity: Severity, title: &str, evidence: &str, action: &str) -> Finding {
+    Finding {
+        severity,
+        title: title.to_owned(),
+        evidence: evidence.to_owned(),
+        action: action.to_owned(),
+        kubectl_cmd: None,
+        owner: id(ObjectKind::Deployment, Some("payments"), "web"),
+        object: id(ObjectKind::Pod, Some("payments"), "web-1"),
+        timestamp: Some(at(0)),
+    }
+}
+
+/// The OOM card `screens/alerts.md` opens with.
+fn oom() -> Card {
+    Card {
+        owner: id(ObjectKind::Deployment, Some("payments"), "web"),
+        findings: vec![finding(
+            Severity::Critical,
+            "Containers exceeded their memory limit and were killed by the kernel (OOMKilled)",
+            "limit 256Mi · exit 137 · 47 restarts",
+            "raise limits.memory, or find the leak",
+        )],
+        affected: 3,
+        total: Some(5),
+    }
+}
+
+/// The cordon card, whose age is an `Option` and whose owner is a node.
+fn cordon(added: Option<Time>) -> Card {
+    let node = id(ObjectKind::Node, None, "node-3");
+    Card {
+        owner: node.clone(),
+        findings: vec![Finding {
+            timestamp: added,
+            owner: node.clone(),
+            object: node,
+            ..finding(
+                Severity::Warn,
+                "This node refuses new pods (cordoned)",
+                "2 pods here would still have to move",
+                "allow new pods once the work is done",
+            )
+        }],
+        affected: 0,
+        total: None,
+    }
+}
+
+fn app() -> App {
+    App::default()
+}
+
+fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
+    Screen {
+        depth: Depth::TrueColor,
+        vitals: "nodes 3/3",
+        context: "ctx: prod-eu · live · admin",
+        alerts,
+        now,
+        note: &[],
+        kinds: &[],
+        reports: &[],
+        log: &[],
+        keys: "↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit",
+    }
+}
+
+fn render_at(columns: u16, rows: u16, app: &App, screen: &Screen) -> Buffer {
+    let mut terminal =
+        Terminal::new(TestBackend::new(columns, rows)).expect("a terminal over a test backend");
+    terminal
+        .draw(|frame| draw(frame, app, screen))
+        .expect("a frame");
+    terminal.backend().buffer().clone()
+}
+
+fn render(app: &App, screen: &Screen) -> Buffer {
+    render_at(MIN_WIDTH, MIN_HEIGHT, app, screen)
+}
+
+/// The buffer as the rows a reader sees, trailing blanks kept — every column assertion below
+/// counts them.
+fn rows(buffer: &Buffer) -> Vec<String> {
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| {
+                    buffer
+                        .cell((x, y))
+                        .map_or(" ", ratatui::buffer::Cell::symbol)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The row a needle is on, so a test names what it is looking for rather than a row number that
+/// moves when the frame does.
+fn row(buffer: &Buffer, needle: &str) -> String {
+    rows(buffer)
+        .into_iter()
+        .find(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", rows(buffer).join("\n")))
+}
+
+fn holds(buffer: &Buffer, needle: &str) -> bool {
+    rows(buffer).iter().any(|line| line.contains(needle))
+}
+
+/// The pane half of a row — the sidebar and the divider dropped — so a column assertion counts
+/// from the content pane's own left edge. 22 is `1` border + [`SIDEBAR`] + `1` divider.
+fn pane(line: &str) -> String {
+    line.chars().skip(usize::from(1 + SIDEBAR + 1)).collect()
+}
+
+/// The character in one column. **Not a byte slice**: every row here carries box-drawing and
+/// severity glyphs, and `&line[21..22]` lands inside one of them.
+fn column(line: &str, at: usize) -> char {
+    line.chars().nth(at).unwrap_or(' ')
+}
+
+// --- THE FRAME ---
+
+/// The 24 rows are spent exactly as `screens/alerts.md` § The height spends them, and the count
+/// is the thing to assert: a body one row short is a card the reader never sees.
+#[test]
+fn the_frame_spends_the_rows_the_way_the_screen_file_does() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let rows = rows(&drawn);
+
+    assert!(rows[0].starts_with(" nodes 3/3"), "row 0 is the header row");
+    assert!(rows[1].starts_with('┌'), "row 1 opens the frame");
+    // 16 body rows, then the rule that closes them.
+    assert!(
+        rows[18].starts_with('├') && rows[18].ends_with('┤'),
+        "row 18 is the rule under the body, not {:?}",
+        rows[18]
+    );
+    assert!(rows[19].starts_with('│'), "row 19 is the command log");
+    assert!(
+        rows[21].starts_with('├'),
+        "row 21 is the rule under the log, not {:?}",
+        rows[21]
+    );
+    assert!(rows[22].starts_with('│'), "row 22 is the footer");
+    assert!(rows[23].starts_with('└'), "row 23 closes the frame");
+}
+
+/// 80 − 2 borders − 20 sidebar − 1 divider = 57, and the divider is a divider on every body row.
+#[test]
+fn the_sidebar_is_twenty_columns_and_the_pane_takes_the_rest() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let rows = rows(&drawn);
+
+    assert_eq!(
+        column(&rows[1], 21),
+        '┬',
+        "the top border joins the divider"
+    );
+    assert_eq!(
+        column(&rows[18], 21),
+        '┴',
+        "and the rule under the body closes it"
+    );
+    for (nth, line) in rows.iter().enumerate().take(18).skip(2) {
+        assert_eq!(column(line, 21), '│', "body row {nth} carries the divider");
+    }
+}
+
+/// `screens/widgets.md` § 8 — below the floor there is no layout at all.
+#[test]
+fn below_the_floor_there_is_one_sentence_and_no_frame() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let drawn = render_at(64, 18, &app(), &screen(&alerts, &now));
+
+    assert!(
+        holds(
+            &drawn,
+            "k8rs needs a terminal at least 80×24. This one is 64×18."
+        ),
+        "{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(!holds(&drawn, "┌"), "and no frame is attempted");
+    assert!(!holds(&drawn, "ALERTS"), "and no sidebar");
+}
+
+/// **Each half of the floor has to be able to refuse on its own.** A terminal that is small in
+/// both directions cannot tell `width < 80 || height < 24` from the same line with `&&`, or from
+/// either comparison the wrong way round — measured, all three of those mutants survived a test
+/// that only tried 64×18.
+#[test]
+fn each_half_of_the_floor_refuses_on_its_own() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let screen = screen(&alerts, &now);
+
+    for (columns, lines) in [(79, 24), (80, 23), (79, 23)] {
+        let drawn = render_at(columns, lines, &app(), &screen);
+        assert!(
+            holds(&drawn, "k8rs needs a terminal at least 80×24."),
+            "{columns}×{lines} is below the floor:\n{}",
+            rows(&drawn).join("\n")
+        );
+        assert!(!holds(&drawn, "┌"), "{columns}×{lines} draws no frame");
+    }
+
+    // And the floor itself is not below itself.
+    let drawn = render_at(MIN_WIDTH, MIN_HEIGHT, &app(), &screen);
+    assert!(!holds(&drawn, "k8rs needs a terminal"));
+    assert!(holds(&drawn, "┌"));
+}
+
+/// The one-column pad inside the frame is a pad and not a nudge: a line handed the whole width
+/// writes over the frame's own border.
+#[test]
+fn a_line_inside_the_frame_never_reaches_the_border() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let long =
+        "$ kubectl get pods -n a-namespace-with-a-name-long-enough-to-run-past-the-edge --watch";
+    let log = [long.to_owned(), long.to_owned()];
+    let mut wide = screen(&alerts, &now);
+    wide.log = &log;
+    wide.keys = long;
+    let drawn = render(&app(), &wide);
+    let rows = rows(&drawn);
+
+    for nth in [19, 20, 22] {
+        assert!(rows[nth].starts_with('│'), "row {nth}: {:?}", rows[nth]);
+        assert!(rows[nth].ends_with('│'), "row {nth}: {:?}", rows[nth]);
+    }
+}
+
+/// **`k8rs` is drawn only with two blank columns each side, and the boundary is where the
+/// mutants live.** At 80 columns the centred name starts at 38, so a left zone of 35 keeps it and
+/// one of 36 loses it; on the other side a context of 36 keeps it and one of 37 loses it. The
+/// name is the only zone that gives way — never the context.
+#[test]
+fn the_name_needs_two_blank_columns_on_each_side() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let header = |screen: &Screen| rows(&render(&app(), screen))[0].clone();
+
+    let thirty_five = "n".repeat(35);
+    let mut roomy = screen(&alerts, &now);
+    roomy.vitals = &thirty_five;
+    assert!(
+        header(&roomy).contains("k8rs"),
+        "a 35-column left zone fits"
+    );
+
+    let thirty_six = "n".repeat(36);
+    let mut tight = screen(&alerts, &now);
+    tight.vitals = &thirty_six;
+    assert!(!header(&tight).contains("k8rs"), "a 36-column one does not");
+
+    let last = format!("ctx: {}", "c".repeat(31));
+    let mut roomy = screen(&alerts, &now);
+    roomy.context = &last;
+    assert_eq!(width(&last), 36);
+    assert!(
+        header(&roomy).contains("k8rs"),
+        "a 36-column context still leaves two blanks"
+    );
+
+    let over = format!("ctx: {}", "c".repeat(32));
+    let mut tight = screen(&alerts, &now);
+    tight.context = &over;
+    assert_eq!(width(&over), 37);
+    let drawn = header(&tight);
+    assert!(
+        !drawn.contains("k8rs"),
+        "and a 37-column one does not: {drawn:?}"
+    );
+    assert!(
+        drawn.ends_with(&over),
+        "the context is never the zone that gives way: {drawn:?}"
+    );
+}
+
+#[test]
+fn the_header_puts_the_name_between_the_two_zones() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let header = &rows(&drawn)[0];
+
+    assert!(header.starts_with(" nodes 3/3"), "vitals left: {header:?}");
+    assert!(
+        header.ends_with("ctx: prod-eu · live · admin"),
+        "context right, never truncated: {header:?}"
+    );
+    assert!(header.contains("k8rs"), "the name is centred: {header:?}");
+}
+
+/// The name is the first zone to go, and the context is never the one that gives way.
+#[test]
+fn the_name_is_dropped_when_the_row_fills_up() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let mut wide = screen(&alerts, &now);
+    wide.context =
+        "ctx: a-very-long-context-name-indeed · ns: payments · read-only · ⚠ TLS not verified";
+    let drawn = render(&app(), &wide);
+    let header = &rows(&drawn)[0];
+
+    assert!(!header.contains("k8rs"), "the name went first: {header:?}");
+    assert!(
+        header.contains("read-only"),
+        "and the context stayed: {header:?}"
+    );
+    assert!(
+        header.ends_with("⚠ TLS not verified"),
+        "including its last column, which is the one that says so: {header:?}"
+    );
+}
+
+/// **The right zone never loses its tail, because its tail is what says what you may do here.**
+///
+/// `screens/widgets.md` § 1a orders the sacrifice — name, then vitals, never the context — and an
+/// EKS ARN at 80 columns runs out of row anyway. What gives way then is the context\'s own *name*,
+/// from the left, behind a `…` the reader can see; `read-only` and the TLS warning stay put.
+/// A right-aligned `Line` handed a zone narrower than itself is clipped at its **tail** by
+/// ratatui, which drops exactly those two and leaves a row still reading as complete.
+#[test]
+fn the_context_elides_its_name_and_never_its_tail() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let arn = "ctx: arn:aws:eks:eu-west-1:123456789012:cluster/production-eu \
+               · ns: payments · live · read-only · ⚠ TLS not verified";
+    let mut screen = screen(&alerts, &now);
+    screen.context = arn;
+    assert_eq!(width(arn), 116, "wider than the row, by half again");
+
+    let drawn = render(&app(), &screen);
+    let header = rows(&drawn)[0].clone();
+    println!("{header}");
+
+    assert!(
+        header.ends_with("read-only · ⚠ TLS not verified"),
+        "the tail is intact: {header:?}"
+    );
+    assert!(
+        header.starts_with('…'),
+        "and the cut is marked where it happened: {header:?}"
+    );
+    assert!(
+        header.contains("cluster/production-eu"),
+        "the end of the name is what tells two clusters apart: {header:?}"
+    );
+    assert!(!header.contains("k8rs"), "the name went first: {header:?}");
+    assert!(
+        !header.contains("nodes"),
+        "the vitals went second: {header:?}"
+    );
+
+    // **And the zone fits the row at every width, not just this one** — the property [`fits`]
+    // owes at the other end of a string, and the reason the marker needs no special case of its
+    // own: a row with no room for `…` keeps nothing.
+    for columns in 0..=width(arn) {
+        let zone = shortened(arn, columns);
+        assert!(
+            width(&zone) <= columns,
+            "{columns} columns asked for, {} drawn: {zone:?}",
+            width(&zone)
+        );
+    }
+}
+
+/// **A vital gives way whole.** `screens/widgets.md` § 1a: *a vital that cannot be read is blank,
+/// never guessed* — and half of one is a guess with no marker on it. `nodes 3/3 (40s ago)` clipped
+/// to `nodes 3/3 (` reads as a complete count of three ready nodes out of three.
+#[test]
+fn the_vitals_give_way_whole_and_never_half_a_number() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let stale = "nodes 3/3 (40s ago)";
+    let mut screen = screen(&alerts, &now);
+    screen.vitals = stale;
+    screen.context = "ctx: prod-eu · ns: payments · live · read-only · ⚠ TLS not verified";
+    assert_eq!(
+        width(screen.context),
+        67,
+        "which leaves 11 columns of left zone"
+    );
+    assert_eq!(width(stale), 19, "and the vitals want 19");
+
+    let drawn = render(&app(), &screen);
+    let header = rows(&drawn)[0].clone();
+    assert!(!header.contains("nodes"), "no half a vital: {header:?}");
+
+    screen.vitals = "nodes 3/3";
+    let drawn = render(&app(), &screen);
+    assert!(
+        rows(&drawn)[0].contains("nodes 3/3"),
+        "and one that fits is drawn"
+    );
+}
+
+#[test]
+fn the_command_log_draws_the_last_two_lines() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = [
+        "$ kubectl get certificatesigningrequests".to_owned(),
+        "$ kubectl get pods -A --watch".to_owned(),
+        "$ kubectl get nodes --watch".to_owned(),
+    ];
+    let mut with_log = screen(&alerts, &now);
+    with_log.log = &log;
+    let drawn = render(&app(), &with_log);
+
+    assert!(holds(&drawn, "$ kubectl get pods -A --watch"));
+    assert!(holds(&drawn, "$ kubectl get nodes --watch"));
+    assert!(
+        !holds(&drawn, "certificatesigningrequests"),
+        "the strip is two lines, not a scrollback"
+    );
+}
+
+// --- THE SIDEBAR ---
+
+#[test]
+fn the_selected_row_carries_the_marker_and_no_other_row_does() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let rows = rows(&drawn);
+
+    assert!(
+        rows.iter().any(|line| line.contains("▸ ALERTS")),
+        "ALERTS is selected on startup:\n{}",
+        rows.join("\n")
+    );
+    assert_eq!(
+        rows.iter().filter(|line| line.contains('▸')).count(),
+        1,
+        "exactly one row is marked"
+    );
+    assert!(
+        row(&drawn, "RESOURCES").contains("  RESOURCES"),
+        "an unselected row keeps the marker's columns blank"
+    );
+}
+
+/// Group headers are drawn and never selected — the cursor walks `views::selectable`'s answer,
+/// so row 1 of it is the first *group*, not the `RESOURCES` header.
+#[test]
+fn the_cursor_skips_the_section_headers() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let mut app = app();
+    app.nav.select(1, &[None, None, None]);
+    let drawn = render(&app, &screen(&alerts, &now));
+
+    assert!(
+        row(&drawn, "workloads").contains("▸  workloads"),
+        "the second selectable row is `workloads`, not `RESOURCES`"
+    );
+    assert!(!row(&drawn, "RESOURCES").contains('▸'));
+}
+
+#[test]
+fn a_group_lists_its_kinds_only_while_it_is_open() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let kinds = [
+        Browsable {
+            group: "apps".to_owned(),
+            version: "v1".to_owned(),
+            kind: "Deployment".to_owned(),
+            plural: "deployments".to_owned(),
+            namespaced: true,
+            verbs: vec!["list".to_owned()],
+        },
+        Browsable {
+            group: "storage.k8s.io".to_owned(),
+            version: "v1".to_owned(),
+            kind: "StorageClass".to_owned(),
+            plural: "storageclasses".to_owned(),
+            namespaced: false,
+            verbs: vec!["list".to_owned()],
+        },
+    ];
+    let mut with_kinds = screen(&alerts, &now);
+    with_kinds.kinds = &kinds;
+
+    let closed = render(&app(), &with_kinds);
+    assert!(
+        !holds(&closed, "deployments"),
+        "every group is closed at startup"
+    );
+
+    let mut open = app();
+    open.expanded = Some(Group::Workloads);
+    let open = render(&open, &with_kinds);
+    assert!(
+        row(&open, "deployments").contains("     deployments"),
+        "a kind sits two columns in from its group"
+    );
+    assert!(
+        !holds(&open, "storageclasses"),
+        "and only the open group's kinds are drawn"
+    );
+}
+
+/// `3 ● 7 ▲` — owners, not pods, and only the bands that have something in them.
+#[test]
+fn the_alerts_badge_counts_owners_in_the_bands_that_have_one() {
+    let now = now();
+    let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0))), cordon(None)]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    assert!(
+        row(&drawn, "ALERTS").contains("1 ● 2 ▲"),
+        "{:?}",
+        row(&drawn, "ALERTS")
+    );
+
+    let warn_only = Pane::Ready(vec![cordon(None)]);
+    let drawn = render(&app(), &screen(&warn_only, &now));
+    let alerts = row(&drawn, "ALERTS");
+    assert!(alerts.contains("1 ▲"), "{alerts:?}");
+    assert!(
+        !alerts.contains('●'),
+        "no band with nothing in it: {alerts:?}"
+    );
+
+    let loading = Pane::Loading;
+    let drawn = render(&app(), &screen(&loading, &now));
+    let alerts = row(&drawn, "ALERTS");
+    assert!(
+        !alerts.contains('▲') && !alerts.contains('●'),
+        "a pane that has not answered counts nothing: {alerts:?}"
+    );
+}
+
+/// The badge-glyph rule, both halves: a count draws its band, a duration draws none.
+#[test]
+fn a_count_badge_takes_a_glyph_and_a_duration_does_not() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let overcommitted = Badge {
+        value: "1".to_owned(),
+        severity: Severity::Warn,
+    };
+    let expiring = Badge {
+        value: "30d".to_owned(),
+        severity: Severity::Warn,
+    };
+    let reports = [
+        ("capacity", Some(&overcommitted)),
+        ("certificates", Some(&expiring)),
+        ("drain safety", None),
+    ];
+    let mut with_reports = screen(&alerts, &now);
+    with_reports.reports = &reports;
+    let drawn = render(&app(), &with_reports);
+
+    assert!(
+        row(&drawn, "capacity").contains("capacity      1 ▲"),
+        "{:?}",
+        row(&drawn, "capacity")
+    );
+    assert!(
+        row(&drawn, "certificates").contains("certificates  30d"),
+        "a duration says its own unit: {:?}",
+        row(&drawn, "certificates")
+    );
+    assert!(
+        !row(&drawn, "drain safety").contains('▲'),
+        "and a report with nothing to say draws nothing"
+    );
+}
+
+// --- THE CARD ---
+
+/// The age is right-aligned and its last column is the card region's — 53 columns in from the
+/// pane's left edge, which at 80×24 is the pane's last column less the two-column pad.
+#[test]
+fn the_age_ends_at_the_card_regions_last_column() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let line = row(&drawn, "payments/web");
+
+    assert!(
+        line.ends_with("4 min ago  │"),
+        "two pad columns then the frame: {line:?}"
+    );
+    assert!(
+        line.contains("● payments/web  ·  3 of 5 pods"),
+        "the identity line: {line:?}"
+    );
+}
+
+/// **A card with no age draws none and reserves nothing** — the name gets the whole 51 columns.
+///
+/// **The name has to be long enough for 51 to be a different answer from 40**, which `node-3` is
+/// not: six columns fit either way, so a card that had quietly kept the widest age's 14 columns
+/// back would pass. 42 is an ordinary EKS node name, it fits the whole line, and it does not fit
+/// beside any age at all (`screens/alerts.md` § The age, and what it costs the name).
+#[test]
+fn a_card_with_no_age_draws_none_and_keeps_the_whole_line() {
+    let now = now();
+    let ageless = Pane::Ready(vec![cordon(None)]);
+    let drawn = render(&app(), &screen(&ageless, &now));
+    let line = row(&drawn, "node-3");
+
+    assert!(line.contains("▲ node-3"), "{line:?}");
+    assert!(
+        !line.contains("ago"),
+        "nothing borrowed from elsewhere: {line:?}"
+    );
+
+    let long = "ip-10-0-134-201.eu-west-1.compute.internal";
+    assert_eq!(width(long), 42);
+    let mut card = cordon(None);
+    card.owner.name = long.to_owned();
+    let alerts = Pane::Ready(vec![card]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let line = row(&drawn, "ip-10-0-134");
+
+    assert!(
+        pane(&line).starts_with(&format!("  ▲ {long}")),
+        "the whole name, on a line that reserved nothing: {line:?}"
+    );
+    // And what follows it is the pad and the frame, nothing else.
+    assert!(
+        pane(&line).trim_end_matches(['│', ' ']).ends_with(long),
+        "the right edge is simply empty: {line:?}"
+    );
+
+    let dated = Pane::Ready(vec![cordon(Some(at(0)))]);
+    let drawn = render(&app(), &screen(&dated, &now));
+    assert!(
+        row(&drawn, "node-3").ends_with("4 min ago  │"),
+        "the same card with a stamp draws it"
+    );
+}
+
+/// An ordinary EKS node name is 42 columns: it fits on a card with no age and on no card with
+/// one, and when it does not fit the **name** is what gives way.
+#[test]
+fn a_long_name_clips_and_the_age_is_never_touched() {
+    let now = now();
+    let long = "ip-10-0-134-201.eu-west-1.compute.internal";
+    let mut card = cordon(Some(at(0)));
+    card.owner.name = long.to_owned();
+    let alerts = Pane::Ready(vec![card]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let line = row(&drawn, "ip-10-0-134");
+
+    assert!(
+        line.ends_with("4 min ago  │"),
+        "the age keeps its column: {line:?}"
+    );
+    assert!(
+        !line.contains(long),
+        "and the 42-column name did not fit beside it: {line:?}"
+    );
+
+    let mut card = cordon(None);
+    card.owner.name = long.to_owned();
+    let alerts = Pane::Ready(vec![card]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    assert!(
+        holds(&drawn, long),
+        "the same name fits whole on a card with no age"
+    );
+}
+
+/// `· n of m pods` gives way before the name does: a name half-read still tells you which
+/// workload, a fraction with no workload attached tells you nothing.
+#[test]
+fn the_count_gives_way_before_the_name_clips() {
+    let now = now();
+    let mut card = oom();
+    // `payments/a-deployment-with-a-longer-name` is **40** columns, which is exactly what an age
+    // of `4 min ago` leaves: the name alone is the last one that fits whole, and the name plus
+    // `  ·  3 of 5 pods` is 16 columns over. A shorter fixture cannot tell `measured + GAP` from
+    // `measured * GAP` — measured, that mutant survived a 33-column name.
+    card.owner.name = "a-deployment-with-a-longer-name".to_owned();
+    let alerts = Pane::Ready(vec![card]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let line = row(&drawn, "a-deployment-with-a-longer");
+
+    assert!(
+        !line.contains("3 of 5 pods"),
+        "the fraction went first: {line:?}"
+    );
+    assert!(
+        line.contains("payments/a-deployment-with-a-longer-name"),
+        "and the whole name stayed: {line:?}"
+    );
+    assert!(line.ends_with("4 min ago  │"), "{line:?}");
+}
+
+/// The evidence is the one thing a card cuts, and the cut is visible.
+#[test]
+fn the_evidence_is_cut_at_three_lines_and_says_so() {
+    let now = now();
+    let mut card = oom();
+    card.findings[0].evidence = "container nope · image registry.invalid/does-not-exist:v9 · \
+         failed to pull and unpack image \
+         \"https://registry.invalid/v2/does-not-exist/manifests/v9\": unexpected status from \
+         HEAD request, and a great deal more text after it than three lines can hold"
+        .to_owned();
+    let alerts = Pane::Ready(vec![card]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+
+    assert!(
+        holds(&drawn, "…"),
+        "the cut is marked:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        !holds(&drawn, "a great deal more text"),
+        "and what is past the third line is gone"
+    );
+    assert!(
+        holds(&drawn, "container nope"),
+        "while the first line is intact"
+    );
+
+    // Counted on the screen, not inferred from the marker: the rows between the last line of the
+    // title and the action are the evidence, and there are three of them.
+    let rows = rows(&drawn);
+    let title = rows
+        .iter()
+        .position(|line| line.contains("(OOMKilled)"))
+        .expect("the title's last line");
+    let action = rows
+        .iter()
+        .position(|line| line.contains("→ raise limits.memory"))
+        .expect("the action");
+    assert_eq!(action - title - 1, 3, "\n{}", rows.join("\n"));
+}
+
+/// **The action is never cut**, and neither is the title: only the evidence is.
+#[test]
+fn the_title_and_the_action_are_drawn_whole() {
+    let now = now();
+    let mut card = oom();
+    card.findings[0].action = "exit 0 says the run ended, not who stopped it — check the pod's \
+         events for a Killing line and the node for a memory killer"
+        .to_owned();
+    let alerts = Pane::Ready(vec![card]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+
+    assert!(
+        holds(&drawn, "  → exit 0 says the run ended"),
+        "the arrow costs the first line two columns:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        holds(&drawn, "node for a memory killer"),
+        "and the last word is on screen"
+    );
+    assert!(
+        holds(&drawn, "killed by the kernel (OOMKilled)"),
+        "the title is drawn whole too"
+    );
+}
+
+/// An empty evidence draws no line at all — not a blank one, which is a hole in the card.
+#[test]
+fn an_empty_evidence_leaves_the_line_out() {
+    let now = now();
+    let mut card = oom();
+    card.findings[0].evidence = String::new();
+    let alerts = Pane::Ready(vec![card]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let rows = rows(&drawn);
+    let title = rows
+        .iter()
+        .position(|line| line.contains("(OOMKilled)"))
+        .expect("the title's last line");
+
+    assert!(
+        rows[title + 1].contains("→ raise limits.memory"),
+        "the action follows the title with nothing between:\n{}",
+        rows.join("\n")
+    );
+}
+
+/// Severity is a symbol **and** a colour, never colour alone — and both come from
+/// `theme::band`, so the two carriers cannot disagree.
+#[test]
+fn a_severity_is_a_symbol_and_a_colour() {
+    let now = now();
+    let alerts = Pane::Ready(vec![oom(), cordon(None)]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let rows = rows(&drawn);
+
+    let critical = rows
+        .iter()
+        .position(|line| line.contains("payments/web"))
+        .expect("the OOM card");
+    let warn = rows
+        .iter()
+        .position(|line| line.contains("node-3"))
+        .expect("the cordon card");
+    // The gutter: two columns in from the pane's left edge, which is column 22 + 2.
+    let gutter = 24;
+    assert_eq!(column(&rows[critical], gutter), '●');
+    assert_eq!(column(&rows[warn], gutter), '▲');
+    assert_eq!(
+        drawn.cell((gutter as u16, critical as u16)).unwrap().fg,
+        ink(theme::CRITICAL, Depth::TrueColor)
+    );
+    assert_eq!(
+        drawn.cell((gutter as u16, warn as u16)).unwrap().fg,
+        ink(theme::WARN, Depth::TrueColor)
+    );
+}
+
+/// At sixteen colours the same two are still told apart, by the glyph and by an indexed colour —
+/// which is what the fallback is for.
+#[test]
+fn the_bands_survive_a_sixteen_colour_terminal() {
+    let now = now();
+    let alerts = Pane::Ready(vec![oom()]);
+    let mut plain = screen(&alerts, &now);
+    plain.depth = Depth::Ansi16;
+    let drawn = render(&app(), &plain);
+
+    assert!(
+        holds(&drawn, "● payments/web"),
+        "the glyph is unconditional"
+    );
+    assert_eq!(drawn.cell((24, 2)).unwrap().fg, Color::Indexed(1));
+}
+
+// --- THE THREE STATES ---
+
+/// *Nothing came back yet* is not *there is nothing* is not *we were not allowed to look*, and
+/// none of the three says `403` or the word RBAC.
+#[test]
+fn loading_empty_and_denied_are_three_different_screens() {
+    let now = now();
+    let note = ["84 pods and 3 nodes checked, none of them is in trouble right now.".to_owned()];
+
+    let loading = Pane::Loading;
+    let mut still = screen(&loading, &now);
+    let reading = ["reading the cluster… 2,140 pods".to_owned()];
+    still.note = &reading;
+    let still = render(&app(), &still);
+    assert!(holds(&still, "reading the cluster…"));
+    assert!(
+        !holds(&still, "nothing is broken"),
+        "a list that has not answered does not claim to be empty"
+    );
+
+    let empty = Pane::Ready(Vec::new());
+    let mut clean = screen(&empty, &now);
+    clean.note = &note;
+    let clean = render(&app(), &clean);
+    assert!(holds(&clean, "○  nothing is broken"));
+    assert!(holds(&clean, "84 pods and 3 nodes checked"));
+
+    // **A blank line goes between the paragraphs and nowhere else** — not above the first one,
+    // which would push the block off its own centre, and not nowhere, which runs two sentences
+    // together.
+    let two = [
+        "84 pods and 3 nodes checked.".to_owned(),
+        "Worth a look anyway:".to_owned(),
+    ];
+    let mut spaced = screen(&empty, &now);
+    spaced.note = &two;
+    let spaced = render(&app(), &spaced);
+    let drawn = rows(&spaced);
+    let first = drawn
+        .iter()
+        .position(|line| line.contains("84 pods and 3 nodes checked."))
+        .expect("the first paragraph");
+    let second = drawn
+        .iter()
+        .position(|line| line.contains("Worth a look anyway:"))
+        .expect("the second");
+    assert_eq!(
+        second - first,
+        2,
+        "one blank between:\n{}",
+        drawn.join("\n")
+    );
+    let headline = drawn
+        .iter()
+        .position(|line| line.contains("nothing is broken"))
+        .expect("the headline");
+    assert_eq!(first - headline, 2, "one blank under the headline, not two");
+
+    // Refused, and nothing came back with it — which is not `Ready(vec![])` and never reaches
+    // `nothing is broken`.
+    let refused = Pane::Denied(
+        "You can't list pods across the whole cluster, so k8rs is showing the namespace your \
+         kubeconfig points at: payments."
+            .to_owned(),
+        Vec::new(),
+    );
+    let refused = render(&app(), &screen(&refused, &now));
+
+    // A caller with nothing to say still gets a sentence rather than a blank pane — and the
+    // fallback is the *loading* pane's alone: an empty list with no note still says only that it
+    // is empty, never that it is still reading.
+    let silent = render(&app(), &screen(&Pane::Loading, &now));
+    assert!(holds(&silent, "reading the cluster…"));
+    assert!(!holds(&silent, "nothing is broken"));
+    let wordless = render(&app(), &screen(&Pane::Ready(Vec::new()), &now));
+    assert!(holds(&wordless, "○  nothing is broken"));
+    assert!(!holds(&wordless, "reading the cluster…"));
+
+    for state in [&still, &clean, &refused] {
+        println!("{}\n", rows(state).join("\n"));
+    }
+    assert!(holds(&refused, "You can't list pods across the whole"));
+    assert!(!holds(&refused, "nothing is broken"));
+    for word in ["403", "RBAC", "forbidden"] {
+        for state in [&still, &clean, &refused] {
+            assert!(!holds(state, word), "no state prints {word:?}");
+        }
+    }
+}
+
+/// **A card holds every finding filed under one owner, draws the one that decides it, and counts
+/// the rest** (`screens/alerts.md` § A card with more than one finding).
+///
+/// Severity settles this one outright: the memory kill is Critical and the readiness failure a
+/// Warning. The right edge belongs to the *newer* of the two and that is not a mismatch — the age
+/// answers *when did something last happen to this owner*, which is `Card::age`'s own reading.
+#[test]
+fn a_second_finding_is_counted_under_the_action_and_never_drawn_beside_it() {
+    let now = now();
+    let mut card = oom();
+    card.findings.push(Finding {
+        timestamp: Some(at(200)),
+        ..finding(
+            Severity::Warn,
+            "Running, but not receiving traffic — the readiness check is failing",
+            "",
+            "check the app's /healthz endpoint",
+        )
+    });
+    let alerts = Pane::Ready(vec![card]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    println!("{}", rows(&drawn).join("\n"));
+
+    assert!(
+        holds(&drawn, "Containers exceeded their memory limit"),
+        "the worst severity is what the four parts are drawn from"
+    );
+    assert!(
+        !holds(&drawn, "readiness check is failing"),
+        "and the other one is one ⏎ away, not on the card"
+    );
+    assert!(
+        holds(&drawn, "1 more problem — ⏎ to see"),
+        "singular at one"
+    );
+    // Two columns of card pad, then the two the title and the evidence also indent by — and
+    // nothing else, which is what *no glyph precedes it* looks like on a rendered row.
+    assert!(
+        pane(&row(&drawn, "more problem")).starts_with("    1 more problem — ⏎ to see"),
+        "under the title, not under the arrow, and no glyph before it: {:?}",
+        row(&drawn, "more problem")
+    );
+    assert!(
+        row(&drawn, "payments/web").ends_with("40s ago  │"),
+        "the right edge is the newest drawable event on the card, whichever finding it belongs to"
+    );
+
+    // Two hidden findings take the plural, and a card with one finding has no fifth part at all —
+    // it is absent, never a blank placeholder.
+    let mut three = oom();
+    three
+        .findings
+        .push(finding(Severity::Warn, "second", "", "do a thing"));
+    three
+        .findings
+        .push(finding(Severity::Warn, "third", "", "do another"));
+    let alerts = Pane::Ready(vec![three]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    assert!(
+        holds(&drawn, "2 more problems — ⏎ to see"),
+        "plural past one"
+    );
+
+    let alone = Pane::Ready(vec![oom()]);
+    let drawn = render(&app(), &screen(&alone, &now));
+    assert!(!holds(&drawn, "more problem"), "one finding, four parts");
+}
+
+/// **Where severity ties, recency breaks it — not `analyze()`'s order.**
+///
+/// `screens/alerts.md` draws the case: a node carrying both N2 (cordoned) and N3 (running low on
+/// memory), both `▲`. N2 is declared before N3 in `rules.rs`, so *first in that order* would draw
+/// the cordon — the older and, on this node, the less urgent of the two — and nothing about which
+/// rule number fired first is a fact a reader can reconstruct.
+///
+/// **And *recent* is [`Finding::age`] answering, not a timestamp existing.** A stamp more than the
+/// skew allowance into the future draws no age at all, so it cannot be the most recent thing on a
+/// card either — the same test `views::Card::newest` applies to the right edge.
+#[test]
+fn a_tie_on_severity_is_broken_by_the_most_recent_drawable_finding() {
+    let now = now();
+    let low = |stamp| Finding {
+        timestamp: stamp,
+        owner: id(ObjectKind::Node, None, "node-3"),
+        object: id(ObjectKind::Node, None, "node-3"),
+        ..finding(
+            Severity::Warn,
+            "This node is running low on memory — Kubernetes may start evicting pods to free it up",
+            "",
+            "free up memory on this node, or move some pods elsewhere",
+        )
+    };
+
+    let mut recent = cordon(Some(at(0)));
+    recent.findings.push(low(Some(at(180))));
+    let alerts = Pane::Ready(vec![recent]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        holds(&drawn, "running low on memory"),
+        "the newer of the two"
+    );
+    assert!(
+        !holds(&drawn, "refuses new pods"),
+        "the cordon is the one behind ⏎: {}",
+        rows(&drawn).join("\n")
+    );
+    assert!(holds(&drawn, "1 more problem — ⏎ to see"));
+
+    // The same pair, with the memory finding stamped ten minutes into the reader's future: it
+    // draws no age, so it is not the most recent thing here and the cordon is drawn instead.
+    let mut ahead = cordon(Some(at(0)));
+    ahead.findings.push(low(Some(at(840))));
+    let alerts = Pane::Ready(vec![ahead]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    assert!(
+        holds(&drawn, "refuses new pods"),
+        "a future stamp is not recency"
+    );
+    assert!(!holds(&drawn, "running low on memory"));
+    assert!(
+        row(&drawn, "node-3").ends_with("4 min ago  │"),
+        "and the right edge is the drawable one: {:?}",
+        row(&drawn, "node-3")
+    );
+
+    // Neither has a drawable age: the screen file promises nothing about which is shown, so this
+    // asserts only that a card still draws a finding and still counts the other.
+    let mut neither = cordon(None);
+    neither.findings.push(low(None));
+    let alerts = Pane::Ready(vec![neither]);
+    let drawn = render(&app(), &screen(&alerts, &now));
+    assert!(
+        holds(&drawn, "refuses new pods") || holds(&drawn, "running low on memory"),
+        "a card with no drawable age still draws a finding"
+    );
+    assert!(holds(&drawn, "1 more problem — ⏎ to see"));
+}
+
+/// **A refusal is a banner over the list, never instead of it.**
+///
+/// `screens/states.md` § *You can only see some namespaces* draws the sentence above the cards,
+/// with `3 ● 7 ▲` still on the sidebar and `● payments/web  ·  3 of 5 pods    4 min ago` still on
+/// the pane. § *Your login expired* says it in prose: *"Stale data stays visible and stays
+/// labelled… k8rs does not clear the screen because it lost its token."*
+#[test]
+fn a_refusal_is_a_banner_over_the_list_and_does_not_clear_it() {
+    let now = now();
+    let refused = Pane::Denied(
+        "You can't list pods across the whole cluster, so k8rs is showing the namespace your \
+         kubeconfig points at: payments."
+            .to_owned(),
+        vec![oom(), cordon(Some(at(0)))],
+    );
+    let drawn = render(&app(), &screen(&refused, &now));
+    println!("{}", rows(&drawn).join("\n"));
+    let lines = rows(&drawn);
+    let at_row = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", lines.join("\n")))
+    };
+
+    let banner = at_row("You can't list pods across the whole");
+    let card = at_row("payments/web");
+    assert!(banner < card, "the banner is above the list, not below it");
+    // The sidebar row beside the blank one is not this test's business.
+    assert!(
+        pane(&lines[card - 1])
+            .chars()
+            .all(|cell| cell == ' ' || cell == '│'),
+        "one blank row between them: {:?}",
+        lines[card - 1]
+    );
+    assert!(
+        row(&drawn, "payments/web").ends_with("4 min ago  │"),
+        "and the card is drawn whole, right edge included"
+    );
+    assert!(
+        holds(&drawn, "node-3"),
+        "every card that did come back, not just the first"
+    );
+    assert!(
+        row(&drawn, "ALERTS").contains("1 ● 1 ▲"),
+        "the badge counts what did come back: {:?}",
+        row(&drawn, "ALERTS")
+    );
+    assert!(
+        !holds(&drawn, "nothing is broken"),
+        "a refusal is the one moment k8rs cannot claim the cluster is clean"
+    );
+}
+
+// --- MEASURING AND CUTTING ---
+
+#[test]
+fn a_word_wider_than_the_line_is_broken_by_character() {
+    assert_eq!(wrapped("aa bb cc", 5), ["aa bb", "cc"]);
+    assert_eq!(
+        wrapped("supercalifragilistic x", 5),
+        ["super", "calif", "ragil", "istic", "x"]
+    );
+    assert_eq!(wrapped("", 5), Vec::<String>::new());
+    // A zero-column line cannot loop forever, and does not lose the word.
+    assert_eq!(wrapped("hello", 0), ["hello"]);
+
+    // **The space between two words is a column and is counted as one.** Without it `aa bb`
+    // would be judged to fit in four and be drawn five wide.
+    assert_eq!(wrapped("aa bb", 4), ["aa", "bb"]);
+    assert_eq!(wrapped("aa bb", 5), ["aa bb"]);
+    // And it is *added*, not multiplied in: `aaa` + ` ` + `bb` is six and fits in six.
+    assert_eq!(wrapped("aaa bb", 6), ["aaa bb"]);
+
+    // A word exactly as wide as the line is not a word that has to be broken.
+    assert_eq!(wrapped("abcde", 5), ["abcde"]);
+    assert_eq!(wrapped("abcdef", 5), ["abcde", "f"]);
+
+    // **And "exactly as wide as the line" has to be fed a word one of whose own *prefixes* is
+    // wider than the whole of it, or the break loop\'s `>` cannot be told from `>=`.** U+FE0E
+    // asks for the text presentation of a symbol that is two columns by default, so `🀄︎` measures
+    // one column where `🀄` measures two: the word fits the line and its prefix does not, so
+    // `fits` hands back a strict prefix of a word that never needed breaking. `>` never asks;
+    // `>=` asks and splits it (measured 2026-09-06 — every prefix of a ZWJ family emoji measures
+    // 2, so that string, the obvious candidate, cannot tell the two apart).
+    let narrowed = "\u{2600}\u{1F004}\u{FE0E}";
+    assert_eq!(width(narrowed), 2, "the word is exactly the line");
+    assert_eq!(
+        width(&narrowed[..narrowed.len() - 3]),
+        3,
+        "and its prefix is not"
+    );
+    assert_eq!(wrapped(narrowed, 2), [narrowed]);
+}
+
+/// **A prefix is measured, never summed** — the defect under the mutant above.
+///
+/// `Span::width` measures a grapheme cluster whole and the cluster is not the sum of its
+/// characters\' widths, in both directions: `☀️` is base + variation selector, one column summed
+/// and **two** measured; a ZWJ family emoji is six summed and **two** measured. A `fits` that
+/// added a per-character step therefore returned a prefix wider than the columns it was given,
+/// and the pane got a line it had no room for — a silent cut, which `screens/widgets.md` § 7
+/// forbids by name.
+#[test]
+fn a_prefix_is_measured_and_never_overruns_the_columns_it_was_given() {
+    let sun = "\u{2600}\u{FE0F}";
+    assert_eq!(width(sun), 2, "measured whole");
+    assert_eq!(
+        sun.chars().map(|c| width(&c.to_string())).sum::<usize>(),
+        1,
+        "summed"
+    );
+
+    // 45 plain columns and six of those clusters: 57 measured, 51 summed. Asking for 51 used to
+    // hand back all 57 of them, into a 51-column card region.
+    let token = format!("{}{}", "x".repeat(45), sun.repeat(6));
+    assert_eq!(width(&token), 57);
+    assert!(
+        width(fits(&token, 51)) <= 51,
+        "{:?} is {} columns",
+        fits(&token, 51),
+        width(fits(&token, 51))
+    );
+    assert!(
+        width(fits("\u{2600}\u{FE0F}a", 1)) <= 1,
+        "one column means one column"
+    );
+
+    // And the same defect one caller up: nothing `wrapped` emits is wider than the line.
+    for line in wrapped(&token, 51) {
+        assert!(width(&line) <= 51, "{line:?} is {} columns", width(&line));
+    }
+
+    // The other direction — a cluster narrower whole than its characters sum to — is measured
+    // whole too, so a word that fits is never broken up.
+    let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F466}";
+    assert_eq!(width(family), 2);
+    assert_eq!(fits(family, 2), family);
+    assert_eq!(wrapped(family, 2), [family]);
+}
+
+#[test]
+fn fits_never_cuts_a_character_in_half() {
+    assert_eq!(fits("payments/web", 8), "payments");
+    assert_eq!(fits("née", 2), "né");
+    assert_eq!(fits("née", 0), "");
+    // Wide characters cost two columns each, so three of them do not fit in five.
+    assert_eq!(fits("日本語", 5), "日本");
+}
+
+#[test]
+fn the_cut_walks_back_to_a_whole_word_before_it_marks() {
+    // Three lines and no more: nothing is cut, nothing is marked.
+    let short = cut("aa bb cc dd", 5);
+    assert_eq!(short, ["aa bb", "cc dd"]);
+
+    let long = cut("aaaa bbbb cccc dddd eeee ffff gggg hhhh", 10);
+    // Three, spelled out rather than read off the constant the code uses: a test that asserts
+    // against `EVIDENCE_LINES` agrees with whatever that constant becomes.
+    assert_eq!(long.len(), 3, "{long:?}");
+    assert_eq!(
+        EVIDENCE_LINES, 3,
+        "and three is the number the screen file measured"
+    );
+    // **The exact line, not merely a marker on the end of one.** The third line is nine columns
+    // and the marker is the tenth, so nothing is given up: a walk-back here would throw away a
+    // word the line had room for.
+    assert_eq!(long, ["aaaa bbbb", "cccc dddd", "eeee ffff…"]);
+
+    // And where the third line fills the width, the walk-back is what makes room for the marker.
+    let full = cut("aaaaa bbbb ccccc dddd eeeee ffff ggggg", 10);
+    assert_eq!(full, ["aaaaa bbbb", "ccccc dddd", "eeeee…"]);
+    for line in &full {
+        assert!(width(line) <= 10, "{full:?}");
+    }
+}
+
+// --- WHAT THE SCREEN ACTUALLY LOOKS LIKE ---
+
+/// Not an assertion about a column — the whole screen, printed, so a reader of the report can
+/// compare it with `screens/alerts.md` line by line. `cargo test -- --nocapture`.
+#[test]
+fn the_alerts_screen_at_the_floor() {
+    let now = now();
+    let cards = vec![oom(), cordon(Some(at(0))), cordon(None)];
+    let alerts = Pane::Ready(cards);
+    let capacity = Badge {
+        value: "1".to_owned(),
+        severity: Severity::Warn,
+    };
+    let certificates = Badge {
+        value: "30d".to_owned(),
+        severity: Severity::Warn,
+    };
+    let reports = [
+        ("capacity", Some(&capacity)),
+        ("certificates", Some(&certificates)),
+        ("drain safety", None),
+        ("posture", None),
+        ("restarts", None),
+        ("waste", None),
+        ("versions", None),
+    ];
+    let log = [
+        "$ kubectl get pods -A --watch".to_owned(),
+        "$ kubectl get nodes --watch".to_owned(),
+    ];
+    let mut screen = screen(&alerts, &now);
+    screen.reports = &reports;
+    screen.log = &log;
+
+    let drawn = render(&app(), &screen);
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(holds(&drawn, "▸ ALERTS"));
+}

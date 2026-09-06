@@ -82,14 +82,14 @@ Eight rules follow from that table, and every pane below obeys all eight.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  What each node promised, and what it has     │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  What each node promised, and what it has     │
+│  RESOURCES         │                                               │
 │   workloads        │  ▲ node-2   6.2 of 8 cpu · 17.8Gi of 16Gi     │
 │   network          │      using 3.4 cpu and 12.1Gi                 │
 │   storage          │      Almost twice the memory is promised as   │
 │   config           │      node-2 has. If these pods use what they  │
 │   cluster          │      asked for, one of them is killed.        │
-│ ANALYSIS           │      → move some pods to another node, or     │
+│  ANALYSIS          │      → move some pods to another node, or     │
 │▸  capacity      1 ▲│        lower what they ask for (their         │
 │   certificates  30d│        requests)                              │
 │   drain safety     │    node-1   7.4 of 8 cpu · 9.8Gi of 16Gi      │
@@ -261,14 +261,14 @@ have been ([states.md](states.md#you-can-only-see-some-namespaces)).
 ```
  nodes 3/3                    ctx: prod-eu · ns: payments · read-only
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  What each node promised, and what it has     │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  What each node promised, and what it has     │
+│  RESOURCES         │                                               │
 │   workloads        │  Not checked here. Adding up what a node has  │
 │   network          │  promised needs every pod on it, and you can  │
 │   storage          │  only see payments — so every number would    │
 │   config           │  come out too low.                            │
 │   cluster          │                                               │
-│ ANALYSIS           │  Ask for cluster-wide read access, or drop    │
+│  ANALYSIS          │  Ask for cluster-wide read access, or drop    │
 │▸  capacity         │  the  --namespace  flag if you set one.       │
 │   certificates  30d│                                               │
 │   drain safety     │  Still counted, from what you can see:        │
@@ -413,14 +413,14 @@ three each get a row, because assuming any of them away is either a false
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  If you drained each node, what happens?      │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  If you drained each node, what happens?      │
+│  RESOURCES         │                                               │
 │   workloads        │  A drain below assumes --ignore-daemonsets, so│
 │   network          │  DaemonSet pods never count as moving.        │
 │   storage          │  ● node-3 would never finish draining         │
 │   config           │      This node has stopped responding. A drain│
 │   cluster          │      cannot confirm a pod is gone until it    │
-│ ANALYSIS           │      answers again, so it waits forever.      │
+│  ANALYSIS          │      answers again, so it waits forever.      │
 │   capacity      1 ▲│      → check the node itself: is it powered on│
 │   certificates  30d│        and reachable?                         │
 │▸  drain safety     │  ▲ node-2 has 2 pods nothing would restart    │
@@ -1104,14 +1104,14 @@ answer.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Things that cost you something for nothing   │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  Things that cost you something for nothing   │
+│  RESOURCES         │                                               │
 │   workloads        │  ● shop/api-svc matches no pod                │
 │   network          │      This Service points at nothing. Anything │
 │   storage          │      calling it gets a 503.                   │
 │   config           │      → fix its selector, or delete it         │
 │   cluster          │  ▲ data/pgdata-old is 128Mi nobody is using   │
-│ ANALYSIS           │      A disk was reserved for it and no pod is │
+│  ANALYSIS          │      A disk was reserved for it and no pod is │
 │   capacity      1 ▲│      mounting it. It stays reserved until     │
 │   certificates  30d│      somebody deletes it.                     │
 │   drain safety     │  ○ 4 pods were removed by a node and remain   │
@@ -1441,14 +1441,14 @@ to review, not an alarm to answer
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Pods that can read the node's own filesystem │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  Pods that can read the node's own filesystem │
+│  RESOURCES         │                                               │
 │   workloads        │  Nothing here is broken. Network, storage and │
 │   network          │  metrics agents are supposed to do this — the │
 │   storage          │  list says who can, not what to go and fix.   │
 │   config           │                                               │
 │   cluster          │  ○ /lib/modules                               │
-│ ANALYSIS           │      Read-only, mounted by 8 pods in          │
+│  ANALYSIS          │      Read-only, mounted by 8 pods in          │
 │   capacity      1 ▲│      kube-system.                             │
 │   certificates  30d│  ○ /var/lib/kubelet                           │
 │   drain safety     │      Read-only, mounted by 3 pods in          │
@@ -1599,14 +1599,14 @@ still says who can, not what to go and fix.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Pods that can read the node's own filesystem │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  Pods that can read the node's own filesystem │
+│  RESOURCES         │                                               │
 │   workloads        │  Network, storage and metrics agents are      │
 │   network          │  supposed to do this. The top row has a pod   │
 │   storage          │  outside kube-system, so k8rs cannot tell     │
 │   config           │  what it is. Nothing is marked broken; it     │
 │   cluster          │  still says who can, not what to go and fix.  │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│  ○ /var/log                                   │
 │   certificates  30d│      Read-only, mounted by 1 pod in default — │
 │   drain safety     │      outside kube-system, so k8rs cannot tell │
@@ -1728,14 +1728,14 @@ report, one question, matches every pane already on this screen.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Containers that keep restarting              │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  Containers that keep restarting              │
+│  RESOURCES         │                                               │
 │   workloads        │  Every container below is serving right       │
 │   network          │  now. A restart count never clears itself     │
 │   storage          │  — the second number, how long this run       │
 │   config           │  has lasted, is the signal.                   │
 │   cluster          │                                               │
-│ ANALYSIS           │  ○ payments/worker-7f9c · container api       │
+│  ANALYSIS          │  ○ payments/worker-7f9c · container api       │
 │   capacity      1 ▲│    Restarted 9 times since this pod started.  │
 │   certificates  30d│    This run started 6 hours ago.              │
 │   drain safety     │                                               │
@@ -1996,14 +1996,14 @@ times since its pod started.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  What expires, soonest first                  │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  What expires, soonest first                  │
+│  RESOURCES         │                                               │
 │   workloads        │  ▲ Your kubeconfig certificate expires in 30  │
 │   network          │  days                                         │
 │   storage          │      valid until 2026-09-20T00:00:00Z · this  │
 │   config           │      is the file on your own machine that     │
 │   cluster          │      proves who you are — nothing in the      │
-│ ANALYSIS           │      cluster is broken                        │
+│  ANALYSIS          │      cluster is broken                        │
 │   capacity      1 ▲│      → ask whoever gave you access for a new  │
 │▸  certificates  30d│        kubeconfig before that date — k8rs     │
 │   drain safety     │        cannot renew it, and after it kubectl  │

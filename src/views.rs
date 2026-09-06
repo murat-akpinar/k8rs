@@ -74,10 +74,23 @@ use std::cmp::Ordering;
 pub enum Pane<T> {
     /// The first answer has not arrived. `screens/states.md` § *Still loading*.
     Loading,
-    /// The cluster refused, in the words the screen prints — *"You can't list pods across the
-    /// whole cluster…"* (`screens/states.md` § *You can only see some namespaces*). Never a
-    /// `403`, never the word `RBAC` (invariant 14).
-    Denied(String),
+    /// **The cluster refused, and whatever did come back anyway** — the sentence the screen
+    /// prints, then the partial answer that sentence is about. Never a `403`, never the word
+    /// `RBAC` (invariant 14).
+    ///
+    /// **The second field is what stops a refusal clearing the screen.** A reader scoped to one
+    /// namespace is refused the cluster-wide list and still has that namespace's findings:
+    /// `screens/states.md` § *You can only see some namespaces* draws the sentence as a **banner
+    /// above the cards**, badge and all, and § *Your login expired* says it in prose — *"stale
+    /// data stays visible and stays labelled… k8rs does not clear the screen because it lost its
+    /// token"*. A one-field `Denied` could not express *refused, and here is the partial list*,
+    /// so the renderer drew the sentence over an empty pane and the reader lost the findings they
+    /// already had (2026-09-06).
+    ///
+    /// **An empty `T` here is *refused, and nothing came back*, which is not [`Pane::Ready`]'s
+    /// empty.** It must never reach `nothing is broken`: that is the strongest claim k8rs makes
+    /// and a refusal is exactly the moment it cannot be made.
+    Denied(String, T),
     /// It came back. An empty `Vec` is *there is nothing*, which is an answer.
     Ready(T),
 }

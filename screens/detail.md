@@ -7,13 +7,13 @@ whole debugging loop without a typed command.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  ‹ logs › describe   yaml   events            │
+│  RESOURCES         │  ‹ logs › describe   yaml   events            │
 │   workloads        │  ───────                                      │
 │   network          │  container: app ▾          previous log: on   │
 │   storage          │                                               │
 │   config           │  14:21:58  starting worker pool               │
 │   cluster          │  14:22:01  connected to postgres              │
-│ ANALYSIS           │  14:22:06  allocating 240MB cache             │
+│  ANALYSIS          │  14:22:06  allocating 240MB cache             │
 │   capacity      1 ▲│  14:22:07  --- killed here ---                │
 │   certificates  30d│                                               │
 │   drain safety     │  This is the log from before the last crash,  │
@@ -105,12 +105,12 @@ whichever bound gets there first), not the Rust shape underneath it.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  ‹ logs › describe   yaml   events            │
+│  RESOURCES         │  ‹ logs › describe   yaml   events            │
 │   workloads        │  ───────                                      │
 │   network          │  container: app ▾          previous log: off  │
 │   storage          │                                               │
 │   config           │  142 lines were dropped from the top to keep  │
-│ ANALYSIS           │  this pane bounded.                           │
+│  ANALYSIS          │  this pane bounded.                           │
 │   capacity      1 ▲│                                               │
 │   certificates  30d│  14:23:41  connected to postgres              │
 │   drain safety     │  14:23:44  allocating 240MB cache             │
@@ -228,12 +228,12 @@ a `Pending` pod, or a container that just started:
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/queue-worker-xk2p9                  │
-│ RESOURCES          │  ‹ logs › describe   yaml   events            │
+│  RESOURCES         │  ‹ logs › describe   yaml   events            │
 │   workloads        │  ───────                                      │
 │   network          │  container: worker ▾       previous log: off  │
 │   storage          │                                               │
 │   config           │               ○  no logs yet                  │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│        Nothing has been written to this       │
 │   certificates  30d│        container's log yet.                   │
 │   drain safety     │                                               │
@@ -273,12 +273,12 @@ this exact screen and a second one would be a second thing to learn:
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  ‹ logs › describe   yaml   events            │
+│  RESOURCES         │  ‹ logs › describe   yaml   events            │
 │   workloads        │  ───────                                      │
 │   network          │  container: app ▾          previous log: off  │
 │   storage          │  14:24:58  writing checkpoint                 │
 │   config           │  14:25:02  shutting down                      │
-│ ANALYSIS           │  14:25:03  --- stream ended: pod deleted ---  │
+│  ANALYSIS          │  14:25:03  --- stream ended: pod deleted ---  │
 │   capacity      1 ▲│                                               │
 │   certificates  30d│  Not a dropped connection — the pod itself    │
 │   drain safety     │  is gone, so there's nothing left to stream.  │
@@ -359,19 +359,31 @@ Rules for this screen:
   [§ The logs tab](#the-logs-tab) has the arithmetic and the wording; this
   line used to promise a bound with no number, which is how a bound stays
   unbuilt.
-- The finding that brought you here stays visible at the top — you never lose
-  the reason you opened the object.
-- **That block draws the finding's evidence in full**, and it is the only place
+- **Every finding filed against this object's owner stays visible at the
+  top — you never lose the reason you opened the object, and a card that had
+  more than one to speak of does not lose the one it did not lead with either**
+  ([alerts.md § A card with more than one finding](alerts.md#a-card-with-more-than-one-finding)).
+  A single-finding card, still the ordinary case, pins one block; a card that
+  fired that page's `N more problems — ⏎ to see` pins all of them, stacked in
+  the same order the card face would have drawn them one at a time — the
+  card's own severity first, the most recent breaking a tie between equals.
+  **Left open here, and worth its own pass rather than a guess**: the exact
+  row cost of a second or third stacked block against this pane's own height
+  budget, which this file has not derived — the same honesty
+  [alerts.md](alerts.md#every-count-this-card-can-have) already uses for a row
+  it has not designed yet (*"not yet designed... nothing here should be read
+  as promising one"*).
+- **Each block draws its finding's evidence in full**, and it is the only place
   that does. The Alerts card caps it at three wrapped lines with `…`, because a
   controller's verbatim message runs past any card
   ([alerts.md § the height](alerts.md#the-height)); this is where the rest of it
-  is, and the cut is only honest because this screen exists. The block wraps to
+  is, and the cut is only honest because this screen exists. Each block wraps to
   the pane and **scrolls with it** rather than being pinned — a nine-line quote
   pinned above a log pane leaves no log pane.
 - On a grouped finding, `⏎` first lists *which* pods of the group are affected,
-  then opens the one you pick. **The finding block is on that step too**, for
-  the same reason: the full message must never be two keypresses away, or the
-  card's `…` is pointing at nothing the reader can find.
+  then opens the one you pick. **The pinned block or blocks are on that step
+  too**, for the same reason: the full message must never be two keypresses
+  away, or the card's `…` is pointing at nothing the reader can find.
 
 ## The describe tab
 
@@ -405,13 +417,13 @@ turning the pane into the tab it is not trying to be.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  Pod · running · created 3 days ago           │
 │   storage          │  containers                                   │
 │   config           │    app             failed                     │
 │   cluster          │      container exceeded its memory limit —    │
-│ ANALYSIS           │      exit 137, 4 restarts                     │
+│  ANALYSIS          │      exit 137, 4 restarts                     │
 │   capacity      1 ▲│    sidecar-envoy   keeps crashing and         │
 │   certificates  30d│      restarting, 12 restarts                  │
 │   drain safety     │    init-migrate    done                       │
@@ -505,13 +517,13 @@ week later, in the one case a reader has no other way to check.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web                                 │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  Pod · running · created 8 days ago           │
 │   storage          │                                               │
 │   config           │  containers                                   │
 │   cluster          │    app             running                    │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│  events                                       │
 │   certificates  30d│  ○  none right now                            │
 │   drain safety     │                                               │
@@ -548,13 +560,13 @@ days ago.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  Pod · running · created 5 days ago           │
 │   storage          │  containers                                   │
 │   config           │    app             running                    │
 │   cluster          │                                               │
-│ ANALYSIS           │  events (newest first)                        │
+│  ANALYSIS          │  events (newest first)                        │
 │   capacity      1 ▲│  3 min ago  the health check failed           │
 │   certificates  30d│  (Unhealthy) Readiness probe failed:          │
 │   drain safety     │  HTTP probe failed with statuscode: 503       │
@@ -602,13 +614,13 @@ new key.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  4 hours ago  the container started pulling   │
 │   storage          │  its image                                    │
 │   config           │  (Pulling) Pulling image "payments/web:2.3.1" │
 │   cluster          │                                               │
-│ ANALYSIS           │  6 hours ago  kubernetes placed this pod on a │
+│  ANALYSIS          │  6 hours ago  kubernetes placed this pod on a │
 │   capacity      1 ▲│  node                                         │
 │   certificates  30d│  (Scheduled) Successfully assigned            │
 │   drain safety     │  payments/web-7d9f4 to node-3                 │
@@ -649,13 +661,13 @@ what ran out."* This is that pod.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/worker-4kd2p                        │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  Pod · failed · created 8 days ago            │
 │   storage          │  removed by the node to take back room        │
 │   config           │  (Evicted) The node was low on resource:      │
 │   cluster          │  ephemeral-storage.                           │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│  containers                                   │
 │   certificates  30d│    worker          not started                │
 │   drain safety     │                                               │
@@ -835,13 +847,13 @@ what 80×24 already draws, shown at its own size instead of a narrower one.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                                     │
-│ RESOURCES          │  logs   describe   ‹ yaml ›   events                    │
+│  RESOURCES         │  logs   describe   ‹ yaml ›   events                    │
 │   workloads        │                    ──────                               │
 │   network          │apiVersion: v1                                           │
 │   storage          │kind: Pod                                                │
 │   config           │metadata:                                                │
 │   cluster          │  name: web-7d9f4                                        │
-│ ANALYSIS           │  namespace: payments                                    │
+│  ANALYSIS          │  namespace: payments                                    │
 │   capacity      1 ▲│  labels:                                                │
 │   certificates  30d│    app: web                                             │
 │   drain safety     │  managedFields:                                         │
@@ -926,13 +938,13 @@ so is every value under `metadata.annotations`, by the same rule:
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/db-credentials                                │
-│ RESOURCES          │  logs   describe   ‹ yaml ›   events                    │
+│  RESOURCES         │  logs   describe   ‹ yaml ›   events                    │
 │   workloads        │                    ──────                               │
 │   network          │apiVersion: v1                                           │
 │   storage          │kind: Secret                                             │
 │   config           │metadata:                                                │
 │   cluster          │  name: db-credentials                                   │
-│ ANALYSIS           │  namespace: payments                                    │
+│  ANALYSIS          │  namespace: payments                                    │
 │   capacity      1 ▲│  annotations:                                           │
 │   certificates  30d│    kubectl.kubernetes.io/last-applied-configuration:    │
 │   drain safety     │    <hidden — 612 bytes>                                 │
@@ -1053,13 +1065,13 @@ container picker already is.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/pending-secret                                │
-│ RESOURCES          │  logs   describe   ‹ yaml ›   events                    │
+│  RESOURCES         │  logs   describe   ‹ yaml ›   events                    │
 │   workloads        │                    ──────                               │
 │   network          │apiVersion: v1                                           │
 │   storage          │kind: Secret                                             │
 │   config           │metadata:                                                │
 │   cluster          │  name: pending-secret                                   │
-│ ANALYSIS           │  namespace: payments                                    │
+│  ANALYSIS          │  namespace: payments                                    │
 │   capacity      1 ▲│  managedFields: …                                       │
 │   certificates  30d│type: Opaque                                             │
 │   drain safety     │data: {}                                                 │

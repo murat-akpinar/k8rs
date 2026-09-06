@@ -270,6 +270,7 @@ its line moving with it.
 - [D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) — the `views.rs` review round: a fraction whose halves count different things, a card that draws a count the screen ends without, and the freeze that was set one phase too early
 - [D247](#d247--the-guard-that-read-a-colour-it-had-never-been-shown-and-the-second-one-beside-it-nobody-would-have-found-by-waiting-2026-09-06) — the guard that read a colour it had never been shown, and the second one beside it nobody would have found by waiting
 - [D248](#d248--the-sidebars-five-sections-are-k8rss-vocabulary-and-not-the-clusters-and-invariant-12-is-untouched-by-that-2026-09-06) — the sidebar's five sections are k8rs's vocabulary and not the cluster's, and invariant 12 is untouched by that
+- [D249](#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06) — the layout box lands from a second session: the header gives way from its front, and a refusal keeps the list it is about
 
 ## Why it exists — where the gap is
 
@@ -21661,3 +21662,71 @@ Phase 10 review, six for six. That is a question about **which drawer a row is i
 about whether the sidebar has sections, so it does not block the layout box; it is in
 [`backlog.md`](backlog.md) as a `screens/` ruling, because a sixth group or a `custom`
 sub-heading is a change to eleven mockups before it is a change to a `match`.
+
+### D249 — the layout box lands from a second session: the header gives way from its front, and a refusal keeps the list it is about (2026-09-06)
+
+Phase 11's first drawing box — `src/ui.rs` and its tests, the frame, the sidebar, the
+content pane, the command log strip and the footer — was written in a **second Claude
+session that held `src/` for most of 2026-09-06** and left no report behind it
+([`backlog.md`](backlog.md) records how that came about). This session landed it, which
+means the evidence for it is what the tree can be made to show rather than an agent's
+word:
+
+- `just check` green — 1182 unit tests, 35 end-to-end, every guard's `--self-test` first.
+- The mutation gate over the box's own diff: **124 mutants on `src/ui.rs`, 0 missed**, one
+  unviable naming a type (`Option<&Finding>` has no `Default`) and not a filesystem, which
+  is the honest half of
+  [D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+  distinction.
+- The screen itself, drawn at the 80×24 floor by `ui::tests::the_alerts_screen_at_the_floor`
+  and read line by line against `screens/alerts.md` — three cards, the badge, the two-line
+  strip, the footer.
+
+One number the next `ui.rs` turn needs: the file is **873 lines**, past the ~800 at which
+[D11](#d11--the-ninth-file-pre-approved) pre-approves `dialog.rs` as the ninth file. Nothing
+is owed by that on its own — it is a permission, not a split — and Phase 11's dialog boxes
+are where it gets spent if it gets spent.
+
+`ratatui` moved from `[dev-dependencies]` to `[dependencies]` in the same change, which is
+exactly what [D238](#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)
+said Phase 11 would do the day the product drew a screen. Measured: `Cargo.lock` unchanged
+at **319 packages** — the move resolves nothing new — and `cargo tree -e no-dev` now
+matches ratatui where D238's row recorded **zero**.
+
+**1. The header's context zone gives way from its front, and which end that is is a
+security question rather than a layout preference.** The tail of that zone is `read-only`
+and `⚠ TLS not verified` — what the reader believes they are allowed to do, and the one
+line of the security gate no script can check. ratatui clips a right-aligned `Line` at its
+*tail*, so a long context dropped both and left a row that still read as complete.
+`ui::shortened` therefore cuts from the **left**, behind a visible `…`, and measures each
+candidate whole with the marker included rather than adding the marker's width to the
+tail's. The case is pinned rather than argued:
+`ui::tests::the_context_elides_its_name_and_never_its_tail` plants a 116-column EKS ARN
+context into an 80-column row and asserts the tail intact, the `…` where the cut happened,
+and — at every width from 0 to 116 — a zone no wider than the row it was given.
+A shortened cluster name is a fact the reader can see; a missing `read-only` is not.
+The name giving way from its front is the same reasoning one level down: `prod-eu`
+and `prod-eu-2` differ in their last character (`screens/widgets.md` § 1a). The doc
+comment on `shortened` states this ruling and its date; it gains this number on the next
+`ui.rs` turn rather than in a PM edit to a file the PM does not write.
+
+**2. A refusal carries whatever did come back: `views::Pane::Denied(String, T)`.** The
+one-field `Denied` could not express *refused, and here is the partial list*, so a reader
+scoped to one namespace was refused the cluster-wide list and lost the findings they
+already had. `screens/states.md` § *You can only see some namespaces* draws that sentence
+as a **banner above the cards**, badge and all, and § *Your login expired* states the rule
+in prose — *"stale data stays visible and stays labelled… k8rs does not clear the screen
+because it lost its token."* An empty `T` is *refused, and nothing came back*, which is not
+`Ready`'s empty and must never reach `nothing is broken`: `ui::content` matches on all four
+shapes and draws three different screens from them, which is what keeps the empty refusal
+off the one screen it must never become
+([PRIOR-ART § C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)).
+
+**3. What is deliberately not written here.** `ui::fits` measures a prefix whole and never
+sums it per character — a summed prefix handed 57 columns into a 51-column card region,
+measured — and that rule lives in the function's own doc and the test that plants both
+directions of it. Which finding a card with more than one draws is
+`screens/alerts.md` § *A card with more than one finding*, which is the same two keys the
+list already sorts by, applied one level down
+([D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+ruling 4). Both are cited by `ui.rs` and neither gets a second copy here.

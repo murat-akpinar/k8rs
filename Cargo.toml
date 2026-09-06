@@ -173,6 +173,23 @@ tokio-rustls = { version = "0.26.4", default-features = false }
 # advisory is a hazard on a path this build does not have.
 serde_yaml_ng = "0.10.0"
 
+# **The eighth of the approved twelve to arrive, and the line D238 said Phase 11
+# would move** — this is that change, the one that first draws a real screen
+# (todo.md § Phase 11). It sat in `[dev-dependencies]` while the only thing that
+# linked it was Phase 8's `examples/` spike, because compiling a TUI library into
+# the published binary to learn an event loop puts a TUI back in the payload D193
+# had just taken out of the prose. `ui.rs` calls it now, so it is a dependency
+# now.
+#
+# **`crossterm` is not named beside it, though invariant 10 approves it too.**
+# 0.30 re-exports the backend's own — `pub use ratatui_crossterm::crossterm`,
+# resolved at `^0.29` — and a second version number in this manifest is how a tree
+# ends up with two crossterms in it, where the backend refuses the `Event` the
+# product hands it. `deny.toml` has `multiple-versions = "warn"`, so that would
+# arrive as a warning and not a red build. It gets named the day our own code
+# calls it directly (D165's shape: name what we write, inherit nothing silently).
+ratatui = "0.30.2"
+
 [dev-dependencies]
 # **Named because our test code uses them, not because the build lacked them**
 # ([NOTES § D165](NOTES.md)) — the shape D143 argued for `futures-util`. Measured
@@ -196,24 +213,6 @@ tokio = { version = "1.53.1", features = ["net", "io-util"] }
 # already comes through in that file, so the Table decode named no new
 # dependency at all (2026-08-22).
 serde_json = "1"
-
-# **The eighth of the approved twelve to arrive, and it is here rather than in
-# `[dependencies]` on purpose** ([NOTES § D238](NOTES.md)). Phase 8's spike is an
-# `examples/` file and examples link dev-dependencies; the published binary does
-# not. Phase 5's release box is open, and D193 has just taken a TUI *claim* out of
-# this crate's description because the binary has no TUI — compiling a TUI library
-# into the same artifact to learn an event loop puts it back in the payload
-# instead of the prose. Phase 11 moves this line up, in the change that first
-# draws a real screen.
-#
-# **`crossterm` is not named beside it, though invariant 10 approves it too.**
-# 0.30 re-exports the backend's own — `pub use ratatui_crossterm::crossterm`,
-# resolved at `^0.29` — and a second version number in this manifest is how a tree
-# ends up with two crossterms in it, where the backend refuses the `Event` the
-# product hands it. `deny.toml` has `multiple-versions = "warn"`, so that would
-# arrive as a warning and not a red build. It gets named the day our own code
-# calls it directly (D165's shape: name what we write, inherit nothing silently).
-ratatui = "0.30.2"
 
 [profile.release]
 lto = true

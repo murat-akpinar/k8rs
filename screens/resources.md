@@ -7,8 +7,8 @@ own `Table` printing — the exact columns `kubectl get` would show.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  deployments          ns: payments            │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  deployments          ns: payments            │
+│  RESOURCES         │                                               │
 │▸  workloads        │    NAME      READY  UP-TO-DATE  AVAILABLE  AGE│
 │     deployments  12│▸ ● web       3/5    5           3          12d│
 │     statefulsets  3│    api       6/6    6           6          40d│
@@ -19,7 +19,7 @@ own `Table` printing — the exact columns `kubectl get` would show.
 │   storage          │                                               │
 │   config           │                                               │
 │   cluster          │                                               │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get deployments -n payments                              │
 ├────────────────────────────────────────────────────────────────────┤

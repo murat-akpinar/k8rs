@@ -72,7 +72,7 @@ manifest cannot drift away from the one `ratatui-crossterm` chose.
 | `tokio-rustls` | `0.26.4` | Phase 5 | no defaults — the connector C2's handshake is driven with |
 | `serde_yaml_ng` | `0.10.0` | Phase 6 | — — the first arrival that is not free: `Cargo.lock` 213 → 218 |
 | `serde_json` | `1` | Phase 3, as a **dev**-dependency | — |
-| `ratatui` | `0.30.2` | Phase 8, as a **dev**-dependency ([D238](../NOTES.md#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)) | — — `Cargo.lock` 218 → 319, and `cargo tree -e no-dev` matches **zero** ratatui lines, so none of the 101 is in the graph `cargo install` builds. Phase 11 moves it to `[dependencies]` |
+| `ratatui` | `0.30.2` | Phase 8, as a **dev**-dependency ([D238](../NOTES.md#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)); moved into `[dependencies]` by Phase 11's layout box, the change that first draws a screen ([D249](../NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)) | — — arriving cost `Cargo.lock` 218 → 319; **the move itself resolves nothing new** — the lock is unchanged at 319 — and what it does change is where those packages sit: `cargo tree -e no-dev` matched **zero** ratatui lines when D238 wrote that row and matches them now, over 257 distinct packages in the graph `cargo install` builds (measured 2026-09-06) |
 
 `kube` 4.x is the line that resolves against the `k8s-openapi` pin — 3.1.0 wants
 `^0.27.0` — and the two are upgraded together, never separately.

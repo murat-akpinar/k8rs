@@ -43,6 +43,7 @@ mod k8s;
 mod ops;
 mod rules;
 mod theme;
+mod ui;
 mod views;
 
 #[cfg(test)]

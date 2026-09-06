@@ -10,13 +10,13 @@ launch**.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS            │                                               │
-│ RESOURCES          │                                               │
+│  RESOURCES         │                                               │
 │   workloads        │               ○  nothing is broken            │
 │   network          │                                               │
 │   storage          │        84 pods and 3 nodes checked, none of   │
 │   config           │        them is in trouble right now.          │
 │   cluster          │                                               │
-│ ANALYSIS           │        Worth a look anyway:                   │
+│  ANALYSIS          │        Worth a look anyway:                   │
 │   capacity      1 ▲│          ANALYSIS → capacity   (1 node is     │
 │   certificates  30d│          promising more than it has)          │
 │   drain safety     │                                               │
@@ -42,13 +42,13 @@ now* — a lint report would never be empty.
  nodes …                        k8rs      ctx: prod-eu · connecting…
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS            │                                               │
-│ RESOURCES          │        reading the cluster… 2,140 pods        │
+│  RESOURCES         │        reading the cluster… 2,140 pods        │
 │   workloads        │                                               │
 │   network          │        Large clusters take a moment. Findings │
 │   storage          │        appear as they are found — this list   │
 │   config           │        fills up, it does not wait.            │
 │   cluster          │                                               │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity         │                                               │
 │   certificates  30d│                                               │
 │   drain safety     │                                               │
@@ -72,13 +72,13 @@ forbidden.
  nodes 3/3 (40s ago)          ctx: prod-eu · ⚠ disconnected, retrying
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│                                               │
-│ RESOURCES          │  ⚠ Not connected to the cluster right now.    │
+│  RESOURCES         │  ⚠ Not connected to the cluster right now.    │
 │   workloads        │    What you see below is from 40 seconds ago. │
 │   network          │    Retrying…                                  │
 │   storage          │                                               │
 │   config           │  ● payments/web  ·  3 of 5 pods    4 min ago  │
 │   cluster          │    Containers exceeded their memory limit     │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│                                               │
 │   certificates  30d│                                               │
 │   drain safety     │                                               │
@@ -103,13 +103,13 @@ out mid-session ([NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kub
  nodes 3/3 (2 min ago)                 ctx: prod-eu · ⚠ login expired
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│                                               │
-│ RESOURCES          │  ⚠ Your login expired.                        │
+│  RESOURCES         │  ⚠ Your login expired.                        │
 │   workloads        │                                               │
 │   network          │    The cluster still knows who you are, but   │
 │   storage          │    the login token your kubeconfig creates    │
 │   config           │    has timed out.                             │
 │   cluster          │                                               │
-│ ANALYSIS           │    Renew it, then press X and pick this       │
+│  ANALYSIS          │    Renew it, then press X and pick this       │
 │   capacity      1 ▲│    cluster again:                             │
 │   certificates  30d│                                               │
 │   drain safety     │      aws sso login                            │
@@ -243,13 +243,13 @@ than inventing a second constant:
  nodes 3/3       ctx: prod-eu · live · admin · ⚠ your clock is behind
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  ⚠ This computer and the cluster disagree     │
-│ RESOURCES          │    about the time by 11 minutes (this one is  │
+│  RESOURCES         │    about the time by 11 minutes (this one is  │
 │   workloads        │    behind), so recent times are missing and   │
 │   network          │    older ones can read smaller than they      │
 │   storage          │    really are.                                │
 │   config           │                                               │
 │   cluster          │  ● payments/web  ·  3 of 5 pods               │
-│ ANALYSIS           │    Containers exceeded their memory limit     │
+│  ANALYSIS          │    Containers exceeded their memory limit     │
 │   capacity      1 ▲│                                               │
 │   certificates  30d│  ▲ shop/api  ·  2 of 6 pods        1 min ago  │
 │   drain safety     │    Running, but not receiving traffic — the   │
@@ -287,13 +287,13 @@ found this box's first draft missed entirely.
  nodes 3/3        ctx: prod-eu · live · admin · ⚠ your clock is ahead
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  ⚠ This computer and the cluster disagree     │
-│ RESOURCES          │    about the time by 9 minutes (this one is   │
+│  RESOURCES         │    about the time by 9 minutes (this one is   │
 │   workloads        │    ahead), so times can read larger than they │
 │   network          │    really are.                                │
 │   storage          │                                               │
 │   config           │  ● payments/web  ·  3 of 5 pods    4 min ago  │
 │   cluster          │    Containers exceeded their memory limit     │
-│ ANALYSIS           │    and were killed by the kernel (OOMKilled)  │
+│  ANALYSIS          │    and were killed by the kernel (OOMKilled)  │
 │   capacity      1 ▲│    limit 256Mi · exit 137 · 47 restarts       │
 │   certificates  30d│    → raise limits.memory, or find the leak    │
 │   drain safety     │                                               │
@@ -326,13 +326,13 @@ has simply never synced deserves to be told before anything else goes wrong:
  nodes 3/3       ctx: prod-eu · live · admin · ⚠ your clock is behind
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS            │                                               │
-│ RESOURCES          │               ○  nothing is broken            │
+│  RESOURCES         │               ○  nothing is broken            │
 │   workloads        │                                               │
 │   network          │        84 pods and 3 nodes checked, none of   │
 │   storage          │        them is in trouble right now.          │
 │   config           │                                               │
 │   cluster          │        This computer and the cluster disagree │
-│ ANALYSIS           │        about the time by 11 minutes (this one │
+│  ANALYSIS          │        about the time by 11 minutes (this one │
 │   capacity      1 ▲│        is behind), so recent times are missing│
 │   certificates  30d│        and older ones can read smaller than   │
 │   drain safety     │        they really are.                       │
@@ -374,13 +374,13 @@ trust *any* time on the page should be told that before being told which
  nodes 3/3     ctx: prod-eu · ns: payments · read-only · ⚠ your clock is behind
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  ⚠ This computer and the cluster disagree about the time│
-│ RESOURCES          │    by 11 minutes (this one is behind), so recent times  │
+│  RESOURCES         │    by 11 minutes (this one is behind), so recent times  │
 │   workloads        │    are missing and older ones can read smaller than they│
 │   network          │    really are.                                          │
 │   storage          │                                                         │
 │   config           │  You can't list pods across the whole cluster, so k8rs  │
 │   cluster          │  is showing the namespace your kubeconfig points at:    │
-│ ANALYSIS           │  payments. Use --namespace <name> for a different one,  │
+│  ANALYSIS          │  payments. Use --namespace <name> for a different one,  │
 │   capacity         │  or ask for cluster-wide read access.                   │
 │   certificates  30d│                                                         │
 │   drain safety     │  One node check is off: spotting a node someone started │
@@ -449,13 +449,13 @@ on the cluster-wide list falls back instead of failing
  nodes 3/3                    ctx: prod-eu · ns: payments · read-only
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  You can't list pods across the whole         │
-│ RESOURCES          │  cluster, so k8rs is showing the namespace    │
+│  RESOURCES         │  cluster, so k8rs is showing the namespace    │
 │   workloads        │  your kubeconfig points at: payments.         │
 │   network          │  Use  --namespace <name>  for a different     │
 │   storage          │  one, or ask for cluster-wide read access.    │
 │   config           │                                               │
 │   cluster          │  One node check is off: spotting a node       │
-│ ANALYSIS           │  someone started emptying and did not finish  │
+│  ANALYSIS          │  someone started emptying and did not finish  │
 │   capacity         │  needs every pod in the cluster.              │
 │   certificates  30d│                                               │
 │   drain safety     │  ● payments/web  ·  3 of 5 pods    4 min ago  │
@@ -531,13 +531,13 @@ making it while one check is switched off.
  nodes 3/3                    ctx: prod-eu · ns: payments · read-only
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS            │                                               │
-│ RESOURCES          │               ○  nothing is broken            │
+│  RESOURCES         │               ○  nothing is broken            │
 │   workloads        │                                               │
 │   network          │        12 pods in payments and 3 nodes        │
 │   storage          │        checked, none of them is in trouble    │
 │   config           │        right now.                             │
 │   cluster          │                                               │
-│ ANALYSIS           │        One node check is off: spotting a      │
+│  ANALYSIS          │        One node check is off: spotting a      │
 │   capacity         │        node someone started emptying and      │
 │   certificates  30d│        did not finish needs every pod in      │
 │   drain safety     │        the cluster.                           │

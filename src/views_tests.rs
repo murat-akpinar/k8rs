@@ -118,24 +118,25 @@ fn browsable(group: &str, plural: &str, namespaced: bool) -> Browsable {
 /// twice to pass.
 #[test]
 fn every_reader_of_a_pane_has_to_answer_for_all_three_states() {
-    fn sentence(pane: &Pane<Vec<u8>>) -> &'static str {
+    fn sentence(pane: &Pane<Vec<u8>>) -> &str {
         match pane {
             Pane::Loading => "reading the cluster…",
-            Pane::Denied(_) => "You can't list pods across the whole cluster",
+            Pane::Denied(said, _) => said,
             Pane::Ready(rows) if rows.is_empty() => "nothing is broken",
             Pane::Ready(_) => "rows",
         }
     }
 
-    let drawn: Vec<&str> = [
+    let panes = [
         Pane::Loading,
-        Pane::Denied("you can't list pods".to_owned()),
+        Pane::Denied(
+            "You can't list pods across the whole cluster".to_owned(),
+            Vec::new(),
+        ),
         Pane::Ready(Vec::new()),
         Pane::Ready(vec![1]),
-    ]
-    .iter()
-    .map(sentence)
-    .collect();
+    ];
+    let drawn: Vec<&str> = panes.iter().map(sentence).collect();
 
     assert_eq!(drawn.len(), 4);
     let mut distinct = drawn.clone();

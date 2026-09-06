@@ -177,7 +177,7 @@ more column from the name beside it.
 | Outer frame | `Block::bordered()` | — | no titles — the header is its own row |
 | Sidebar (ALERTS / RESOURCES / ANALYSIS + children) | `List` | `ListState` | flat `Vec<NavItem>`; group headers are unselectable rows, `↑↓` skips them |
 | Sidebar counts (`3 ● 7 ▲`, `1 ▲`, `30d`, `12`) | right-aligned `Span` in the same `ListItem` | — | part of the row, not a second column |
-| Finding card (Alerts) | `List` of **multi-line** `ListItem` | `ListState` | one `ListItem` = one card = **three to twelve `Line`s** + a blank, wrapped and capped by [alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall); selection highlights the whole card, and `ListState` does the scrolling for free. `ListItem` does not wrap — `views.rs` wraps the card's four parts into `Line`s itself, at the pane's current width, every frame |
+| Finding card (Alerts) | `List` of **multi-line** `ListItem` | `ListState` | one `ListItem` = one card = **three to twelve `Line`s** + a blank, wrapped and capped by [alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall). **No card carries a selection marker** — `theme::SELECTION` is the sidebar's, and every mockup on this screen draws a card the same way selected or not; `ListState` is here only for the other half of its job, keeping a tall card's action in view rather than scrolling past it (§4). `ListItem` does not wrap — `ui.rs` wraps the card's four parts into `Line`s itself, at the pane's current width, every frame |
 | Resource table | `Table` | `TableState` | rows and header both come from the server's `Table` response; widths `Constraint::Min(len(header))` per column, so nothing is hard-coded per kind ([invariant 12](../CLAUDE.md)) |
 | Finding marker in a table row (`●`) | `Span` prepended to the first `Cell` | — | how Alerts bleeds through into the browser |
 | Detail tabs (logs · describe · yaml · events) | `Tabs` | `usize` index in the view state | `[` `]` move it |
@@ -189,6 +189,25 @@ more column from the name beside it.
 | Typed-name input (delete / drain) | `Paragraph` + `Frame::set_cursor_position` | `String` + byte cursor | no input widget exists in ratatui and one line does not need one |
 | Empty · loading · disconnected | centered `Paragraph` | — | same frame, different content pane — never a different screen |
 | Banner above a list (disconnected · namespace scope) | two to eight `Line`s above the normal list | — | one slot, two occupants: the list stays visible and the banner says what is wrong with it — stale data, or a check that could not run ([states.md](states.md)). Disconnected **while** scoped drops the scope explanation (the header still says `ns: payments`) and keeps the *"one node check is off"* line, which is the half a reader cannot infer from anywhere else |
+
+**The sidebar's indent, stated once rather than read off which rows happen to
+be selected today.** Every row — top-level heading, nav group, kind row —
+reserves the same two-column gutter `List::highlight_symbol` gives it:
+[`theme::SELECTION`](../src/theme.rs) plus the column that keeps it off the
+label, blank when the row is not the selected one. **Indent is additive on
+top of that gutter and depends only on the row's level, never on whether it or
+any other row is selected**: 0 for `ALERTS` / `RESOURCES` / `ANALYSIS`, 1 for a
+nav group under one of them (`workloads`, `capacity`, …), 3 for a kind row
+nested under an expanded Resources group (`deployments`, …). A selected and an
+unselected row at the same level land their label on the same column — compare
+`▸  workloads` and `   network` in [resources.md](resources.md) — and that
+equality, not any single drawing, is the rule a reviewer checks a new row
+against. It cost every mockup on this page one column: an unselected top-level
+heading used to draw with a single leading space, one column short of the
+gutter its own selected form already spent, which a uniform rule cannot
+produce without a second one carved out for exactly three rows. The fix
+was the mockups, not a second `List` — `RESOURCES` and `ANALYSIS` gained the
+column their gutter already reserved, everywhere they are drawn unselected.
 
 **The badge-glyph rule, stated once for every sidebar count on every
 screen**: `3 ● 7 ▲` · `1 ▲` · `30d` · `12` are not one convention, they are
@@ -225,18 +244,27 @@ wrong before the widget set is.
 
 ## 3. Where the state lives
 
-Every `ListState`, `TableState`, `ScrollbarState`, tab index and scroll offset
-lives in **`views.rs`**, which
-[NOTES § File layout](../NOTES.md#file-layout) already defines as "per-view
-state: selection, filters, tabs, scroll". `ui.rs` receives `&mut ViewState` and
-draws it.
+**No `ListState`, `TableState` or `ScrollbarState` is stored anywhere.** What
+`views.rs` holds is a `Cursor` (a plain `usize` index plus the anchor key it
+last pointed at, so a selection survives the list under it changing shape) for
+the sidebar and for whatever the content pane is showing, a `u16` scroll offset
+for the free-text panes — logs, yaml, describe — which have no selection to
+follow, and a tab index: [NOTES § File layout](../NOTES.md#file-layout)'s
+"per-view state: selection, filters, tabs, scroll", named in the types that
+actually carry it. `ui::draw` takes **`&App`, immutably** — it builds every `ListState`
+and `TableState` fresh from a `Cursor` on the spot, hands it to
+`render_stateful_widget`, and drops it at the end of the frame. Nothing ratatui
+resolves is carried between frames; the `Cursor` is what is, and it is
+re-derived every time.
 
-The `&mut` is unavoidable — `render_stateful_widget` writes the resolved offset
-back — but that is the only mutation `ui.rs` performs. It computes nothing,
-stores nothing, and decides nothing that survives the frame. This is what keeps
-`ui.rs` under the ~800-line line that would trigger `dialog.rs`
-([NOTES § D11](../NOTES.md#d11--the-ninth-file-pre-approved)), and it is what
-makes a view's behaviour testable without a terminal.
+`ui.rs` computes nothing that outlives the frame, stores nothing, and decides
+nothing a second frame could see — this is what makes a view's behaviour
+testable without a terminal. It does not keep the file short: `ui.rs` has
+already passed the ~800-line mark at which
+[NOTES § D11](../NOTES.md#d11--the-ninth-file-pre-approved) pre-approves
+`dialog.rs` as the ninth file, and that permission is now on the table for
+Phase 11's dialog boxes to spend or not
+([NOTES § D249](../NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)).
 
 ## 4. Scrolling
 
@@ -345,7 +373,8 @@ technically renders is worse than a sentence that says why. Recorded as
 
 | Not here | Where |
 |---|---|
-| Colours, styles, the 16-colour fallback | `theme.rs` · [docs/tech-stack § Visual identity](../docs/tech-stack.md#visual-identity) |
+| The colour and glyph data — a role's Catppuccin value, its 16-colour degrade, a severity's symbol | `theme.rs` · [docs/tech-stack § Visual identity](../docs/tech-stack.md#visual-identity) |
+| Turning that data into a ratatui `Style`/`Color` | `ui.rs` ([NOTES § D241](../NOTES.md#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05)) — `theme.rs` names no ratatui type, so it cannot hold this mapping itself |
 | The key map | [NOTES § D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted) · [help.md](help.md) |
 | What each screen says | the mockups in this directory |
 | Which findings exist | [NOTES § v1 rule set](../NOTES.md#v1-rule-set) |

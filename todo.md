@@ -4283,7 +4283,7 @@ string and key was settled in the design phase, so this phase is drawing.
       what the survey found still loose was a second convention in
       `screens/states.md`, a `·`-joined trailing age left by the clock-skew
       work, now on the rule with every other card in the directory
-- [ ] Layout: sidebar · content pane · command log strip · key footer.
+- [x] Layout: sidebar · content pane · command log strip · key footer.
       **The sidebar's five sections cannot come from discovery** —
       `categories` is the closest thing on the wire to *workloads / network /
       storage / config / cluster* and it does not survive kube's parse, so
@@ -4295,6 +4295,11 @@ string and key was settled in the design phase, so this phase is drawing.
       going to come from the wire; the kinds are discovery's and the join is
       `views::Group::of`**
       ([D248](NOTES.md#d248--the-sidebars-five-sections-are-k8rss-vocabulary-and-not-the-clusters-and-invariant-12-is-untouched-by-that-2026-09-06))
+      — **landed 2026-09-06** in `src/ui.rs` · `src/ui_tests.rs`, drawn at the
+      80×24 floor and read against `screens/alerts.md`; `views::Pane::Denied`
+      gained the partial list its banner sits over, and `ratatui` moved into
+      `[dependencies]`
+      ([D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06))
 - [ ] **Alerts view** (the default on startup): findings list, severity symbol,
       title bright / evidence dim, blank line between findings
 - [ ] **Resources view**: generic table driven by server-side columns; works
