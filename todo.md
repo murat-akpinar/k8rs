@@ -4271,11 +4271,18 @@ Goal: the screens in [`screens/`](screens/README.md) — the lazygit-shaped
 product. Nothing on this list is a design decision any more; every layout,
 string and key was settled in the design phase, so this phase is drawing.
 
-- [ ] **First, `tui-designer` settles the ragged right edge on the Alerts
+- [x] **First, `tui-designer` settles the ragged right edge on the Alerts
       cards** — `4 min ago` stops two columns short of the border and
       `6 days ago` sits flush against it, so the mockup does not say whether
       the timestamp is right-aligned or trailing the title. Pre-existing, and
-      an ambiguous mockup transcribes into an arbitrary renderer
+      an ambiguous mockup transcribes into an arbitrary renderer — settled
+      2026-09-06 in
+      [screens/alerts.md § The age, and what it costs the name](screens/alerts.md#the-age-and-what-it-costs-the-name):
+      right-aligned, last column is the card region's, never truncated and
+      never reserved when absent. The border-flush case had already been fixed;
+      what the survey found still loose was a second convention in
+      `screens/states.md`, a `·`-joined trailing age left by the clock-skew
+      work, now on the rule with every other card in the directory
 - [ ] Layout: sidebar · content pane · command log strip · key footer.
       **The sidebar's five sections cannot come from discovery** —
       `categories` is the closest thing on the wire to *workloads / network /

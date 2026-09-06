@@ -124,6 +124,18 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
   unknown time cannot claim to be more recent than a known one, and a reader
   who sees the blanks grouped reads them as a kind of card rather than as
   missing data.
+- **A run of ageless cards is the single-card rule applied more than once, not
+  a second layout.** [The age, and what it costs the name](#the-age-and-what-it-costs-the-name)
+  never looks at a neighbouring card: an ageless card gets the full 51-column
+  identity line and its name ends wherever the name ends, so two or three in a
+  row read as a block of differently-long names — never as a column that tried
+  to line up and failed. That is what "deliberate" looks like here: nothing
+  pads a name out to a false alignment it does not have a partner for. **This
+  is the common case now, not the rare one** — a clock five minutes ahead of
+  the reader's blanks every recent card's age at once, not one
+  ([NOTES § D246](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+  ruling 4), so a reader with a stale clock meets this block on an ordinary
+  screen, not an edge case nobody will see.
 - Every string here passes the glossary test: a newcomer reads it without
   looking anything up.
 

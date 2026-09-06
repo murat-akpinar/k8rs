@@ -251,7 +251,7 @@ than inventing a second constant:
 │   cluster          │  ● payments/web  ·  3 of 5 pods               │
 │ ANALYSIS           │    Containers exceeded their memory limit     │
 │   capacity      1 ▲│                                               │
-│   certificates  30d│  ▲ shop/api  ·  2 of 6 pods  ·  1 min ago     │
+│   certificates  30d│  ▲ shop/api  ·  2 of 6 pods        1 min ago  │
 │   drain safety     │    Running, but not receiving traffic — the   │
 │   posture          │    readiness check is failing                 │
 │   restarts         │                                               │
