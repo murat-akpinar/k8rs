@@ -239,6 +239,24 @@ here from `analysis.md`, which drew it once for `certificates  30d` and
 named this file as where it belonged — see that section for the one worked
 example.
 
+**A mockup's command log line is read against its real 76-column budget, not
+its own drawn width — the number and the cut behaviour live at §7.** Most
+mockups in this directory draw their frame 70 columns wide for the
+page's own readability
+([README § How to read them](README.md#how-to-read-them)), which puts a
+stricter 66 on the line they draw — never the real ceiling, only a narrower
+one a mockup's own text almost always clears anyway.
+
+**The gap before an outcome word is three columns** — `→ rejected`,
+`→ not sent`, `→ refused`, `→ not allowed`, `→ login expired` all sit three
+spaces after the command they answer, a beat the eye can find the same way
+on every screen that draws one. [dialogs.md](dialogs.md)'s own rejected-scale
+line is the one exception, at two: that row already fills all 68 columns of
+its 70-column-page pane with the command and the verdict, and there is no
+column left to spend on a third space. It is the exception because its pane
+is drawn narrower than the real floor above, not because the rule bends —
+read the other five as the pattern, not this one.
+
 Nothing here is a custom widget. If a screen seems to need one, the screen is
 wrong before the widget set is.
 
@@ -341,22 +359,34 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   characters; `String::truncate` slices bytes and panics in the middle of a
   multi-byte name. Handing the full `Span` to the widget is both shorter and
   correct.
-- **Two places truncate on purpose, and they are the exceptions that prove the
-  rule above:** the Alerts card's evidence line, capped at three wrapped lines
-  with `…` at the cut
+- **Three places truncate on purpose, and they are the exceptions that prove
+  the rule above:** the Alerts card's evidence line, capped at three wrapped
+  lines with `…` at the cut
   ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall));
-  and the Resources browser's one-line summary under the table, whose name
+  the Resources browser's one-line summary under the table, whose name
   gives way to the sentence around it and is marked the same way
-  ([resources.md § The line under the table](resources.md#the-line-under-the-table)).
-  What § 7 forbids is a *silent* cut and a *byte* cut. Neither of these is: both
-  are marked with a character the reader can see, and both step by whole
-  characters. The evidence line also walks back to a whole word before it
-  cuts, because it is prose; the browser's line does not — a name is one
-  token, so there is no word boundary to walk back to, and cutting mid-token
-  is what the mark is for. The full text is one `⏎` away in both cases
-  ([detail.md](detail.md)) — which is what makes cutting either one legitimate
-  at all. Everything else on a card, and every other string in the browser, is
-  drawn whole and clips at the pane edge like any other string.
+  ([resources.md § The line under the table](resources.md#the-line-under-the-table));
+  and the command log strip, when even its real 76-column budget at the
+  80×24 floor — pane width minus the outer border minus the one-column
+  margin `indented()` reserves on each side (§1) — cannot hold the whole
+  teaching line. What § 7 forbids is a *silent* cut and a *byte* cut. None of
+  these three is: all are marked with a character the reader can see, and all
+  step by whole characters. The evidence line and the command log both walk
+  back to a whole word before they cut, because both are made of more than
+  one token and a word with its last character sheared off would still look
+  like a real one — `--show-managed-fiel` is not a flag a reader would notice
+  was wrong. Walking back drops the whole word instead, so the mark lands
+  after the word before it, never glued to a maimed one
+  ([detail.md's yaml tab](detail.md#the-yaml-tab) draws the case: the whole
+  flag gives way, `…` lands right after `yaml`, and deleting just the `…`
+  leaves a real command — the one `kubectl get -o yaml` already runs by
+  default). The browser's line does not walk back — a name is one token, so
+  there is no word boundary to find, and cutting mid-token is what the mark
+  is for there. The full text is one `⏎` away in all three cases
+  ([detail.md](detail.md)) — which is what makes cutting any of them
+  legitimate at all. Everything else on a card, every other string in the
+  browser, and every command log line that fits is drawn whole and clips at
+  the pane edge like any other string, if it clips at all.
 - Long values are bounded *before* they are stored, not at draw time — a 50 MB
   annotation must never become a `Text`.
 

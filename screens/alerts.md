@@ -22,8 +22,8 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 │   versions         │    2 pods here would still have to move       │
 │                    │    → allow new pods once the work is done     │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch                                      │
-│ $ kubectl get nodes --watch                                        │
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit    │
 └────────────────────────────────────────────────────────────────────┘
@@ -402,8 +402,8 @@ captures, and reaches all four caps at once:
 │   versions         │    Running, but not receiving traffic — the readiness   │
 │                    │    check is failing                                     │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch                                                │
-│ $ kubectl get nodes --watch                                                  │
+│ $ kubectl get statefulsets -A --watch                                        │
+│ $ kubectl get daemonsets -A --watch                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit              │
 └──────────────────────────────────────────────────────────────────────────────┘

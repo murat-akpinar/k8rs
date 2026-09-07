@@ -570,15 +570,38 @@ fn shortened(text: &str, columns: usize) -> String {
     kept
 }
 
-/// The command log — **the last two lines, unwrapped**. These are copy-paste text and a wrapped
-/// command is a lie (`screens/widgets.md` § 2).
+/// The command log — **the last two lines, unwrapped, and cut behind a [`CUT`] where one does not
+/// fit**. These are copy-paste text and a wrapped command is a lie (`screens/widgets.md` § 2).
+///
+/// **Unwrapped was never a licence to be silently wrong** (PM ruling, 2026-09-07). The strip is
+/// 76 columns at the floor — 80 less the frame's two and [`indented`]'s two — and a `Paragraph`
+/// with no `Wrap` truncates with no marker at all, so a 106-column `get pod` line drew as a
+/// **valid, different command**: the same `get pod` minus `-o yaml`, which runs, exits 0 and
+/// prints a table row instead of the object. Not a mangled string a reader would notice — a
+/// working one, in the record invariant 4 says may not lie. Three more real cases were measured
+/// the same afternoon, including a mutation whose `…` was itself clipped off, so the line never
+/// changed when the outcome landed (`k8s-admin`, 2026-09-07,
+/// `reports/2026-09-07-command-log-panel.md`).
+///
+/// **The cut walks back to a whole word, which is the third of `screens/widgets.md` § 7's three
+/// deliberate truncations** (that section, rewritten 2026-09-07, and `screens/detail.md` § The
+/// yaml tab, which draws the one line in the whole directory that does not fit even at the true
+/// floor). A flag with its last character sheared off still looks like a flag —
+/// `--show-managed-fiel` is not one a reader would notice was wrong — so the whole token gives
+/// way and the mark lands where the reader can see it.
 fn strip(frame: &mut Frame, area: Rect, screen: &Screen) {
+    let row = indented(area);
     let last = screen.log.len().saturating_sub(usize::from(LOG_LINES));
     let lines: Vec<Line> = screen.log[last..]
         .iter()
-        .map(|line| Line::styled(line.as_str(), screen.fg(theme::INFO)))
+        .map(|line| {
+            Line::styled(
+                command_cut(line, usize::from(row.width)),
+                screen.fg(theme::INFO),
+            )
+        })
         .collect();
-    frame.render_widget(Paragraph::new(Text::from(lines)), indented(area));
+    frame.render_widget(Paragraph::new(Text::from(lines)), row);
 }
 
 // --- THE FRAME END ---
@@ -1375,14 +1398,10 @@ fn problems(frame: &mut Frame, area: Rect, screen: &Screen, card: &Card, name: &
     // constants** — the indent is what [`spanned`] says it is, so it cannot drift from the two
     // lines above it.
     let room = usize::from(area.width).saturating_sub(spanned(&spans) + width(&tail));
-    // `screens/resources.md` § The line under the table, rules 2–4: whole and unmarked when it
-    // fits; else `room` less [`CUT`]'s own column, with the mark glued to the last character
-    // kept and no space before it; and nothing at all where there is no room to mark a cut in.
-    let shown = match fits(name, room) {
-        whole if whole == name => whole.to_owned(),
-        _ if room == 0 => String::new(),
-        _ => format!("{}{CUT}", fits(name, room.saturating_sub(width(CUT)))),
-    };
+    // `screens/resources.md` § The line under the table, rules 2–4, which is [`clipped`]'s whole
+    // contract: whole and unmarked when it fits; else the mark glued to the last character kept,
+    // with no space before it; and nothing at all where there is no room to mark a cut in.
+    let shown = clipped(name, room);
     spans.push(Span::styled(
         format!("{shown}{tail}"),
         screen.fg(theme::DIM),
@@ -2157,6 +2176,51 @@ fn fits(text: &str, columns: usize) -> &str {
         end = next;
     }
     &text[..end]
+}
+
+/// `text` at the width it has, **with [`CUT`] where it had to give way** — the head is kept and
+/// the tail is what goes, which is the opposite end from [`shortened`] and for the opposite
+/// reason: a command reads left to right and its first words are the ones that say what it is.
+///
+/// **Three answers and the third is the one that is easy to miss.** Whole and unmarked when it
+/// fits; the head plus the mark when it does not; and **nothing at all** where the row is too
+/// narrow to draw even the mark, because a cut with no mark on it is the silent truncation this
+/// exists to stop (`screens/widgets.md` § 7, `screens/resources.md` § The line under the table).
+///
+/// **The mark's own column comes off the budget before the head is measured**, never added to the
+/// head's width afterwards — [`shortened`]'s comment is about the same sum, and it is the one
+/// this file has already been caught by once.
+fn clipped(text: &str, columns: usize) -> Cow<'_, str> {
+    match fits(text, columns) {
+        whole if whole == text => Cow::Borrowed(whole),
+        _ if columns < width(CUT) => Cow::Borrowed(""),
+        _ => Cow::Owned(format!("{}{CUT}", fits(text, columns - width(CUT)))),
+    }
+}
+
+/// [`clipped`], **walked back to a whole word first** — [`strip`]'s rule, and the one thing that
+/// separates it from [`clipped`]'s own (`screens/widgets.md` § 7 names three deliberate
+/// truncations; this is the third, the browser's row is [`clipped`] and the evidence line is
+/// [`cut`]).
+///
+/// A command is several tokens and the browser's row is one name, which is the whole of why they
+/// differ: there is a word boundary to find here and none there, so a name cuts mid-token behind
+/// the mark and a command gives up the token whole. **`--show-managed-fiel` is the case that
+/// decides it** — a flag one character short still reads as a flag, where
+/// `-o yaml…` visibly is not the end of the line (`screens/detail.md` § The yaml tab).
+///
+/// **The character break is still the floor**, through [`clipped`]: a single token wider than the
+/// row has no space to walk back to, and dropping it whole would draw an empty strip where a
+/// marked prefix is what the reader needs.
+fn command_cut(line: &str, columns: usize) -> Cow<'_, str> {
+    if width(line) <= columns {
+        return Cow::Borrowed(line);
+    }
+    let room = columns.saturating_sub(width(CUT));
+    match fits(line, room).rfind(' ') {
+        Some(at) => Cow::Owned(format!("{}{CUT}", line[..at].trim_end())),
+        None => clipped(line, columns),
+    }
 }
 
 /// **Word wrap, with a character break for a token wider than the line.**

@@ -278,6 +278,8 @@ its line moving with it.
 - [D254](#d254--the-events-tab-is-settled-before-it-is-drawn-describes-grammar-reused-whole-a-heading-that-only-comes-back-to-withdraw-a-promise-and-the-check-that-could-not-see-the-defect-it-was-written-after-2026-09-06) — the events tab is settled before it is drawn: describe's grammar reused whole, a heading that only comes back to withdraw a promise, and the check that could not see the defect it was written after
 - [D255](#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07) — the detail-tabs mutation round: three mutants no test can kill, two that were the mockup's number instead of the rule's boundary, and a guard whose subject moved when its second strip went away
 - [D256](#d256--the-events-pane-cannot-tell-a-warning-from-a-normal-the-deadline-for-saying-so-was-this-box-and-a-doc-comment-naming-a-future-box-is-a-reminder-nothing-enforces-2026-09-07) — the events pane cannot tell a Warning from a Normal, the deadline for saying so was this box, and a doc comment naming a future box is a reminder nothing enforces
+- [D257](#d257--the-command-logs-third-kind-of-line-a-read-the-user-asked-for-is-not-the-read-path-instrumenting-itself-2026-09-07) — the command log's third kind of line: a read the user asked for is not the read path instrumenting itself
+- [D258](#d258--the-command-log-panel-an-outcome-is-not-a-mutations-privilege-the-servers-own-sentence-had-to-be-bounded-before-it-reached-the-strip-and-a-cut-that-leaves-a-working-command-behind-2026-09-07) — the command log panel: an outcome is not a mutation's privilege, the server's own sentence had to be bounded before it reached the strip, and a cut that leaves a working command behind
 
 ## Why it exists — where the gap is
 
@@ -22233,3 +22235,95 @@ would have worked is the deadline living where the deadline is *checked*, which 
 been unmissable, and a sentence inside the file it constrains was not. **That is the shape to
 copy the next time a frozen-by-phase file defers a decision** — the note goes in the phase that
 closes the door, not in the file the door is on.
+
+### D257 — the command log's third kind of line: a read the user asked for is not the read path instrumenting itself (2026-09-07)
+
+[D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05)
+settled two kinds of line — **the manifest**, computed up front from the calls a run is going to
+make, and **the mutation**, appended the instant [`ask`] returns `Answer::Confirmed`. Phase 11's
+panel box needs a third, and reading D233 without it produces a panel that contradicts every
+mockup in `screens/detail.md`.
+
+**The ambiguity, and why an implementer would land on the wrong side of it.** D233 says *the read
+side is a manifest, not a feed*, and that widening it *"is a `k8s.rs` reopening and therefore a
+plan change, not a feature."* Every detail-tab mockup draws a read command in the strip —
+`$ kubectl logs web-7d9f4 -n payments -c app --previous`, `$ kubectl describe pod web-7d9f4 -n
+payments`, `$ kubectl events --for pod/web-7d9f4 -n payments` — and those appear when the reader
+presses `⏎`, long after startup. Taken literally, D233 deletes them; taken loosely, it licenses
+instrumenting the read path. Both are wrong.
+
+**Ruled: a read the user asked for is appended when the UI asks for it, and that is not
+instrumentation.** The distinction is *who knows the call happened*. D233's limitation is about
+`k8s.rs`'s **internals** — a watch reconnecting, a report's five fetches, a ReplicaSet resolved
+behind an owner chain — none of which the layer above can see without the frozen file reporting
+them. **A tab the reader opened is different in kind**: `views.rs` chose that read, knows its
+object, its namespace and its container, and can write the line from what it already holds. No
+`k8s.rs` change, no callback, nothing reopened.
+
+**So the panel holds three kinds and they are honest about different things**: the manifest says
+*these are the streams this run opened*, a user-initiated read says *you asked for this and k8rs
+sent it*, and a mutation says *you agreed to this and k8rs ran it*. What stays forbidden is the
+one D233 named — **a line that implies k8rs saw a call it never saw** — and the test of any new
+line is whether the layer writing it knows the call was made, not whether the line looks useful.
+
+**The line is written where the reader's intent is, and not twice.** `views.rs` builds it, because
+that is where *which object, which tab, which container* already lives and because `ui.rs` may not
+invent a command string it then also draws. It is the same argument that moved the detail tabs'
+wording down one layer this turn
+([D254](#d254--the-events-tab-is-settled-before-it-is-drawn-describes-grammar-reused-whole-a-heading-that-only-comes-back-to-withdraw-a-promise-and-the-check-that-could-not-see-the-defect-it-was-written-after-2026-09-06)),
+and it carries the same deadline: **`views.rs` freezes at Phase 11's close.**
+
+### D258 — the command log panel: an outcome is not a mutation's privilege, the server's own sentence had to be bounded before it reached the strip, and a cut that leaves a working command behind (2026-09-07)
+
+The feed [D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) ruling 2 said belongs in `views.rs` is built, with the three kinds of line
+[D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) and [D257](#d257--the-command-logs-third-kind-of-line-a-read-the-user-asked-for-is-not-the-read-path-instrumenting-itself-2026-09-07) settled. Two reviews found four things the design did not have,
+and one of them was a leak.
+
+**1. An outcome is not a mutation's privilege.** The first shape split on *is this a mutation*:
+only a mutation could be marked as still running and only a marked line could take an outcome.
+Three screen files draw otherwise — `screens/detail.md`'s 403 pane puts `→ refused` on a
+**user-initiated read**, `screens/states.md` puts `→ login expired` on a **manifest** line — and
+the type could build neither. **The property the panel needs is *is an outcome still coming*,
+which any of the three kinds can be.** `started` became `sent`, kind-agnostic; `ran` now means
+*nothing more will be said about this*. **The red for that fix was a compile error and not a
+behaviour change**, which is worth saying: the capability was always kind-agnostic — `started`
+took any `String` — and what was mutation-only was the method name and the docs, which is exactly
+what a Phase 12 caller would have read and believed.
+
+**2. The outcome word had to be bounded, and that was a security-gate row, not tidiness.**
+`Log::outcome` took an unbounded, unstripped `&str`, and the obvious caller is
+`ops::Performed::plainly()` — **the server's own words**. [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04) measured a
+`fieldValidation=Strict` rejection handing back *the whole object you sent*, 4859 bytes on a
+trivial Deployment, and the security gate says a Secret value never enters the command log. So the
+mechanism that puts a submitted object into a `Status.message` had a clear path onto the strip.
+It is now bounded through `k8s::text` at 32 columns — the longest word any mockup draws is
+`login expired`, at 13 — so an over-long outcome carries `… (shortened by k8rs)` like every other
+bounded string in the product. **The `Log` doc's *"nothing here strips"* paragraph enumerated
+three sources and this was a fourth it did not name**, which is how the gap survived being
+written down.
+
+**3. The strip clipped silently, and a clipped command can be a working, different command.**
+Both reviewers found it independently. The strip is 76 columns at 80×24 and `Paragraph` without
+`Wrap` truncates with no marker, so
+`$ kubectl get pod <name> -n <ns> -o yaml --show-managed-fields` drew as
+`$ kubectl get pod <name> -n <ns>` — **which runs, exits 0, and prints a table row instead of the
+object.** Not a mangled string a reader would notice; a different instruction. `screens/widgets.md`
+§ 2 keeps the strip unwrapped *because a wrapped command is a lie*, and the code had substituted
+*unwrapped* for *correct*. The cut is now marked, and `tui-designer` ruled the walk-back is to a
+whole **word** rather than a character: `--show-managed-fiel` is not a flag a reader would catch,
+where dropping the flag entirely leaves kubectl's own default behind. `screens/widgets.md` § 7 grew
+from *two places truncate on purpose* to three.
+
+**4. And one line was equivalent to the whole namespace it printed.** `events_line` built its
+`-n` from the **object's** namespace, but a cluster-scoped object's events live in a namespace the
+cluster chooses — `default` for a Node — which `k8s.rs` had already written down while naming this
+box as the caller that would need it. The printed line returned *No resources found* while the
+pane above it showed events. The builder now takes the namespace the fetch went to.
+
+**A fifth survivor is equivalent and joins the three from [D255](#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07).** `Log::push`'s
+`if over > 0` mutated to `>= 0`: `over` is a `usize`, so the branch always runs, and its body is
+`drain(..0)` — a no-op — followed by `checked_sub(0)`, which returns the index unchanged. No input
+separates them. Author and PM agreed independently. **The one real survivor beside it was a
+guard's own boundary**: `clipped`'s narrow-budget arm returned the mark alone at one column and
+nothing at zero, and nothing had ever fed it either — the arm whose doc says this file *"has
+already been caught by once"* had never been shown to work at the end it exists for.

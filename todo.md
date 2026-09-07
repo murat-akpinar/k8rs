@@ -4360,7 +4360,35 @@ string and key was settled in the design phase, so this phase is drawing.
       box missed it ([D256](NOTES.md#d256--the-events-pane-cannot-tell-a-warning-from-a-normal-the-deadline-for-saying-so-was-this-box-and-a-doc-comment-naming-a-future-box-is-a-reminder-nothing-enforces-2026-09-07)); the `v` Secret reveal the yaml section
       specifies is unbuildable without reopening that same frozen file. Both in
       [`backlog.md`](backlog.md)
-- [ ] Command log panel — always visible, showing what k8rs ran
+- [x] Command log panel — always visible, showing what k8rs ran — landed
+      2026-09-07. **The strip was already drawn by the layout box; what did not
+      exist was anything that produces its lines**, so this box built the feed in
+      `views.rs`, where [D233](NOTES.md#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) ruling 2 put it and where it had to go
+      before that file freezes at this phase's close. Three kinds of line, each
+      honest about something different: the **manifest** computed up front, a
+      **user-initiated read** appended by the UI that asked for it
+      ([D257](NOTES.md#d257--the-command-logs-third-kind-of-line-a-read-the-user-asked-for-is-not-the-read-path-instrumenting-itself-2026-09-07), written this turn because D233 ruling 3 has an edge an
+      implementer lands on the wrong side of), and a **mutation** appended only on
+      `Answer::Confirmed` — never when the dialog opens, which is the record that
+      would otherwise lie.
+      **Two reviews found two blockers and a leak** ([D258](NOTES.md#d258--the-command-log-panel-an-outcome-is-not-a-mutations-privilege-the-servers-own-sentence-had-to-be-bounded-before-it-reached-the-strip-and-a-cut-that-leaves-a-working-command-behind-2026-09-07)): only a
+      mutation could carry an outcome where three screen files draw one on a read
+      and on a manifest line; the outcome word was unbounded and unstripped with
+      `ops::Performed::plainly()` — the server's own sentence, which D217 measured
+      handing back a whole 4859-byte object — as its obvious caller; and the strip
+      clipped silently, turning
+      `kubectl get pod … -o yaml --show-managed-fields` into a command that **runs,
+      exits 0 and prints a table row instead of the object**. Also: `events_line`
+      printed the object's namespace where the fetch used the cluster's choice, so
+      a Node's line returned nothing while the pane above it showed events.
+      Final gate: `just check` **EXIT=0**, 1271 + 35 tests; mutation sweep **41
+      mutants, 40 caught, 1 missed and that one equivalent** — `over` is a `usize`,
+      so `> 0` and `>= 0` differ only where the branch body is a no-op.
+      **What is deferred, ruled rather than missed**: which two lines the two-row
+      strip should show — the tail of the feed, or the commands behind the open
+      pane — and the manifest's own spelling, which is `main.rs`'s; the Secret
+      caveat the headless surface has and the strip does not; and a `…` with no
+      deadline. All in [`backlog.md`](backlog.md)
 - [ ] Context-sensitive key footer + `?` full key map, keys exactly as
       [NOTES § D12](NOTES.md#d12--the-key-map-and-two-keys-deleted) assigns them
 - [ ] Confirmation dialogs: consequence in plain language above the kubectl

@@ -491,6 +491,142 @@ fn the_command_log_draws_the_last_two_lines() {
     );
 }
 
+/// **The feed and the strip, end to end** — the panel is drawn from `views::Log` and not from a
+/// list somebody assembled for a test (NOTES § D233, § D257). The three kinds of line meet here:
+/// the manifest this run opened with, the read the reader asked for, and the mutation still on
+/// the wire with D20's `…` on it.
+#[test]
+fn the_strip_draws_a_running_mutation_from_the_feed_it_is_given() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let mut feed = views::Log::default();
+    feed.ran("$ kubectl get pods -A --watch".to_owned());
+    feed.ran("$ kubectl describe pod web-7d9f4 -n payments".to_owned());
+    feed.sent("$ kubectl scale deployment/web --replicas=3 -n payments".to_owned());
+
+    let lines = feed.lines().to_vec();
+    let mut with_log = screen(&alerts, &now);
+    with_log.log = &lines;
+    let drawn = render(&app(), &with_log);
+    println!("{}", rows(&drawn).join("\n"));
+
+    assert!(holds(
+        &drawn,
+        "$ kubectl describe pod web-7d9f4 -n payments"
+    ));
+    assert!(holds(
+        &drawn,
+        "$ kubectl scale deployment/web --replicas=3 -n payments   \u{2026}"
+    ));
+    assert!(
+        !holds(&drawn, "get pods -A --watch"),
+        "the strip is two lines, not a scrollback"
+    );
+}
+
+/// **Invariant 4 reached through a layout decision, which is why it took a reviewer to see it.**
+/// The strip is 76 columns at the floor — 80 less the frame's two and [`indented`]'s two — and a
+/// `Paragraph` with no `Wrap` truncates in silence. A 106-column `get pod` line therefore drew as
+/// a **valid, different command**: the same `get pod` without `-o yaml`, which runs, exits 0 and
+/// prints a table row instead of the object (`k8s-admin`, 2026-09-07,
+/// `reports/2026-09-07-command-log-panel.md`). The line is not wrapped — a wrapped command is a
+/// lie (`screens/widgets.md` § 2) — it is cut, behind [`CUT`], the way every other cut on this
+/// screen is marked (§ 7).
+#[test]
+fn a_command_wider_than_the_strip_is_cut_where_the_reader_can_see_it() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    // 106 columns: an 18-column prefix, a 40-character Deployment-generated pod name, ` -n ` and
+    // a 14-character namespace put the cut exactly on a token boundary.
+    let long = [
+        "$ kubectl get pod checkout-api-canary-7d9f4bc86d-x2k9pqrst \
+         -n payments-prod0 -o yaml --show-managed-fields"
+            .to_owned(),
+    ];
+    assert_eq!(width(&long[0]), 106);
+    let mut with_log = screen(&alerts, &now);
+    with_log.log = &long;
+    let drawn = render(&app(), &with_log);
+    let line = row(&drawn, "kubectl get pod");
+    println!("{line}");
+
+    assert!(line.contains(CUT), "the cut is not marked: {line:?}");
+    assert!(
+        !line.contains("-n payments-prod0"),
+        "the drawn line is a whole, different, working command: {line:?}"
+    );
+    assert!(
+        line.contains("$ kubectl get pod checkout-api-canary-7d9f4bc86d-x2k9pqrst -n\u{2026}"),
+        "the head is kept and the token that did not fit gave way whole: {line:?}"
+    );
+}
+
+/// **The one line in `screens/` that does not fit even at the true 76-column floor**, drawn byte
+/// for byte as `screens/detail.md` § A Secret's values, hidden behind an explicit reveal draws it:
+/// the flag gives way whole, the mark lands right after `yaml`, and what is left of it is
+/// **deliberately** a real command — the `kubectl get -o yaml` a reader already gets by default —
+/// which is the trade that section makes and states.
+#[test]
+fn the_yaml_tabs_secret_line_is_cut_exactly_where_the_mockup_draws_it() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let secret = [views::yaml_line(
+        "secret",
+        &ObjectId {
+            kind: ObjectKind::Pod,
+            namespace: Some("payments".to_owned()),
+            name: "db-credentials".to_owned(),
+            uid: None,
+        },
+    )];
+    assert_eq!(width(&secret[0]), 77, "77 columns against the strip's 76");
+    let mut with_log = screen(&alerts, &now);
+    with_log.log = &secret;
+    let drawn = render(&app(), &with_log);
+    let line = row(&drawn, "kubectl get secret");
+    println!("{line}");
+    assert!(
+        line.contains("$ kubectl get secret db-credentials -n payments -o yaml\u{2026}"),
+        "{line:?}"
+    );
+    assert!(
+        !line.contains("--show-managed"),
+        "half a flag still reads as a flag: {line:?}"
+    );
+}
+
+/// And one that fits is drawn whole, with no marker on it — the mark means *this is not all of
+/// it* and a mark on a complete command would be its own lie.
+#[test]
+fn a_command_that_fits_the_strip_carries_no_mark() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    // 76 columns exactly, which is the whole of the strip at the floor.
+    let exact = [
+        "$ kubectl get pod checkout-api-canary-7d9f4bc86d-x2k9pqrst -n payments-prod0".to_owned(),
+    ];
+    assert_eq!(width(&exact[0]), 76);
+    let mut with_log = screen(&alerts, &now);
+    with_log.log = &exact;
+    let drawn = render(&app(), &with_log);
+    let line = row(&drawn, "kubectl get pod");
+    println!("{line}");
+    assert!(line.contains(exact[0].as_str()), "{line:?}");
+    assert!(!line.contains(CUT), "{line:?}");
+}
+
+/// **The narrow end of [`clipped`], which is what that arm exists for.** One column is room for
+/// [`CUT`] and nothing else, and zero is room for nothing at all — so the guard is `<`, not `<=`,
+/// and a mutation run found nothing feeding it either side (2026-09-07). It is not reachable
+/// through [`command_cut`] at the 80x24 floor, where the strip is 76 columns and below which
+/// there is no layout (`screens/widgets.md` § 8); it is reachable through the next caller of a
+/// helper this turn made shared, and a guard whose boundary has never been drawn is not one.
+#[test]
+fn one_column_draws_the_mark_alone_and_zero_draws_nothing() {
+    assert_eq!(clipped("kubectl", 1), "\u{2026}");
+    assert_eq!(clipped("kubectl", 0), "");
+}
+
 // --- THE SIDEBAR ---
 
 #[test]

@@ -1162,6 +1162,318 @@ fn escape_clears_the_namespace_scope_when_no_text_filter_is_set() {
     assert!(app.filters.namespace.is_empty());
 }
 
+// --- THE COMMAND LOG ---
+
+/// NOTES § D233: the manifest is the first kind of line, and the panel draws it oldest first —
+/// `screens/alerts.md`'s strip at startup.
+#[test]
+fn the_manifest_is_kept_in_the_order_it_was_handed_over() {
+    let mut log = Log::default();
+    for line in [
+        "$ kubectl get --raw /version",
+        "$ kubectl get pods -A --watch",
+        "$ kubectl get nodes --watch",
+    ] {
+        log.ran(line.to_owned());
+    }
+    assert_eq!(
+        log.lines(),
+        [
+            "$ kubectl get --raw /version",
+            "$ kubectl get pods -A --watch",
+            "$ kubectl get nodes --watch",
+        ]
+    );
+}
+
+/// NOTES § D257: a read the reader asked for is a line, and `screens/detail.md` draws each of
+/// them byte for byte.
+#[test]
+fn a_detail_tab_spells_the_read_it_asked_for() {
+    let web = pod("web-7d9f4", "a-uid");
+    assert_eq!(
+        describe_line(&web),
+        "$ kubectl describe pod web-7d9f4 -n payments"
+    );
+    assert_eq!(
+        events_line("pod", &web, "payments"),
+        "$ kubectl events --for pod/web-7d9f4 -n payments"
+    );
+    assert_eq!(
+        yaml_line("pod", &web),
+        "$ kubectl get pod web-7d9f4 -n payments -o yaml --show-managed-fields"
+    );
+}
+
+/// NOTES § D36: `-n ""` is a command that does not work, printed in a record that may not lie.
+///
+/// **[`events_line`] is the one that still names a namespace, and that is the fix rather than an
+/// inconsistency**: `kubectl get node` is cluster-scoped, while a Node's *events* are objects in
+/// a namespace the cluster chose — `default` — which is the namespace `k8s::events` sent the
+/// request to. This test froze the wrong answer in until 2026-09-07: it asserted the Node's
+/// events line carried no `-n`, which on a context scoped to `payments` prints *No resources
+/// found in payments namespace* beneath a pane showing the events (`k8s-admin`, 2026-09-07).
+///
+/// **[`describe_line`] is not here on purpose** — its pane draws a pod and a pod is always
+/// namespaced, so a cluster-scoped id is an input it cannot be handed, and asserting what it
+/// would print for one is asserting a command nobody should ever see.
+#[test]
+fn a_cluster_scoped_object_gets_no_namespace_flag() {
+    let node = id(ObjectKind::Node, None, "node-3", Some("a-uid"));
+    assert_eq!(
+        yaml_line("node", &node),
+        "$ kubectl get node node-3 -o yaml --show-managed-fields"
+    );
+    assert_eq!(
+        events_line("node", &node, "default"),
+        "$ kubectl events --for node/node-3 -n default",
+        "a Node's events live where the cluster put them, and the line has to go there too"
+    );
+}
+
+/// NOTES § D36 — **and the `Option` alone does not get there.** `k8s::text` can hand back
+/// `Some("")` from a namespace that was entirely control characters, and a bare `-n ` is *worse*
+/// than the `-n ""` that doc argued about: it swallows the next token, so
+/// `$ kubectl get pod web -n  -o yaml …` reads `-o` as the namespace (`k8s-admin`, 2026-09-07).
+/// Unreachable through today's callers; the record invariant 4 says may not lie does not get to
+/// depend on that.
+#[test]
+fn an_emptied_namespace_names_no_namespace_at_all() {
+    let empty = id(ObjectKind::Pod, Some(""), "web", Some("a-uid"));
+    assert_eq!(describe_line(&empty), "$ kubectl describe pod web");
+    assert_eq!(
+        yaml_line("pod", &empty),
+        "$ kubectl get pod web -o yaml --show-managed-fields"
+    );
+    assert_eq!(
+        events_line("pod", &empty, ""),
+        "$ kubectl events --for pod/web",
+        "and the same holds for the namespace the fetch was given"
+    );
+}
+
+/// `screens/dialogs.md` § While the call is running: the `…` is replaced by the outcome, never
+/// removed (NOTES § D20).
+#[test]
+fn a_mutation_carries_the_running_mark_until_its_outcome_arrives() {
+    let mut log = Log::default();
+    log.sent("$ kubectl scale deployment/web --replicas=3 -n payments".to_owned());
+    assert_eq!(
+        log.lines(),
+        ["$ kubectl scale deployment/web --replicas=3 -n payments   …"]
+    );
+    log.outcome("rejected");
+    assert_eq!(
+        log.lines(),
+        ["$ kubectl scale deployment/web --replicas=3 -n payments   → rejected"]
+    );
+}
+
+/// NOTES § D233 ruling 1: navigation stays free while a mutation is on the wire, so the line that
+/// is running is not the last line. Rewriting the last one puts a scale's outcome onto a read.
+#[test]
+fn the_outcome_lands_on_the_call_that_was_running_and_not_on_the_last_line() {
+    let mut log = Log::default();
+    log.sent("$ kubectl delete pod/web-7d9f4 -n payments".to_owned());
+    log.ran(describe_line(&pod("web-7d9f4", "a-uid")));
+    log.outcome("not sent");
+    assert_eq!(
+        log.lines(),
+        [
+            "$ kubectl delete pod/web-7d9f4 -n payments   → not sent",
+            "$ kubectl describe pod web-7d9f4 -n payments",
+        ]
+    );
+}
+
+/// Invariant 4: an outcome written onto a line no call is attached to is the record lying.
+#[test]
+fn an_outcome_with_nothing_running_writes_nothing() {
+    let mut log = Log::default();
+    log.ran("$ kubectl get pods -A --watch".to_owned());
+    log.outcome("rejected");
+    log.outcome("done");
+    assert_eq!(log.lines(), ["$ kubectl get pods -A --watch"]);
+
+    // **A line that ends in `…` and was never `sent` is still not running.** [`Log::ran`] is
+    // `pub` and takes an arbitrary `String`, so *the mark is only ever there because `sent` put
+    // it there* is an assumption about the caller set and not a property of this type — and it is
+    // what an index falling back to the last line rests on. No producer emits a trailing `…`
+    // today; the contract sits here rather than on the four that do not (`tester`, 2026-09-07).
+    let mut trailing = Log::default();
+    trailing.ran("$ kubectl get pods -A --watch …".to_owned());
+    trailing.outcome("done");
+    assert_eq!(trailing.lines(), ["$ kubectl get pods -A --watch …"]);
+
+    log.sent("$ kubectl rollout restart deployment/web -n payments".to_owned());
+    log.outcome("done");
+    // The second one has nothing left to answer for and may not edit the line again.
+    log.outcome("rejected");
+    assert_eq!(
+        log.lines()[1],
+        "$ kubectl rollout restart deployment/web -n payments   → done"
+    );
+}
+
+/// NOTES § D257 and `screens/detail.md` § The events fetch could not be completed: **a read the
+/// reader asked for carries an outcome exactly the way a mutation does.** The property this panel
+/// needs is *does this line get an outcome*, not *is this a mutation* — and until 2026-09-07 the
+/// only method that reserved one was documented as mutation-only, which left three approved
+/// mockups undrawable (`k8s-admin`, 2026-09-07).
+#[test]
+fn a_read_the_reader_asked_for_carries_its_outcome() {
+    let mut log = Log::default();
+    log.sent(events_line("pod", &pod("web-7d9f4", "a-uid"), "payments"));
+    assert_eq!(
+        log.lines(),
+        ["$ kubectl events --for pod/web-7d9f4 -n payments   …"]
+    );
+    log.outcome("refused");
+    assert_eq!(
+        log.lines(),
+        ["$ kubectl events --for pod/web-7d9f4 -n payments   → refused"]
+    );
+}
+
+/// And so does a manifest line — `screens/states.md` § Your login expired draws the pods watch
+/// answering `→ login expired` long after the manifest was handed over.
+#[test]
+fn a_manifest_line_carries_an_outcome_too() {
+    let mut log = Log::default();
+    log.sent("$ kubectl get pods -A --watch".to_owned());
+    log.ran("$ kubectl get nodes --watch".to_owned());
+    log.outcome("login expired");
+    assert_eq!(
+        log.lines(),
+        [
+            "$ kubectl get pods -A --watch   → login expired",
+            "$ kubectl get nodes --watch",
+        ]
+    );
+}
+
+/// The security gate's *a Secret value never enters the command log*, reached through the one
+/// string on this panel that never passed an ingest strip (NOTES § D217, [`SAID`]).
+#[test]
+fn an_outcome_is_bounded_and_stripped_however_long_the_cluster_was() {
+    let mut log = Log::default();
+    log.sent("$ kubectl scale deployment/web --replicas=9 -n payments".to_owned());
+    // D217's shape: a `fieldValidation=Strict` rejection hands back the object that was sent.
+    let whole_object = format!(
+        "Deployment in version \"v1\" cannot be handled: {}",
+        "x".repeat(4859)
+    );
+    log.outcome(&whole_object);
+    let line = &log.lines()[0];
+    println!("{line}");
+    assert_eq!(
+        line,
+        concat!(
+            "$ kubectl scale deployment/web --replicas=9 -n payments",
+            "   → Deployment in version \"v1\" canno… (shortened by k8rs)"
+        ),
+        "the cluster's whole sentence reached the panel"
+    );
+
+    // Invariant 9, on the fourth string this file's module doc did not name until 2026-09-07.
+    let mut escaped = Log::default();
+    escaped.sent("$ kubectl delete pod/web-7d9f4 -n payments".to_owned());
+    escaped.outcome("not \u{1b}[2Jsent");
+    assert_eq!(
+        escaped.lines(),
+        ["$ kubectl delete pod/web-7d9f4 -n payments   → not [2Jsent"]
+    );
+}
+
+/// **An outcome with no word left is not an outcome.** `→ ` with nothing behind it says strictly
+/// less than the `…` it would replace, so the mark stays and the line stays resolvable.
+#[test]
+fn an_empty_outcome_leaves_the_running_mark_alone() {
+    let mut log = Log::default();
+    log.sent("$ kubectl scale deployment/web --replicas=3 -n payments".to_owned());
+    log.outcome("");
+    // Everything `k8s::unprintable` removes and nothing it keeps — the `[2J` of an escape
+    // sequence is ordinary text once the `ESC` is gone, and an outcome reading `[2J` is a word.
+    log.outcome("\u{1b}\u{0}\u{200b}");
+    assert_eq!(
+        log.lines(),
+        ["$ kubectl scale deployment/web --replicas=3 -n payments   …"]
+    );
+    log.outcome("done");
+    assert_eq!(
+        log.lines(),
+        ["$ kubectl scale deployment/web --replicas=3 -n payments   → done"]
+    );
+}
+
+/// The security gate's *sizes are bounded*: a session nothing prunes grows for as long as it runs.
+///
+/// **The numbers are written out, and that is the point of this test rather than a style
+/// choice.** Every assertion here read [`KEPT`] back from the implementation until 2026-09-07, so
+/// the whole suite asserted *bounded* and never *bounded at a hundred* — `tester` set `KEPT = 3`
+/// and all 91 `views` tests stayed green, and `cargo mutants` does not mutate a `const`, so the
+/// gate could not see it either.
+#[test]
+fn the_log_is_bounded_and_drops_the_oldest_first() {
+    let mut log = Log::default();
+    for line in 0..105 {
+        log.ran(format!("$ line {line}"));
+    }
+    assert_eq!(log.lines().len(), 100);
+    assert_eq!(log.lines()[0], "$ line 5");
+    assert_eq!(log.lines()[99], "$ line 104");
+}
+
+/// The bound moves lines; the one that is running has to move with them, or its outcome lands on
+/// somebody else's command.
+#[test]
+fn the_running_line_keeps_its_outcome_across_the_bound() {
+    let mut log = Log::default();
+    log.sent("$ kubectl scale deployment/web --replicas=3 -n payments".to_owned());
+    for line in 0..KEPT - 1 {
+        log.ran(format!("$ line {line}"));
+    }
+    log.outcome("done");
+    assert_eq!(
+        log.lines()[0],
+        "$ kubectl scale deployment/web --replicas=3 -n payments   → done"
+    );
+}
+
+/// And where the burst was longer than the whole window, the line it belonged to is gone and the
+/// outcome has nowhere true to go.
+#[test]
+fn an_outcome_whose_line_was_dropped_writes_nothing() {
+    let mut log = Log::default();
+    log.sent("$ kubectl scale deployment/web --replicas=3 -n payments".to_owned());
+    for line in 0..KEPT {
+        log.ran(format!("$ line {line}"));
+    }
+    log.outcome("done");
+    assert!(
+        !log.lines().iter().any(|line| line.contains("→ done")),
+        "an outcome was written onto a command it did not belong to"
+    );
+    assert_eq!(log.lines().len(), KEPT);
+}
+
+/// A `…` that stays claims less than the line under it, never more — the reading `App::may_mutate`
+/// makes unreachable and this type still has to be honest about.
+#[test]
+fn a_second_call_leaves_the_first_running_mark_standing() {
+    let mut log = Log::default();
+    log.sent("$ kubectl scale deployment/web --replicas=3 -n payments".to_owned());
+    log.sent("$ kubectl rollout restart deployment/web -n payments".to_owned());
+    log.outcome("done");
+    assert_eq!(
+        log.lines(),
+        [
+            "$ kubectl scale deployment/web --replicas=3 -n payments   …",
+            "$ kubectl rollout restart deployment/web -n payments   → done",
+        ]
+    );
+}
+
 // --- WHICH VIEW IS OPEN ---
 
 #[test]

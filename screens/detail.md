@@ -1138,7 +1138,7 @@ missing verb and resource. It never crashes and never retries in a loop."*):
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl events --for pod/web-7d9f4 -n payments  → refused        │
+│ $ kubectl events --for pod/web-7d9f4 -n payments   → refused       │
 ├────────────────────────────────────────────────────────────────────┤
 │ [ ] tabs  esc back                                                 │
 └────────────────────────────────────────────────────────────────────┘
@@ -1375,11 +1375,26 @@ so is every value under `metadata.annotations`, by the same rule:
 │                    │  password: <hidden — 16 bytes>                          │
 │                    │  tls.crt: <hidden — 1,172 bytes>                        │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│ $ kubectl get secret db-credentials -n payments -o yaml --show-managed-fields│
+│ $ kubectl get secret db-credentials -n payments -o yaml…                     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ [ ] tabs  v reveal  esc back                                                 │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**This is the first line on the page that does not fit, and it is cut, not
+clipped.** `--show-managed-fields` makes the full teaching command 77
+characters; the strip has 76 to give it — pane width minus the outer border
+minus the one-column margin `indented()` reserves on each side
+([widgets.md § 1](widgets.md#1-the-frame)) — even at the true 80-column floor
+this section already draws at. The cut walks back to the last space rather
+than stopping mid-flag, the rule [the evidence line already
+follows](widgets.md#7-text-that-came-from-the-api): a flag with its last
+character sheared off would still look like a flag, and `--show-managed-fiel`
+is not one a reader would notice was wrong. Dropping the whole flag instead
+leaves `…` right after `yaml` — and if a reader deletes just the `…`, what is
+left is a real command: the one `kubectl get -o yaml` already runs by
+default, without `managedFields`. A wider terminal never needs this cut; 80×24
+is the floor, and the content pane only grows from here.
 
 **Why an annotation on a Secret gets treated as a copy of the Secret rather
 than as metadata about it.** `kubectl apply -f secret.yaml` — the ordinary
@@ -1453,7 +1468,7 @@ container picker already is.
 │   └────────────────────────────────────────────────────────────┘   │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get secret db-credentials -n payments -o yaml            │
+│ $ kubectl get secret db-credentials -n payments -o yaml…           │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc close                                                          │
 └────────────────────────────────────────────────────────────────────┘
@@ -1502,11 +1517,16 @@ container picker already is.
 │                    │                                                         │
 │                    │                                                         │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│ $ kubectl get secret pending-secret -n payments -o yaml --show-managed-fields│
+│ $ kubectl get secret pending-secret -n payments -o yaml…                     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ [ ] tabs  esc back                                                           │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Same cut, same reason.** `pending-secret` is the same length as
+`db-credentials`, so with `--show-managed-fields` on it this line is the same
+77 characters against the same 76-column floor — cut in the same place, for
+the reason spelled out at [the mockup above](#a-secret-values-hidden-behind-an-explicit-reveal).
 
 No `metadata.annotations` here — this Secret has none yet, and an empty
 section is not drawn any more than an empty `data` map invents keys that

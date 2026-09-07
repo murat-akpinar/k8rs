@@ -2870,3 +2870,70 @@ long-form version and stays the authority.*
   line becomes**, and it belongs to `tui-designer` before `dev-ui`. The value is the same one that
   justified the `Waiting` fix — a reason no table names is a word the reader cannot act on, and
   the message is the sentence that says what to change. 2026-09-07
+
+- **`views::in_namespace` is a verbatim second copy of the private `rules::in_namespace`, and the
+  original carries the same latent defect — so sharing it would mean inheriting the bug.** Found by
+  `tester` at the command-log box. Both build ` -n <ns>` from an `ObjectId` and both document the
+  `Option` as the guard that makes them safe; measured, neither stops `Some("")`, which renders
+  `-n ` with no value and **swallows the next token** — worse than the `-n ""` the doc argues
+  about. `k8s::maybe` does not collapse an emptied string back to `None`, so `k8s::text` can
+  produce it from a namespace that was entirely control characters. `views.rs`'s copy is being
+  fixed in the box that found it; `rules.rs` is **frozen**, so its copy keeps the defect and the
+  two now differ. **The de-duplication needs a recorded reversal** — `fn` → `pub(crate) fn` on a
+  frozen file, zero behaviour change — and it should land together with the same guard, or the
+  reversal buys a shared function that is shared *and* wrong. This is D91's named failure mode
+  arriving exactly where D91 said it would: at a module boundary. 2026-09-07
+
+- **A mutation's `…` has no deadline, and `views::Log` cannot say k8rs stopped waiting.**
+  `k8s-admin`, at the command-log box: `ops.rs` carries no timeout on a mutation, and kube's
+  default `read_timeout` is 295 s — so a dead socket mid-`PATCH` leaves the running mark standing
+  for about five minutes with nothing on screen distinguishing it from a slow cluster. The type has
+  no third state between *running* and *an outcome word*; the shape it would need is an
+  `outcome("k8rs stopped waiting")` driven by a deadline. **Not fixable after `views.rs` freezes at
+  Phase 11's close without a reversal**, which is why it is recorded now rather than when Phase 12
+  wires a real cluster to it. The neighbouring case is clean and was checked: a second `started`
+  before the first resolves is made unreachable by `App::may_mutate`. 2026-09-07
+
+- **The command-log strip is drawn in `screens/` in words the manifest does not produce, and in an
+  order a tail of a feed cannot produce.** Measured by `k8s-admin` and enumerated by
+  `tui-designer` at the command-log box; deliberately **not** fixed there, because the manifest's
+  wording is `main.rs`'s and that file is `dev-core`'s. Every site:
+  `analysis.md:102-103` (Capacity) draws `$ kubectl get nodes -o json`, which matches **no**
+  manifest command at all, beside `top nodes`; `:433-434` (Drain safety) draws `get pdb -A` where
+  the manifest emits `get poddisruptionbudgets -A`, and puts the report fetch **above** the pods
+  watch; `:1124-1125` (Waste) draws one comma-joined `get svc,endpointslices,pvc,replicasets -A`
+  where the manifest emits five separate lines, same ordering problem; `:2015-2016`
+  (Certificates) draws `get csr` and `kubectl version` where the manifest says
+  `get certificatesigningrequests` and `get --raw /version`; and `:1460`, `:1618` (Posture, both
+  variants) and `:1747` (Restarts) each draw `get pods -A --watch` **alone**, which is manifest
+  line 11 of 15 and not the tail — the same stale-tail defect already fixed in `alerts.md`.
+  **Two questions, and they are different**: whether the manifest should be spelled the short way
+  a reader would type (`csr`, `pdb`, `version`) — `dev-core`'s, in `main.rs::command_log` — and
+  whether the strip should show *the tail of the feed* or *the commands behind the open pane*,
+  which is a design ruling nobody has made. `k8s-admin`'s judgement on the second, recorded
+  because it is the reason this is worth doing: two permanent rows reading
+  `statefulsets --watch` / `daemonsets --watch` are the two least informative of the fifteen, and
+  they cost an operator one card off a 16-row body. 2026-09-07
+
+- **The drawn Secret yaml line teaches a command that prints in full what the pane just masked,
+  and has no caveat where the headless surface has one.** `main.rs` writes *"k8rs: a Secret's
+  values are hidden here and shown as their sizes — the command above prints them in full"* under
+  its yaml command — a `k8s-admin` finding at Phase 6's close — and the TUI's two-row strip has no
+  equivalent, so the surface that also offers the `v` reveal is the one **without** the warning.
+  `tui-designer`'s ruling, asked for and given: it needs one, and it does not fit in the strip.
+  `LOG_LINES` is 2, so a caveat costs either the command line itself (defeating the teaching) or
+  the previous command (losing context); the honest options are widening the strip's
+  `Constraint::Length` — a frame change, not a mockup fix — or a dim one-line note **inside** the
+  yaml pane near the masked `data:` block. That is a layout ruling and wants its own box.
+  2026-09-07
+
+- **`states.md` and `alerts.md` disagree about whether a healthy watch line carries a running
+  mark.** Raised by `dev-ui` at the command-log box, after the type was reshaped so any line can
+  carry an outcome. `states.md:218` draws `$ kubectl get pods -A --watch   → login expired` in the
+  strip — which is only reachable if the caller marked that line as sent, and a watch is
+  long-lived, so the same line would carry D20's `…` for the entire time the watch is **healthy**.
+  `alerts.md` draws those watch lines with no `…` at all. Both cannot be right. The fact itself is
+  already drawn twice: `states.md` also puts `⚠ login expired` in the header, so the strip's
+  version is a second record of one event. **No code path produces this yet** — the caller is
+  Phase 12's — which is why it is boxed rather than blocking, but it wants settling before that
+  caller is written, because the answer decides whether a watch is `ran` or `sent`. 2026-09-07

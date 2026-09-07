@@ -14,10 +14,19 @@
 //! paid once on the way in so no renderer has to remember it, which is what [`crate::rules`]'s and
 //! [`crate::analysis`]'s own module docs already promise.
 //!
-//! **The one class that did *not* arrive that way is what the user types, and [`Input`] is where
-//! it is handled** — bounded in length, **and** refused a [`crate::k8s::unprintable`] character,
-//! reusing the ingest strip's own predicate rather than a second list (NOTES § D246 ruling 5).
-//! That is the whole of invariant 9 inside this file, and it is one call in one method.
+//! **Two classes did *not* arrive that way, and each is handled in one method.** What the user
+//! types is [`Input`] — bounded in length, **and** refused a [`crate::k8s::unprintable`]
+//! character, reusing the ingest strip's own predicate rather than a second list
+//! (NOTES § D246 ruling 5). What the *cluster* says about a mutation is [`Log::outcome`], whose
+//! word comes from `ops::Performed::plainly` and therefore from the server: NOTES § D217 measured
+//! one of those handing back the whole object that was sent, 4859 bytes on a trivial Deployment,
+//! and that is the security gate's *a Secret value never enters the command log* row. It spends
+//! [`crate::k8s::text`] itself ([`SAID`]).
+//!
+//! **It was one method until 2026-09-07 and this paragraph said so** — the second was found by
+//! reading who the obvious caller of `outcome` would be (`k8s-admin`, 2026-09-07). That is the
+//! whole of invariant 9 inside this file: two calls, two methods, both naming `k8s.rs`'s own
+//! guard rather than a second list.
 //!
 //! **Nothing here sorts a rendered string back into values** (NOTES § D245,
 //! `screens/analysis.md` § 3, PRIOR-ART § F1). The browser keeps the order the server sent; the
@@ -36,7 +45,7 @@
 )]
 
 use crate::analysis::Row as ReportRow;
-use crate::k8s::{Browsable, IDENTIFIER, unprintable};
+use crate::k8s::{Browsable, IDENTIFIER, text, unprintable};
 use crate::rules::{
     ContainerSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot, Severity,
     WorkloadSnapshot, age,
@@ -778,6 +787,360 @@ impl Dialog {
 }
 
 // --- THE MODAL LAYER END ---
+
+// --- THE COMMAND LOG START ---
+
+/// **How many lines are kept**, oldest dropped first.
+///
+/// The strip draws two of them and nothing scrolls the rest, so this is the security gate's
+/// *sizes are bounded* and not a scrollback: a session left open for a week appends one line per
+/// tab the reader opens and one per mutation they confirm, and a `Vec` nothing ever prunes grows
+/// for as long as the process lives.
+///
+/// **A hundred is past any burst this can see, counted rather than guessed.** The longest thing
+/// that arrives at once is the manifest, and it is **fifteen** lines — `main.rs`'s `command_log`
+/// with `--analysis`: three before the report fetches, seven for the fetches themselves, five
+/// watches. **Sixteen is its maximum and not its usual value**, reached only on the
+/// `Coverage::Refused` / `Coverage::Blind` branch with a context naming no namespace, which is
+/// what adds the second scope probe (`k8s-admin`, 2026-09-07,
+/// `reports/2026-09-07-command-log-panel.md`; this doc said sixteen flat until then). Everything
+/// after that is one line per keypress.
+///
+/// **What it costs is bounded by what a line can be**, not by this number alone: a name reaching
+/// one came through [`crate::k8s::IDENTIFIER`], which cuts at 512 bytes, and an outcome through
+/// [`SAID`], so the worst case is a hundred lines of about a kilobyte and every real one is a few
+/// kB in total. **That ceiling is only true while every string entering this type carries a
+/// bound** — [`Log::outcome`] took an unbounded one until 2026-09-07, which is the hole [`SAID`]
+/// closes.
+const KEPT: usize = 100;
+
+/// **The gap between a command and what became of it** — three columns, ruled in
+/// `screens/widgets.md` § 2 (*the gap before an outcome word is three columns*) and drawn by
+/// `screens/states.md` § Your login expired, `screens/context.md`, `screens/detail.md` § The
+/// events fetch could not be completed and `screens/dialogs.md` § The object went away.
+///
+/// **This said *as every mockup that draws one uses* until 2026-09-07 and that was not measured**
+/// — six mockups drew an outcome and two of them used two columns (`k8s-admin`, 2026-09-07). One
+/// was a mistake and was corrected; the other is `screens/dialogs.md` § The cluster said no,
+/// which that section now names as **the** exception, at two, because its command and its verdict
+/// already fill the pane it is drawn in. A screen file's acknowledged exception is not a second
+/// constant here: the rule is three.
+const OUTCOME_GAP: &str = "   ";
+
+/// **D20's `…`** — a call that takes time is a state, and this is the whole of what the line says
+/// while it is in that state. [`Log::outcome`] replaces it and never removes it
+/// (`screens/dialogs.md` § While the call is running).
+const RUNNING: &str = "…";
+
+/// **The longest outcome word kept** — 32 bytes, and this is a security-gate bound rather than a
+/// layout one.
+///
+/// [`Log::outcome`] takes a **short form** — `rejected`, `not sent`, `refused`, `login expired` —
+/// and the caller it is written for is `ops::Performed::plainly`, which interpolates
+/// `outcome.said()`: **the server's own words**. NOTES § D217 measured a `fieldValidation=Strict`
+/// rejection handing back the whole object that was sent, 4859 bytes on a trivial Deployment, and
+/// the gate's *a Secret value never enters the command log* row is exactly what an unbounded
+/// `said` walks through.
+///
+/// **Thirteen is the longest any mockup draws** — `login expired`, `screens/states.md`. Double it
+/// and round: 32 is past every word `screens/` spells and nothing a cluster's sentence survives.
+/// **The bound is not the guard on its own** — a word cut to 32 bytes is still the cluster's
+/// words, which is why [`Log::outcome`]'s doc says what the argument is and why the short form is
+/// the dialog's to build (NOTES § D233).
+///
+/// **It is spent through [`crate::k8s::text`] and not a loop written here**, which is the same
+/// reuse [`Input`] makes of [`crate::k8s::unprintable`] and for the same reason: that function
+/// already decides which characters go, that a whitespace one leaves a boundary behind rather
+/// than gluing two words together, that the cut lands on a character boundary, and that a cut
+/// says so in plain language attributed to k8rs (NOTES § D146, `screens/widgets.md` § 7). A
+/// second opinion about any of those is the second copy that goes stale.
+const SAID: usize = 32;
+
+/// **What k8rs ran, oldest first** — the strip along the bottom of every screen, and invariant
+/// 4's teaching device (`screens/alerts.md` § The height).
+///
+/// **Three kinds of line, and each is honest about something different** (NOTES § D233,
+/// § D257):
+///
+/// * the **manifest** — the streams this run opened, computed up front by `main.rs`'s
+///   `command_log` from what the run is *going* to do (NOTES § D233 ruling 3), and handed over
+///   line by line;
+/// * a **user-initiated read** — the fetch a detail tab sent, spelled by [`describe_line`],
+///   [`events_line`], [`yaml_line`] and [`crate::k8s::LogRequest::kubectl`], appended by the key
+///   handler that asked for it. Not instrumentation: this file chose that read and holds its
+///   object, its namespace and its container (NOTES § D257);
+/// * a **mutation** — appended the instant `ops::ask` answers `ops::Answer::Confirmed`, and
+///   never when the dialog opens. `Cancelled`, `Gone` and `Changed` append nothing. The
+///   dialog's `$ …` line and this one carry the same text and are **not the same line**: the
+///   dialog prints its own before anyone has agreed to anything, and feeding that into here
+///   publishes a command that was never run — invariant 4's *neither record may lie*, reached by
+///   reusing a string rather than by writing a wrong one (NOTES § D233 ruling 1).
+///
+/// **Which method a line goes to is decided by whether an outcome is still coming, and never by
+/// which of the three it is.** [`Log::ran`] is a line nothing more will be said about;
+/// [`Log::sent`] is a line [`Log::outcome`] will finish. **All three kinds reach `sent`** — a
+/// mutation on the wire (`screens/dialogs.md` § While the call is running), a **read** that was
+/// refused (`screens/detail.md` § The events fetch could not be completed), a **manifest** watch
+/// whose token ran out (`screens/states.md` § Your login expired). Splitting on the kind instead —
+/// which is what this type did until 2026-09-07, under a method called `started` documented as
+/// mutation-only — is a panel three approved mockups cannot be drawn from.
+///
+/// **One line at a time, said rather than left implied by an `Option`.** `waiting` is a single
+/// index because no screen draws two outcomes at once, and because the honest answer to *what
+/// became of it* is per call. A single `401` that kills five watches therefore resolves **one**
+/// line here and says the rest in the pane above it, which is where `screens/states.md` § Your
+/// login expired puts that sentence anyway. Widening it is a screen ruling first, not a `Vec`.
+///
+/// **What is forbidden is a line implying k8rs saw a call it never saw.** `k8s.rs`'s internals —
+/// a watch reconnecting, a report's five fetches, a ReplicaSet resolved behind an owner chain —
+/// are invisible from up here and stay inside the manifest, which is why the read side is a
+/// manifest rather than a feed (NOTES § D233 ruling 3).
+///
+/// **Display text.** k8rs never executes a line of this and nothing in it is fed back into a
+/// process (the security gate). **Three of the four strings that reach this type were stripped
+/// before they got here**, exactly as this file's module doc promises: the manifest arrives
+/// through `main.rs`'s own `sanitize`, a read line's names came through `k8s::text` at ingest,
+/// and a mutation's line was stripped once by `ops::Record::of`. **The fourth is
+/// [`Log::outcome`]'s word, and it is stripped and bounded here**, because the caller that method
+/// is written for hands over whatever the cluster said — the one string on this panel that never
+/// passed an ingest (NOTES § D217, [`SAID`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Log {
+    lines: Vec<String>,
+    /// **Which line is still waiting for its outcome**, or `None` when nothing is running.
+    ///
+    /// **An index, and not *the last line*.** Navigation stays free while a call is on the wire
+    /// (`screens/dialogs.md` § While the call is running), so a reader who opens a detail tab
+    /// meanwhile appends a read line **after** the one still waiting. Rewriting whatever happens
+    /// to be last would put a scale's outcome onto a `kubectl logs`, which is the same record
+    /// lying this whole type is shaped to prevent.
+    ///
+    /// **Set by [`Log::sent`] and by nothing else, whichever of the three kinds that line is.**
+    waiting: Option<usize>,
+}
+
+impl Log {
+    /// **The lines, oldest first** — what `ui::Screen::log` borrows and the strip draws the last
+    /// two of.
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
+
+    /// **A line nothing more will be said about** — a manifest line, and a read that answered.
+    ///
+    /// **Not *a call that is over by the time it is written down*, which is what this said until
+    /// 2026-09-07 and was never true of the manifest**: `command_log` computes those lines
+    /// *before* the calls, from what the run is going to do (NOTES § D233 ruling 3). The only
+    /// thing true of every line here is that no [`Log::outcome`] is coming for it. A line that
+    /// expects one goes to [`Log::sent`], whichever of the three kinds it is.
+    ///
+    /// **The whole display line, `$ ` and all**, because that is what every builder feeding this
+    /// already produces: `main.rs`'s `command_log`, [`crate::k8s::LogRequest::kubectl`], and the
+    /// three below.
+    pub fn ran(&mut self, line: String) {
+        self.push(line);
+    }
+
+    /// **A call whose outcome has not arrived** — appended with [`RUNNING`], which
+    /// [`Log::outcome`] replaces when the answer comes (NOTES § D20).
+    ///
+    /// **Any of the three kinds, and that is the whole reason this is not called `started`.** A
+    /// mutation on the wire is the case D20 was written for, and it is not the only one: a read
+    /// the reader opened can be refused (`screens/detail.md` § The events fetch could not be
+    /// completed) and a manifest watch can outlive its token (`screens/states.md` § Your login
+    /// expired). Both mockups draw an outcome on a line that is not a mutation, and a method
+    /// reserved for mutations is what made them undrawable (`k8s-admin`, 2026-09-07).
+    ///
+    /// **The caller writes the `$ `**, because `ops::Shown::kubectl` carries none: the same
+    /// `format!("$ {}", shown.kubectl)` the headless dialog already prints, so the panel and the
+    /// dialog cannot come to spell one command two ways (invariant 4, NOTES § D8).
+    ///
+    /// **A second `sent` before the first has an outcome leaves the first `…` standing**, and
+    /// that is the honest reading of it: k8rs never learned. A `…` that stays claims less than
+    /// the line under it, never more.
+    pub fn sent(&mut self, line: String) {
+        self.push(format!("{line}{OUTCOME_GAP}{RUNNING}"));
+        self.waiting = Some(self.lines.len() - 1);
+    }
+
+    /// **What became of the call that is running, onto the line it belongs to** — `→ rejected`,
+    /// `→ not sent`, `→ login expired` (`screens/dialogs.md`, `screens/states.md` § Your login
+    /// expired). The `…` is replaced, never removed.
+    ///
+    /// **The word is the caller's, and that is a deferral rather than a design.** `screens/` has
+    /// spelled a short form for some of what `ops::Outcome` can say and not for all of it, so a
+    /// table from one to the other written here would be wording no screen file has agreed to —
+    /// and the code matches the screen file, or the screen file changes first. It belongs with the
+    /// dialog, which is a later box in this phase and still inside this file's freeze.
+    ///
+    /// **It is bounded and stripped here all the same** ([`SAID`]). The argument is the *word* —
+    /// `rejected`, `refused`, `login expired` — never the cluster's sentence: the obvious caller
+    /// is `ops::Performed::plainly`, which carries the server's own words, and NOTES § D217
+    /// measured one of those returning the whole object that was submitted. The bound is what
+    /// keeps that out of the panel when a caller forgets; it is not permission to pass a
+    /// sentence, which is why the paragraph above still stands.
+    ///
+    /// **Nothing running means nothing written.** An outcome on a line no call is attached to is
+    /// the record lying, so this returns having done nothing rather than editing the last line it
+    /// can find.
+    pub fn outcome(&mut self, said: &str) {
+        // **The ingest strip, paid here** — this panel's other three strings each paid it at
+        // their own ingest and this one never had one ([`SAID`]).
+        let mut said = said.to_owned();
+        text(&mut said, SAID);
+        // **A word that is empty after that is not an outcome**, and `→ ` with nothing behind it
+        // says strictly less than the `…` it would replace. The line keeps its mark and stays
+        // resolvable, which is the same reading a second `sent` gets.
+        if said.is_empty() {
+            return;
+        }
+        let Some(at) = self.waiting.take() else {
+            return;
+        };
+        // **Only the `…` goes**; [`OUTCOME_GAP`] is already in place and is spelled once.
+        //
+        // **`strip_suffix` and not a byte count.** Only [`Log::sent`] sets `waiting` and it
+        // always appends [`RUNNING`], so the mark is there — but a `truncate` that was ever wrong
+        // about that would cut mid-character and panic a terminal in the middle of a frame.
+        //
+        // **And the index is read off `waiting`, never fallen back to the last line.** That
+        // equivalence rests on *no caller ever passing a line that already ends in `…`*, which is
+        // an assumption about the caller set and not a property of this type — [`Log::ran`] is
+        // `pub` and takes an arbitrary `String`. `tester` found the sequence that separates them
+        // on 2026-09-07; `an_outcome_with_nothing_running_writes_nothing` holds it.
+        let replaced = self.lines[at]
+            .strip_suffix(RUNNING)
+            .map(|command| format!("{command}→ {said}"));
+        if let Some(replaced) = replaced {
+            self.lines[at] = replaced;
+        }
+    }
+
+    /// Append, and drop from the front once past [`KEPT`].
+    fn push(&mut self, line: String) {
+        self.lines.push(line);
+        let over = self.lines.len().saturating_sub(KEPT);
+        if over > 0 {
+            self.lines.drain(..over);
+            // **The waiting line moves with them, or stops existing.** `checked_sub` is the second
+            // case: a burst longer than the whole window evicted the line that was running, and an
+            // outcome then has nowhere true to go.
+            self.waiting = self.waiting.and_then(|at| at.checked_sub(over));
+        }
+    }
+}
+
+/// `-n payments`, or nothing at all where there is no namespace to name.
+///
+/// **An empty string is *no namespace*, and the `Option` alone never said so.** This doc claimed
+/// `ObjectId::namespace`'s `Option` made the function safe because `-n ""` is a command that does
+/// not work — but an `Option` stops a `None`, not a `Some("")`, and `k8s::maybe` does not
+/// collapse an emptied string back to `None`, so a namespace that was entirely control characters
+/// survives ingest as `Some("")`. What that built was **worse** than the `-n ""` the doc argued
+/// about: a bare `-n ` swallows the next token, so `$ kubectl get pod web -n  -o yaml …` reads
+/// `-o` as the namespace (`k8s-admin`, 2026-09-07). Unreachable through today's callers; the
+/// record invariant 4 says may not lie does not get to depend on that (NOTES § D36).
+///
+/// **`rules::in_namespace` is not called from here**, though it is the same three lines: it is
+/// private, `rules.rs` is frozen, and it carries this identical defect — reusing it would mean
+/// inheriting the bug being fixed. The duplication is the PM's box, not this one's.
+fn in_namespace(namespace: Option<&str>) -> String {
+    match namespace.unwrap_or_default() {
+        "" => String::new(),
+        namespace => format!(" -n {namespace}"),
+    }
+}
+
+/// **`$ kubectl describe pod …`** — the describe tab's line (`screens/detail.md` § The describe
+/// tab).
+///
+/// **Two reads and one line**, because `kubectl describe pod` is the one command a reader would
+/// have typed for both halves of that pane — the object *and* its events. It is the *equivalent*
+/// command and not a transcript of the two calls under it (invariant 4).
+///
+/// **`pod` is written here and is not the caller's, which is the opposite of [`yaml_line`].**
+/// That pane is `ui::Described`, which holds a `PodSnapshot` and can draw nothing else, so the
+/// word cannot be wrong while the pane keeps its shape — and `rules::describe` spells it the same
+/// way for the same reason. A describe tab over another kind changes that pane's type first, and
+/// this line with it.
+pub fn describe_line(id: &ObjectId) -> String {
+    format!(
+        "$ kubectl describe pod {}{}",
+        id.name,
+        in_namespace(id.namespace.as_deref())
+    )
+}
+
+/// **`$ kubectl events --for pod/… -n …`** — the events tab's line (`screens/detail.md` § The
+/// command log, and the footer).
+///
+/// **Not `kubectl describe`.** Describe's pane earns that command because it shows two reads
+/// folded into one; this pane shows only the second half, so the line it teaches is the command
+/// that produces only that half. `kubectl events --for TYPE/NAME` is a real subcommand, stable
+/// since kubectl 1.28, built for exactly this question.
+///
+/// **The equivalence has two named limits and neither is fixable by a longer line**, which is why
+/// that screen section states them rather than leaving them for 3am: `kubectl events` sorts
+/// oldest first — the reverse of the order this pane draws and the fetch returns, and it has no
+/// `--sort-by` to add — and `--for` selects on kind, apiVersion and name where the fetch's
+/// selector also carries the `uid`, so a replacement object under one name is a different match to
+/// the pane and the same match to the typed line.
+///
+/// **The resource word is the caller's** — `k8s::events` already takes the kind as an argument
+/// for the tab this is, and mapping an `ObjectKind` onto what `kubectl` accepts is API
+/// discovery's job and not a table in this file (invariant 12, `rules::get_yaml`'s own doc).
+/// **Lowercased by whoever passes it**, or the teaching device prints a form no documentation
+/// shows (NOTES § D39).
+///
+/// **`namespace` is the one the fetch went to, and reading it off the object instead was wrong.**
+/// `k8s::events` takes a namespace because a cluster-scoped object's events live in one the
+/// *cluster* chose — `default` for a Node — and that file's own doc names this tab as the caller
+/// with the question. Built from [`ObjectId::namespace`], a Node produced
+/// `$ kubectl events --for node/node-3` with no `-n` at all: on a context scoped to `payments`
+/// that answers *No resources found in payments namespace* while the pane above it is showing
+/// the events (`k8s-admin`, 2026-09-07). There is exactly one right answer here because there was
+/// exactly one request, and this argument is it.
+pub fn events_line(resource: &str, id: &ObjectId, namespace: &str) -> String {
+    format!(
+        "$ kubectl events --for {resource}/{}{}",
+        id.name,
+        in_namespace(Some(namespace))
+    )
+}
+
+/// **`$ kubectl get … -o yaml --show-managed-fields`** — the yaml tab's line
+/// (`screens/detail.md` § The yaml tab).
+///
+/// **`--show-managed-fields`, because without it the printed line does not produce what was
+/// printed** (invariant 4). `kubectl` has hidden `managedFields` from `get -o yaml` since v1.21
+/// and this pane does not — 95 of a pod's 246 lines, 39% of the document (`k8s-admin`,
+/// 2026-08-31). Dropping the field to match instead was refused: the pane's only claim is that it
+/// is the object.
+///
+/// **The claim is about the *request*, not about the same bytes back** — the narrowing
+/// [`crate::k8s::LogRequest::kubectl`] took on 2026-08-30 and this line needed too. `kubectl get
+/// -o yaml` alphabetises where this pane keeps the API's own order, and quotes a timestamp this
+/// pane leaves bare. Same object, not the same file.
+///
+/// **The resource word is the caller's**, [`events_line`]'s reason exactly — and this is the tab
+/// that has a second kind to open on today, `screens/detail.md` § A Secret with no keys.
+pub fn yaml_line(resource: &str, id: &ObjectId) -> String {
+    format!(
+        "$ kubectl get {resource} {}{} -o yaml --show-managed-fields",
+        id.name,
+        in_namespace(id.namespace.as_deref())
+    )
+}
+
+// **The logs tab's line is not built here, and its absence is the ruling rather than an
+// omission.** [`crate::k8s::LogRequest::kubectl`] already spells it, in the file that sends the
+// request and off the same fields `LogRequest::params` is built from — so the line cannot describe
+// a request that was not sent. A copy here would be the second spelling NOTES § D257 forbids while
+// it is asking for the first, and it would be the one that goes stale. The key handler that opens
+// the tab holds the `LogRequest` it is about to fetch with; `log.ran(request.kubectl())` is the
+// whole of it.
+
+// --- THE COMMAND LOG END ---
 
 // --- WHICH VIEW IS OPEN START ---
 
