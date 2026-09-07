@@ -1594,3 +1594,301 @@ fn a_card_where_nothing_carries_a_time_has_no_newest_finding() {
     );
     assert_eq!(cards[0].age(&at(60)), None);
 }
+
+// --- THE WORDING A DETAIL TAB DRAWS ---
+//
+// **The sentences here have two consumers and this is where they are proven once** (NOTES § D254):
+// `ui.rs` draws them and the temporary `main.rs` prints them, and the whole reason they live in
+// `views.rs` is that a second wording is a second thing that can be wrong.
+
+fn stopped(reason: Option<&str>, exit_code: i32) -> ContainerState {
+    ContainerState::Terminated(crate::rules::Terminated {
+        reason: reason.map(str::to_owned),
+        exit_code,
+        started_at: None,
+        finished_at: None,
+        message: None,
+    })
+}
+
+fn waiting(reason: Option<&str>) -> ContainerState {
+    ContainerState::Waiting {
+        reason: reason.map(str::to_owned),
+        message: None,
+    }
+}
+
+/// One event, in the five fields [`crate::k8s::Happening`] carries.
+fn happening(count: Option<i32>, first: Option<Time>) -> crate::k8s::Happening {
+    crate::k8s::Happening {
+        at: Some(at(0)),
+        reason: "Unhealthy".to_owned(),
+        message: "Readiness probe failed".to_owned(),
+        count,
+        first,
+    }
+}
+
+/// **`happened 2,383 times since 4 days ago`** — both numbers where both are known, the count
+/// alone where the first stamp did not survive, and silence at one.
+#[test]
+fn a_repeated_event_says_how_often_and_over_what_span() {
+    let now = at(345_600);
+    assert_eq!(
+        repeated(&happening(Some(2383), Some(at(0))), &now).as_deref(),
+        Some("happened 2,383 times since 4 days ago"),
+        "exact, with a comma at the thousand, and the span off the one age ladder"
+    );
+    assert_eq!(
+        repeated(&happening(Some(2383), None), &now).as_deref(),
+        Some("happened 2,383 times"),
+        "no first stamp is the count alone, never a span this file guessed"
+    );
+    assert_eq!(
+        repeated(&happening(Some(1), Some(at(0))), &now),
+        None,
+        "a thing that happened once needs no sentence saying so"
+    );
+    // The boundary the screen fixes in words is *more than one*, not the mockup's 2,383: two is
+    // the first count that earns the line, and `<` is what makes it so.
+    assert_eq!(
+        repeated(&happening(Some(2), Some(at(0))), &now).as_deref(),
+        Some("happened 2 times since 4 days ago"),
+        "`screens/detail.md` § A repeated event: the line appears when the count is more than one"
+    );
+    assert_eq!(repeated(&happening(None, None), &now), None);
+    assert_eq!(
+        repeated(&happening(Some(-4), None), &now),
+        None,
+        "a count the API server never sets is drawn as none, not as its absolute value"
+    );
+}
+
+/// **Nothing left is not nothing happened**, and the emptiness is decided here so both surfaces
+/// ask one function.
+#[test]
+fn an_empty_events_read_gets_the_sentence_and_a_full_one_does_not() {
+    assert_eq!(no_events(&crate::k8s::Happened::default()), Some(NO_EVENTS));
+    assert!(NO_EVENTS.starts_with("Kubernetes only keeps events"));
+    assert!(
+        !NO_EVENTS.starts_with("k8rs:"),
+        "the stderr prefix is the driver's, not part of the sentence"
+    );
+    assert_eq!(
+        no_events(&crate::k8s::Happened {
+            lines: vec![happening(None, None)],
+            cut: false,
+        }),
+        None
+    );
+}
+
+/// **The heading is where the newest-first claim is made, so a cut read is where it is withdrawn**
+/// — with `k8s::EVENTS_KEPT` interpolated rather than a second copy of the number.
+#[test]
+fn the_events_heading_takes_back_newest_first_when_the_read_was_cut() {
+    let full = crate::k8s::Happened {
+        lines: vec![happening(None, None)],
+        cut: false,
+    };
+    assert_eq!(events_heading(&full), "events (newest first)");
+    assert_eq!(
+        events_heading(&crate::k8s::Happened::default()),
+        "events",
+        "an empty list promises no order because it has none"
+    );
+    let cut = crate::k8s::Happened { cut: true, ..full };
+    assert_eq!(
+        events_heading(&cut),
+        format!(
+            "events (the first {} k8rs was given — there are more, and these are not the newest)",
+            crate::k8s::EVENTS_KEPT
+        )
+    );
+    assert!(
+        !events_heading(&cut).ends_with(':'),
+        "the punctuation is the caller's — one surface draws a colon and one does not"
+    );
+}
+
+/// **The raw word beside the message, and no empty brackets when there is no word.**
+#[test]
+fn a_state_word_is_drawn_beside_its_message_and_never_instead_of_it() {
+    assert_eq!(
+        raw_and_message("Unhealthy", Some("Readiness probe failed")),
+        "(Unhealthy) Readiness probe failed"
+    );
+    assert_eq!(
+        raw_and_message("Evicted", None),
+        "(Evicted)",
+        "a missing message costs the space and nothing else"
+    );
+    assert_eq!(
+        raw_and_message("", Some("the node was low on memory")),
+        "the node was low on memory",
+        "an event with no reason draws no empty brackets"
+    );
+}
+
+/// **Every container state `screens/detail.md` names, and the fall-through for the rest.**
+#[test]
+fn a_containers_state_is_a_word_a_beginner_reads() {
+    assert_eq!(
+        container_state(Some(&ContainerState::Running { started_at: None })),
+        ("running".to_owned(), None)
+    );
+    assert_eq!(
+        container_state(Some(&stopped(None, 0))),
+        ("done".to_owned(), None),
+        "a clean exit is the healthy case and is not renamed to failed"
+    );
+    assert_eq!(
+        container_state(Some(&stopped(Some("OOMKilled"), 137))),
+        (
+            "failed".to_owned(),
+            Some("container exceeded its memory limit — exit 137".to_owned())
+        )
+    );
+    assert_eq!(
+        container_state(Some(&stopped(Some("Error"), 1))),
+        ("failed".to_owned(), Some("exit 1".to_owned())),
+        "a reason no table names falls through to the exit code, never a guessed word"
+    );
+    assert_eq!(
+        container_state(Some(&stopped(None, 255))),
+        ("failed".to_owned(), Some("exit 255".to_owned()))
+    );
+    assert_eq!(
+        container_state(Some(&waiting(Some("CrashLoopBackOff")))),
+        ("keeps crashing and restarting".to_owned(), None)
+    );
+    assert_eq!(
+        container_state(Some(&waiting(Some("ContainerCreating")))),
+        ("not started".to_owned(), None),
+        "the ordinary first second of every pod is not dressed up as a problem"
+    );
+    assert_eq!(
+        container_state(Some(&waiting(Some("SomethingNew")))),
+        ("SomethingNew".to_owned(), None),
+        "a reason this table does not know prints its own raw word"
+    );
+    assert_eq!(
+        container_state(Some(&ContainerState::Waiting {
+            reason: Some("InvalidImageName".to_owned()),
+            message: Some("couldn't parse image reference".to_owned()),
+        })),
+        (
+            "InvalidImageName".to_owned(),
+            Some("couldn't parse image reference".to_owned())
+        ),
+        "and keeps the kubelet's sentence under it — the events table's rule, not a second one"
+    );
+    assert_eq!(
+        container_state(Some(&ContainerState::Waiting {
+            reason: Some("CrashLoopBackOff".to_owned()),
+            message: Some("back-off 5m0s restarting failed container".to_owned()),
+        })),
+        ("keeps crashing and restarting".to_owned(), None),
+        "a reason the table does name says the phrase alone, which is what the mockup draws"
+    );
+    assert_eq!(
+        container_state(Some(&ContainerState::Waiting {
+            reason: Some("InvalidImageName".to_owned()),
+            message: Some(String::new()),
+        })),
+        ("InvalidImageName".to_owned(), None),
+        "an empty message is no message, not a blank line carrying the restart count"
+    );
+    assert_eq!(
+        container_state(Some(&waiting(None))),
+        ("waiting".to_owned(), None)
+    );
+    assert_eq!(
+        container_state(None),
+        ("not started".to_owned(), None),
+        "a container the kubelet has not reported on"
+    );
+}
+
+/// **`, 3 restarts`, or nothing at all** — one spelling of a fact two surfaces draw, and a count
+/// no API server produces is drawn as none.
+#[test]
+fn a_restart_count_is_spelled_once_and_a_negative_one_is_not_a_count() {
+    let counted = |restarts: i32| ContainerSnapshot {
+        name: "app".to_owned(),
+        image: "app:1".to_owned(),
+        role: crate::rules::ContainerRole::Regular,
+        restart_policy: None,
+        restart_rules: Vec::new(),
+        restarts,
+        state: ContainerState::Running { started_at: None },
+        last_terminated: None,
+        ready: true,
+        started: true,
+        cpu_request: None,
+        memory_request: None,
+        cpu_limit: None,
+        memory_limit: None,
+        allocated_cpu: None,
+        allocated_memory: None,
+    };
+    assert_eq!(restarts(None), "");
+    assert_eq!(restarts(Some(&counted(0))), "");
+    assert_eq!(restarts(Some(&counted(1))), ", 1 restart");
+    assert_eq!(restarts(Some(&counted(12))), ", 12 restarts");
+    assert_eq!(restarts(Some(&counted(-1))), "");
+}
+
+/// **`⇧p` with no previous run to show** falls back and says so — and stays silent when it was not
+/// asked for, or when the container really has restarted.
+#[test]
+fn asking_for_a_previous_run_that_does_not_exist_is_answered_in_one_sentence() {
+    assert_eq!(
+        no_previous_run("app", 0, true).as_deref(),
+        Some(
+            "app hasn't restarted, so there's no previous run to show. Showing the current run \
+             instead."
+        )
+    );
+    assert_eq!(no_previous_run("app", 0, false), None, "not asked for");
+    assert_eq!(no_previous_run("app", 3, true), None, "it has restarted");
+    assert!(
+        no_previous_run("app", -1, true).is_some(),
+        "a count no API server produces reads as *no restarts* here exactly as it does in the \
+         display sites, and never as a previous run this pane cannot show"
+    );
+}
+
+/// **`Pod · running · created 3 days ago`, and each part dropped rather than guessed at.**
+#[test]
+fn a_pods_identity_line_drops_what_it_cannot_read_rather_than_guessing() {
+    let mut pod = PodSnapshot::from(k8s_openapi::api::core::v1::Pod::default());
+    assert_eq!(
+        identity(&pod, &now()),
+        vec!["Pod".to_owned()],
+        "no phase and no stamp is `Pod`, never `Pod · unknown`"
+    );
+    pod.phase = Some("Running".to_owned());
+    pod.creation_timestamp = Some(at(1_000_000 - 259_200));
+    assert_eq!(
+        identity(&pod, &now()),
+        vec!["Pod · running · created 3 days ago".to_owned()]
+    );
+    pod.phase = Some("Failed".to_owned());
+    pod.reason = Some("Evicted".to_owned());
+    assert_eq!(
+        identity(&pod, &now()),
+        vec![
+            "Pod · failed · created 3 days ago".to_owned(),
+            "removed by the node to take back room".to_owned(),
+            "(Evicted)".to_owned(),
+        ],
+        "the phrase, then the raw word — the same shape an event's row uses"
+    );
+    pod.reason = Some("Shutdown".to_owned());
+    assert_eq!(
+        identity(&pod, &now())[1],
+        "(Shutdown)",
+        "a reason no table names falls through to its raw word with no phrase above it"
+    );
+}

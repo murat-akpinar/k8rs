@@ -146,7 +146,8 @@ src/
   ops.rs       every write. The ONLY file that may mutate the cluster
   rules.rs     analyze(&Snapshot) -> Vec<Finding>     ← the product lives here
   analysis.rs  cluster-wide reports
-  views.rs     per-view state: selection, filters, tabs, scroll
+  views.rs     per-view state: selection, filters, tabs, scroll —
+               and the wording a detail tab draws, shared with main.rs
   ui.rs        ratatui drawing
   theme.rs     Catppuccin constants (10 of them)
 tests/

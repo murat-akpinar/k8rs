@@ -22,8 +22,9 @@
 //! What this file does owe is not *building* a string that escapes that guarantee, which is why
 //! every span below is either a literal or a value that arrived stripped.
 //!
-//! **What it does not draw yet**: the detail tabs, the modal layer and the `?` overlay.
-//! [`content`] dispatches on [`crate::views::View`] and now has one arm per view.
+//! **What it does not draw yet**: the modal layer and the `?` overlay. [`content`] dispatches on
+//! [`crate::views::View`] and now has one arm per view, and on [`Screen::detail`] before any of
+//! them — a detail is open *over* a view, which is what `esc back` means.
 
 // Nothing outside `#[cfg(test)]` calls this file yet: the event loop that will is Phase 12's
 // `main.rs`. Same attribute, same position and same accepted blind spot as `theme.rs`'s and
@@ -39,15 +40,15 @@
 
 use crate::analysis::{Badge, Report, Row as ReportRow};
 use crate::k8s::Browsable;
-use crate::rules::{Finding, Severity};
+use crate::rules::{ContainerSnapshot, Finding, ObjectId, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
-use crate::views::{self, App, Card, NavItem, Pane, View};
+use crate::views::{self, App, Card, NavItem, Pane, Tab, View};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs};
 use std::borrow::Cow;
 
 // --- THE NUMBERS THE MOCKUPS ARE DRAWN TO START ---
@@ -118,6 +119,13 @@ const CUT: &str = "…";
 /// `App` is what the *user* did; this is what the *store* answered, plus the two header zones,
 /// which are assembled where the facts in them live. Nothing here is stored, and nothing here is
 /// a decision: every string arrives already worded and already stripped.
+///
+/// **[`Screen::detail`] is the one field that is deliberately the other way round, and this
+/// sentence used to be false because of it** (NOTES § D254). A detail tab carries *typed* values —
+/// a `k8s::LogLines`, a `k8s::Happened`, a `PodSnapshot` — and the wording is done here, out of
+/// `crate::views`. Handing them over pre-worded would put the wording back in `main.rs`, one layer
+/// **above** the file that draws it, where the drawn pane and the temporary driver would each keep
+/// their own copy of the same sentence. **Already stripped still holds of every one of them.**
 pub struct Screen<'a> {
     /// How much colour the terminal admits to — [`theme::depth`] of `COLORTERM`, read once by
     /// the caller so this file can be proven without an environment (the same reason `Snapshot`
@@ -208,6 +216,105 @@ pub struct Screen<'a> {
     /// The footer: the keys valid right now, already spelled. Rebuilt by the caller every frame,
     /// because there is no stored footer (`screens/widgets.md` § 2).
     pub keys: &'a str,
+    /// **The object a detail tab is open on, and what each of its four fetches answered** —
+    /// `None` when nothing is open (`screens/detail.md`).
+    ///
+    /// **A detail is drawn *over* whatever view is open, which is why it is an `Option` here and
+    /// not a fourth [`View`]**: `esc` goes back to the pane the reader came from, and a view that
+    /// had to be re-derived to go back to would be a second place holding where they were.
+    pub detail: Option<&'a Detail<'a>>,
+}
+
+/// **What the four detail tabs were answered**, one field per tab (`screens/detail.md`).
+///
+/// **Typed values and not sentences, which is the opposite of what [`Screen`]'s own doc says
+/// about everything above it** (NOTES § D254). Pre-wording these would put the wording back in
+/// `main.rs`, one layer above the file that draws them — and `crate::views` is where the shared
+/// half of it now lives precisely so that the drawn pane and the temporary driver cannot say one
+/// fact two ways.
+///
+/// **One field per tab, so *which tab is open* and *which content arrived* cannot come apart.**
+/// [`crate::views::App::tab`] picks the field; nothing in here claims to be a particular tab, the
+/// same way [`Screen::browser`] carries no kind of its own. An enum of contents would let
+/// `Tab::Yaml` be open over a `Content::Logs`, which is the disagreement this shape refuses to be
+/// able to express.
+///
+/// **[`Detail::events`] is one fetch with two readers** — the events tab *and* describe's own
+/// events block — which is `screens/detail.md`'s own rule: *"One function, two callers, one
+/// order — newest first — settled once."* A second field for describe's copy is how the two come
+/// to disagree about the order.
+pub struct Detail<'a> {
+    /// Which object, for the line above the tab row. **An id and not a name**, so the
+    /// `namespace/name` spelling is [`name`]'s one answer and not a second one
+    /// (`screens/README.md` § the five rules).
+    pub object: &'a ObjectId,
+    /// The logs tab's stream and everything the header line over it says.
+    pub logs: &'a Pane<Logs<'a>>,
+    /// **The describe tab's own fresh, unpruned read** — never the watch store, which is pruned
+    /// to the fields `rules.rs` names (invariant 6, `screens/detail.md` § The describe tab).
+    pub read: &'a Pane<Described<'a>>,
+    /// **The yaml tab's document, as [`crate::k8s::Document::yaml`] emitted it** — masked,
+    /// stripped by `k8s::clean` and serialised before it got here.
+    ///
+    /// **A `String` and not a `Document`, which is not the same compromise as pre-wording a
+    /// sentence**: YAML emission is `serde_yaml_ng`'s answer and the masking is `k8s.rs`'s, so
+    /// nothing k8rs *says* is decided by the caller — and the emitter's own `Err`, which
+    /// `screens/detail.md` draws no pane for, stays with the caller that already has an exit code
+    /// for it rather than becoming a screen this file invented.
+    pub yaml: &'a Pane<String>,
+    /// **This object's own events, newest first** — describe's second read and the events tab's
+    /// only one ([`crate::k8s::events`]).
+    pub events: &'a Pane<crate::k8s::Happened>,
+    /// **A `Secret` whose `data` holds no keys** (`screens/detail.md` § A Secret with no keys).
+    ///
+    /// **It is a fact from the caller because the pane cannot reach it.**
+    /// [`crate::k8s::Document`] hands over YAML and nothing else, and re-reading `data: {}` back
+    /// out of the rendered document would be exactly the *split a rendered string back into
+    /// values* this build refuses (NOTES § D245). The caller reads it off the object it fetched;
+    /// the sentence drawn from it is this file's.
+    pub secret_without_keys: bool,
+}
+
+/// **The object describe draws**, which is the pod plus the one pairing this file must not make
+/// for itself (`screens/detail.md` § The describe tab).
+///
+/// **`k8s::PodRead` is what the caller holds and this is what it hands over**, because that type
+/// has no constructor outside `k8s.rs` — which is frozen — and a pane no test can build is a pane
+/// nobody has drawn. What is lost is nothing the screen reads: `snapshot` is the same value
+/// `PodRead` carries, and `containers` is `PodRead::declared()` zipped with `PodRead::status()`,
+/// which keeps **that** type's by-name lookup as the only one and stops a second by-index reading
+/// of `status.containerStatuses` growing here.
+pub struct Described<'a> {
+    /// The pod as the rules see it — the fresh read's snapshot, not the watch store's.
+    pub snapshot: &'a PodSnapshot,
+    /// **One entry per *declared* container, in `spec` order**, with the kubelet's report on it or
+    /// `None` where it has not reported one — a `Pending` pod.
+    ///
+    /// **The order is `spec.containers[]` then `spec.initContainers[]`, and never
+    /// `status.containerStatuses`'**, which the kubelet sorts by name: choosing off the snapshot
+    /// opened `alpha` where `kubectl logs` opens `zeta`, and `[web, envoy]` opened the proxy
+    /// (`k8s-admin`, 2026-08-30). It is [`crate::k8s::PodRead::declared`]'s answer, carried
+    /// rather than re-derived.
+    pub containers: &'a [(&'a str, Option<&'a ContainerSnapshot>)],
+}
+
+/// **What the logs tab is showing**, which is a stream plus the facts its header line says
+/// (`screens/detail.md` § The logs tab).
+pub struct Logs<'a> {
+    /// **The pod, so the header says what it *has* rather than being told.** Whether there is a
+    /// container to pick is how many entries [`Described::containers`] holds, and whether `⇧p`
+    /// had a previous run to show is the chosen container's restart count — both read here rather
+    /// than carried as bools somebody else computed.
+    pub pod: &'a Described<'a>,
+    /// The container being read — `kubectl`'s own default where the reader named none
+    /// ([`crate::k8s::PodRead::default_container`]).
+    pub container: &'a str,
+    /// `⇧p` — whether the run *before* the last restart was asked for.
+    pub previous: bool,
+    /// **The bounded buffer**: at most [`crate::k8s::LOG_BYTES`], [`crate::k8s::LOG_LINES`] lines,
+    /// each already cut at `k8s::FREE_TEXT` and stripped on the way in. Nothing here holds a log
+    /// line; this borrows the one the caller keeps.
+    pub held: &'a crate::k8s::LogLines,
 }
 
 impl Screen<'_> {
@@ -611,6 +718,12 @@ fn value<'a>(badge: Option<&'a Badge>, screen: &Screen) -> Vec<Span<'a>> {
 /// [`note`] — the same block the other two panes draw while they wait, because it is the same
 /// wait.
 fn content(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
+    // **A detail is drawn over the view, not instead of one** ([`Screen::detail`]): the view
+    // underneath is still what `esc` goes back to, so it is not cleared and not consulted.
+    if let Some(open) = screen.detail {
+        detail(frame, area, app, screen, open);
+        return;
+    }
     match app.view {
         View::Resources(nth) => browser(frame, area, app, screen, screen.kinds.get(nth)),
         View::Analysis(nth) => match screen.reports.get(nth).and_then(|(_, report)| *report) {
@@ -647,14 +760,7 @@ fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool) {
         lines.push(Line::styled("reading the cluster…", screen.fg(theme::DIM)));
     }
     if healthy {
-        let (colour, signal) = theme::band(Severity::Info);
-        lines.push(
-            Line::from(vec![
-                Span::styled(format!("{}  ", mark(signal)), screen.fg(colour)),
-                Span::styled("nothing is broken", screen.fg(theme::TEXT)),
-            ])
-            .centered(),
-        );
+        lines.push(calm(screen, "nothing is broken").centered());
         lines.push(Line::default());
     }
     let dim = screen.fg(theme::DIM);
@@ -668,6 +774,31 @@ fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool) {
                 .map(|line| Line::styled(line, dim)),
         );
     }
+    centred(frame, area, lines);
+}
+
+/// **`○  nothing is broken`, `○  no logs yet`, `○  none right now`** — the product's own calm
+/// headline, in the one place its glyph is read off `theme.rs` (`screens/states.md`
+/// § Nothing is broken).
+///
+/// **One function because three panes draw it and the glyph is a severity's**, so a second copy
+/// would be a second reader of `theme::band` — the thing [`found`] already refuses one file up.
+///
+/// **It does not centre itself**: describe draws this same headline left-flush under a heading,
+/// because there it is a section of a pane and not the whole of one.
+fn calm<'a>(screen: &Screen, headline: &str) -> Line<'a> {
+    let (colour, signal) = theme::band(Severity::Info);
+    Line::from(vec![
+        Span::styled(format!("{}  ", mark(signal)), screen.fg(colour)),
+        Span::styled(headline.to_owned(), screen.fg(theme::TEXT)),
+    ])
+}
+
+/// The calm headline, a blank, and the sentence that says *why* — `screens/states.md`'s own shape,
+/// where **the second paragraph is the point of the screen** and not decoration.
+fn calmly(frame: &mut Frame, area: Rect, screen: &Screen, headline: &str, said: &str) {
+    let mut lines = vec![calm(screen, headline).centered(), Line::default()];
+    lines.extend(set(said, usize::from(BLOCK), screen.fg(theme::DIM)));
     centred(frame, area, lines);
 }
 
@@ -847,7 +978,7 @@ fn identity<'a>(card: &Card, screen: &Screen, region: usize) -> Line<'a> {
         body.saturating_sub(measured + GAP)
     };
 
-    let name = name(card);
+    let name = name(&card.owner);
     let whole = match card.count() {
         Some(count) => format!("{name}  ·  {count}"),
         None => name.clone(),
@@ -873,10 +1004,13 @@ fn identity<'a>(card: &Card, screen: &Screen, region: usize) -> Line<'a> {
 
 /// `payments/web`, or a bare `node-3` for something cluster-scoped — `None` is not `""`, which
 /// would draw as `/node-3` (`screens/README.md` § the five rules).
-fn name(card: &Card) -> String {
-    match &card.owner.namespace {
-        Some(namespace) => format!("{namespace}/{}", card.owner.name),
-        None => card.owner.name.clone(),
+///
+/// **Over an [`ObjectId`] and not over a [`Card`]**, because a detail pane's own heading is the
+/// same spelling of the same fact and a second one would be a second answer for `node-3`.
+fn name(id: &ObjectId) -> String {
+    match &id.namespace {
+        Some(namespace) => format!("{namespace}/{}", id.name),
+        None => id.name.clone(),
     }
 }
 
@@ -1356,13 +1490,6 @@ fn drawn<'a>(
         Some(ReportRow::NotComputed { .. }) => false,
         Some(_) => true,
     };
-    let set = |text: &str, columns: usize, style: Style| -> Vec<Line<'a>> {
-        wrapped(text, columns)
-            .into_iter()
-            .map(|line| Line::styled(line, style))
-            .collect()
-    };
-
     let mut lines: Vec<Line> = Vec::new();
     match row {
         ReportRow::Answer {
@@ -1435,6 +1562,571 @@ fn drawn<'a>(
 }
 
 // --- THE ANALYSIS PANE END ---
+
+// --- THE DETAIL TABS START ---
+
+/// The columns between two labels in the tab row (`screens/detail.md`, measured off the describe,
+/// yaml and events mockups — the marked tab widens, so the labels after it move).
+const TAB_GAP: usize = 3;
+
+/// The marks around the open tab. **Text and not only a colour**, which is `theme.rs`'s own rule
+/// that colour is never the only carrier of a state.
+const MARKED: (&str, &str) = ("‹ ", " ›");
+
+/// Between the widest container name in describe's block and the word after it — three columns,
+/// which is what that mockup draws (`sidecar-envoy` at 13, `failed` at 16) and what the headless
+/// surface already pads to.
+const NAMES_GAP: usize = 3;
+
+/// **The object's name, the tab row, its underline, and the open tab's pane**
+/// (`screens/detail.md`).
+///
+/// **The first three rows are pinned and only the body scrolls**, which is what that file's
+/// scrolled mockups draw: *"The object's name, the tab row and its underline stay pinned — drawn
+/// above the scrolling `Paragraph`, not inside it."* A reader who has scrolled has not lost which
+/// object they are looking at or which tab they are on.
+fn detail(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Detail) {
+    let [head, row, under, body] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    frame.render_widget(
+        Paragraph::new(Line::styled(name(open.object), screen.fg(theme::TEXT))),
+        padded(head),
+    );
+    tabs(frame, row, under, app, screen);
+    match app.tab {
+        Tab::Logs => logs(frame, body, app, screen, open.logs),
+        Tab::Describe => describe(frame, body, app, screen, open),
+        Tab::Yaml => yaml(frame, body, app, screen, open),
+        Tab::Events => events(frame, body, app, screen, open.events),
+    }
+}
+
+/// **The tab row and the underline under the open one**, drawn together because they are one
+/// layout: the underline's column is the sum of the labels before it, and two functions computing
+/// that sum is two answers to one question.
+///
+/// **The widget is `Tabs`, which is what `screens/widgets.md` § 2 names** — with no padding and a
+/// [`TAB_GAP`] divider, so the row is exactly `logs   describe   yaml   ‹ events ›`.
+///
+/// **The underline is `label + 2` columns wide and starts at the `‹`**, which is the three
+/// mockups' own arithmetic read off them rather than estimated (describe: 10 columns at 9; yaml:
+/// 6 at 20; events: 8 at 27). **The logs mockup disagrees with all three** — 7 columns, and one
+/// space after `›` where the others draw three — and is drawn from the rule the other three share
+/// rather than special-cased; `tui-designer` owes that mockup a correction.
+fn tabs(frame: &mut Frame, row: Rect, under: Rect, app: &App, screen: &Screen) {
+    let titles: Vec<String> = Tab::ALL
+        .iter()
+        .map(|tab| match *tab == app.tab {
+            true => format!("{}{}{}", MARKED.0, tab.label(), MARKED.1),
+            false => tab.label().to_owned(),
+        })
+        .collect();
+    let at = app.tab.at();
+    frame.render_widget(
+        Tabs::new(titles.clone())
+            .select(at)
+            .divider(" ".repeat(TAB_GAP))
+            .padding("", "")
+            .style(screen.fg(theme::DIM))
+            .highlight_style(screen.fg(theme::ACCENT)),
+        padded(row),
+    );
+    // **Measured off the same strings the row was built from**, so a longer label cannot move the
+    // row and leave the underline behind.
+    let start: usize = titles
+        .iter()
+        .take(at)
+        .map(|title| width(title) + TAB_GAP)
+        .sum();
+    let rule = "─".repeat(
+        titles
+            .get(at)
+            .map_or(0, |title| width(title))
+            .saturating_sub(2),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            format!("{}{rule}", " ".repeat(start)),
+            screen.fg(theme::ACCENT),
+        )),
+        padded(under),
+    );
+}
+
+/// **A detail pane's body — the one scrolling widget all four tabs draw**
+/// (`screens/widgets.md` § 4: no cap, no *N more* line, a `Paragraph` with an offset).
+///
+/// **The offset is clamped here and not in `views.rs`**, because how many rows a pane has depends
+/// on the width it is drawn at and that file names no widget ([`crate::views::App::scroll`]).
+///
+/// **Every line handed here is already one row**, wrapped by [`wrapped`] on the way in and never
+/// by ratatui's own `Wrap`. Two wrapping algorithms in one pane is two answers to *how tall is
+/// this*, and the offset is computed from the taller-or-shorter of them — so a followed stream
+/// pins to a bottom that is not the bottom. One algorithm, and the count is `len`.
+fn scrolled(frame: &mut Frame, area: Rect, offset: u16, follow: bool, lines: Vec<Line>) {
+    let last = lines.len().saturating_sub(usize::from(area.height));
+    let at = if follow {
+        last
+    } else {
+        usize::from(offset).min(last)
+    };
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).scroll((u16::try_from(at).unwrap_or(u16::MAX), 0)),
+        area,
+    );
+}
+
+/// **One line of a document or a stream, wrapped without losing its own indentation.**
+///
+/// [`wrapped`] drops the whitespace a line *starts* with, which is right for a card's sentence and
+/// wrong here: leading whitespace is meaningful in the two panes that draw text nobody at k8rs
+/// composed — a YAML document's structure, and the indent on a stack frame in a log line
+/// (`screens/detail.md` § The yaml tab, § A line longer than the cap; `screens/widgets.md` § 2's
+/// rule that `yaml` and `logs` do not wrap-trim). The indent goes back on the first row; a
+/// continuation starts at the pane's own edge, which is what wrapping to a pane means.
+fn kept<'a>(text: &str, columns: usize, style: Style) -> Vec<Line<'a>> {
+    let lead: String = text.chars().take_while(|c| c.is_whitespace()).collect();
+    let body = &text[lead.len()..];
+    if body.is_empty() {
+        return vec![Line::styled(text.to_owned(), style)];
+    }
+    let mut rows = wrapped(body, columns.saturating_sub(width(&lead)));
+    if let Some(first) = rows.first_mut() {
+        first.insert_str(0, &lead);
+    }
+    rows.into_iter()
+        .map(|line| Line::styled(line, style))
+        .collect()
+}
+
+/// **A block whose first row is indented by `step` and whose continuations are indented by
+/// `under`** — describe's container rows (`screens/detail.md` § The describe tab).
+///
+/// **The two indents are separate because that file draws them differently, for a reason.** A
+/// **name** row goes deeper on the wrap — `sidecar-envoy   keeps crashing and` /
+/// `      restarting, 12 restarts` — because a continuation starting in the name's own column
+/// would read as the next container. A **detail** row does not — `container exceeded its memory
+/// limit —` / `exit 137, 4 restarts` — because it is already visibly subordinate to the name
+/// above it, and going deeper again would suggest a third level that does not exist.
+fn hanging<'a>(
+    text: &str,
+    region: usize,
+    step: usize,
+    under: usize,
+    style: Style,
+) -> Vec<Line<'a>> {
+    let mut rows = wrapped(text, region.saturating_sub(step)).into_iter();
+    let Some(first) = rows.next() else {
+        return Vec::new();
+    };
+    let mut lines = vec![Line::styled(format!("{}{first}", " ".repeat(step)), style)];
+    lines.extend(
+        wrapped(
+            &rows.collect::<Vec<_>>().join(" "),
+            region.saturating_sub(under),
+        )
+        .into_iter()
+        .map(|line| Line::styled(format!("{}{line}", " ".repeat(under)), style)),
+    );
+    lines
+}
+
+/// Wrapped lines in one style — the shape every free-text block in this file draws.
+fn set<'a>(text: &str, columns: usize, style: Style) -> Vec<Line<'a>> {
+    wrapped(text, columns)
+        .into_iter()
+        .map(|line| Line::styled(line, style))
+        .collect()
+}
+
+/// **The logs tab** (`screens/detail.md` § The logs tab), in the three answers a fetch has
+/// (PRIOR-ART § C2).
+///
+/// **The match is written out here and in each of the three panes below rather than shared**,
+/// which is [`content`]'s own rule and not a missed extraction: a helper that hands a refusal's
+/// partial answer to the same arm that draws the ready one lets *we were not allowed to look*
+/// become *there is nothing*. Measured on 2026-09-06 — one was written, and the refused events
+/// pane drew `○  none right now` under its own banner.
+fn logs(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, pane: &Pane<Logs>) {
+    match pane {
+        Pane::Loading => note(frame, area, screen, false),
+        Pane::Denied(said, held) => {
+            let rest = banner(frame, area, screen, said);
+            stream(frame, rest, app, screen, held);
+        }
+        Pane::Ready(held) => stream(frame, area, app, screen, held),
+    }
+}
+
+/// **The header line, whatever k8rs has to admit about the buffer, and the stream under both.**
+///
+/// **The header and the two admissions are pinned above the scrolling half**, which is what
+/// § When the buffer fills draws: the dropped-lines line *"replaces the blank row above the
+/// content"*, and it says how many lines are gone from the top of what is left — a sentence that
+/// scrolled away with the content would be pointing at nothing.
+fn stream(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, logs: &Logs) {
+    let area = padded(area);
+    let region = usize::from(area.width);
+    let text = screen.fg(theme::TEXT);
+    let dim = screen.fg(theme::DIM);
+
+    // **`previous log: on ` is padded to the width of `off`** so both start in the same column,
+    // which is what both mockups draw (column 28 of a 47-column pane, measured).
+    let toggle = format!(
+        "previous log: {:<3}",
+        if logs.previous { "on" } else { "off" }
+    );
+    // **`▾` only where there is something to pick** — a single-container pod is not offered a
+    // picker, and a key that does nothing is a bug this product has already shipped once.
+    let picker = if logs.pod.containers.len() > 1 {
+        " ▾"
+    } else {
+        ""
+    };
+    let named = format!("container: {}{picker}", logs.container);
+    let mut top = vec![Line::from(vec![
+        Span::styled(named.clone(), text),
+        Span::raw(" ".repeat(region.saturating_sub(width(&named) + width(&toggle)))),
+        Span::styled(toggle, dim),
+    ])];
+    // **`⇧p` with no previous run to show**: k8rs does not print the API's refusal and does not
+    // leave the toggle pointed at nothing (`crate::views::no_previous_run`, whose sentence the
+    // headless surface prints too — the prefix is all that differs).
+    let restarts = logs
+        .pod
+        .containers
+        .iter()
+        .find(|(name, _)| *name == logs.container)
+        .and_then(|(_, status)| *status)
+        .map_or(0, |status| status.restarts);
+    if let Some(said) = views::no_previous_run(logs.container, restarts, logs.previous) {
+        let mut wrapped = wrapped(&said, region.saturating_sub(width("⇧p — "))).into_iter();
+        top.push(Line::from(vec![
+            Span::styled("⇧p — ", screen.fg(theme::ACCENT)),
+            Span::styled(wrapped.next().unwrap_or_default(), text),
+        ]));
+        top.extend(indent(wrapped.collect(), "     ", text));
+    }
+    top.push(Line::default());
+    if let Some(said) = logs.held.dropped_line() {
+        top.extend(set(&said, region, dim));
+        top.push(Line::default());
+    }
+
+    let height = u16::try_from(top.len())
+        .unwrap_or(u16::MAX)
+        .min(area.height);
+    let [pinned, body] =
+        Layout::vertical([Constraint::Length(height), Constraint::Min(0)]).areas(area);
+    frame.render_widget(Paragraph::new(Text::from(top)), pinned);
+
+    // **Nothing has arrived is a state, not a hang** (PRIOR-ART § E1) — and it is not the same
+    // screen as a stream that ended.
+    if !logs.held.arrived() {
+        calmly(
+            frame,
+            body,
+            screen,
+            "no logs yet",
+            "Nothing has been written to this container's log yet.",
+        );
+        return;
+    }
+    let lines: Vec<Line> = logs
+        .held
+        .lines()
+        .flat_map(|line| kept(line, region, text))
+        .collect();
+    scrolled(frame, body, app.scroll, app.following, lines);
+}
+
+/// **The describe tab: the object, then what happened to it** — two reads, one pane
+/// (`screens/detail.md` § The describe tab).
+fn describe(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Detail) {
+    let (area, read) = match open.read {
+        Pane::Loading => return note(frame, area, screen, false),
+        Pane::Denied(said, read) => (banner(frame, area, screen, said), read),
+        Pane::Ready(read) => (area, read),
+    };
+    let area = padded(area);
+    let region = usize::from(area.width);
+    let text = screen.fg(theme::TEXT);
+    let dim = screen.fg(theme::DIM);
+    let mut lines: Vec<Line> = Vec::new();
+    // **The identity block: `Pod · running · created 3 days ago`, and the pod's own reason
+    // under it** — the raw word and the message in the same shape an event's row uses, which
+    // is that file's point: one layout for *a word that explains a state*.
+    //
+    // **The `(RawReason) message` line is dim and the lines above it are not** — it is the
+    // evidence, the role a card's quoted line already has. **Dimmed for being *last* and not for
+    // being third**: a `status.reason` no table names produces two lines rather than three, and
+    // keying on the count would draw the evidence in the identity line's own ink.
+    let said = views::identity(read.snapshot, screen.now);
+    let last = said.len().saturating_sub(1);
+    for (nth, line) in said.into_iter().enumerate() {
+        let ink = if nth == last && last > 0 { dim } else { text };
+        lines.extend(set(&line, region, ink));
+    }
+    if !read.containers.is_empty() {
+        lines.push(Line::default());
+        lines.push(Line::styled("containers", dim));
+        let column = read
+            .containers
+            .iter()
+            .map(|(name, _)| width(name))
+            .max()
+            .unwrap_or(0)
+            + NAMES_GAP;
+        for (name, status) in read.containers {
+            let status = *status;
+            let (word, detail) = views::container_state(status.map(|held| &held.state));
+            // **The restart count goes on the last line of the row**, which is the detail line
+            // where there is one and the state word where there is not.
+            let counted = views::restarts(status);
+            let step = usize::from(PAD);
+            let (first, under) = match &detail {
+                None => (format!("{name:<column$}{word}{counted}"), None),
+                Some(said) => (
+                    format!("{name:<column$}{word}"),
+                    Some(format!("{said}{counted}")),
+                ),
+            };
+            // **A wrapped row continues under its own text and never under its name**, which
+            // is `screens/detail.md`'s own `sidecar-envoy   keeps crashing and` /
+            // `      restarting, 12 restarts` — a continuation at the name's column would read
+            // as a second container.
+            // **The name row's wrap goes one pad deeper and the detail row's stays flat**, which
+            // is what that section draws; [`hanging`] carries why.
+            lines.extend(hanging(&first, region, step, step * 2, text));
+            if let Some(said) = under {
+                lines.extend(hanging(&said, region, step * 2, step * 2, dim));
+            }
+        }
+    }
+    lines.push(Line::default());
+    lines.extend(block(open.events, screen, region));
+    scrolled(frame, area, app.scroll, false, lines);
+}
+
+/// **Describe's own events block: the heading, then the three answers under it**
+/// (`screens/detail.md` § No events at all).
+///
+/// **It is the events *tab*'s list under a heading, and the heading is where the claim is**
+/// ([`crate::views::events_heading`]) — so a cut read withdraws *newest first* here exactly as it
+/// does one tab over, from the same function.
+///
+/// **Left-flush and not centred**, which is the one thing this block does differently from the
+/// tab: it is a section inside a longer pane rather than the whole of one, so *`○ none right
+/// now`* sits under the heading rather than in the middle of the screen.
+fn block<'a>(events: &Pane<crate::k8s::Happened>, screen: &Screen, region: usize) -> Vec<Line<'a>> {
+    let dim = screen.fg(theme::DIM);
+    let heading = match events {
+        Pane::Ready(happened) => views::events_heading(happened),
+        // A read that has not answered and one that was refused both have a block to head;
+        // neither may claim an order it has not seen.
+        _ => "events".to_owned(),
+    };
+    // **The heading wraps like every other free-text block in this function.** A cut read's
+    // heading is 84 columns and the pane is 55, and a hard cut takes off exactly the withdrawal —
+    // the clause the heading exists to say (`k8s-admin`, 2026-09-07).
+    let mut lines = set(&heading, region, dim);
+    match events {
+        Pane::Loading => lines.push(Line::styled("reading the cluster…", dim)),
+        Pane::Denied(said, _) => lines.extend(set(said, region, screen.fg(theme::TEXT))),
+        // **`crate::views::no_events` decides the emptiness, not this call site** — the driver
+        // asks the same function, and a `lines.is_empty()` spelled at each of them is two places
+        // that can come to differ about what an empty read means.
+        Pane::Ready(happened) => match views::no_events(happened) {
+            Some(said) => {
+                lines.push(calm(screen, "none right now"));
+                lines.push(Line::default());
+                lines.extend(set(said, region, dim));
+            }
+            None => lines.extend(rows(happened, screen, region)),
+        },
+    }
+    lines
+}
+
+/// **The events tab** (`screens/detail.md` § The events tab) — the same list describe reads,
+/// filling the pane instead of a block in it.
+fn events(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    screen: &Screen,
+    pane: &Pane<crate::k8s::Happened>,
+) {
+    let happened = match pane {
+        Pane::Loading => return note(frame, area, screen, false),
+        // **A refusal draws whatever did come back and never the empty sentence below.** A read
+        // that was refused and answered with nothing draws the banner and an empty pane, which is
+        // the browser's own rule one region up.
+        Pane::Denied(said, happened) => {
+            let rest = banner(frame, area, screen, said);
+            return rows_into(frame, rest, app, screen, happened);
+        }
+        Pane::Ready(happened) => happened,
+    };
+    // **Empty is centred here and left-flush in describe**, because with nothing else sharing the
+    // pane this is a whole-screen calm state like *nothing is broken*.
+    if let Some(said) = views::no_events(happened) {
+        calmly(frame, area, screen, "none right now", said);
+        return;
+    }
+    rows_into(frame, area, app, screen, happened);
+}
+
+/// The events list itself, under whatever was drawn above it — and, on a cut read, under the
+/// heading this function pins there ([`crate::views::events_heading`]).
+fn rows_into(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    screen: &Screen,
+    happened: &crate::k8s::Happened,
+) {
+    let area = padded(area);
+    let region = usize::from(area.width);
+    // **No heading in the ordinary case — the tab label already says what the pane is** — and
+    // exactly one case brings it back: a read the server cut, which is the one state whose
+    // heading exists to *withdraw* the newest-first promise the absence of a heading would
+    // otherwise imply.
+    //
+    // **It is pinned above the scrolling half**, for [`stream`]'s reason on the sentence one
+    // region up: it is a claim about the whole read rather than a row of it, and a sentence that
+    // scrolled away with the content would be pointing at nothing. It scrolled off at offset 3
+    // (`k8s-admin`, 2026-09-07). **No row is reserved when there is no heading** — `top` is empty,
+    // so the pinned half is zero rows tall and the list starts where it always did.
+    //
+    // **The heading's own rows pin and the blank row under it does not**, which is what that
+    // section's two mockups draw between them: the unscrolled one separates the heading from the
+    // first event, the scrolled one has the heading directly above a row, and the prose counts
+    // *"the ten rows left once the heading takes its own two"*. The blank is the list's first
+    // row, so it goes with the list.
+    let mut top: Vec<Line> = Vec::new();
+    let mut lines: Vec<Line> = Vec::new();
+    if happened.cut {
+        top.extend(set(
+            &format!("{}:", views::events_heading(happened)),
+            region,
+            screen.fg(theme::DIM),
+        ));
+        lines.push(Line::default());
+    }
+    lines.extend(rows(happened, screen, region));
+    let height = u16::try_from(top.len())
+        .unwrap_or(u16::MAX)
+        .min(area.height);
+    let [pinned, body] =
+        Layout::vertical([Constraint::Length(height), Constraint::Min(0)]).areas(area);
+    frame.render_widget(Paragraph::new(Text::from(top)), pinned);
+    scrolled(frame, body, app.scroll, false, lines);
+}
+
+/// **One event's rows, and the whole of the grammar** (`screens/detail.md` § The events tab):
+/// the age and the plain-language phrase, the raw word beside the controller's verbatim message
+/// under it, and the *happened N times* line where the count is more than one.
+///
+/// **The age column pads to the widest age actually on the pane plus [`GAP`]**, so the phrases
+/// line up — and a
+/// row with neither an age nor a phrase **drops its first line rather than drawing a row of blank
+/// padding**, which is `main.rs`'s own rule for the same list reached one function away.
+///
+/// **Every string here comes from `crate::views`**, not from a second table: `plainly` is
+/// `k8s.rs`'s, `raw_and_message` and `repeated` are `views.rs`', and a reason no table names falls
+/// through to its own raw word beside its message with nothing invented (NOTES § D198, § D254).
+fn rows<'a>(happened: &crate::k8s::Happened, screen: &Screen, region: usize) -> Vec<Line<'a>> {
+    let text = screen.fg(theme::TEXT);
+    let dim = screen.fg(theme::DIM);
+    let ages: Vec<String> = happened
+        .lines
+        .iter()
+        .map(|line| {
+            line.at
+                .as_ref()
+                .and_then(|at| age(screen.now, at))
+                .unwrap_or_default()
+        })
+        .collect();
+    let column = ages.iter().map(|at| width(at)).max().unwrap_or(0) + GAP;
+    let mut lines: Vec<Line> = Vec::new();
+    for (happening, at) in happened.lines.iter().zip(&ages) {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        // **The phrase is wrapped after the age column and its continuations return to the pane's
+        // own left edge**, which is what the scrolled mockup draws — no hanging indent.
+        let mut said = wrapped(
+            happening.plainly().unwrap_or_default(),
+            region.saturating_sub(column),
+        )
+        .into_iter();
+        let first = said.next().unwrap_or_default();
+        if !(at.is_empty() && first.is_empty()) {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{at:<column$}"), dim),
+                Span::styled(first, text),
+            ]));
+            lines.extend(set(&said.collect::<Vec<_>>().join(" "), region, text));
+        }
+        lines.extend(set(
+            &views::raw_and_message(&happening.reason, Some(&happening.message)),
+            region,
+            dim,
+        ));
+        if let Some(said) = views::repeated(happening, screen.now) {
+            lines.extend(set(&said, region, dim));
+        }
+    }
+    lines
+}
+
+/// **The yaml tab: the object exactly as the API returned it** (`screens/detail.md`
+/// § The yaml tab).
+///
+/// **No two-column reading margin, unlike every other tab on this screen.** The pane's own left
+/// edge *is* the document's, so the YAML's indentation is the only indentation drawn — a margin
+/// on top of it would misrepresent the structure this pane exists to get right.
+///
+/// **Nothing here strips, and here that is load-bearing rather than merely true** (NOTES § D198):
+/// `k8s::clean` already removed everything `unprintable` refuses **except** `\n` and `\t`, which
+/// on this one pane print as themselves. A second strip here would collapse a ConfigMap's
+/// 20-line `Corefile` onto one line and call it the object.
+fn yaml(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Detail) {
+    let (area, document) = match open.yaml {
+        Pane::Loading => return note(frame, area, screen, false),
+        Pane::Denied(said, document) => (banner(frame, area, screen, said), document),
+        Pane::Ready(document) => (area, document),
+    };
+    let region = usize::from(area.width);
+    let mut lines: Vec<Line> = document
+        .lines()
+        .flat_map(|line| kept(line, region, screen.fg(theme::TEXT)))
+        .collect();
+    // **`data: {}` is drawn exactly as the API returned it — there is nothing to mask because
+    // there is nothing there** — and the sentence under it says so in a reader's words rather
+    // than leaving an empty map to be interpreted.
+    if open.secret_without_keys {
+        lines.push(Line::default());
+        lines.extend(indent(
+            wrapped(
+                "This Secret holds no keys yet.",
+                region.saturating_sub(usize::from(PAD)),
+            ),
+            "  ",
+            screen.fg(theme::DIM),
+        ));
+    }
+    scrolled(frame, area, app.scroll, false, lines);
+}
+
+// --- THE DETAIL TABS END ---
 
 // --- MEASURING AND CUTTING START ---
 

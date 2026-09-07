@@ -3265,15 +3265,18 @@ public release.
       **This is the first unchecked box in the file and it is not the next one to
       work.** Nothing here can move until the user runs `cargo publish` and until
       Phase 13 writes the README. **The next box is the first unchecked one in the
-      lowest open phase below this one — Phase 10 today** (Phase 9 closed
+      lowest open phase below this one — Phase 11 today** (Phase 10 closed
       2026-09-06), and that phase's head note says why a
       later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
       [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)).
       **This line names a phase and so it goes stale at every close** — it has now
-      done so four times. The third was caught during Phase 8's own close ritual;
+      done so five times. The third was caught during Phase 8's own close ritual;
       the fourth was caught at Phase 9's close, but only in the last check before
       the context was cleared, *after* the phase-close ritual had already run and
-      the PR had merged. **The head note above the open phase and this line are two
+      the PR had merged. **The fifth was caught by neither** — Phase 10 closed
+      2026-09-06 and both copies still named Phase 10 when the next session
+      opened the file to pick a box, which is the first time this pair has been
+      found by the reader it misdirects rather than by a ritual. **The head note above the open phase and this line are two
       copies of one fact, which is why one of them keeps going stale** — moving
       both is part of the close ritual, not a thing to notice later
 
@@ -4173,21 +4176,6 @@ looking broken.
 
 ## Phase 10 — View state
 
-> **Phase 5's release box is still unchecked, and it is still not next** — it
-> needs the maintainer's crates.io credential and a `README.md` that belongs to
-> Phase 13
-> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
-> It is the first unchecked box in this file, so a cold session lands on it. This
-> note moves forward with whichever phase is open and **has now moved four
-> times** — from Phase 6, Phase 7, Phase 8, and Phase 9, which closed 2026-09-06.
-> Running a later phase over a deliberately open earlier one is
-> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
-> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
-> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
-> runs whole when that box closes**
-> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
-> The next box is the first unchecked one below.
-
 *Also read: [PRIOR-ART § F1](PRIOR-ART.md#f1--sorting) (sorting the rendered string instead of the value — a defect class k9s has never closed) and [§ F4](PRIOR-ART.md#f4--the-api-surface-is-not-a-constant) (a resource is group + version + resource, always all three).*
 
 Goal: `ui.rs` can be a pure function of state, which is the only thing that
@@ -4265,6 +4253,22 @@ state before its renderer exists is what manufactures a frozen-file violation.
 
 ## Phase 11 — The console
 
+> **Phase 5's release box is still unchecked, and it is still not next** — it
+> needs the maintainer's crates.io credential and a `README.md` that belongs to
+> Phase 13
+> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
+> It is the first unchecked box in this file, so a cold session lands on it. This
+> note moves forward with whichever phase is open and **has now moved five
+> times** — from Phase 6, Phase 7, Phase 8, Phase 9, and Phase 10, the last two
+> of which closed 2026-09-06. Running a later phase over a deliberately open
+> earlier one is
+> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
+> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
+> runs whole when that box closes**
+> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
+> The next box is the first unchecked one below.
+
 *Also read: [PRIOR-ART § C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens) (loading, empty and denied are three screens) and [§ D3](PRIOR-ART.md#d3--wrapping-and-resizing-must-be-pure-functions) (a wrap that leaks into the data).*
 
 Goal: the screens in [`screens/`](screens/README.md) — the lazygit-shaped
@@ -4326,7 +4330,36 @@ string and key was settled in the design phase, so this phase is drawing.
       that reaches the screen without a `Pane` because its three answers are
       already inside it
       ([D252](NOTES.md#d252--the-analysis-pane-one-renderer-for-seven-reports-a-shared-wrap-that-had-been-respelling-its-input-and-two-mutants-that-were-infinite-loops-2026-09-06))
-- [ ] Detail tabs per object: logs · describe · yaml · events, `[` / `]`
+- [x] Detail tabs per object: logs · describe · yaml · events, `[` / `]` —
+      landed 2026-09-07. **The screen did not exist and was written first**:
+      `screens/detail.md` had three tab sections and deliberately deferred the
+      fourth to this phase ([D254](NOTES.md#d254--the-events-tab-is-settled-before-it-is-drawn-describes-grammar-reused-whole-a-heading-that-only-comes-back-to-withdraw-a-promise-and-the-check-that-could-not-see-the-defect-it-was-written-after-2026-09-06)). The wording an event and a container
+      row is drawn with **moved down into `views.rs`** in the same turn, so the
+      drawn pane and `main.rs`'s headless printer are one wording — the last turn
+      in which it could move, because `k8s.rs` was already frozen and `views.rs`
+      freezes at this phase's close; `main.rs`'s copies were deleted in the same
+      turn and **no `main_tests.rs` expectation changed**, which is what proves
+      the headless output byte-identical.
+      **`[` / `]` is the state half only.** `views::Tab::next`/`previous` clamp at
+      both ends and are tested; no keypress reaches them, because no key handling
+      exists anywhere in the product yet — the crossterm event loop is Phase 12's
+      `main.rs`, by the phase map. Every Phase 11 box is in that position.
+      **Three review rounds, six real defects, none of them found by the green
+      suite**: a `count == 2` boundary and a one-line identity block that the
+      mutation gate caught ([D255](NOTES.md#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07)); a cut-read heading clipped on describe
+      and the same heading scrolling away on the events tab, both found by
+      `k8s-admin` measuring the drawn buffer; a waiting container throwing away the
+      kubelet's message where the events fall-through keeps it; and three mockups
+      drawing a screen their own prose forbids. Final gate: `just check` **EXIT=0**,
+      1251 + 35 tests; mutation sweep **114 mutants, 111 caught, 3 missed and all
+      three ruled unkillable** — `PAD` is 2, so `step * 2` and `step + 2` are both 4
+      ([D255](NOTES.md#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07)).
+      **What it does not do, ruled rather than missed**: the events pane cannot tell
+      a Warning from a Normal, because `k8s::Happening` does not carry `type` and
+      the file froze at Phase 6 — the deadline for raising it was this box and this
+      box missed it ([D256](NOTES.md#d256--the-events-pane-cannot-tell-a-warning-from-a-normal-the-deadline-for-saying-so-was-this-box-and-a-doc-comment-naming-a-future-box-is-a-reminder-nothing-enforces-2026-09-07)); the `v` Secret reveal the yaml section
+      specifies is unbuildable without reopening that same frozen file. Both in
+      [`backlog.md`](backlog.md)
 - [ ] Command log panel — always visible, showing what k8rs ran
 - [ ] Context-sensitive key footer + `?` full key map, keys exactly as
       [NOTES § D12](NOTES.md#d12--the-key-map-and-two-keys-deleted) assigns them

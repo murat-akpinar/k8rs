@@ -7739,8 +7739,8 @@ async fn the_picker_does_not_call_a_container_that_failed_done() {
 /// **What a container is doing, in a word a beginner reads** (invariant 14) — never the API's own
 /// `reason`, which is the jargon this product exists to translate.
 ///
-/// **And never a second spelling of [`container_state`]'s word.** The picker is the screen where a
-/// reader chooses which container's log explains a failed pod, and it printed `done` for a
+/// **And never a second spelling of [`views::container_state`]'s word.** The picker is the screen
+/// where a reader chooses which container's log explains a failed pod, and it printed `done` for a
 /// container that exited `1` while describe printed `failed` for the same state — the one word
 /// that sends the reader to the wrong log (`k8s-admin`, Phase 6 close).
 #[test]
@@ -8998,27 +8998,6 @@ async fn a_pod_with_no_events_and_one_whose_events_could_not_be_read_print_the_s
     );
 }
 
-/// **A read that found no events says why on stderr, and one that found some says nothing** —
-/// `screens/detail.md` § No events at all, whose whole point is the *second* sentence: *nothing
-/// left* and *nothing happened* are different facts wearing the same empty list, and only one of
-/// them is true of a pod that has been up for a week.
-#[tokio::test]
-async fn a_read_that_found_no_events_says_why_and_one_that_found_some_says_nothing() {
-    let said = no_events(&k8s::Happened::default()).expect("an empty list has something to say");
-    assert!(
-        said.contains("Kubernetes only keeps events for a while") && said.contains("none are left"),
-        "the sentence says the list is empty without saying why it can be: {said:?}"
-    );
-    assert_eq!(
-        no_events(&k8s::Happened {
-            lines: vec![happening(None, "Pulled", "")],
-            cut: false,
-        }),
-        None,
-        "a pod whose events were printed was told it has none"
-    );
-}
-
 /// **A cut list withdraws the *newest first* claim in the heading, because that is where the claim
 /// is** (`k8s::Happened::cut`, `k8s::EVENTS_KEPT`).
 ///
@@ -9246,11 +9225,11 @@ async fn a_describe_run_reads_the_pod_then_its_own_events() {
 /// above. The deadline is the test's for [`describe_run`]'s stated reason.
 ///
 /// **What the first arm pins is the exit code and not the sentence beside it**, and the limit is
-/// worth stating rather than discovering: [`NO_EVENTS`] goes to stderr, which belongs to the
-/// process (§ WATCHING A CLUSTER), so a reversion that printed the wrong line here would still
-/// pass. The words are pinned one test up, by
-/// [`a_read_that_found_no_events_says_why_and_one_that_found_some_says_nothing`] over
-/// [`no_events`]; what is proven here is that a read which succeeded and found nothing ends the
+/// worth stating rather than discovering: [`views::NO_EVENTS`] goes to stderr, which belongs to
+/// the process (§ WATCHING A CLUSTER), so a reversion that printed the wrong line here would still
+/// pass. The words are pinned in `views_tests.rs`, by
+/// `an_empty_events_read_gets_the_sentence_and_a_full_one_does_not` over [`views::no_events`]
+/// (NOTES § D254); what is proven here is that a read which succeeded and found nothing ends the
 /// run *happily*, which is the half `screens/detail.md` says only the code can carry.
 #[tokio::test]
 async fn the_three_endings_of_a_describe_are_told_apart_by_the_exit_code() {
@@ -9631,7 +9610,7 @@ async fn a_yaml_run_with_no_kind_reads_a_pod() {
 #[test]
 fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
     let stopped = |reason: Option<&str>, exit_code| {
-        container_state(Some(&ContainerState::Terminated(rules::Terminated {
+        views::container_state(Some(&ContainerState::Terminated(rules::Terminated {
             reason: reason.map(str::to_string),
             exit_code,
             started_at: None,
@@ -9640,7 +9619,7 @@ fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
         })))
     };
     let waiting = |reason: Option<&str>| {
-        container_state(Some(&ContainerState::Waiting {
+        views::container_state(Some(&ContainerState::Waiting {
             reason: reason.map(str::to_string),
             message: None,
         }))
@@ -9704,10 +9683,13 @@ fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
     assert_eq!(waiting(None), ("waiting".to_string(), None));
 
     assert_eq!(
-        container_state(Some(&ContainerState::Running { started_at: None })),
+        views::container_state(Some(&ContainerState::Running { started_at: None })),
         ("running".to_string(), None)
     );
-    assert_eq!(container_state(None), ("not started".to_string(), None));
+    assert_eq!(
+        views::container_state(None),
+        ("not started".to_string(), None)
+    );
 
     // **The log picker is this function's word and not a second spelling of it.** It said `done`
     // about a container that exited `137` while describe said `failed` about the same state, on
@@ -9742,7 +9724,7 @@ fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
     ] {
         assert_eq!(
             doing(state.as_ref()),
-            container_state(state.as_ref()).0,
+            views::container_state(state.as_ref()).0,
             "the picker and the describe row spell one state two ways again: {state:?}"
         );
     }
@@ -10093,8 +10075,8 @@ const AFTER_ONE_STRIP: &str = "[2Jallocating 240MB of cache [accounts] for the a
 /// so it needs nothing added on the day one arrives.
 ///
 /// **Three of the four were run**, each against a planted producer: `card` wrapping the evidence
-/// at 80 columns, `raw_and_message` cutting at 100 characters, and `dump` padding every line to a
-/// column width. Each fails naming its own path.
+/// at 80 columns, `views::raw_and_message` cutting at 100 characters, and `dump` padding every
+/// line to a column width. Each fails naming its own path.
 ///
 
 #[tokio::test]
@@ -10135,6 +10117,19 @@ async fn one_line_comes_out_of_every_emit_path_with_one_transformation_on_it() {
     let fetched = String::from_utf8(fetched).expect("k8rs writes UTF-8");
 
     // **`--describe`**, where a controller's sentence is the second line of an event's block.
+    //
+    // **This arm is fed [`AFTER_ONE_STRIP`] and every other one [`FROM_THE_CLUSTER`], because
+    // that is the shape the pipeline hands it** (CLAUDE.md § A check is proven only for the input
+    // shapes it was fed). [`happening`]'s own doc is the contract — *one event, as `k8s::events`
+    // hands it over* — and `k8s::events` hands over an ingested `Happening`, so a message with an
+    // `ESC` still in it is a value that path cannot produce. The strip itself is proven at the
+    // door, against a stub server, by `k8s_tests.rs`'s
+    // `an_events_words_are_stripped_before_anything_can_draw_them`.
+    //
+    // **It was fed the raw line while `main.rs` carried a second strip of its own**, and that
+    // strip did not move with the wording: nothing in `views.rs` strips, because ingest already
+    // did (NOTES § D254). What this arm proves is unchanged — that `described` carries the value
+    // out whole, cutting nothing, padding nothing inside it and folding nothing.
     let pod = pod_read("healthy").await;
     let described = described(
         &pod,
@@ -10142,7 +10137,7 @@ async fn one_line_comes_out_of_every_emit_path_with_one_transformation_on_it() {
             lines: vec![happening(
                 Some("2026-08-30T21:35:41Z"),
                 "Unhealthy",
-                FROM_THE_CLUSTER,
+                AFTER_ONE_STRIP,
             )],
             cut: false,
         }),

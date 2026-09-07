@@ -7,8 +7,8 @@ whole debugging loop without a typed command.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│  RESOURCES         │  ‹ logs › describe   yaml   events            │
-│   workloads        │  ───────                                      │
+│  RESOURCES         │  ‹ logs ›   describe   yaml   events          │
+│   workloads        │  ──────                                       │
 │   network          │  container: app ▾          previous log: on   │
 │   storage          │                                               │
 │   config           │  14:21:58  starting worker pool               │
@@ -105,8 +105,8 @@ whichever bound gets there first), not the Rust shape underneath it.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│  RESOURCES         │  ‹ logs › describe   yaml   events            │
-│   workloads        │  ───────                                      │
+│  RESOURCES         │  ‹ logs ›   describe   yaml   events          │
+│   workloads        │  ──────                                       │
 │   network          │  container: app ▾          previous log: off  │
 │   storage          │                                               │
 │   config           │  142 lines were dropped from the top to keep  │
@@ -228,8 +228,8 @@ a `Pending` pod, or a container that just started:
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/queue-worker-xk2p9                  │
-│  RESOURCES         │  ‹ logs › describe   yaml   events            │
-│   workloads        │  ───────                                      │
+│  RESOURCES         │  ‹ logs ›   describe   yaml   events          │
+│   workloads        │  ──────                                       │
 │   network          │  container: worker ▾       previous log: off  │
 │   storage          │                                               │
 │   config           │               ○  no logs yet                  │
@@ -273,8 +273,8 @@ this exact screen and a second one would be a second thing to learn:
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│  RESOURCES         │  ‹ logs › describe   yaml   events            │
-│   workloads        │  ───────                                      │
+│  RESOURCES         │  ‹ logs ›   describe   yaml   events          │
+│   workloads        │  ──────                                       │
 │   network          │  container: app ▾          previous log: off  │
 │   storage          │  14:24:58  writing checkpoint                 │
 │   config           │  14:25:02  shutting down                      │
@@ -407,11 +407,11 @@ defect this repo pays most for (invariant 11's own reasoning, one layer up).
 One function, two callers, one order — newest first — settled once here.
 
 **What describe needs of events, and what it deliberately does not build.**
-The events *tab*'s own drawn layout — its own scrolling, its own columns, the
-full reason-to-sentence table — is Phase 11's, out of scope for this file
-today. What describe needs is smaller: the same list, oldest to newest
-reversed, each line short enough to sit under a container block without
-turning the pane into the tab it is not trying to be.
+The events *tab*'s own drawn layout — its own scrolling and its own columns —
+is [Phase 11's](#the-events-tab), out of scope for this file today. What
+describe needs is smaller: the same list, oldest to newest reversed, each
+line short enough to sit under a container block without turning the pane
+into the tab it is not trying to be.
 
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
@@ -427,10 +427,10 @@ turning the pane into the tab it is not trying to be.
 │   capacity      1 ▲│    sidecar-envoy   keeps crashing and         │
 │   certificates  30d│      restarting, 12 restarts                  │
 │   drain safety     │    init-migrate    done                       │
-│   posture          │  events (newest first)                        │
-│   restarts         │  3 min ago  the container is being stopped    │
-│   waste            │  (Killing) Stopping container app             │
-│   versions         │                                               │
+│   posture          │                                               │
+│   restarts         │  events (newest first)                        │
+│   waste            │  3 min ago  the container is being stopped    │
+│   versions         │  (Killing) Stopping container app             │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web-7d9f4 -n payments                       │
 ├────────────────────────────────────────────────────────────────────┤
@@ -567,7 +567,7 @@ days ago.
 │   config           │    app             running                    │
 │   cluster          │                                               │
 │  ANALYSIS          │  events (newest first)                        │
-│   capacity      1 ▲│  3 min ago  the health check failed           │
+│   capacity      1 ▲│  3 min ago    the health check failed         │
 │   certificates  30d│  (Unhealthy) Readiness probe failed:          │
 │   drain safety     │  HTTP probe failed with statuscode: 503       │
 │   posture          │  happened 2,383 times since 4 days ago        │
@@ -625,9 +625,9 @@ new key.
 │   certificates  30d│  (Scheduled) Successfully assigned            │
 │   drain safety     │  payments/web-7d9f4 to node-3                 │
 │   posture          │                                               │
-│   restarts         │  9 hours ago  BackOff                         │
-│   waste            │  Back-off restarting failed container app     │
-│   versions         │                                               │
+│   restarts         │  9 hours ago                                  │
+│   waste            │  (BackOff) Back-off restarting failed         │
+│   versions         │  container app                                │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web-7d9f4 -n payments                       │
 ├────────────────────────────────────────────────────────────────────┤
@@ -642,8 +642,9 @@ the containers block — the tab row and the underline under it stay pinned
 wraps to the pane exactly as a log line does
 ([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)) — *"the container
 started pulling its image"* above is the ordinary case, not a special one.
-`BackOff` is the fall-through case drawn for real: no phrase, the raw word
-and the message it came with, nothing invented.
+`BackOff` is the fall-through case drawn for real: no phrase, so the age sits
+alone on its own line, and `(BackOff)` and the message it came with follow
+under it, nothing invented.
 
 ### The pod's own reason, when it has one
 
@@ -816,6 +817,425 @@ than one of `--logs` / `--describe` / `--yaml`, which one wins is a tie-break
 left the flag's exact spelling to them. This file specifies what each verb
 shows once chosen, not the precedence between three that all narrow to one
 object.
+
+## The events tab
+
+**The same fetch describe already reads — reused, not reopened.** `events`
+shows exactly what [describe's own events read](#the-describe-tab) already
+fetches: the `involvedObject` field-selector GET, newest first, the one
+function two callers share so there is never a second version of "this
+object's events" to keep in agreement with the first — "One function, two
+callers, one order — newest first — settled once here," in describe's own
+words. Nothing new goes to the cluster; what is new is the pane. Describe
+fits a handful of these rows under a container block. Here the whole content
+pane is the list.
+
+**What the tab draws that describe's own block does not: nothing.** Same
+rows, more of them, no header. `events (newest first)` — the line describe
+prints above its own block, because it needs to say what the block below it
+is — is dropped here: the tab label already says that, the same way the
+yaml pane carries no `yaml:` heading of its own repeating what the tab
+underneath it already says. The reason→phrase table is
+[describe's own six rows](#the-describe-tab), unchanged and not grown here —
+a reason the table does not recognise still falls through to its raw word
+beside the message, nothing invented. The `(RawReason) message` line, the
+`happened N times since <span> ago` line (only when `count` is more than
+one), and [the one age ladder](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen)
+are the identical rules, reached from the identical function. A second
+grammar for the same fact would be exactly the two-places-disagreeing defect
+this repo pays most for — invariant 11's own reasoning, restated once by
+describe, cited rather than repeated here.
+
+Several events, newest first, on a pane with nothing above it but the
+object's name and the tab row — the ordinary case, and it happens to be the
+same pod [describe's own repeated-event example](#a-repeated-event--one-line-for-something-that-happened-2383-times)
+already measured, so the count-more-than-one row and a plain, once-only row
+sit side by side without inventing a second fixture:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │  3 min ago    the health check failed         │
+│   storage          │  (Unhealthy) Readiness probe failed:          │
+│   config           │  HTTP probe failed with statuscode: 503       │
+│   cluster          │  happened 2,383 times since 4 days ago        │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│  4 hours ago  the image is ready              │
+│   certificates  30d│  (Pulled) Successfully pulled image           │
+│   drain safety     │  "payments/web:2.3.1"                         │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back                                                 │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The `(Unhealthy)`/count-2,383 row and the plain `(Pulled)` row are the
+  same two events [describe's own repeated-event section](#a-repeated-event--one-line-for-something-that-happened-2383-times)
+  measured on a real cluster.** Reused rather than re-fixtured, for the same
+  reason the events read itself is reused rather than refetched.
+- **The second row's `(Pulled) Successfully pulled image
+  "payments/web:2.3.1"` line is drawn here that describe's own mockup did
+  not have room for.** Describe's block sits under a container list and
+  cropped it for space; the rule above it — every event reason is a phrase
+  *beside* the controller's own message, never instead of it — carves out no
+  exception for a `count` of one, and this pane has the room to show it
+  correctly. This is the one place this section adds a line describe's
+  mockup omitted; everything else here is transcribed, not invented.
+- **An event can reach this pane with no age at all** — `Happening::at` is
+  `Option<Time>`, and a real event can carry none of the four fields that
+  fill it, which draws no age rather than one this file invented, [the same
+  "no number we cannot produce" rule](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen)
+  every age on this product already keeps. The age column still pads to the
+  widest age actually on the pane, and describe's own rule for the row that
+  has neither an age nor a phrase applies unchanged here, one function away:
+  the first line is dropped rather than left as a row of blank padding, so
+  a phrase-less, age-less `BackOff` reads as its two lines, not three:
+  ```
+  (BackOff) Back-off restarting failed container app
+  ```
+  — no leading blank line above it.
+
+### No events at all — the same words, filling the pane instead of a block in it
+
+[Describe's own reasoning](#no-events-at-all--a-healthy-pod-is-not-a-broken-fetch)
+is unchanged: *nothing left* and *nothing happened* are different facts, and
+only the second paragraph tells them apart. The words do not change when the
+pane is the whole screen rather than a block under a container list — reusing
+them is the same "written once" discipline as everywhere else on this page.
+What changes is only the layout: with nothing else sharing the pane, this is
+now a whole-screen calm state like
+[the ordinary Nothing is broken screen](states.md#nothing-is-broken), so it is
+centred the same way that one is, rather than left-flush under a heading that
+no longer exists here.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web                                 │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │               ○  none right now               │
+│   cluster          │                                               │
+│  ANALYSIS          │    Kubernetes only keeps events for a         │
+│   capacity      1 ▲│    while, and this pod has run long enough    │
+│   certificates  30d│    that none are left.                        │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web -n payments                         │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back                                                 │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+`○` is still the product's own calm symbol
+([states.md § Nothing is broken](states.md#nothing-is-broken)), reused rather
+than invented a third time.
+
+### More events than the pane — the whole pane scrolls now, not a block in it
+
+[Describe's own rule](#more-events-than-the-pane--it-scrolls-the-same-as-everything-else)
+holds unchanged: no cap, no "N more" line, a `Paragraph` with a scroll offset
+like every other overflowing pane on this product
+([widgets.md § 4](widgets.md#4-scrolling)). The object's name, the tab row
+and its underline stay pinned — drawn above the scrolling `Paragraph`, not
+inside it — three rows here and, once a read has been cut,
+[a fourth](#more-events-than-k8rs-was-given--a-different-claim-from-more-than-the-pane-holds)
+alongside them; nothing is reserved for that fourth row until there is
+something to put in it. Otherwise exactly as
+[describe's own scrolled mockup](#more-events-than-the-pane--it-scrolls-the-same-as-everything-else)
+already shows — and only the event list itself moves. This is the identical
+three events from that section, scrolled to the same point, because the pane
+holding them is the same widget with the same content:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │  4 hours ago  the container started pulling   │
+│   storage          │  its image                                    │
+│   config           │  (Pulling) Pulling image "payments/web:2.3.1" │
+│   cluster          │                                               │
+│  ANALYSIS          │  6 hours ago  kubernetes placed this pod on a │
+│   capacity      1 ▲│  node                                         │
+│   certificates  30d│  (Scheduled) Successfully assigned            │
+│   drain safety     │  payments/web-7d9f4 to node-3                 │
+│   posture          │                                               │
+│   restarts         │  9 hours ago                                  │
+│   waste            │  (BackOff) Back-off restarting failed         │
+│   versions         │  container app                                │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back                                                 │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+`BackOff` is still the fall-through case drawn for real: no phrase, so the
+age sits alone on its own line and `(BackOff)` and the message it came with
+follow under it. A message too long for one line still wraps exactly as a
+log line does
+([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)).
+
+### More events than k8rs was given — a different claim from more than the pane holds
+
+**Not the same state as the one above.** "More than the pane" is this
+product's own display choice — it scrolls, and nothing on screen needs to
+say so because scrolling is how every overflowing pane on this product
+already answers it. This one is the server's choice, not this product's:
+the fetch is capped at `EVENTS_KEPT` — 500 today — and once the cluster has
+more than that for one object, the read stops there. There is no scrolling
+to what was never fetched. That costs this pane its own opening claim: a
+`limit` returns the cluster's own storage order, not the newest, so *newest
+first* — the thing every other mockup in this section is quietly true of —
+is false the moment the fetch is cut, and the words that promised it are the
+words that have to be withdrawn.
+
+**The heading carries the withdrawal, because the heading is the only place
+the claim was made.** This pane draws no heading in the ordinary case — [the
+opening section above](#the-events-tab) rules that the tab label already
+says what the pane is — so a cut list is the one case that heading comes
+back, and it comes back saying the opposite of what it would otherwise imply
+by its absence: not "these are the newest," but that no such promise can be
+made. The words are exactly what describe's own headless print already
+says when its own events read is cut — this file had not written them down
+before now, but the product already had, and they are reused rather than
+reworded a second time here. Only the number is a fact about this build,
+not a fact about the object, so it is named plainly rather than rounded or
+hidden:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │  events (the first 500 k8rs was given — there │
+│   storage          │  are more, and these are not the newest):     │
+│   config           │                                               │
+│   cluster          │  9 hours ago                                  │
+│  ANALYSIS          │  (BackOff) Back-off restarting failed         │
+│   capacity      1 ▲│  container app                                │
+│   certificates  30d│                                               │
+│   drain safety     │  3 min ago    the container is being stopped  │
+│   posture          │  (Killing) Stopping container app             │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back                                                 │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The 3-minute-old `Killing` row sits below the 9-hour-old `BackOff`
+  row on purpose.** This is not a scrolled view — it is the top of the
+  pane — and the order is the cluster's storage order, not time. Drawing it
+  chronologically would quietly rely on the one thing the heading just
+  said not to trust.
+- **`500` is read off `k8s::EVENTS_KEPT`, not typed twice.** If that
+  constant ever changes, this heading's number
+  changes with it in the running product; it is written here because a
+  mockup shows what actually renders, the same way `2,383` above is a real
+  measured count and not a smaller stand-in.
+- **The heading pins, and only the event list scrolls under it.** A cut
+  list can also be longer than the pane — 500 events is far more than the
+  ten rows left once the heading takes its own two — so [the pane-overflow
+  rule](#more-events-than-the-pane--the-whole-pane-scrolls-now-not-a-block-in-it)
+  still applies, but the heading is not part of what it scrolls: it draws
+  pinned above the scrolling `Paragraph`, beside the object's name, the tab
+  row and the underline — a fourth pinned row, and one this pane carries
+  only because this is the one state that has something to pin there.
+  **Nothing is reserved for it otherwise** — an ordinary, uncut list keeps
+  the same three pinned rows every other mockup on this page draws, no
+  blank line held open for a heading that never withdrew anything. Scrolled
+  well past the list's own first two rows, the heading is still the first
+  thing on the pane:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │  events (the first 500 k8rs was given — there │
+│   storage          │  are more, and these are not the newest):     │
+│   config           │  3 min ago    the health check failed         │
+│   cluster          │  (Unhealthy) Readiness probe failed:          │
+│  ANALYSIS          │  HTTP probe failed with statuscode: 503       │
+│   capacity      1 ▲│  happened 2,383 times since 4 days ago        │
+│   certificates  30d│                                               │
+│   drain safety     │  4 hours ago  the image is ready              │
+│   posture          │  (Pulled) Successfully pulled image           │
+│   restarts         │  "payments/web:2.3.1"                         │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back                                                 │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+This is the same `Unhealthy`/`Pulled` pair [the ordinary case
+above](#the-events-tab) already measured — reused, not re-fixtured — now
+standing in for two rows from deeper in the (much longer, capped-at-500)
+list. `BackOff` and `Killing`, the two rows the mockup above draws right
+under the heading, have scrolled out of view above them; the heading has
+not, because it was never part of what scrolled. Nor is the blank row the
+mockup above draws between the heading and `BackOff`: that row is the top of
+the *scrollable* body, not the pinned area, so scrolling past it removes it
+the same as any other row — which is why no gap is left here between the
+heading and the event now sitting at the top of the visible list.
+
+### The events fetch could not be completed
+
+Two different facts share this heading, and they are not the same failure
+wearing two names.
+
+**A permission gap degrades this one tab and nothing else.** Nothing has
+happened to the object — only to what k8rs may read about it — so this stays
+a message inside the pane, the same shape
+[the namespace-scoping banner](states.md#you-can-only-see-some-namespaces)
+already uses for a 403 elsewhere, and it names the missing verb and resource
+the same way every other refusal on this product does
+([states.md § Rules that hold across every state on this page](states.md#rules-that-hold-across-every-state-on-this-page):
+*"A 403 degrades exactly the feature that needed the permission and names the
+missing verb and resource. It never crashes and never retries in a loop."*):
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │                                               │
+│   storage          │  k8rs can't read this pod's events.           │
+│   config           │                                               │
+│   cluster          │  Missing permission: list events in payments. │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│  The other tabs on this object still work —   │
+│   certificates  30d│  only this permission is missing.             │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments  → refused        │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back                                                 │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+No `⚠` — that glyph is reserved for a connection or trust problem
+([states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser)),
+and a scoped-down role is neither;
+[the namespace-scoping banner](states.md#you-can-only-see-some-namespaces) it
+is modelled on carries none either.
+
+**The object being gone entirely is a different fact, and takes a different
+shape.** This tab cannot be opened on an object that does not exist — `⏎`
+only ever opens a row currently in the watched store, the same guard
+[describe's own version of this state](#an-object-that-does-not-exist)
+already names — so the only way to reach it here is the object being removed
+by something else while this view is already open on it. That is exactly
+[dialogs.md § The object went away while the dialog was open](dialogs.md#the-object-went-away-while-the-dialog-was-open),
+which describe already ruled applies unchanged to "describe/yaml opening on a
+since-deleted object," for the same reason it applies here: the read behind
+this tab is downstream of the identical `k8s::pod()` call. No new pane, no
+new mockup — the existing "Already gone" shape covers it, minus its "Nothing
+was changed" line, which is a sentence about a mutation this tab, a read,
+never attempted.
+
+### Free text that carried control characters — the same rule as describe's, not a second reading of it
+
+Identical to describe's own rule, not a second reading of it: an event's
+`message` is a **cell**, not a document — one line in a list, wrapped by
+width, never carrying a hard line break of its own — and
+[D198's own distinction](../NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)
+is what decides that, the same way it decides it for
+[describe's own version of this section](#free-text-that-carried-control-characters).
+`\n` does not survive here any more than it does there — this pane is exactly
+the shape D198 carved the exception *away* from, not the one it carved it
+into. Every character `unprintable` refuses on describe it refuses here too.
+
+### No headless surface for this tab
+
+Every other tab on this page has a "Printed instead of drawn" section
+because `--logs` / `--describe` / `--yaml` already exist in the temporary
+driver
+([D194](../NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
+There is no `--events`, and this section does not add one: invariant 10
+fixes the flag list at fifteen, and a sixteenth is a recorded decision this
+box does not make. This tab is drawn only, reachable through `⏎` then
+`[`/`]`, never through a flag — and nothing is lost by that:
+[describe already prints this object's events headlessly](#printed-instead-of-drawn--describe-on-the-headless-surface),
+newest-to-oldest reversed under its own `events (newest first):` heading,
+which is the one place a script gets this same fact today.
+
+### The command log, and the footer
+
+**The command log shows `kubectl events --for pod/web-7d9f4 -n payments`,
+not `kubectl describe`.** Describe's own pane earns `kubectl describe` as its
+equivalent because its pane shows two reads folded into one — the object
+*and* its events — and `kubectl describe` is genuinely what a user would type
+to get both. This pane shows only the second half, so the line it teaches is
+the command that produces only that half: `kubectl events --for TYPE/NAME` is
+a real, current subcommand (stable since kubectl 1.28) built for exactly this
+question — "what happened to this one object" — and it is a truer equivalent
+of what is on screen than `kubectl describe` would be, which shows spec and
+status this pane does not. The refused mockup above appends `→ refused`, the
+same convention [the login-expired header](states.md#your-login-expired)
+already uses for a command that was sent and answered no.
+
+**Typing the line does not reproduce the order this pane promises, and that
+is worth saying rather than leaving for a reader to find out at 3am.**
+`kubectl events --for` sorts its own output oldest first — read off
+kubectl's own `pkg/cmd/events/events.go`, `sort.Sort(SortableEvents(...))`
+ascending on `eventTime` — the reverse of the newest-first order this pane
+draws and the fetch behind it returns. There is no `--sort-by` on `kubectl
+events` to add to the line, so the difference is not one this file can fix
+by teaching a longer command; it can only name it: the command log teaches
+the *equivalent* a user would type, per invariant 4, and an equivalent that
+hands back the reverse of what the pane just showed is exactly the surprise
+invariant 4 exists to prevent, not one it excuses.
+
+**It also matches on one field this pane's own fetch does not stop at.**
+`kubectl events --for` selects by kind, apiVersion and name; the pane's
+`involvedObject` selector adds `uid`, so a replacement object under the same
+name is a different match to the pane and the same match to the typed line.
+That is why the `uid` term is in the selector at all, not a decoration on
+it: without it, a StatefulSet pod deleted and recreated under the same name
+inside the event TTL would have the typed command hand back its
+predecessor's events where the pane shows none — a consequence read off the
+selector, not yet measured against a cluster.
+
+**The footer reads `[ ] tabs  esc back`, the same as describe's.** Nothing
+else applies: there is no follow (this is a fetch, not a stream — invariant 6
+keeps events off the permanent watch, so there is nothing to tail), no
+container picker (an event is not scoped to one container), no `⇧p previous`
+(an event has no earlier version to ask for), and no reveal (nothing on this
+pane is a secret). Offering any of them would be exactly the
+promised-key-that-does-nothing bug
+[the README's key rules](README.md#the-five-rules-every-screen-obeys)
+already forbids.
 
 ## The yaml tab
 

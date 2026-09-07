@@ -60,8 +60,8 @@ use k8s_openapi::jiff::{SignedDuration, Timestamp};
 use k8s_openapi::serde::de::DeserializeOwned;
 use k8s_openapi::serde_json::{self, Value};
 use rules::{
-    ClusterSnapshot, ContainerSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot,
-    Severity, age, analyze,
+    ClusterSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot, Severity, age,
+    analyze,
 };
 use std::collections::BTreeMap;
 
@@ -2665,11 +2665,14 @@ fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>, said: Option<&
         // not exist (CreateContainerConfigError)* over *configmap "…" not found*. The jargon word
         // is kept **and** explained, on the surface built to explain it.
         //
-        // **[`WAITING_REASONS`] is in this file and is still not reused here, which is the
-        // question this box had to answer.** Reaching it is not the obstacle — the obstacle is
-        // that its phrases are this file's paraphrase of the cards, not the cards' words, and for
-        // one of the two states a live cluster produced they and the server disagree outright:
-        // the API server writes *trying and failing to pull image* where that table writes
+        // **[`views::WAITING_REASONS`] is reachable from here and is still not reused, which is
+        // the question this box had to answer.** (It stood in this file until the detail tabs
+        // needed the same words and it moved down, NOTES § D254; the argument below did not move
+        // with it, because it is about this call site and not about where the table lives.)
+        // Reaching it is not the obstacle — the obstacle is that its phrases are a paraphrase of
+        // the cards, not the cards' words, and for one of the two states a live cluster produced
+        // they and the server disagree outright: the API server writes
+        // *trying and failing to pull image* where that table writes
         // *cannot get its image* (`default/broken-image`, 2026-09-03). Printing both in one
         // sentence is two spellings of one condition, which is the defect this repo has paid most
         // for; keying off the message's trailing word to pick one would be scraping free text the
@@ -4450,168 +4453,15 @@ async fn on_cluster(args: &[String], context: Option<&str>) -> Option<String> {
     }
 }
 
-/// **The plain-language phrase for a state word, or `None` for one no table names.**
+/// **The picker's half of [`views::container_state`]** — the word, without the second line a
+/// one-line row has no room for (`screens/detail.md` § Choosing a container).
 ///
-/// **A short list per surface and a fall-through, never a guess.** A reason with no phrase prints
-/// as its own raw word beside the controller's message ([`raw_and_message`]) — which is strictly
-/// more informative than an invented sentence and cannot be false, the discipline NOTES § D198
-/// generalised from `BackOff` to everything.
-fn phrase(table: &'static [(&'static str, &'static str)], reason: &str) -> Option<&'static str> {
-    table
-        .iter()
-        .find(|(word, _)| *word == reason)
-        .map(|(_, said)| *said)
-}
-
-/// **`(Evicted) The node was low on resource: ephemeral-storage.`** — the raw API word and the
-/// controller's verbatim message, which is the second line of every *word that explains a state*
-/// block on this surface: a pod's own reason, a container's, and an event's
-/// (`screens/detail.md` — *three separate inventions here would be three things to keep agreeing*).
-///
-/// **The message is never replaced and never summarised** (NOTES § D37, § D198). A missing one
-/// costs the space and nothing else: `(Evicted)` alone is what a pod prints today, because
-/// `status.message` is not a field `rules.rs` carries and that file is frozen.
-fn raw_and_message(reason: &str, message: Option<&str>) -> String {
-    let said = message.map_or(String::new(), sanitize);
-    // **An empty reason draws no empty brackets.** The API allows an Event with no `reason`, and
-    // `()` in front of a message is a word this file invented out of a field that was not there.
-    match sanitize(reason).as_str() {
-        "" => said,
-        word => format!("({word}) {said}").trim_end().to_string(),
-    }
-}
-
-/// **The only `status.reason` this build translates** (`screens/detail.md` § The pod's own reason).
-///
-/// **One entry, because one is what has been measured.** Anything else the field can hold falls
-/// through to its raw word beside the message, which is the safe fallback every table on this
-/// surface uses.
-const POD_REASONS: &[(&str, &str)] = &[("Evicted", "removed by the node to take back room")];
-
-/// **The only terminated reason this build translates** — invariant 14's own worked example
-/// (`CLAUDE.md`: `OOMKilled` reads *container exceeded its memory limit*, not the raw word).
-///
-/// **Everything else falls through to the exit code alone, never a guessed word**
-/// (`screens/detail.md`). `Error`, `ContainerCannotRun` and the empty string a real container can
-/// carry — `k8s-admin` measured `reason=Error, exit=1` and a bare `exit=255` with nothing in
-/// `reason` on one pod — say no more than the number already does.
-const STOPPED_REASONS: &[(&str, &str)] = &[("OOMKilled", "container exceeded its memory limit")];
-
-/// **The waiting reasons this build translates**, each phrase derived from the card `rules.rs`
-/// already draws for the same state rather than invented beside it — rule 1's *keeps crashing*,
-/// rule 3's *image is not usable, so the container never started*, rule 4's *needs a ConfigMap or
-/// Secret that does not exist*.
-///
-/// **The other five of rule 3's seven image reasons are not here**, and that is a limit rather
-/// than a decision: `UNUSABLE_IMAGE` is private to the frozen `rules.rs`, so the two
-/// `screens/detail.md` names by name are the two spelled here and `InvalidImageName` and its
-/// siblings fall through to their own raw word — which is honest and is what the fall-through is
-/// for.
-const WAITING_REASONS: &[(&str, &str)] = &[
-    ("CrashLoopBackOff", "keeps crashing and restarting"),
-    ("ImagePullBackOff", "cannot get its image"),
-    ("ErrImagePull", "cannot get its image"),
-    (
-        "CreateContainerConfigError",
-        "needs a ConfigMap or Secret that does not exist",
-    ),
-];
-
-/// **What one container's row says on `--describe`** — the word after its name, and the indented
-/// line under it where there is one (`screens/detail.md` § The describe tab).
-///
-/// **[`doing`] is this function**, and the sentence that used to stand here — *"the picker's
-/// wording is unchanged; this is a second reader of one state, not a second spelling of one
-/// sentence"* — was false when it was written. It was exactly a second spelling: the two `match`es
-/// disagreed on the terminated-non-zero arm, and the picker's `done` about a container that exited
-/// `1` is the claim that let it through (`k8s-admin`, Phase 6 close). What is a *reader* is the
-/// second line, which describe prints and the picker has no room for.
-///
-/// **Describe is the headless surface**, and that is what earned the words: there is no card in
-/// the same output, so `waiting` printed alike for `ImagePullBackOff`, `CrashLoopBackOff` and
-/// `CreateContainerConfigError` is the whole of what a reader gets (`k8s-admin`, 2026-08-31).
-///
-/// **`done` is not renamed to `failed` before it earns the word.** A clean `exit 0` is the healthy
-/// case and stays `done`; measured, three containers that exited 1, 0 and 255 all printed `done`,
-/// and `done` is a false statement about two of them.
-///
-/// **A momentary `ContainerCreating` stays the calm `not started`** rather than being dressed up
-/// as a problem — it is the ordinary first second of every pod.
-fn container_state(state: Option<&ContainerState>) -> (String, Option<String>) {
-    match state {
-        Some(ContainerState::Running { .. }) => ("running".to_string(), None),
-        Some(ContainerState::Terminated(stopped)) if stopped.exit_code == 0 => {
-            ("done".to_string(), None)
-        }
-        Some(ContainerState::Terminated(stopped)) => {
-            let said = stopped
-                .reason
-                .as_deref()
-                .and_then(|reason| phrase(STOPPED_REASONS, reason))
-                .map_or(String::new(), |phrase| format!("{phrase} — "));
-            (
-                "failed".to_string(),
-                Some(format!("{said}exit {}", stopped.exit_code)),
-            )
-        }
-        Some(ContainerState::Waiting { reason, .. }) => {
-            let word = match reason.as_deref() {
-                // The kubelet has taken the pod and is making the sandbox: nothing is wrong yet.
-                Some("ContainerCreating" | "PodInitializing") => "not started".to_string(),
-                Some(reason) => {
-                    phrase(WAITING_REASONS, reason).map_or_else(|| sanitize(reason), str::to_string)
-                }
-                None => "waiting".to_string(),
-            };
-            (word, None)
-        }
-        // **A container the pod declares and the kubelet has not reported on** — a `Pending` pod.
-        None => ("not started".to_string(), None),
-    }
-}
-
-/// **`, 3 restarts`, or nothing at all** — the one spelling of a fact two screens draw
-/// (`screens/detail.md` says outright they are one rule).
-///
-/// **It was written twice, byte for byte, in [`container_choice`] and [`described`]**, and a third
-/// reader already disagreed with both: [`no_previous_run`] compares `restarts != 0` on the raw
-/// `i32` where the two display sites floor a negative one to zero, so a `restartCount` below zero
-/// would have had two screens say *no restarts* while `--previous` said it had restarted
-/// (`k8s-admin`, 2026-08-31). No API server produces one — which is why this is an extraction and
-/// not a fix — but one field with three readers and one already out of step is the family shape
-/// this repo pays most for.
-///
-/// **`restartCount` is an `i32` the API server never sets below zero**; a negative one is not a
-/// count and is drawn as none rather than as its absolute value. **A container the kubelet has not
-/// reported on has no count at all**, which is not a zero it chose.
-fn restarts(status: Option<&ContainerSnapshot>) -> String {
-    match status
-        .map(|container| usize::try_from(container.restarts).unwrap_or(0))
-        .unwrap_or(0)
-    {
-        0 => String::new(),
-        counted => format!(", {}", plural(counted, "restart")),
-    }
-}
-
-/// **What a container is doing, in one word a beginner reads** (invariant 14) — the picker's half
-/// of [`container_state`], which is the only place that decides what a state is called.
-///
-/// **It was a second `match` over the same value and it disagreed on the arm that matters most.**
-/// Measured on `default/broken-neverback`, three containers that exited `1`, `0` and `255`: the
-/// picker printed *(done)* beside all three while `--describe` printed `failed` beside two of them
-/// (`k8s-admin`, Phase 6 close). The picker is the screen where a reader chooses **which
-/// container's log explains a failed pod**, so of the two spellings it was the calm one that was
-/// wrong, and wrong in the direction that sends them to the log of a container that is fine.
-///
-/// **What is dropped here is the second line and never the word**: [`container_state`] returns
-/// `failed` *and* `container exceeded its memory limit — exit 137`, and a picker row is one line
-/// with a restart count already on it. **A waiting container's raw `reason` still never reaches
-/// this screen** — that was this function's original argument and it survives whole, because the
-/// table it now reads through translates the four reasons it names and falls through to the raw
-/// word only where no phrase exists (`WAITING_REASONS`).
+/// **The word itself is spelled once, in `views.rs`** (NOTES § D254). It was a second `match`
+/// here until Phase 6 close, and the two disagreed on the arm that matters most: a container that
+/// exited `1` read *(done)* in the picker and `failed` in describe (`k8s-admin`), which is the
+/// measurement [`views::container_state`]'s own doc carries.
 fn doing(state: Option<&ContainerState>) -> String {
-    container_state(state).0
+    views::container_state(state).0
 }
 
 /// **The container the log is read from**, or the sentence saying why there is none
@@ -4687,7 +4537,7 @@ fn container_choice(
                 "{} ({}{})",
                 sanitize(name),
                 doing(status.map(|container| &container.state)),
-                restarts(status)
+                views::restarts(status)
             )
         })
         .collect();
@@ -4707,25 +4557,22 @@ fn container_choice(
 /// the request — in its own words, about a request the reader did not knowingly make. What that
 /// refusal says exactly is not quoted here, because nothing in this repo has measured it; what is
 /// measured is that k8rs stops sending it
-/// (`previous_on_a_container_that_never_restarted_asks_for_the_run_that_exists`). It says so in
-/// one line and falls back to the run that does exist.
+/// (`previous_on_a_container_that_never_restarted_asks_for_the_run_that_exists`).
 ///
-/// **A container the kubelet has not reported on has not restarted either**, so it takes the same
-/// line — which is right and is also what stops `--previous` reaching a `Pending` pod, where the
-/// API server has nothing to serve it from.
+/// **The sentence is [`views::no_previous_run`]'s and only the `k8rs: ` prefix is this file's**
+/// (NOTES § D254) — stderr's convention belongs to the process, and the pane that draws the same
+/// sentence prefixes it differently.
+///
+/// **Which container, and how often it restarted, are still decided here**: the count is looked
+/// up by name through [`k8s::PodRead::status`], never by index, and a container the kubelet has
+/// not reported on has not restarted either — which is what stops `--previous` reaching a
+/// `Pending` pod, where the API server has nothing to serve it from.
 fn no_previous_run(read: &k8s::PodRead, chosen: Option<&str>, previous: bool) -> Option<String> {
     let chosen = chosen?;
     let restarts = read
         .status(chosen)
         .map_or(0, |container| container.restarts);
-    if !previous || restarts != 0 {
-        return None;
-    }
-    Some(format!(
-        "k8rs: {} hasn't restarted, so there's no previous run to show. Showing the current run \
-         instead.",
-        sanitize(chosen)
-    ))
+    views::no_previous_run(chosen, restarts, previous).map(|said| format!("k8rs: {said}"))
 }
 
 /// **The marker a followed stream ends with**, or `None` when there is nothing honest to say.
@@ -5231,7 +5078,14 @@ fn widest<'a>(items: impl Iterator<Item = &'a str>, gap: usize) -> usize {
 /// and the events under it where there are any (`screens/detail.md` § Printed instead of drawn).
 ///
 /// **A function over values, so a test can read it**: stdout belongs to the process and a test
-/// cannot read it back (§ WATCHING A CLUSTER), and every decision in describe's output is here.
+/// cannot read it back (§ WATCHING A CLUSTER), so every decision this file still makes about
+/// describe's output is here.
+///
+/// **What it no longer decides is the wording** (NOTES § D254). Every sentence in the block comes
+/// out of `views.rs`, because Phase 11's detail tabs draw the same ones and `views.rs` is the
+/// lowest file both surfaces can reach. What stays here is the *layout* — [`column`], [`widest`],
+/// the two gaps, the indents and the block's own punctuation — because a printed block and a
+/// drawn pane share no geometry at all.
 ///
 /// **`happened` of `None` prints no events section at all, and so does an empty one** — the
 /// screen's own rule, and the reason exit codes carry what stdout cannot: *"No events prints no
@@ -5240,55 +5094,31 @@ fn widest<'a>(items: impl Iterator<Item = &'a str>, gap: usize) -> usize {
 /// read that failed print the identical block; `0` and `2` are what tell them apart.
 ///
 /// **The containers block is the picker's own list, unchanged** — same order (declared, then
-/// init), the same word out of [`doing`], and the same rule about when a restart count is shown
-/// (`screens/detail.md` § Choosing a container). A second wording for the same fact is the drift
-/// this file keeps refusing.
+/// init), the same word out of [`views::container_state`], and the same rule about when a restart
+/// count is shown (`screens/detail.md` § Choosing a container). A second wording for the same fact
+/// is the drift this file keeps refusing.
 ///
 /// **The age is [`age`]'s one ladder** — the same strings a card's right edge draws, because it is
 /// one function reached from here too (`screens/widgets.md` § 1b, NOTES § D68).
 fn described(read: &k8s::PodRead, happened: Option<&k8s::Happened>, now: &Time) -> String {
-    // **Each part is dropped rather than guessed at when the field is absent** — a pod with no
-    // `phase` prints `Pod`, never `Pod · unknown`, which would be a reading nothing took
-    // (`screens/states.md` § When there is nothing to say).
-    let mut identity = vec!["Pod".to_string()];
-    if let Some(phase) = &read.snapshot.phase {
-        identity.push(sanitize(phase).to_lowercase());
-    }
-    if let Some(created) = read
-        .snapshot
-        .creation_timestamp
-        .as_ref()
-        .and_then(|created| age(now, created))
-    {
-        identity.push(format!("created {created}"));
-    }
-    let mut out = identity.join(" · ");
-    // **The pod's own `status.reason`, which was dropped entirely until this review** — a pod
-    // carrying `reason: Evicted` printed `Pod · failed · created 8 days ago` and never said why,
-    // which is a `Failed` that tells a reader nothing any other `Failed` would not
-    // (`k8s-admin`, 2026-08-31, `screens/detail.md` § The pod's own reason).
-    if let Some(reason) = &read.snapshot.reason {
-        // **`status.message` is not on [`PodSnapshot`] and this build cannot print it.**
-        // `rules.rs` is frozen, so the sentence the screen draws beside `(Evicted)` waits for the
-        // snapshot field the PM has boxed; what is here is the half that is reachable.
-        if let Some(phrase) = phrase(POD_REASONS, reason) {
-            out.push_str(&format!("\n{phrase}"));
-        }
-        out.push_str(&format!("\n{}", raw_and_message(reason, None)));
-    }
+    // **The identity line and the pod's own reason under it are [`views::identity`]'s**, one line
+    // per element and this file only joining them (NOTES § D254). Nothing is stripped on the way
+    // past: every field it reads came through `k8s::text` in `k8s::ingest`, which is where
+    // [`k8s::PodRead::of`] puts it.
+    let mut out = views::identity(&read.snapshot, now).join("\n");
 
-    let names: Vec<String> = read.declared().map(sanitize).collect();
+    let names: Vec<&str> = read.declared().collect();
     if !names.is_empty() {
-        let width = widest(names.iter().map(String::as_str), 3);
+        let width = widest(names.iter().copied(), 3);
         out.push_str("\n\ncontainers:");
         for name in &names {
             let status = read.status(name);
-            let (word, detail) = container_state(status.map(|container| &container.state));
+            let (word, detail) = views::container_state(status.map(|container| &container.state));
             // **The restart count goes on the last line of the row**, which is the detail line
             // where there is one and the state word where there is not — the mockup's
             // `container exceeded its memory limit — exit 137, 4 restarts` against its
             // `keeps crashing and restarting, 12 restarts` (`screens/detail.md`).
-            let counted = restarts(status);
+            let counted = views::restarts(status);
             match detail {
                 None => out.push_str(&format!("\n  {}{word}{counted}", column(name, width))),
                 Some(detail) => out.push_str(&format!(
@@ -5313,20 +5143,10 @@ fn described(read: &k8s::PodRead, happened: Option<&k8s::Happened>, now: &Time) 
         })
         .collect();
     let width = widest(ages.iter().map(String::as_str), 2);
-    // **The heading carries the cut, because the heading is where the claim is.** *newest first*
-    // is not true of a list the server stopped at [`k8s::EVENTS_KEPT`] — a `limit` returns the
-    // cluster's own order, not the newest — so the words that promise it are the words that have
-    // to be withdrawn (`k8s::Happened::cut`).
-    out.push_str(&match happened.cut {
-        false => "\n\nevents (newest first):".to_string(),
-        // **The bound is interpolated and not written out**, because a second copy of a number is
-        // the copy that goes stale — the reason `scripts/twin-guard.py` exists one layer up.
-        true => format!(
-            "\n\nevents (the first {} k8rs was given — there are more, and these are not the \
-             newest):",
-            k8s::EVENTS_KEPT
-        ),
-    });
+    // **The heading is [`views::events_heading`]'s and the colon is this block's** (NOTES § D254):
+    // the printed block punctuates its headings and the drawn tab does not, so the sentence is
+    // shared and the punctuation is not.
+    out.push_str(&format!("\n\n{}:", views::events_heading(happened)));
     for (line, at) in happened.lines.iter().zip(ages) {
         // **The phrase where there is one, then the raw word and the message under it, always**
         // (NOTES § D198). A phrase that stood *instead of* the message was measurably false for
@@ -5345,62 +5165,15 @@ fn described(read: &k8s::PodRead, happened: Option<&k8s::Happened>, now: &Time) 
         }
         row.push(format!(
             "    {}",
-            raw_and_message(&line.reason, Some(&line.message))
+            views::raw_and_message(&line.reason, Some(&line.message))
         ));
-        if let Some(repeated) = repeated(line, now) {
+        if let Some(repeated) = views::repeated(line, now) {
             row.push(format!("    {repeated}"));
         }
         out.push('\n');
         out.push_str(&row.join("\n"));
     }
     out
-}
-
-/// **`happened 2,383 times since 4 days ago`, and `None` for something that happened once**
-/// (`screens/detail.md` § A repeated event).
-///
-/// **Both numbers or neither is not the rule — both numbers where both are known.** The count
-/// without the span is *a lot*, of unknown recency; the span without the count is *still going*,
-/// of unknown severity. An event whose first stamp did not survive prints the count alone rather
-/// than a span this file guessed.
-///
-/// **Exact, with a comma at the thousand, never rounded** — the discipline
-/// [`k8s::LogLines::dropped_line`] already keeps for a number a reader is counting on, and
-/// [`k8s::grouped`] is the one spelling of the separator.
-///
-/// **Silent at `1`**, because a thing that happened once needs no sentence saying so.
-fn repeated(line: &k8s::Happening, now: &Time) -> Option<String> {
-    let counted = usize::try_from(line.count?).unwrap_or(0);
-    if counted < 2 {
-        return None;
-    }
-    let since = line
-        .first
-        .as_ref()
-        .and_then(|first| age(now, first))
-        .map_or(String::new(), |span| format!(" since {span}"));
-    Some(format!("happened {} times{since}", k8s::grouped(counted)))
-}
-
-/// **What a pod with no events gets, on stderr** (`screens/detail.md` § No events at all).
-///
-/// **Two facts wearing one empty list, and only one of them is *nothing happened*.** Kubernetes
-/// keeps events for a while and then drops them, so a pod up for a week has almost certainly
-/// outlived every event it ever had — and saying only *nothing happened* would be true the day it
-/// started and false a week later, in the one case a reader has no other way to check.
-const NO_EVENTS: &str = "k8rs: Kubernetes only keeps events for a while, and this pod has run \
-                         long enough that none are left.";
-
-/// **[`NO_EVENTS`] when the read found nothing, and `None` when it found something** — the same
-/// shape [`nothing_written`] is, for the same measured reason.
-///
-/// **The emptiness is decided here and not at the call site.** Spelled as a `match` guard in
-/// [`describe_run`], both `happened.lines.is_empty() -> true` and `-> false` survived the mutation
-/// gate: the only thing that depends on the answer there is a line on stderr, and stderr belongs
-/// to the process (`dev-core`'s run, 2026-08-31 — the second time this file has paid for it, and
-/// [`nothing_written`]'s doc is where the first is written down).
-fn no_events(happened: &k8s::Happened) -> Option<&'static str> {
-    happened.lines.is_empty().then_some(NO_EVENTS)
 }
 
 /// **What the events selector names as the kind** — `describe` is pod-only, so the one caller in
@@ -5499,8 +5272,16 @@ async fn describe_run(
     }
     match happened {
         Ok(Ok(happened)) => {
-            if let Some(sentence) = no_events(&happened) {
-                let _ = writeln!(err, "{sentence}");
+            // **The sentence is [`views::no_events`]'s and the `k8rs: ` prefix is this file's**
+            // (NOTES § D254) — stderr's convention belongs to the process, not to the words.
+            //
+            // **The emptiness is decided there and not here.** Spelled as a `match` guard on this
+            // line, both `happened.lines.is_empty() -> true` and `-> false` survived the mutation
+            // gate: the only thing that depends on the answer is a line on stderr, and stderr
+            // belongs to the process (`dev-core`'s run, 2026-08-31 — the second time this file has
+            // paid for it, and [`nothing_written`]'s doc is where the first is written down).
+            if let Some(sentence) = views::no_events(&happened) {
+                let _ = writeln!(err, "k8rs: {sentence}");
             }
             None
         }

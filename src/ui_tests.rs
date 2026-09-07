@@ -11,7 +11,10 @@
 //! evidence quotes are the committed capture's bytes as that file prints them.
 
 use super::*;
-use crate::rules::{ClusterSnapshot, Finding, NodeSnapshot, ObjectId, ObjectKind, PodSnapshot};
+use crate::rules::{
+    ClusterSnapshot, ContainerSnapshot, ContainerState, Finding, NodeSnapshot, ObjectId,
+    ObjectKind, PodSnapshot,
+};
 use crate::views::Group;
 use k8s_openapi::jiff::Timestamp;
 use ratatui::Terminal;
@@ -125,6 +128,7 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
         reports: &[],
         log: &[],
         keys: "↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit",
+        detail: None,
     }
 }
 
@@ -3181,5 +3185,1154 @@ fn every_analysis_pane_at_the_floor() {
                 rows(&scrolled).join("\n")
             );
         }
+    }
+}
+
+// --- THE DETAIL TABS ---
+//
+// **The fixtures are committed captures wherever a pane reads a pod** (NOTES § D53): `oom`,
+// `crashloop`, `evicted`, `healthy-sidecar` and `pending` are the five real container shapes
+// describe has to draw, and none of them is hand-written JSON. What *is* constructed here is
+// `k8s::Happened` and `k8s::LogLines` — k8rs's own types, decoded and proven in `k8s_tests.rs`,
+// the same reason `Card` and `Finding` are constructed above.
+
+/// The pane's own columns — the sidebar, the divider and the frame's right border dropped — so an
+/// assertion reads as the row a person sees.
+fn said(line: &str) -> String {
+    pane(line).trim_end_matches(['│', ' ']).to_owned()
+}
+
+/// **A moment after every committed capture's own stamps**, so `created 4 days ago` is a real rung
+/// of the ladder. [`now`] is four minutes after a *constructed* stamp and is four years *before*
+/// these, which draws no age at all — correctly, by [`crate::rules::age`]'s skew guard.
+const READING: i64 = 1_787_616_000;
+
+fn later() -> Time {
+    Time(Timestamp::from_second(READING).expect("a representable second"))
+}
+
+/// A stamp `seconds` before [`later`].
+fn ago(seconds: i64) -> Time {
+    Time(Timestamp::from_second(READING - seconds).expect("a representable second"))
+}
+
+/// One event, in the five fields [`crate::k8s::Happening`] carries.
+fn happening(
+    at: Option<Time>,
+    reason: &str,
+    message: &str,
+    count: Option<i32>,
+    first: Option<Time>,
+) -> crate::k8s::Happening {
+    crate::k8s::Happening {
+        at,
+        reason: reason.to_owned(),
+        message: message.to_owned(),
+        count,
+        first,
+    }
+}
+
+/// The two events `screens/detail.md` § A repeated event measured — the `Unhealthy` that happened
+/// 2,383 times over four days, and a `Pulled` that happened once — side by side, so the fourth
+/// line and its absence are on one screen.
+fn measured() -> crate::k8s::Happened {
+    crate::k8s::Happened {
+        lines: vec![
+            happening(
+                Some(ago(180)),
+                "Unhealthy",
+                "Readiness probe failed: HTTP probe failed with statuscode: 503",
+                Some(2383),
+                Some(ago(345_600)),
+            ),
+            happening(
+                Some(ago(14_400)),
+                "Pulled",
+                "Successfully pulled image \"payments/web:2.3.1\"",
+                Some(1),
+                None,
+            ),
+        ],
+        cut: false,
+    }
+}
+
+/// **A pod and its containers in `spec` order** — `k8s::PodRead`'s own pairing, rebuilt from the
+/// same capture because that type has no constructor outside the frozen `k8s.rs`.
+///
+/// **`spec.containers[]` then `spec.initContainers[]`, never `status.containerStatuses`'** order:
+/// the kubelet sorts that one by name, and reading it instead is what opened `alpha` where
+/// `kubectl logs` opens `zeta` (`k8s-admin`, 2026-08-30).
+fn declared_by(name: &str) -> (PodSnapshot, Vec<String>) {
+    let pod: k8s_openapi::api::core::v1::Pod = serde_json::from_value(capture(name))
+        .unwrap_or_else(|e| panic!("{name}.json is not a Pod: {e}"));
+    let spec = pod.spec.clone().unwrap_or_default();
+    let names = spec
+        .containers
+        .iter()
+        .chain(spec.init_containers.iter().flatten())
+        .map(|container| container.name.clone())
+        .collect();
+    (PodSnapshot::from(pod), names)
+}
+
+fn paired<'a>(
+    pod: &'a PodSnapshot,
+    names: &'a [String],
+) -> Vec<(&'a str, Option<&'a ContainerSnapshot>)> {
+    names
+        .iter()
+        .map(|name| {
+            (
+                name.as_str(),
+                pod.containers.iter().find(|held| held.name == *name),
+            )
+        })
+        .collect()
+}
+
+/// Everything a detail pane is drawn from, owned, so the borrows in [`Detail`] have somewhere to
+/// live for the length of a test.
+struct Open<'a> {
+    object: ObjectId,
+    logs: Pane<Logs<'a>>,
+    read: Pane<Described<'a>>,
+    yaml: Pane<String>,
+    events: Pane<crate::k8s::Happened>,
+    secret: bool,
+}
+
+impl<'a> Open<'a> {
+    /// Nothing has answered — which is the state of every tab the reader is not on.
+    fn new() -> Self {
+        Open {
+            object: id(ObjectKind::Pod, Some("payments"), "web-7d9f4"),
+            logs: Pane::Loading,
+            read: Pane::Loading,
+            yaml: Pane::Loading,
+            events: Pane::Loading,
+            secret: false,
+        }
+    }
+
+    fn open(&'a self) -> Detail<'a> {
+        Detail {
+            object: &self.object,
+            logs: &self.logs,
+            read: &self.read,
+            yaml: &self.yaml,
+            events: &self.events,
+            secret_without_keys: self.secret,
+        }
+    }
+}
+
+fn on(tab: Tab) -> App {
+    App {
+        tab,
+        ..App::default()
+    }
+}
+
+/// Render one detail pane at the 80×24 floor.
+fn detailed(app: &App, open: &Detail) -> Buffer {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = later();
+    let mut screen = screen(&alerts, &now);
+    screen.detail = Some(open);
+    render(app, &screen)
+}
+
+fn logged(lines: &[&str]) -> crate::k8s::LogLines {
+    let mut held = crate::k8s::LogLines::default();
+    for line in lines {
+        held.push((*line).to_owned());
+    }
+    held
+}
+
+/// **The tab row and the underline under the open tab**, for all four tabs, at the columns
+/// `screens/detail.md` draws them — read off that file rather than estimated.
+///
+/// **The logs mockup is the one that does not agree with its three siblings** and is drawn to the
+/// rule the other three share: three columns between labels, and an underline of `label + 2`
+/// starting at the `‹`. That mockup draws one column and seven; describe (10 at 9), yaml (6 at 20)
+/// and events (8 at 27) all read straight off the rule.
+#[test]
+fn the_tab_row_marks_the_open_tab_and_underlines_exactly_it() {
+    for (tab, row, under) in [
+        (
+            Tab::Logs,
+            "  ‹ logs ›   describe   yaml   events",
+            "  ──────",
+        ),
+        (
+            Tab::Describe,
+            "  logs   ‹ describe ›   yaml   events",
+            "         ──────────",
+        ),
+        (
+            Tab::Yaml,
+            "  logs   describe   ‹ yaml ›   events",
+            "                    ──────",
+        ),
+        (
+            Tab::Events,
+            "  logs   describe   yaml   ‹ events ›",
+            "                           ────────",
+        ),
+    ] {
+        let open = Open::new();
+        let drawn = detailed(&on(tab), &open.open());
+        let rows = rows(&drawn);
+        assert_eq!(said(&rows[3]), row, "{tab:?} drew the wrong tab row");
+        assert_eq!(
+            said(&rows[4]),
+            under,
+            "{tab:?} underlined the wrong columns"
+        );
+    }
+}
+
+/// The object's name is the row above the tabs, `namespace/name` — [`name`]'s one spelling.
+#[test]
+fn the_object_is_named_above_the_tab_row() {
+    let open = Open::new();
+    let drawn = detailed(&on(Tab::Events), &open.open());
+    assert_eq!(said(&rows(&drawn)[2]), "  payments/web-7d9f4");
+}
+
+/// **A count above one earns the fourth line and a count of one does not** — the two events
+/// § A repeated event measured, on one screen so the rule and its absence are both visible. The
+/// age column pads to the widest age on the pane, which is what makes the phrases line up.
+#[test]
+fn an_event_that_repeated_says_how_often_and_one_that_did_not_says_nothing_extra() {
+    let mut open = Open::new();
+    open.events = Pane::Ready(measured());
+    let drawn = detailed(&on(Tab::Events), &open.open());
+    println!("{}", rows(&drawn).join("\n"));
+
+    assert_eq!(
+        said(&row(&drawn, "the health check failed")),
+        "  3 min ago    the health check failed",
+        "the age pads to `4 hours ago`, the widest on the pane"
+    );
+    assert_eq!(
+        said(&row(&drawn, "Readiness probe")),
+        "  (Unhealthy) Readiness probe failed: HTTP probe failed"
+    );
+    assert_eq!(
+        said(&row(&drawn, "happened")),
+        "  happened 2,383 times since 4 days ago"
+    );
+    assert_eq!(
+        said(&row(&drawn, "the image is ready")),
+        "  4 hours ago  the image is ready"
+    );
+    assert!(
+        !holds(&drawn, "happened 1 times"),
+        "a thing that happened once needs no sentence saying so"
+    );
+}
+
+/// **An event with no stamp draws no age**, rather than one this file invented — and still pays
+/// the column, so the phrases below it line up.
+#[test]
+fn an_event_with_no_age_draws_none_and_still_pays_the_column() {
+    let mut open = Open::new();
+    let mut happened = measured();
+    happened.lines[0].at = None;
+    open.events = Pane::Ready(happened);
+    let drawn = detailed(&on(Tab::Events), &open.open());
+    assert_eq!(
+        said(&row(&drawn, "the health check failed")),
+        "               the health check failed",
+        "no age, and the phrase still starts where the other one's does"
+    );
+}
+
+/// **Neither an age nor a phrase drops the first line rather than padding a blank one** — the
+/// phrase-less, age-less `BackOff` `screens/detail.md` draws, as its two lines and not three.
+#[test]
+fn an_event_with_neither_an_age_nor_a_phrase_drops_its_first_line() {
+    let mut open = Open::new();
+    open.events = Pane::Ready(crate::k8s::Happened {
+        lines: vec![happening(
+            None,
+            "BackOff",
+            "Back-off restarting failed container app",
+            None,
+            None,
+        )],
+        cut: false,
+    });
+    let drawn = detailed(&on(Tab::Events), &open.open());
+    assert_eq!(
+        said(&rows(&drawn)[5]),
+        "  (BackOff) Back-off restarting failed container app",
+        "the row starts on the first body line, with no blank padding above it"
+    );
+}
+
+/// **A reason no table names prints its own raw word beside the message, nothing invented** — the
+/// fall-through that is the ordinary case rather than a carve-out (NOTES § D198).
+#[test]
+fn a_reason_the_table_does_not_name_keeps_its_raw_word() {
+    let mut open = Open::new();
+    open.events = Pane::Ready(crate::k8s::Happened {
+        lines: vec![happening(
+            Some(ago(180)),
+            "FailedScheduling",
+            "0/3 nodes are available",
+            None,
+            None,
+        )],
+        cut: false,
+    });
+    let drawn = detailed(&on(Tab::Events), &open.open());
+    assert_eq!(
+        said(&row(&drawn, "3 min ago")),
+        "  3 min ago",
+        "no phrase, so the head line is the age alone"
+    );
+    assert_eq!(
+        said(&row(&drawn, "FailedScheduling")),
+        "  (FailedScheduling) 0/3 nodes are available"
+    );
+}
+
+/// **A cut read brings the heading back, and the heading withdraws the newest-first promise** —
+/// the one state this pane draws a heading at all, with `k8s::EVENTS_KEPT` interpolated rather
+/// than a second copy of the number.
+#[test]
+fn a_read_the_server_cut_says_so_and_takes_back_newest_first() {
+    let mut open = Open::new();
+    let mut happened = measured();
+    happened.cut = true;
+    open.events = Pane::Ready(happened);
+    let drawn = detailed(&on(Tab::Events), &open.open());
+    assert_eq!(
+        said(&rows(&drawn)[5]),
+        "  events (the first 500 k8rs was given — there are",
+        "the heading is the first thing in the pane"
+    );
+    assert_eq!(
+        said(&rows(&drawn)[6]),
+        "  more, and these are not the newest):"
+    );
+
+    let mut open = Open::new();
+    open.events = Pane::Ready(measured());
+    let uncut = detailed(&on(Tab::Events), &open.open());
+    assert!(
+        !holds(&uncut, "events ("),
+        "an uncut list draws no heading — the tab label already says what the pane is"
+    );
+}
+
+/// **Nothing left is not nothing happened**, and the second sentence is what tells them apart —
+/// centred here, because with nothing else on the pane this is a whole-screen calm state.
+#[test]
+fn an_events_pane_with_nothing_in_it_says_why_it_is_empty() {
+    let mut open = Open::new();
+    open.events = Pane::Ready(crate::k8s::Happened::default());
+    let drawn = detailed(&on(Tab::Events), &open.open());
+    assert!(holds(&drawn, "○  none right now"));
+    assert!(holds(&drawn, "Kubernetes only keeps events for a"));
+    assert!(
+        said(&row(&drawn, "○  none right now")).starts_with("           "),
+        "the calm headline is centred in the pane, not flush left: {:?}",
+        said(&row(&drawn, "○  none right now"))
+    );
+}
+
+/// **A refusal degrades this one tab and says so in the pane** — never a `403`, never the word
+/// RBAC, and **never the empty sentence**: *we were not allowed to look* is not *there is
+/// nothing*. This is the one a shared three-answer helper got wrong on 2026-09-06.
+#[test]
+fn a_refused_events_read_draws_the_sentence_and_not_the_empty_state() {
+    let mut open = Open::new();
+    open.events = Pane::Denied(
+        "k8rs can't read this pod's events. Missing permission: list events in payments."
+            .to_owned(),
+        crate::k8s::Happened::default(),
+    );
+    let drawn = detailed(&on(Tab::Events), &open.open());
+    assert_eq!(
+        said(&rows(&drawn)[5]),
+        "  k8rs can't read this pod's events. Missing"
+    );
+    assert!(holds(&drawn, "permission: list events in payments."));
+    assert!(
+        !holds(&drawn, "none right now"),
+        "a refusal must not draw the empty state"
+    );
+    assert!(!holds(&drawn, "Kubernetes only keeps events"));
+}
+
+/// **The identity line, the containers block and the events under it** — describe's three parts,
+/// over the committed OOM capture, at the columns `screens/detail.md` draws them.
+#[test]
+fn describe_draws_the_identity_line_the_containers_and_the_events() {
+    let (pod, names) = declared_by("oom");
+    let containers = paired(&pod, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    open.events = Pane::Ready(measured());
+    let drawn = detailed(&on(Tab::Describe), &open.open());
+    println!("{}", rows(&drawn).join("\n"));
+
+    assert_eq!(
+        said(&rows(&drawn)[5]),
+        "  Pod · running · created 4 days ago"
+    );
+    assert_eq!(said(&row(&drawn, "containers")), "  containers");
+    assert_eq!(
+        said(&row(&drawn, "hog")),
+        "    hog   failed",
+        "the name pads to the widest declared name plus three"
+    );
+    assert_eq!(
+        said(&row(&drawn, "exceeded")),
+        "      container exceeded its memory limit — exit 137,",
+        "the restart count rides the last line of the row"
+    );
+    assert_eq!(
+        said(&row(&drawn, "10 restarts")),
+        "      10 restarts",
+        "a detail row's wrap stays at its own indent, unlike a name row's"
+    );
+    assert_eq!(said(&row(&drawn, "events (")), "  events (newest first)");
+    assert!(holds(&drawn, "the health check failed"));
+}
+
+/// **A pod carrying `reason: Evicted` says why it failed**, in the same shape an event's row uses
+/// — the phrase, then the raw word.
+///
+/// **`(Evicted)` carries no message and that is a limit, not a bug**: `status.message` is not a
+/// field `rules.rs` holds and that file is frozen, so this build has no sentence to put beside it
+/// (`screens/detail.md` draws one; `crate::views::identity` says why it cannot).
+#[test]
+fn describe_says_why_a_pod_failed_when_it_carries_a_reason() {
+    let (pod, names) = declared_by("evicted");
+    let containers = paired(&pod, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    let drawn = detailed(&on(Tab::Describe), &open.open());
+    assert_eq!(
+        said(&rows(&drawn)[5]),
+        "  Pod · failed · created 2 days ago"
+    );
+    assert_eq!(
+        said(&row(&drawn, "take back room")),
+        "  removed by the node to take back room"
+    );
+    assert_eq!(said(&row(&drawn, "(Evicted)")), "  (Evicted)");
+    // `Error` is in no table, so the container row falls through to its exit code alone.
+    assert_eq!(said(&row(&drawn, "exit 137")), "      exit 137");
+}
+
+/// **A waiting container says its reason in plain language, not the generic `waiting`** — over the
+/// committed CrashLoopBackOff capture, wrapping under its own text.
+#[test]
+fn describe_translates_a_waiting_container_and_counts_its_restarts() {
+    let (pod, names) = declared_by("crashloop");
+    let containers = paired(&pod, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    let drawn = detailed(&on(Tab::Describe), &open.open());
+    assert_eq!(
+        said(&row(&drawn, "quitter")),
+        "    quitter   keeps crashing and restarting, 10"
+    );
+    assert_eq!(
+        said(&row(&drawn, "restarts")),
+        "      restarts",
+        "a name-row continuation indents one pad past the name, not under it"
+    );
+}
+
+/// **The containers block is `spec` order and not the kubelet's** — `healthy-sidecar` declares
+/// `app` then the init container `proxy`, and `status.containerStatuses` reports them the other
+/// way round.
+#[test]
+fn the_containers_block_keeps_the_order_the_author_wrote() {
+    let (pod, names) = declared_by("healthy-sidecar");
+    let containers = paired(&pod, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    let drawn = detailed(&on(Tab::Describe), &open.open());
+    let rows = rows(&drawn);
+    let at = |needle: &str| rows.iter().position(|line| line.contains(needle));
+    assert!(
+        at("  app  ") < at("  proxy"),
+        "spec order, not kubelet order"
+    );
+    assert_eq!(said(&row(&drawn, "proxy")), "    proxy   running");
+}
+
+/// **A healthy pod's empty events block is not a broken fetch** — the heading loses its
+/// `(newest first)`, and the sentence under it says *why* the list is empty. **Left-flush here**,
+/// unlike the tab, because it is a section of a pane rather than the whole of one.
+#[test]
+fn describe_with_no_events_says_nothing_is_left_rather_than_nothing_happened() {
+    let (pod, names) = declared_by("healthy-sidecar");
+    let containers = paired(&pod, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    open.events = Pane::Ready(crate::k8s::Happened::default());
+    let drawn = detailed(&on(Tab::Describe), &open.open());
+    assert_eq!(
+        said(&row(&drawn, "none right now")),
+        "  ○  none right now",
+        "flush under the heading, not centred in the pane"
+    );
+    let rows = rows(&drawn);
+    let heading = rows
+        .iter()
+        .position(|line| said(line) == "  events")
+        .expect("the block still has a heading");
+    assert!(
+        said(&rows[heading + 1]).contains("none right now"),
+        "the heading sits directly above the calm line"
+    );
+    assert!(holds(&drawn, "Kubernetes only keeps events for a"));
+}
+
+/// **`▾` where there is something to pick, and nothing where there is not** — a key that does
+/// nothing is a bug this product has already shipped once. `previous log:` starts in the same
+/// column either way, which is what both mockups draw.
+#[test]
+fn the_logs_header_offers_a_picker_only_to_a_pod_that_has_one() {
+    for (capture, expected) in [
+        (
+            "healthy-sidecar",
+            "  container: app ▾                    previous log: off",
+        ),
+        (
+            "pending",
+            "  container: app                      previous log: off",
+        ),
+    ] {
+        let (pod, names) = declared_by(capture);
+        let containers = paired(&pod, &names);
+        let read = Described {
+            snapshot: &pod,
+            containers: &containers,
+        };
+        let held = logged(&["14:21:58  starting worker pool"]);
+        let mut open = Open::new();
+        open.logs = Pane::Ready(Logs {
+            pod: &read,
+            container: "app",
+            previous: false,
+            held: &held,
+        });
+        let drawn = detailed(&on(Tab::Logs), &open.open());
+        assert_eq!(said(&row(&drawn, "container:")), expected, "{capture}");
+    }
+}
+
+/// **Silent below one drop, exact at and above it** — and the sentence is pinned above the
+/// content, where the gap actually is.
+#[test]
+fn the_dropped_lines_sentence_appears_only_once_something_was_dropped() {
+    let (pod, names) = declared_by("pending");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let short = logged(&["14:23:41  connected to postgres"]);
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &short,
+    });
+    let quiet = detailed(&on(Tab::Logs), &open.open());
+    assert!(!holds(&quiet, "dropped from the top"));
+
+    let mut full = crate::k8s::LogLines::default();
+    for nth in 0..crate::k8s::LOG_LINES + 142 {
+        full.push(format!("line {nth}"));
+    }
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &full,
+    });
+    let drawn = detailed(&on(Tab::Logs), &open.open());
+    assert_eq!(
+        said(&row(&drawn, "dropped")),
+        "  142 lines were dropped from the top to keep this pane"
+    );
+    assert!(holds(&drawn, "bounded."));
+}
+
+/// **A container that has produced nothing is a state, not a hang** (PRIOR-ART § E1) — and the
+/// header line above it still says which container and which run.
+#[test]
+fn a_container_that_has_written_nothing_says_so_rather_than_hanging() {
+    let (pod, names) = declared_by("pending");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let held = crate::k8s::LogLines::default();
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &held,
+    });
+    let drawn = detailed(&on(Tab::Logs), &open.open());
+    assert!(holds(&drawn, "○  no logs yet"));
+    assert!(holds(&drawn, "Nothing has been written to this"));
+    assert!(holds(&drawn, "container: app"));
+    assert!(
+        !holds(&drawn, "reading the cluster…"),
+        "the stream answered — it answered with nothing"
+    );
+}
+
+/// **`⇧p` on a container that has never restarted** falls back to the run that does exist and says
+/// so — k8rs does not print the API's refusal and does not leave the toggle pointed at nothing.
+#[test]
+fn asking_for_a_previous_run_that_does_not_exist_says_so_and_falls_back() {
+    let (pod, names) = declared_by("healthy-sidecar");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let held = logged(&["14:21:58  starting worker pool"]);
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: true,
+        held: &held,
+    });
+    let drawn = detailed(&on(Tab::Logs), &open.open());
+    assert_eq!(
+        said(&row(&drawn, "⇧p —")),
+        "  ⇧p — app hasn't restarted, so there's no previous run"
+    );
+    assert_eq!(
+        said(&row(&drawn, "Showing the current")),
+        "       to show. Showing the current run instead."
+    );
+
+    // A container that *has* restarted gets no such line — `oom`'s `hog` has 10.
+    let (restarted, names) = declared_by("oom");
+    let containers = paired(&restarted, &names);
+    let read = Described {
+        snapshot: &restarted,
+        containers: &containers,
+    };
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "hog",
+        previous: true,
+        held: &held,
+    });
+    let drawn = detailed(&on(Tab::Logs), &open.open());
+    assert!(!holds(&drawn, "hasn't restarted"));
+    assert!(holds(&drawn, "previous log: on"));
+}
+
+/// **A log line keeps its own indentation through a wrap** — a stack frame's leading spaces *are*
+/// the line — and a line `k8s::text` already cut carries its marker verbatim rather than being cut
+/// a second time here.
+#[test]
+fn a_log_line_keeps_its_indent_and_a_cut_one_keeps_its_marker() {
+    let (pod, names) = declared_by("pending");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let held = logged(&[
+        "    at Ledger.post(Ledger.java:214)",
+        "14:23:51  {\"level\":\"error\"… (shortened by k8rs)",
+        "14:23:52  connecting to postgres://payments-db.svc.cluster.local:5432/payments",
+    ]);
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &held,
+    });
+    let drawn = detailed(&on(Tab::Logs), &open.open());
+    assert_eq!(
+        said(&row(&drawn, "Ledger.post")),
+        "      at Ledger.post(Ledger.java:214)",
+        "the line's own four spaces survive"
+    );
+    assert!(holds(&drawn, "(shortened by k8rs)"));
+    // Wider than the 53-column pane, so it takes two rows and loses nothing.
+    assert!(holds(&drawn, "14:23:52  connecting to"));
+    assert!(holds(
+        &drawn,
+        "postgres://payments-db.svc.cluster.local:5432"
+    ));
+}
+
+/// **The yaml pane is the document and nothing else**: no reading margin, the API's own key order,
+/// and — the one reversal on this page — `\n` surviving, because here the payload *is* the text
+/// (NOTES § D198).
+#[test]
+fn the_yaml_pane_keeps_the_documents_own_lines_and_its_own_left_edge() {
+    let mut open = Open::new();
+    open.yaml = Pane::Ready(
+        "apiVersion: v1\nkind: ConfigMap\ndata:\n  Corefile: |\n    .:53 {\n        errors\n    }\n"
+            .to_owned(),
+    );
+    let drawn = detailed(&on(Tab::Yaml), &open.open());
+    let rows = rows(&drawn);
+    println!("{}", rows.join("\n"));
+    assert_eq!(
+        said(&rows[5]),
+        "apiVersion: v1",
+        "no two-column reading margin: the pane's left edge is the document's"
+    );
+    assert_eq!(said(&rows[6]), "kind: ConfigMap");
+    assert_eq!(said(&rows[7]), "data:");
+    assert_eq!(said(&rows[8]), "  Corefile: |");
+    assert_eq!(
+        said(&rows[9]),
+        "    .:53 {",
+        "a block scalar's newlines print as the lines they are"
+    );
+    assert_eq!(said(&rows[10]), "        errors");
+}
+
+/// **A Secret's values arrive masked and are drawn exactly as `k8s::document` wrote them** — this
+/// pane adds no masking of its own and takes none away.
+#[test]
+fn a_secrets_values_are_drawn_as_the_sizes_they_were_masked_to() {
+    let mut open = Open::new();
+    open.yaml = Pane::Ready(
+        "kind: Secret\ndata:\n  username: <hidden — 8 bytes>\n  tls.crt: <hidden — 1,172 bytes>\n"
+            .to_owned(),
+    );
+    let drawn = detailed(&on(Tab::Yaml), &open.open());
+    assert_eq!(
+        said(&row(&drawn, "username")),
+        "  username: <hidden — 8 bytes>"
+    );
+    assert!(holds(&drawn, "tls.crt: <hidden — 1,172 bytes>"));
+}
+
+/// **A Secret with no keys says so** — `data: {}` is drawn as the API returned it, and the
+/// sentence under it says what an empty map means rather than leaving it to be interpreted.
+#[test]
+fn a_secret_with_no_keys_says_it_holds_none_yet() {
+    let mut open = Open::new();
+    open.yaml = Pane::Ready("kind: Secret\ntype: Opaque\ndata: {}\n".to_owned());
+    open.secret = true;
+    let drawn = detailed(&on(Tab::Yaml), &open.open());
+    assert!(holds(&drawn, "data: {}"));
+    assert_eq!(
+        said(&row(&drawn, "holds no keys")),
+        "  This Secret holds no keys yet."
+    );
+
+    let mut open = Open::new();
+    open.yaml = Pane::Ready("kind: Secret\ndata:\n  username: <hidden — 8 bytes>\n".to_owned());
+    let drawn = detailed(&on(Tab::Yaml), &open.open());
+    assert!(
+        !holds(&drawn, "holds no keys"),
+        "a Secret that has keys is told nothing about having none"
+    );
+}
+
+/// **A tab that has not answered says so, and never says there is nothing** (PRIOR-ART § C2) — the
+/// same wait every other pane on this product draws.
+#[test]
+fn a_tab_that_has_not_answered_is_not_a_tab_with_nothing_in_it() {
+    for tab in Tab::ALL {
+        let open = Open::new();
+        let drawn = detailed(&on(tab), &open.open());
+        assert!(
+            holds(&drawn, "reading the cluster…"),
+            "{tab:?} drew no waiting state"
+        );
+        assert!(
+            !holds(&drawn, "none right now") && !holds(&drawn, "no logs yet"),
+            "{tab:?} turned a wait into an empty answer"
+        );
+    }
+}
+
+/// **The name, the tab row and the underline stay pinned while the body scrolls** — a reader who
+/// has scrolled has not lost which object they are on.
+#[test]
+fn scrolling_a_detail_pane_moves_the_body_and_nothing_above_it() {
+    let mut open = Open::new();
+    open.yaml = Pane::Ready((0..40).map(|nth| format!("key{nth}: value\n")).collect());
+    let still = detailed(&on(Tab::Yaml), &open.open());
+    let moved = detailed(
+        &App {
+            tab: Tab::Yaml,
+            scroll: 3,
+            ..App::default()
+        },
+        &open.open(),
+    );
+    for nth in 2..5 {
+        assert_eq!(
+            pane(&rows(&still)[nth]),
+            pane(&rows(&moved)[nth]),
+            "row {nth} is pinned"
+        );
+    }
+    assert_eq!(said(&rows(&still)[5]), "key0: value");
+    assert_eq!(said(&rows(&moved)[5]), "key3: value");
+}
+
+/// **Follow pins to the bottom, and a manual offset cannot scroll past the end.** The clamp is
+/// this file's because how many rows a pane has depends on the width it is drawn at.
+#[test]
+fn follow_pins_to_the_last_line_and_a_wild_offset_stops_at_the_end() {
+    let (pod, names) = declared_by("pending");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let held = logged(&[
+        "line 0", "line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8",
+        "line 9", "line 10", "line 11", "line 12", "line 13", "line 14",
+    ]);
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &held,
+    });
+    let following = detailed(
+        &App {
+            tab: Tab::Logs,
+            following: true,
+            ..App::default()
+        },
+        &open.open(),
+    );
+    assert!(
+        holds(&following, "line 14"),
+        "follow shows the newest line:\n{}",
+        rows(&following).join("\n")
+    );
+    assert!(
+        !holds(&following, "line 0 "),
+        "and has scrolled past the oldest"
+    );
+    let wild = detailed(
+        &App {
+            tab: Tab::Logs,
+            scroll: 900,
+            ..App::default()
+        },
+        &open.open(),
+    );
+    assert!(
+        holds(&wild, "line 14"),
+        "an offset past the end clamps to it rather than drawing a blank pane"
+    );
+}
+
+/// **The `(RawReason)` line is the evidence and is drawn dim; the lines above it are not** — and
+/// it is dim for being *last*, so a reason no table names still dims the right line when the
+/// block is two lines instead of three.
+///
+/// **All three block sizes, because *last* is not *third* and it is not *any*** — three lines, two
+/// lines, and the one line a pod with no `status.reason` at all draws, where the last line is also
+/// the first and must stay in the identity's own ink. That one shape was the unfed one
+/// (NOTES § D29): `just mutants-diff` turned `last > 0` into `last >= 0` — always true for a
+/// `usize` — and no test could tell the difference, because none of them drew a block of one.
+#[test]
+fn a_pods_own_reason_is_dim_and_the_identity_line_above_it_is_not() {
+    let ink_of = |drawn: &Buffer, needle: &str, at: u16| {
+        let y = rows(drawn)
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}"));
+        drawn
+            .cell((at, u16::try_from(y).expect("a row on screen")))
+            .map(|cell| cell.style().fg)
+            .expect("a cell")
+    };
+    let dim = Some(ink(theme::DIM, Depth::TrueColor));
+    let text = Some(ink(theme::TEXT, Depth::TrueColor));
+    let left = 1 + SIDEBAR + 1 + PAD;
+
+    let (pod, names) = declared_by("evicted");
+    let containers = paired(&pod, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    let three = detailed(&on(Tab::Describe), &open.open());
+    assert_eq!(ink_of(&three, "Pod · failed", left), text);
+    assert_eq!(ink_of(&three, "take back room", left), text);
+    assert_eq!(ink_of(&three, "(Evicted)", left), dim);
+
+    // Two lines, not three: `Shutdown` is in no table, so there is no phrase between them.
+    let mut two = pod.clone();
+    two.reason = Some("Shutdown".to_owned());
+    let containers = paired(&two, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &two,
+        containers: &containers,
+    });
+    let drawn = detailed(&on(Tab::Describe), &open.open());
+    assert_eq!(ink_of(&drawn, "Pod · failed", left), text);
+    assert_eq!(
+        ink_of(&drawn, "(Shutdown)", left),
+        dim,
+        "the evidence is still the dim one when the block lost its middle line"
+    );
+
+    // One line, not two: a pod with no `status.reason` has no evidence line under its identity,
+    // and the one line it does draw is the identity — never dimmed for being last of one.
+    let (quiet, names) = declared_by("healthy-sidecar");
+    let containers = paired(&quiet, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &quiet,
+        containers: &containers,
+    });
+    let one = detailed(&on(Tab::Describe), &open.open());
+    assert_eq!(
+        ink_of(&one, "Pod · running", left),
+        text,
+        "a block of one line is the identity and not the evidence"
+    );
+}
+
+/// **The cut heading wraps on describe exactly as it does on the events tab** — the clause it
+/// exists to say is its second half, so a hard cut at the pane edge takes off precisely the
+/// withdrawal and leaves the promise standing (`k8s-admin`, 2026-09-07: 84 columns into 55).
+#[test]
+fn describe_wraps_the_cut_heading_rather_than_clipping_the_withdrawal() {
+    let (pod, names) = declared_by("oom");
+    let containers = paired(&pod, &names);
+    let mut happened = measured();
+    happened.cut = true;
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    open.events = Pane::Ready(happened);
+    let drawn = detailed(&on(Tab::Describe), &open.open());
+    println!("{}", rows(&drawn).join("\n"));
+    assert_eq!(
+        said(&row(&drawn, "events (")),
+        "  events (the first 500 k8rs was given — there are",
+        "the heading wraps at the pane edge like every other free-text block here"
+    );
+    assert!(
+        holds(&drawn, "and these are not the newest"),
+        "the withdrawal is the only reason this heading exists and it has to reach the screen"
+    );
+}
+
+/// **The withdrawal is pinned above the list, not carried inside it** — it is a claim about the
+/// whole read rather than a row of it, which is the rule the logs pane one region up already
+/// keeps for its dropped-lines sentence: *a sentence that scrolled away with the content would be
+/// pointing at nothing*. Measured scrolling off at offset 3 (`k8s-admin`, 2026-09-07).
+#[test]
+fn the_cut_withdrawal_stays_on_screen_while_the_events_scroll() {
+    let mut happened = measured();
+    happened.cut = true;
+    for nth in 0..12 {
+        happened.lines.push(happening(
+            Some(ago(60)),
+            "BackOff",
+            &format!("Back-off restarting failed container app-{nth}"),
+            None,
+            None,
+        ));
+    }
+    let mut open = Open::new();
+    open.events = Pane::Ready(happened);
+    let at = |scroll: u16| {
+        detailed(
+            &App {
+                tab: Tab::Events,
+                scroll,
+                ..App::default()
+            },
+            &open.open(),
+        )
+    };
+    let still = at(0);
+    println!("{}", rows(&still).join("\n"));
+    for scroll in [0, 1, 3, 6, 900] {
+        let drawn = at(scroll);
+        assert!(
+            holds(&drawn, "and these are not the newest"),
+            "scroll {scroll} took the withdrawal off the pane:\n{}",
+            rows(&drawn).join("\n")
+        );
+    }
+    let moved = at(3);
+    println!(
+        "=== scrolled three rows in ===\n{}",
+        rows(&moved).join("\n")
+    );
+    for nth in 5..7 {
+        assert_eq!(
+            pane(&rows(&still)[nth]),
+            pane(&rows(&moved)[nth]),
+            "row {nth} is pinned"
+        );
+    }
+    assert_ne!(
+        pane(&rows(&still)[7]),
+        pane(&rows(&moved)[7]),
+        "and the list under the heading did move — the blank row between them is the list's \
+         first row and scrolls with it, which is what the two mockups draw between them"
+    );
+}
+
+/// **A waiting reason no table names still says what the kubelet said** — the raw word alone is a
+/// dead end for the reader it was left to, and the events table two functions away has never done
+/// that (`k8s-admin`, 2026-09-07, on `InvalidImageName`: one of rule 3's seven, and a real one).
+#[test]
+fn a_waiting_reason_the_table_does_not_name_keeps_the_kubelets_message() {
+    let (mut pod, names) = declared_by("oom");
+    {
+        let held = pod
+            .containers
+            .first_mut()
+            .expect("the capture reports one container");
+        held.state = ContainerState::Waiting {
+            reason: Some("InvalidImageName".to_owned()),
+            message: Some(
+                "Failed to apply default image tag \"nginx:latest:\": couldn't parse image \
+                 reference"
+                    .to_owned(),
+            ),
+        };
+    }
+    let containers = paired(&pod, &names);
+    let mut open = Open::new();
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    let drawn = detailed(&on(Tab::Describe), &open.open());
+    println!("{}", rows(&drawn).join("\n"));
+    assert_eq!(
+        said(&row(&drawn, "hog")),
+        "    hog   InvalidImageName",
+        "the raw word is still the state word"
+    );
+    assert!(
+        holds(&drawn, "Failed to apply default image tag"),
+        "and the kubelet's own sentence is under it, the way an event's message is"
+    );
+    assert!(
+        holds(&drawn, "10 restarts"),
+        "the restart count still rides the last line of the row"
+    );
+}
+
+/// **A refusal draws the sentence *and* whatever did come back — on all four tabs.** The second
+/// field of [`Pane::Denied`] is the whole reason that arm exists, and until 2026-09-07 no test fed
+/// a refusal that carried anything to logs, describe or yaml, and fed the events tab an empty one
+/// (`tester`). `cargo mutants` cannot see this: it replaces function bodies, not match arms.
+#[test]
+fn a_refusal_draws_the_sentence_and_the_partial_answer_on_every_tab() {
+    let (pod, names) = declared_by("oom");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let held = logged(&["the last line before the token expired"]);
+    let mut open = Open::new();
+    open.logs = Pane::Denied(
+        "k8rs can't read this container's log. Missing permission: get pods/log in payments."
+            .to_owned(),
+        Logs {
+            pod: &read,
+            container: "hog",
+            previous: false,
+            held: &held,
+        },
+    );
+    open.read = Pane::Denied(
+        "k8rs can't re-read this pod. Missing permission: get pods in payments.".to_owned(),
+        Described {
+            snapshot: &pod,
+            containers: &containers,
+        },
+    );
+    open.yaml = Pane::Denied(
+        "k8rs can't read this pod's YAML. Missing permission: get pods in payments.".to_owned(),
+        "kind: Pod\nmetadata:\n  name: web-7d9f4\n".to_owned(),
+    );
+    open.events = Pane::Denied(
+        "k8rs can't read this pod's events. Missing permission: list events in payments."
+            .to_owned(),
+        measured(),
+    );
+    for (tab, refusal, came_back) in [
+        (Tab::Logs, "pods/log", "before the token expired"),
+        (Tab::Describe, "re-read this pod", "Pod · running · created"),
+        (Tab::Yaml, "pod's YAML", "name: web-7d9f4"),
+        (
+            Tab::Events,
+            "list events in payments.",
+            "the health check failed",
+        ),
+    ] {
+        let drawn = detailed(&on(tab), &open.open());
+        println!("=== {tab:?} refused ===\n{}", rows(&drawn).join("\n"));
+        assert!(
+            holds(&drawn, refusal),
+            "{tab:?} drew no refusal sentence:\n{}",
+            rows(&drawn).join("\n")
+        );
+        assert!(
+            holds(&drawn, came_back),
+            "{tab:?} threw away what did come back:\n{}",
+            rows(&drawn).join("\n")
+        );
+        assert!(
+            !holds(&drawn, "none right now") && !holds(&drawn, "no logs yet"),
+            "{tab:?} turned a refusal into an empty answer"
+        );
     }
 }

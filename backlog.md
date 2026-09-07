@@ -2773,3 +2773,100 @@ long-form version and stays the authority.*
   first, which is what the renderer already draws. **Wanted before Phase 12 wires the sidebar
   to the panes**, because a badge drawn for a pane that is not there is a wrong sidebar and
   not a wrong report. Raised by `dev-ui` at the Analysis box, 2026-09-06
+
+- **`scripts/check-docs.py` cannot see a duplicate heading slug, because a duplicate slug
+  *resolves*.** Two `###` headings with identical text make every anchor to either one land on
+  the first, so the second section is permanently unlinkable — and the checker, which asks only
+  *does this link resolve*, passes. It happened in `screens/detail.md` on 2026-09-06 and was
+  caught by hand; the repo measures 0 duplicates today across `screens/`, `docs/`, `NOTES.md`,
+  `todo.md` and `README.md`, so a guard would land green and stay green. `tester`'s, whenever
+  `scripts/` is next open — roughly ten lines beside the existing `anchors()` walk, which
+  already collects every heading and only needs to count them. Raised by the PM at the
+  detail-tabs box
+  ([D254](NOTES.md#d254--the-events-tab-is-settled-before-it-is-drawn-describes-grammar-reused-whole-a-heading-that-only-comes-back-to-withdraw-a-promise-and-the-check-that-could-not-see-the-defect-it-was-written-after-2026-09-06)),
+  2026-09-06
+
+- **Nothing pins the `k8rs: ` prefix on the no-events stderr line.** `dev-core` measured it
+  during the Phase 11 de-duplication: drop the prefix and the whole suite stays green. Not a
+  regression — it was unpinned before the wording moved to `views.rs` too — but it is a
+  user-visible string with no test under it, and the prefix split is now load-bearing
+  (`views::NO_EVENTS` deliberately carries no prefix; the driver adds it). It belongs in
+  `tests/binary.rs`, which is **`tester`'s** file and not a dev's, which is why it was not closed
+  in the turn that found it.
+  **A second string is in the same state and belongs in the same box, but in `ui_tests.rs`:**
+  `ui.rs`'s log header formats `previous log: {:<3}`, and that `{:<3}` is the whole of the claim
+  that the `on` and `off` spellings start in the same column. `tester` planted `{}` in a copy of
+  the tree and the suite stayed green — 1257 passed, 0 failed — because one test feeds
+  `previous: false` for both captures and the assertion on the other is a substring.
+  **`cargo mutants` structurally cannot catch this class**: it does not mutate format strings, so
+  a padding claim has no gate but a test that asserts the column
+  ([D255](NOTES.md#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07)),
+  2026-09-07
+
+- **`container_choice` and `container_names` sanitise a value that ingest already stripped, and
+  `described` no longer does.** Created by the Phase 11 de-duplication and reported by its own
+  author. Both values come through `k8s::text(…, IDENTIFIER)` in `PodRead::of`, so the second
+  strip is redundant and the output is identical either way — **not** the two-readers-disagreeing
+  defect, just an asymmetry. Left alone deliberately: dropping a strip is not part of a
+  de-duplication and burying it in that commit would hide it from review. **One `sanitize` in
+  that region is load-bearing and must stay** — `which_container`'s refusal names a value that
+  comes from argv and never meets ingest, so a sweep that removes all three is wrong
+  ([D255](NOTES.md#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07)),
+  2026-09-07
+
+- **The Secret reveal `screens/detail.md` specifies cannot be built without reopening frozen
+  `k8s.rs`, and Phase 11's own security gate already assumes it exists.** Measured this turn, at
+  the detail-tabs box:
+  `screens/detail.md` § *A Secret, values hidden behind an explicit reveal* assigns **`v`**, gated
+  on the object being a Secret **and** holding at least one key, and Phase 11's security gate
+  carries the row *"Nothing revealed from a Secret is redrawn after the reveal is dismissed."*
+  **No box in Phase 11 builds it**, and the layer underneath cannot supply it: `k8s::document`
+  takes `(client, fetch, name, requested)` and no reveal flag, `mask()` is private and
+  unconditional, and `k8s.rs` froze at Phase 6's close.
+  **The obstacle is deliberate, which is what makes this a ruling and not a bug.** That path
+  never base64-decodes — the masked size is arithmetic over the base64 alphabet — and `k8s.rs`
+  states the reason: the plaintext is never materialised anywhere a formatter, a `Debug` or a
+  panic could find it, and it settles *a value that is not valid UTF-8 after decode is never
+  printed as text* for free. A `v` that reveals plaintext gives all of that up.
+  So there are three honest answers and the PM has ruled on none: reopen `k8s.rs` behind a
+  recorded reversal; drop `v` from the screen and let the masked sizes be the whole feature; or
+  put the reveal somewhere that is not the frozen read path. **Wanted before the Phase 11 box
+  that draws the key footer**, because that box will otherwise either bind a key that does
+  nothing — *"a key that does nothing is a bug this product has already shipped once"*, in the
+  screen's own words — or silently drop a row from a phase's security gate. Raised by the PM,
+  2026-09-07
+
+- **Carry `type` on `k8s::Happening`, so the events pane can tell a Warning from a Normal — and
+  decide what a Warning looks like before writing the field.** Ruled and deferred in
+  [D256](NOTES.md#d256--the-events-pane-cannot-tell-a-warning-from-a-normal-the-deadline-for-saying-so-was-this-box-and-a-doc-comment-naming-a-future-box-is-a-reminder-nothing-enforces-2026-09-07): the field is three lines, the *drawing* is a screen decision this product has a
+  vocabulary for (`●` `▲` `○`, `theme::band`) and this pane uses none of. **It needs a recorded
+  reversal**, because `k8s.rs` froze at Phase 6's close. Wanted before anyone calls the events tab
+  finished; the command log under that pane already teaches `kubectl events`, which prints a
+  `TYPE` column. Raised by `k8s-admin` at the detail-tabs review, 2026-09-07
+
+- **The events pane re-wraps the whole list every frame; the measured ceiling is 35.8 ms.**
+  `k8s-admin`, release build, 80×24, ten frames: 500 events each carrying a `FREE_TEXT`-length
+  message — the widest input the type permits — costs **35.8 ms per frame** and holds 2,047,500
+  bytes; the same 500 at realistic message lengths cost **975 µs**. The realistic number is fine
+  and the logs pane already has this shape, so nothing is being changed on a ceiling nobody has
+  hit. Recorded because it is per keystroke while scrolling, and because the number is measured
+  rather than guessed. Revisit only if a real cluster is ever seen producing long event messages
+  at volume. 2026-09-07
+
+- **Two smaller wording findings on the detail panes, neither wrong output.** `views::repeated`
+  can produce *"happened 2 times since just now"* when both stamps land inside the same age
+  bucket; and `views::identity` prints `Pod · unknown` for the one phase that means something
+  specific — the node stopped reporting — where it reads to a newcomer as *we don't know*, which
+  invariant 14 would rather it said outright. Both raised by `k8s-admin`, 2026-09-07
+
+- **`ContainerState::Terminated`'s `message` is discarded exactly the way `Waiting`'s was, and
+  fixing it is a screen change rather than a quiet code change.** Raised by `dev-ui` in the turn
+  that fixed the `Waiting` half, and deliberately not folded into it. `Waiting`'s fall-through now
+  carries the kubelet's sentence — `InvalidImageName` used to print bare jargon and now prints
+  *"Failed to apply default image tag …: couldn't parse image reference"* under it — but the
+  terminated arm still drops its own `message`, and it cannot simply copy that fix:
+  `screens/detail.md` pins the terminated detail line to `{phrase} — exit N`, so adding a
+  controller sentence to it changes a shape the screen fixes. **The ruling wanted is what that
+  line becomes**, and it belongs to `tui-designer` before `dev-ui`. The value is the same one that
+  justified the `Waiting` fix — a reason no table names is a word the reader cannot act on, and
+  the message is the sentence that says what to change. 2026-09-07

@@ -275,6 +275,9 @@ its line moving with it.
 - [D251](#d251--the-bleed-through-one-line-about-the-selected-row-a-count-that-is-asked-and-not-re-derived-and-the-third-silent-cut-the-mark-went-looking-for-2026-09-06) — the bleed-through: one line about the selected row, a count that is asked and not re-derived, and the third silent cut the mark went looking for
 - [D252](#d252--the-analysis-pane-one-renderer-for-seven-reports-a-shared-wrap-that-had-been-respelling-its-input-and-two-mutants-that-were-infinite-loops-2026-09-06) — the analysis pane: one renderer for seven reports, a shared wrap that had been respelling its input, and two mutants that were infinite loops
 - [D253](#d253--the-mutation-gates-jobs-measured-the-premise-was-wrong-four-is-the-number-and-the-headroom-check-had-been-sized-for-a-build-that-no-longer-exists-2026-09-06) — the mutation gate's jobs, measured: the premise was wrong, four is the number, and the headroom check had been sized for a build that no longer exists
+- [D254](#d254--the-events-tab-is-settled-before-it-is-drawn-describes-grammar-reused-whole-a-heading-that-only-comes-back-to-withdraw-a-promise-and-the-check-that-could-not-see-the-defect-it-was-written-after-2026-09-06) — the events tab is settled before it is drawn: describe's grammar reused whole, a heading that only comes back to withdraw a promise, and the check that could not see the defect it was written after
+- [D255](#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07) — the detail-tabs mutation round: three mutants no test can kill, two that were the mockup's number instead of the rule's boundary, and a guard whose subject moved when its second strip went away
+- [D256](#d256--the-events-pane-cannot-tell-a-warning-from-a-normal-the-deadline-for-saying-so-was-this-box-and-a-doc-comment-naming-a-future-box-is-a-reminder-nothing-enforces-2026-09-07) — the events pane cannot tell a Warning from a Normal, the deadline for saying so was this box, and a doc comment naming a future box is a reminder nothing enforces
 
 ## Why it exists — where the gap is
 
@@ -22065,3 +22068,168 @@ diff; verdict agreement was measured over the `ui.rs` diff alone, and the `rules
 [D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)
 sharded the phase-close sweep because four shards at ~2m50s each exceed the ten-minute call
 cap — **measured at one job**, so that rationale may no longer hold and nobody has re-run it.
+
+### D254 — the events tab is settled before it is drawn: describe's grammar reused whole, a heading that only comes back to withdraw a promise, and the check that could not see the defect it was written after (2026-09-06)
+
+**Phase 11's detail-tabs box opened on a screen that did not exist.** `screens/detail.md`
+draws four tab labels at its head and `views::Tab::ALL` has had four variants since Phase 10,
+but the file has `## The logs tab`, `## The describe tab` and `## The yaml tab` and no fourth —
+deliberately: § *The describe tab* says the events tab's own layout, scrolling and columns are
+"Phase 11's, out of scope for this file today". So step 2 ran before step 3, and `tui-designer`
+wrote the section a dev would otherwise have invented.
+
+**What it reuses, and the ruling that made that the answer.** The tab is describe's own event
+grammar over a whole pane: the reason→phrase table, the `(RawReason) verbatim message` line
+beside the phrase and never instead of it
+([D198](#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)),
+the `happened N times since <span> ago` line only when `count` is more than one, and the one age
+ladder. **Same rows, more of them, no header** — a tab that is deliberately the same grammar is
+a better answer than a second layout, and `k8s::Happening::plainly` was already built in Phase 6
+for exactly two callers. The table **does not grow here**: describe's deferral sentence promised
+the tab "the full reason-to-sentence table" and that phrase predates D198's reversal, so it was
+reworded rather than honoured. An unrecognised reason still prints its raw word beside its
+message and nothing is invented.
+
+**The heading is dropped, and that is what put a lie one round away from shipping.** The
+section's first draft dropped `events (newest first)` on the sound reasoning that the tab label
+already says it — the yaml pane carries no `yaml:` heading either. The PM's pass then read the
+code the pane will be drawn from and found `k8s::Happened::cut`: the fetch is capped at
+`EVENTS_KEPT` (500), and `main.rs:5316-5328` puts the cut **in the heading**, with its own
+comment saying why — *newest first* is not true of a list a `limit` stopped, because a limit
+returns the cluster's storage order, so the words that promise it are the words that have to be
+withdrawn. Dropping the heading dropped the only place the withdrawal could live, and a cut list
+would have been drawn under a tab labelled `events`, in arbitrary order, with the section's own
+prose asserting newest-first. **The heading now comes back only when `cut` is true**, in
+`main.rs`'s exact words, and the two overflow states stack rather than replace each other: *more
+than the pane* is this product's display choice and scrolls silently; *more than k8rs was given*
+is the server's cap and cannot be scrolled to. The mockup draws its rows deliberately out of
+chronological order, so the claim is visible and not merely stated.
+
+**Three smaller rulings the designer made that the brief did not decide.**
+1. **The command log reads `kubectl events --for pod/<name> -n <ns>`, not `kubectl describe`.**
+   Describe earns `kubectl describe` because its pane folds two reads into one; this pane shows
+   only the second half, so it teaches the command that produces only that half. **Measured, not
+   recalled**: `kubectl events --help` on 1.36.3 carries `kubectl events --for pod/web-pod-13je7`
+   as its own example.
+2. **No headless surface and no sixteenth flag.** Every other tab has a *Printed instead of
+   drawn* section because `--logs` / `--describe` / `--yaml` exist; there is no `--events` and
+   this box does not add one — invariant 10 fixes the list at fifteen and a sixteenth is a
+   recorded decision, not a side effect. Describe already prints this object's events headlessly.
+3. **A 403 on the events fetch degrades this tab and nothing else, and carries no `⚠`** — that
+   glyph is a connection or trust problem (`screens/states.md`) and a scoped-down role is
+   neither. An event with no timestamp draws no age, and a row with neither an age nor a phrase
+   drops its first line rather than leaving blank padding — describe's rule, cited rather than
+   restated.
+
+**And the check that could not see the defect it was written after.** The section arrived with
+two `###` headings byte-identical to describe's, which in GitHub markdown makes both new sections
+permanently unlinkable — every anchor resolves to the first occurrence. The designer's second
+pass had checked every link against the set of headings that exist and passed, because it was
+never asked about uniqueness: [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)'s
+shape exactly, in a document rather than in code. `scripts/check-docs.py` does not catch it
+either — it resolves links, and a duplicate slug *resolves*. Both were renamed on the file's own
+existing convention (the yaml tab's `— reversed for this one pane`), and the repo now measures
+0 duplicate heading slugs across `screens/`, `docs/`, `NOTES.md`, `todo.md` and `README.md`.
+**Whether that becomes a guard is `backlog.md`'s**, not this box's.
+
+### D255 — the detail-tabs mutation round: three mutants no test can kill, two that were the mockup's number instead of the rule's boundary, and a guard whose subject moved when its second strip went away (2026-09-07)
+
+**94 mutants over the box's own diff, 30 minutes, 5 missed and 89 caught** — and the five split
+three ways, which is why the count alone decides nothing.
+
+**Three cannot be killed by any test, and the code is not to be contorted to try.** `PAD` is `2`
+(`ui.rs`), so `step` is `usize::from(PAD)` and `step * 2` and `step + 2` are both `4`; the
+mutants at `ui.rs:1908:61`, `1910:58` and `1910:68` are arithmetically indistinguishable from the
+original. `dev-ui` added the half that matters for the next reader: **they are equivalent only
+while `PAD` is 2.** If it ever moves they become killable and will surface as new survivors —
+that is not a regression and not a re-litigation of this ruling, it is the arithmetic changing
+underneath it. **A phase-close sweep will keep reporting these three**, and this paragraph is
+what it is reported against.
+
+**Two were real, and they were the same defect wearing two spellings: a test written against the
+number the mockup draws instead of the boundary the prose states.**
+`views.rs:1186` guards `counted < 2`, and `screens/detail.md` § *A repeated event* says the line
+appears when `count` is **more than one** — so `2` must print. The tests used `1` and `2,383`,
+which are the mockup's own two numbers, and the mutant `counted <= 2` survived between them.
+`ui.rs:1875` guards `nth == last && last > 0`, and nothing had ever fed `describe` a pod whose
+`views::identity` returns **exactly one line** — the only shape where the guard does anything
+([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12), again, and this time
+the unfed shape was a length rather than a type). Both are closed, both pinned by asserting the
+**ink** and the value rather than the string.
+
+**`-D warnings` would have rejected one of them anyway, and that is worth knowing rather than
+comforting.** `last >= 0` on a `usize` makes rustc emit *comparison is useless due to type
+limits*, so CI would have refused that exact mutant whatever the tests said. It was still a real
+gap: what was missing was a *drawn one-line identity block*, and the next refactor of that
+expression would not carry the warning with it.
+
+**The de-duplication's own finding: a guard arm whose subject moved.** `views::raw_and_message`
+and `views::container_state` do not re-strip, deliberately — ingest already did
+(`k8s.rs`'s `impl Bounded for Happening` strips `reason` as an `IDENTIFIER` and `message` as `FREE_TEXT`,
+and `k8s.rs`'s events fetch builds every `Happening` through `ingest`, verified this turn at the
+call site). `main.rs`'s copies *did* re-strip, so
+`one_line_comes_out_of_every_emit_path_with_one_transformation_on_it` had been feeding its
+`--describe` arm an **unstripped** `Happening` and passing on that second strip. That input is a
+shape the pipeline cannot produce. The arm now takes `AFTER_ONE_STRIP`.
+
+**Ruled: accepted, and what changed is the guard's subject, not its strength.** That arm used to
+claim *this path strips*; it now claims *this path does not un-strip*, which is the true claim
+once the only strip is at ingest. The stronger claim did not disappear — it is
+`k8s_tests.rs`'s `an_events_words_are_stripped_before_anything_can_draw_them`, end to end against
+a stub server. **The rule this does not bend**: an input was narrowed because the wide one was
+unreachable, which is the opposite of narrowing one because the test was failing, and the
+distinction is the whole of why this paragraph exists.
+
+**One measured gap left open on purpose, with an owner.** `dev-core` dropped the `k8rs: ` prefix
+from the no-events stderr line and the suite stayed green: **no test pins it.** Not a regression —
+it was unpinned before the port too — but it is a real hole in a user-visible string, and it
+belongs in `tests/binary.rs`, which is `tester`'s file and not a dev's. Boxed in a later phase,
+never added to this running one.
+
+**And one asymmetry left alone rather than tidied.** `container_choice` and `container_names`
+still call `sanitize()` on a value that already came through `k8s::text(…, IDENTIFIER)`;
+`described` no longer does. The output is identical either way, so it is not the
+two-readers-disagreeing defect, and dropping a strip is not part of a de-duplication — burying
+that decision in this commit would hide it from the review that should see it. It is in
+[`backlog.md`](backlog.md). One `sanitize` in that region **is** load-bearing and stays:
+`which_container`'s refusal names a value that comes from argv and never meets ingest.
+
+### D256 — the events pane cannot tell a Warning from a Normal, the deadline for saying so was this box, and a doc comment naming a future box is a reminder nothing enforces (2026-09-07)
+
+**`k8s::Happening` carries five fields and `type` is not one of them**, so the events tab draws a
+`Normal` `Pulled` and a `Warning` `FailedScheduling` in the same ink and the same weight. That
+was a known omission, and the place it was written down is the part that matters: `Happening`'s
+own doc says *"`type` and `source` are on the wire and are not carried… **this file freezes after
+Phase 6**, so the box that wants one raises it before then."* **Phase 11's detail-tabs box is the
+box that wants one, and it did not raise it** — the brief named that exact region as required
+reading, the dev read it, and the sentence still did not fire. It was `k8s-admin` who found it,
+at step 6, with the file already frozen.
+
+**The cost, stated rather than waved at.** Today the five translated reasons happen to correlate
+with `type`, so the common screen is not wrong. The fall-through is what breaks it, and
+[D198](#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)
+made the fall-through **the ordinary case** rather than a carve-out: `(SuccessfulCreate)` and
+`(NodeNotReady)` reach the pane as the same dim line. This product has a severity vocabulary —
+`theme::band`, `●` `▲` `○` — and this pane uses none of it. And the command log drawn directly
+under it teaches `kubectl events`, which prints a `TYPE` column, so k8rs shows strictly less than
+the command it recommends in the same frame.
+
+**Ruled: `type` is not carried, and the reason is not that the file is frozen.** The freeze is
+the consequence; it is not an argument, and *the plan said so* is the answer this repo has
+already agreed is worth nothing on its own. The real reason is that the field is the small half.
+Adding it is three lines — the struct, the `From`, an `IDENTIFIER` strip at ingest. **Drawing it
+is a screen decision**: whether a Warning takes a band, whether it takes one of three symbols the
+rest of the product has trained the reader on, what that does to a pane whose whole grammar was
+settled hours earlier in this same turn. Settling a screen in the last hour of a box that has
+already been through two reviews is exactly how this repo has bought its most expensive defects.
+So it is **boxed in a later phase** with the reversal it needs named up front — reopening `k8s.rs`
+for one field is a recorded reversal, not a quiet edit — and the phase closes without it.
+
+**The process fact is worth more than the field.** A doc comment that names a future box as its
+deadline is a reminder with nothing behind it: no script reads it, no gate fails on it, and the
+one mechanism that could have caught it — the brief naming the region — did name the region. What
+would have worked is the deadline living where the deadline is *checked*, which is
+[`todo.md`](todo.md): a box in Phase 6 saying *decide `type` before this file freezes* would have
+been unmissable, and a sentence inside the file it constrains was not. **That is the shape to
+copy the next time a frozen-by-phase file defers a decision** — the note goes in the phase that
+closes the door, not in the file the door is on.
