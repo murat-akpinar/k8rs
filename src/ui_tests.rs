@@ -127,7 +127,6 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
         kinds: &[],
         reports: &[],
         log: &[],
-        keys: "↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit",
         detail: None,
     }
 }
@@ -294,7 +293,6 @@ fn a_line_inside_the_frame_never_reaches_the_border() {
     let log = [long.to_owned(), long.to_owned()];
     let mut wide = screen(&alerts, &now);
     wide.log = &log;
-    wide.keys = long;
     let drawn = render(&app(), &wide);
     let rows = rows(&drawn);
 
@@ -302,6 +300,16 @@ fn a_line_inside_the_frame_never_reaches_the_border() {
         assert!(rows[nth].starts_with('│'), "row {nth}: {:?}", rows[nth]);
         assert!(rows[nth].ends_with('│'), "row {nth}: {:?}", rows[nth]);
     }
+
+    // **The footer can no longer be the line that runs past the border** — every string
+    // `views::App::footer` returns is a literal inside the 76 columns [`indented`] leaves. What
+    // it can still get wrong is the pad, and a short line proves nothing about a pad by starting
+    // with `│`, so the first key is named at the column it is drawn at.
+    assert!(
+        rows[22].starts_with("│ ↑↓ move"),
+        "the footer lost its one-column pad: {:?}",
+        rows[22]
+    );
 }
 
 /// **`k8rs` is drawn only with two blank columns each side, and the boundary is where the
@@ -3155,7 +3163,6 @@ fn the_browser_screen_at_the_floor() {
         let mut screen = browsing(&ready, &workloads, &now);
         screen.namespace = namespace;
         screen.log = &log;
-        screen.keys = "↑↓ move  ⏎ open  s scale  r restart  ctrl-d delete  / filter";
 
         let mut app = App::default();
         app.open(NavItem::Group(Group::Workloads));
@@ -3184,7 +3191,6 @@ fn the_marked_browser_screen_at_the_floor() {
     let log = ["$ kubectl get pods -A".to_owned()];
     let mut screen = bleeding(&ready, &alerts, &kinds, &now);
     screen.log = &log;
-    screen.keys = "↑↓ move  ⏎ open  s scale  r restart  ctrl-d delete  / filter";
 
     let mut app = App::default();
     app.open(NavItem::Group(Group::Workloads));
@@ -4471,4 +4477,332 @@ fn a_refusal_draws_the_sentence_and_the_partial_answer_on_every_tab() {
             "{tab:?} turned a refusal into an empty answer"
         );
     }
+}
+
+// --- THE FOOTER AND THE HELP SCREEN ---
+
+/// The footer row of a frame drawn at the floor, the frame's own borders and pad dropped.
+///
+/// **Not [`said`]**, which drops the sidebar's columns too — the footer runs the full width of
+/// the frame and has no sidebar to cut off it.
+fn footer_of(buffer: &Buffer) -> String {
+    unframed(&rows(buffer)[22])
+}
+
+/// A row that runs the frame's full width — the borders and the pad dropped, and no sidebar cut
+/// off it, which is the whole difference from [`said`].
+fn unframed(line: &str) -> String {
+    line.trim_matches('│').trim().to_owned()
+}
+
+/// **The footer is drawn from [`views::App`] and from nothing the caller hands over** — one
+/// `Screen`, three different footers, which is only possible if `ui.rs` asks `App` for it.
+///
+/// **The `Screen` is deliberately the Alerts one throughout**: what changes between the arms is
+/// the `App`, so a footer that came from the caller could not move.
+#[test]
+fn the_footer_is_the_apps_answer_and_not_the_callers() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let screen = screen(&alerts, &now);
+
+    for (app, expected) in [
+        (
+            app(),
+            "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        ),
+        (
+            App {
+                view: View::Analysis(0),
+                ..App::default()
+            },
+            "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+        ),
+        (
+            App {
+                modal: Some(views::Modal::Help),
+                ..App::default()
+            },
+            "? or esc to close",
+        ),
+    ] {
+        assert!(
+            footer_of(&render(&app, &screen)).starts_with(expected),
+            "{:?} drew {:?}",
+            app.view,
+            footer_of(&render(&app, &screen))
+        );
+    }
+}
+
+/// **The detail tab decides the footer, and it is `Screen::detail` that says one is open** — the
+/// same `App::tab` with and without a detail draws two different lines, which is the whole reason
+/// `ui.rs` passes `screen.detail.is_some()` rather than letting `App` guess.
+#[test]
+fn a_detail_tab_changes_the_footer_and_only_while_one_is_open() {
+    let open = Open::new();
+    for (tab, expected) in [
+        (
+            Tab::Logs,
+            "[ ] tabs  f follow  c container  esc back  ? all keys  q quit",
+        ),
+        (Tab::Describe, "[ ] tabs  esc back  ? all keys  q quit"),
+        (Tab::Yaml, "[ ] tabs  esc back  ? all keys  q quit"),
+        (Tab::Events, "[ ] tabs  esc back  ? all keys  q quit"),
+    ] {
+        assert_eq!(footer_of(&detailed(&on(tab), &open.open())), expected);
+
+        // The same tab with nothing open is the list footer — `Tab` alone must not decide it.
+        let alerts = Pane::Ready(vec![oom()]);
+        let now = now();
+        let closed = render(&on(tab), &screen(&alerts, &now));
+        assert_eq!(
+            footer_of(&closed),
+            "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+            "{tab:?} drew a detail footer with no detail open"
+        );
+    }
+}
+
+/// **`q quit` is right-aligned against [`indented`]'s own right edge, and it is the only
+/// right-hand zone any footer has** (`screens/help.md`).
+///
+/// **The mockup draws it one column further left than this**, because `screens/` draws its
+/// right-aligned content two columns short of the page's right edge — the header row of that same
+/// mockup is 68 wide inside a 70-wide frame. What is drawn here is the shipped [`header`]'s own
+/// rule, flush to the `Rect`, which is what the brief's *align, do not transcribe the gap* settles.
+#[test]
+fn the_help_footer_puts_the_quit_at_the_right_edge_and_the_rest_at_the_left() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let helping = App {
+        modal: Some(views::Modal::Help),
+        ..App::default()
+    };
+    let drawn = render(&helping, &screen(&alerts, &now));
+    let footer = &rows(&drawn)[22];
+
+    assert!(
+        footer.starts_with("│ ? or esc to close  "),
+        "the left zone lost its pad or gained a neighbour: {footer:?}"
+    );
+    assert!(
+        footer.ends_with("q quit │"),
+        "`q quit` is not against the pad at the right edge: {footer:?}"
+    );
+    assert!(
+        !footer.contains("all keys"),
+        "help pointed at itself: {footer:?}"
+    );
+
+    // At a wider terminal the zone moves with the edge — it is a right-aligned zone and not a
+    // gap somebody counted.
+    let wide = render_at(120, MIN_HEIGHT, &helping, &screen(&alerts, &now));
+    let row = &rows(&wide)[22];
+    assert!(row.starts_with("│ ? or esc to close"), "{row:?}");
+    assert!(row.ends_with("q quit │"), "{row:?}");
+}
+
+/// **The mockup's own sixteen rows, read out of `screens/help.md`** — the body of the fenced
+/// block between the titled top border and the rule under it, borders stripped and the page's
+/// trailing pad dropped.
+///
+/// **The screen file is the fixture here, which is the point.** A test that compares the drawn
+/// screen with [`HELP`] compares the implementation with itself: that is exactly what let a
+/// `\` line-continuation swallow `Moving around`'s two-column indent and still go green
+/// (2026-09-10). `screens/help.md` is the specification, so it is what the assertion reads.
+fn mockup() -> Vec<String> {
+    let path = format!("{}/screens/help.md", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the screen file {path} could not be read: {e}"));
+    let body: Vec<String> = text
+        .lines()
+        .skip_while(|line| !line.starts_with("┌ Keys "))
+        .skip(1)
+        .take_while(|line| !line.starts_with('├'))
+        .map(|line| {
+            line.trim_start_matches('│')
+                .trim_end_matches('│')
+                .trim_end()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        body.len(),
+        16,
+        "screens/help.md's key map is no longer sixteen rows — the body's own budget"
+    );
+    body
+}
+
+/// **The key map is the mockup's sixteen lines, and each of them fits the body it is drawn in**
+/// (`screens/help.md`, `screens/widgets.md` § 1).
+#[test]
+fn the_key_map_is_the_sixteen_lines_the_mockup_draws() {
+    let drawn: Vec<String> = HELP.lines().map(str::to_owned).collect();
+    assert_eq!(drawn, mockup());
+    for line in &drawn {
+        assert!(
+            width(line) <= usize::from(MIN_WIDTH - 2),
+            "{line:?} is {} columns, past the body at the floor",
+            width(line)
+        );
+    }
+}
+
+/// **Help is the body region and nothing else** (`screens/widgets.md` § 5): the frame's own
+/// border takes the title `Keys`, the sidebar and the divider are gone, and the command log
+/// strip behind it keeps showing the real commands the run made.
+#[test]
+fn help_replaces_the_body_and_leaves_the_rest_of_the_frame_alone() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = [
+        "$ kubectl get statefulsets -A --watch".to_owned(),
+        "$ kubectl get daemonsets -A --watch".to_owned(),
+    ];
+    let mut screen = screen(&alerts, &now);
+    screen.log = &log;
+    let helping = App {
+        modal: Some(views::Modal::Help),
+        ..App::default()
+    };
+    let drawn = render(&helping, &screen);
+    let rows = rows(&drawn);
+
+    assert!(
+        rows[1].starts_with("┌ Keys ─"),
+        "the title is not on the frame's own border: {:?}",
+        rows[1]
+    );
+    assert!(
+        !rows[1].contains('┬'),
+        "the sidebar divider survived into the help screen: {:?}",
+        rows[1]
+    );
+    assert_eq!(
+        rows[0],
+        crate::ui::tests::rows(&render(&app(), &screen))[0],
+        "the header is a sibling of the body and must not move when `?` opens"
+    );
+    assert_eq!(unframed(&rows[19]), "$ kubectl get statefulsets -A --watch");
+    assert_eq!(unframed(&rows[20]), "$ kubectl get daemonsets -A --watch");
+    assert_eq!(rows.len(), usize::from(MIN_HEIGHT), "the frame is 24 rows");
+
+    // **The sixteen body rows are `screens/help.md`'s own, in order**, each starting at the
+    // frame's first inner column — no block of its own, so nothing is indented by a border.
+    // Read off the screen file and not off [`HELP`], for the reason [`mockup`] gives.
+    for (nth, line) in mockup().iter().enumerate() {
+        assert_eq!(
+            rows[2 + nth],
+            format!("│{line:<width$}│", width = usize::from(MIN_WIDTH - 2)),
+            "body row {nth}"
+        );
+    }
+
+    // Nothing of the Alerts screen underneath survives the `Clear`.
+    for leaked in ["ALERTS", "OOMKilled", "▸", "payments/web"] {
+        assert!(
+            !rows[2..18].iter().any(|row| row.contains(leaked)),
+            "{leaked:?} showed through the help screen"
+        );
+    }
+}
+
+/// **The title is drawn only while `?` is open** — every other screen's frame is untitled
+/// (`screens/widgets.md` § 5), and a border that always said `Keys` would be the same defect
+/// seen from the other side.
+#[test]
+fn the_frame_carries_no_title_when_help_is_closed() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let drawn = render(&app(), &screen(&alerts, &now));
+    let top = &rows(&drawn)[1];
+    assert!(!top.contains("Keys"), "{top:?}");
+    assert!(
+        top.starts_with("┌────────────────────┬"),
+        "the sidebar's own divider is back on an ordinary frame: {top:?}"
+    );
+}
+
+/// **Every mode's whole screen, printed, footer row and all** — not an assertion about a column
+/// but the eight frames a reader of the report compares with `screens/`, line by line.
+/// `cargo test -- --nocapture`.
+#[test]
+fn every_footer_on_the_screen_it_belongs_to() {
+    let now = now();
+    let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
+    let log = [
+        "$ kubectl get statefulsets -A --watch".to_owned(),
+        "$ kubectl get daemonsets -A --watch".to_owned(),
+    ];
+
+    let show = |title: &str, buffer: &Buffer| {
+        println!("--- {title} ---\n{}\n", rows(buffer).join("\n"));
+    };
+
+    // Alerts.
+    let mut plain = screen(&alerts, &now);
+    plain.log = &log;
+    show("Alerts", &render(&app(), &plain));
+
+    // Resources — the browser open on the committed pods capture.
+    let kinds: Vec<Browsable> = ["deployments", "statefulsets", "daemonsets", "pods", "jobs"]
+        .into_iter()
+        .map(|plural| browsable(plural, true))
+        .collect();
+    let ready = Pane::Ready(table("table-pods"));
+    let mut browser = browsing(&ready, &kinds, &now);
+    browser.log = &log;
+    let mut opened = App::default();
+    opened.open(NavItem::Group(Group::Workloads));
+    opened.open(NavItem::Kind(3));
+    show("Resources", &render(&opened, &browser));
+
+    // Analysis — the capacity report over the committed cluster capture.
+    let held = reported();
+    let reports = entries(&held);
+    let mut analysis = screen(&alerts, &now);
+    analysis.reports = &reports;
+    analysis.log = &log;
+    show("Analysis", &render(&opened_report(0), &analysis));
+
+    // The four detail tabs, each over the committed OOM capture.
+    let (pod, names) = declared_by("oom");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let held_lines = logged(&[
+        "14:21:58  starting worker pool",
+        "14:22:03  allocating 512Mi cache",
+    ]);
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &held_lines,
+    });
+    open.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    open.yaml = Pane::Ready("apiVersion: v1\nkind: Pod\nmetadata:\n  name: web-7d9f4".to_owned());
+    open.events = Pane::Ready(measured());
+    let detail = open.open();
+    for tab in Tab::ALL {
+        show(
+            &format!("Detail · {}", tab.label()),
+            &detailed(&on(tab), &detail),
+        );
+    }
+
+    // Help, over the Alerts screen it was opened from.
+    let helping = App {
+        modal: Some(views::Modal::Help),
+        ..App::default()
+    };
+    show("Help", &render(&helping, &plain));
 }

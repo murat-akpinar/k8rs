@@ -24,7 +24,7 @@ whole debugging loop without a typed command.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app --previous             │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  f follow  c container  ⇧p previous  / search  esc back   │
+│ [ ] tabs  f follow  c container  esc back  ? all keys  q quit      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -34,6 +34,16 @@ whole debugging loop without a typed command.
 | **describe** | the object plus its events | Assembled from what we already hold; the event list is fetched for this object only, never a global Events watch. |
 | **yaml** | the object as YAML | Key order is the API's, not alphabetised. Secret values are hidden behind an explicit reveal, and a revealed value never enters the command log, the audit log or this pane's copy buffer. |
 | **events** | this object's events, newest first | Plain-language reason word, the controller's own message kept beside it: `Unhealthy` reads "the health check failed" next to "Readiness probe failed: …", never instead of it. |
+
+**The logs tab's footer carries `f follow` and `c container`, not `⇧p
+previous` or `/ search`.** Both keys still work — `⇧p` and `/` are bound
+exactly as [NOTES § D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted)
+says — they are just not two of the six things this one line has room to
+name before `? all keys  q quit`, the pair that never gives way
+([widgets.md § The footer](widgets.md#2a-the-footer)). Follow and the
+container picker are what a reader reaches for on nearly every open log pane;
+`⇧p` only matters once a container has actually crashed, and a text search is
+the same `/` every other pane already carries silently.
 
 ## The logs tab
 
@@ -121,7 +131,7 @@ whichever bound gets there first), not the Rust shape underneath it.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app -f                     │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  f follow  c container  ⇧p previous  / search  esc back   │
+│ [ ] tabs  f follow  c container  esc back  ? all keys  q quit      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -244,7 +254,7 @@ a `Pending` pod, or a container that just started:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs queue-worker-xk2p9 -n payments -c worker -f         │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  f follow  c container  ⇧p previous  / search  esc back   │
+│ [ ] tabs  f follow  c container  esc back  ? all keys  q quit      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -289,7 +299,7 @@ this exact screen and a second one would be a second thing to learn:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app -f                     │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  f follow  c container  ⇧p previous  / search  esc back   │
+│ [ ] tabs  f follow  c container  esc back  ? all keys  q quit      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -434,7 +444,7 @@ into the tab it is not trying to be.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web-7d9f4 -n payments                       │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -534,7 +544,7 @@ week later, in the one case a reader has no other way to check.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web -n payments                             │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -577,7 +587,7 @@ days ago.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web-7d9f4 -n payments                       │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -631,7 +641,7 @@ new key.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web-7d9f4 -n payments                       │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -679,7 +689,7 @@ what ran out."* This is that pod.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod worker-4kd2p -n payments                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -873,7 +883,7 @@ sit side by side without inventing a second fixture:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl events --for pod/web-7d9f4 -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -937,7 +947,7 @@ no longer exists here.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl events --for pod/web -n payments                         │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -982,7 +992,7 @@ holding them is the same widget with the same content:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl events --for pod/web-7d9f4 -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1040,7 +1050,7 @@ hidden:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl events --for pod/web-7d9f4 -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1089,7 +1099,7 @@ hidden:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl events --for pod/web-7d9f4 -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1140,7 +1150,7 @@ missing verb and resource. It never crashes and never retries in a loop."*):
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl events --for pod/web-7d9f4 -n payments   → refused       │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1227,13 +1237,13 @@ inside the event TTL would have the typed command hand back its
 predecessor's events where the pane shows none — a consequence read off the
 selector, not yet measured against a cluster.
 
-**The footer reads `[ ] tabs  esc back`, the same as describe's.** Nothing
-else applies: there is no follow (this is a fetch, not a stream — invariant 6
-keeps events off the permanent watch, so there is nothing to tail), no
-container picker (an event is not scoped to one container), no `⇧p previous`
-(an event has no earlier version to ask for), and no reveal (nothing on this
-pane is a secret). Offering any of them would be exactly the
-promised-key-that-does-nothing bug
+**The footer reads `[ ] tabs  esc back  ? all keys  q quit`, the same as
+describe's.** Nothing else applies: there is no follow (this is a fetch, not
+a stream — invariant 6 keeps events off the permanent watch, so there is
+nothing to tail), no container picker (an event is not scoped to one
+container), no `⇧p previous` (an event has no earlier version to ask for),
+and no reveal (nothing on this pane is a secret). Offering any of them would
+be exactly the promised-key-that-does-nothing bug
 [the README's key rules](README.md#the-five-rules-every-screen-obeys)
 already forbids.
 
@@ -1286,7 +1296,7 @@ what 80×24 already draws, shown at its own size instead of a narrower one.
 ├────────────────────┴─────────────────────────────────────────────────────────┤
 │ $ kubectl get pod web-7d9f4 -n payments -o yaml --show-managed-fields        │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                           │
+│ [ ] tabs  esc back  ? all keys  q quit                                       │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1377,7 +1387,7 @@ so is every value under `metadata.annotations`, by the same rule:
 ├────────────────────┴─────────────────────────────────────────────────────────┤
 │ $ kubectl get secret db-credentials -n payments -o yaml…                     │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  v reveal  esc back                                                 │
+│ [ ] tabs  v reveal  esc back  ? all keys  q quit                             │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1519,7 +1529,7 @@ container picker already is.
 ├────────────────────┴─────────────────────────────────────────────────────────┤
 │ $ kubectl get secret pending-secret -n payments -o yaml…                     │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                           │
+│ [ ] tabs  esc back  ? all keys  q quit                                       │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 

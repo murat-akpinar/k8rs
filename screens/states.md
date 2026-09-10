@@ -78,19 +78,20 @@ There are exactly three sentences, one per reason the pane can be empty:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get jobs -A                                              │
 ├────────────────────────────────────────────────────────────────────┤
-│ / filter                                                           │
+│ / filter  ? all keys  q quit                                       │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-- **The footer loses `⏎ open`, `s scale`, `r restart` and `ctrl-d delete`.**
-  All four act on a selected object (invariant 2), and zero rows leaves
-  nothing to select — showing them would be exactly the "promised key that
-  does nothing" this file's own key rule already forbids
+- **The footer loses `⏎ open`, `s scale` and `r restart`.** All three act on a
+  selected object (invariant 2), and zero rows leaves nothing to select —
+  showing them would be exactly the "promised key that does nothing" this
+  file's own key rule already forbids
   ([README § the five rules, item 2](README.md#the-five-rules-every-screen-obeys)).
   `↑↓ move` goes with them; there is nothing to move a cursor across.
   `/ filter` stays: it opens a pane-level control, not an operation on an
   object, so it is still honest to offer even though this particular list has
-  nothing to narrow.
+  nothing to narrow. `? all keys` and `q quit` stay too — they never give way,
+  on this pane or any other ([widgets.md § The footer](widgets.md#2a-the-footer)).
 - **`no jobs in this cluster` is the ordinary state, not a fallback** — see
   [resources.md § Browsing every namespace](resources.md#browsing-every-namespace):
   without a namespace scope, `-A` is what k8rs is always doing today.
@@ -156,9 +157,14 @@ to put in a sentence:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get pods -A                                              │
 ├────────────────────────────────────────────────────────────────────┤
-│ q quit                                                             │
+│ ? all keys  q quit                                                 │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+`↑↓ move` and `⏎ open` are gone for the same reason as the empty kind above —
+nothing is on screen to select yet. `?` is not: help does not need a finding
+to explain, and the anchor pair never gives way
+([widgets.md § The footer](widgets.md#2a-the-footer)).
 
 ## The connection dropped
 

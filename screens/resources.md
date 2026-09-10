@@ -23,7 +23,7 @@ own `Table` printing — the exact columns `kubectl get` would show.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get deployments -n payments                              │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  ctrl-d delete  / filter       │
+│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,6 +81,12 @@ own `Table` printing — the exact columns `kubectl get` would show.
 
 ## Rules
 
+- **The footer's exact set — and why `ctrl-d delete` is not in it even though
+  the key still works — is [widgets.md § The footer](widgets.md#2a-the-footer)**,
+  the same rule [alerts.md](alerts.md) draws from. `q quit` and `? all keys`
+  are the two keys that never give way; `ctrl-d delete` gives way to them here
+  the same way `d describe` and `y view as YAML` already did, on every list
+  view, before this footer was ever audited for width.
 - **Alerts bleed through.** A row whose object has a finding is marked (`●`),
   so the browser never disagrees with the Alerts view.
 - **The `ns:` label follows the kind and disappears for the cluster-wide

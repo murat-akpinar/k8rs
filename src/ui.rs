@@ -22,9 +22,12 @@
 //! What this file does owe is not *building* a string that escapes that guarantee, which is why
 //! every span below is either a literal or a value that arrived stripped.
 //!
-//! **What it does not draw yet**: the modal layer and the `?` overlay. [`content`] dispatches on
-//! [`crate::views::View`] and now has one arm per view, and on [`Screen::detail`] before any of
-//! them — a detail is open *over* a view, which is what `esc back` means.
+//! **What it does not draw yet**: the confirmation dialogs (`screens/dialogs.md`).
+//! [`content`] dispatches on [`crate::views::View`] and has one arm per view, and on
+//! [`Screen::detail`] before any of them — a detail is open *over* a view, which is what
+//! `esc back` means. The one modal that *is* drawn is [`crate::views::Modal::Help`], and
+//! [`draw`] draws it rather than [`content`]: it replaces the whole body region, sidebar
+//! included, and not the content pane inside it (`screens/widgets.md` § 5).
 
 // Nothing outside `#[cfg(test)]` calls this file yet: the event loop that will is Phase 12's
 // `main.rs`. Same attribute, same position and same accepted blind spot as `theme.rs`'s and
@@ -48,7 +51,9 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs};
+use ratatui::widgets::{
+    Block, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs,
+};
 use std::borrow::Cow;
 
 // --- THE NUMBERS THE MOCKUPS ARE DRAWN TO START ---
@@ -108,6 +113,44 @@ const NAME: &str = "k8rs";
 /// (`screens/widgets.md` § 7). One character, two callers — the evidence line and the header —
 /// so the mark a reader learns is one mark.
 const CUT: &str = "…";
+
+/// **The one title the frame's outer border ever carries**, and it carries it only while `?` is
+/// open (`screens/widgets.md` § 5, `screens/help.md`). A space each side, because that is how
+/// `screens/help.md` draws it: `┌ Keys ─…`.
+const TITLE: &str = " Keys ";
+
+/// **The key map itself — sixteen lines, which is exactly the body's own budget**
+/// (`screens/help.md`, `screens/widgets.md` § 1). It is a literal and not a table assembled from
+/// [`crate::views::Tab`] or a key enum: the grouping is *what you are doing* rather than keycode
+/// order, the jargon in brackets is the teaching (invariant 14), and both are the screen file's
+/// choices rather than anything the code holds. NOTES § D12 fixes the keys; this is the one place
+/// they are spelled for a reader, and `screens/help.md` is what it is checked against.
+///
+/// **Every line is drawn as written, with no wrap** — the widest is well inside the 78 columns
+/// the body has at the floor, so nothing here reflows and nothing here is cut. The indents are
+/// the mockup's own: two columns for a group, four for a key.
+///
+/// **The first line starts on the opening quote and not behind a `\` continuation**, which is
+/// the one way this literal has already been got wrong: `\` at a line's end strips the newline
+/// *and the next line's leading whitespace*, so `Moving around` drew at column 0 while its two
+/// sibling headings drew at 2. It was invisible to a test that compared the screen with this
+/// constant, and visible the moment the screen was compared with `screens/help.md`.
+const HELP: &str = "  Moving around
+    ↑ ↓ / j k    move            ⏎     open the selected thing
+    tab          next panel      esc   back / close
+    X            switch cluster
+    [ ]          detail tabs     / n   filter · namespace
+
+  Looking at things (always available)
+    l  logs, with the log from before a crash
+       in the log tab:  f follow · c container · ⇧p previous
+    d  describe — the object and what happened to it
+    y  view as YAML
+
+  Changing things (each one asks first, and shows the command)
+    s       run more or fewer copies       (scale)
+    r       restart, at its own pace       (rollout restart)
+    ctrl-d  delete — you type the name to confirm";
 
 // --- THE NUMBERS THE MOCKUPS ARE DRAWN TO END ---
 
@@ -213,9 +256,6 @@ pub struct Screen<'a> {
     /// The command log, oldest first. The strip draws the last [`LOG_LINES`] of it — display
     /// text, never executed and never fed back into a process (invariant 4).
     pub log: &'a [String],
-    /// The footer: the keys valid right now, already spelled. Rebuilt by the caller every frame,
-    /// because there is no stored footer (`screens/widgets.md` § 2).
-    pub keys: &'a str,
     /// **The object a detail tab is open on, and what each of its four fetches answered** —
     /// `None` when nothing is open (`screens/detail.md`).
     ///
@@ -406,8 +446,16 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
     let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
     header(frame, top, screen);
 
+    // **`?` is the one mode where the frame's own border carries a title, and it is the whole
+    // of how `Keys` gets onto the screen** (`screens/widgets.md` § 5). Help draws no block of
+    // its own: a second `Block::bordered()` over the body would spend two of the sixteen rows
+    // the key map needs on a border nobody asked for.
+    let helping = app.modal == Some(views::Modal::Help);
     let border = screen.fg(theme::BORDER);
-    let outer = Block::bordered().border_style(border);
+    let mut outer = Block::bordered().border_style(border);
+    if helping {
+        outer = outer.title(TITLE);
+    }
     let inner = outer.inner(rest);
     frame.render_widget(outer, rest);
 
@@ -433,17 +481,85 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
 
     sidebar(frame, nav, app, screen);
     content(frame, pane, app, screen);
+    // **Drawn over the body the normal pass just filled, and not instead of it** —
+    // `screens/widgets.md` § 5's own draw order. Under it the `Clear` inside [`help`] is
+    // load-bearing: the key map's lines are shorter than the body is wide, and a `Paragraph`'s
+    // style paints past its text while its symbols do not, so without the `Clear` the sidebar and
+    // the pane show through beside it. That is checked, and it is what this box's first draft got
+    // wrong by drawing no `Clear` at all.
+    //
+    // **Skipping the pass underneath instead would draw the identical frame, and nothing here
+    // claims otherwise** (`tester`, 2026-09-10: the two orders were rendered and diffed byte for
+    // byte). Telling them apart needs a spy on [`sidebar`] and [`content`], which asserts a call
+    // and not a screen — so this is the spec's order followed, not a behaviour a test defends.
+    if helping {
+        help(frame, body, screen);
+    }
     strip(frame, log, screen);
-    frame.render_widget(
-        Paragraph::new(Line::styled(screen.keys, screen.fg(theme::DIM))),
-        indented(keys),
-    );
+    footer(frame, keys, app, screen);
 
     // The two rules and the sidebar's divider are drawn last, over the panes' own edges, so the
     // frame is one shape rather than four blocks that happen to touch.
     rule(frame, rest, above_log.y, border);
     rule(frame, rest, above_keys.y, border);
-    divider(frame, split.x, rest.y, above_log.y, border);
+    // **The divider is the one part of the frame Help does not keep**: it is drawn *after* the
+    // panes, so leaving it in would rule a sidebar edge straight down the cleared key map, and
+    // `screens/help.md` draws the body as one field with no sidebar left to divide off.
+    if !helping {
+        divider(frame, split.x, rest.y, above_log.y, border);
+    }
+}
+
+/// **The keys valid right now** — one line, and the only one in the frame with a right-hand
+/// zone (`screens/widgets.md` § 2a).
+///
+/// **Nothing here chooses a word.** [`crate::views::App::footer`] answers with both zones and
+/// this places them, so a mode's footer is spelled once, in the file that already knows which
+/// keys a mode has. **It also cuts nothing**: every string it can be handed is a literal that
+/// fits the 76 columns [`indented`] leaves at the floor, which is what
+/// `screens/widgets.md` § 2a means by *curated to fit* — the curation happens in the words, not
+/// in a truncation here.
+///
+/// **The right zone is laid out first and takes exactly its own width**, the same shape
+/// [`header`] uses for the context: an empty one is a zero-width `Rect` that draws nothing, so
+/// the ordinary single-zone footer needs no branch of its own.
+fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
+    let (keys, quit) = app.footer(screen.detail.is_some());
+    let dim = screen.fg(theme::DIM);
+    let row = indented(area);
+    let [left, right] =
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(width(quit) as u16)]).areas(row);
+    frame.render_widget(Paragraph::new(Line::styled(quit, dim)), right);
+    frame.render_widget(Paragraph::new(Line::styled(keys, dim)), left);
+}
+
+/// **`?` — the full key map, drawn over the whole body region** (`screens/help.md`,
+/// `screens/widgets.md` § 5).
+///
+/// **`Clear` first, then a borderless `Paragraph`, and there is no third call.** ratatui does not
+/// clear for you, so without it the sidebar and the pane show through; and the block that would
+/// normally follow is the one thing § 5 rules out, because the frame's own outer border already
+/// carries the title ([`TITLE`]).
+///
+/// **The background is repainted with the foreground or neither is**, which is `theme.rs`
+/// § THE PALETTE's pairing and the same reason [`draw`]'s base block sets both: `Clear` resets
+/// the cells this `Rect` had been painted with, and a near-white key map on whatever the terminal
+/// happens to sit on is exactly the failure the pairing exists to avoid.
+///
+/// **The header, the command log strip and the footer are untouched, and that is the layout's
+/// doing rather than this function's**: they are siblings of the body in `screens/widgets.md`
+/// § 1, not inside the `Rect` handed here — which is why the log strip behind Help keeps showing
+/// the real commands the run made (`screens/help.md`, its note under the mockup).
+fn help(frame: &mut Frame, area: Rect, screen: &Screen) {
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(HELP).style(
+            screen
+                .fg(theme::TEXT)
+                .bg(ink(theme::BACKGROUND, screen.depth)),
+        ),
+        area,
+    );
 }
 
 /// `screens/widgets.md` § 8 — below the floor there is no layout, one sentence, and the normal

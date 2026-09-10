@@ -359,10 +359,18 @@ stderr message. Mid-session, k8rs stays on the context the user chose:
 ├────────────────────────────────────────────────────────────────────┤
 │ $ kubectl --context staging get pods -A   → not allowed            │
 ├────────────────────────────────────────────────────────────────────┤
-│ X switch cluster   esc dismiss                                     │
+│ esc dismiss                                                        │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+- **The footer reads `esc dismiss` alone — `X` is not there to press.**
+  [D16](../NOTES.md#d16--the-context-switcher) ruling 1 is explicit: `X`
+  cannot fire while a modal is open, and this refusal is a modal. A footer
+  that showed `X switch cluster` here would promise a key that does nothing
+  until `esc` has already closed this box — exactly the bug
+  [widgets.md § The footer](widgets.md#2a-the-footer) forbids of every modal.
+  The body's own *"X takes you back"* still says what to do next; it is
+  read after dismissing, not instead of it.
 - **We do not silently fall back to the old context.** A header that says
   `staging` while the data is from `prod-eu` is the one thing this whole
   screen exists to prevent. The user asked for staging; they get staging, or

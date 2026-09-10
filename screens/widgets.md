@@ -260,6 +260,103 @@ read the other five as the pattern, not this one.
 Nothing here is a custom widget. If a screen seems to need one, the screen is
 wrong before the widget set is.
 
+## 2a. The footer
+
+The footer is a `Paragraph` rebuilt every frame from the current mode (§2's
+own element table) — there is no stored footer, so nothing here is a runtime
+truncation of a string this file already drew wrong. It goes through the same
+`ui::indented` pass as the command log strip, so it carries the identical
+**76-column** ceiling at the 80×24 floor, never its own number — pane width,
+less the outer border, less the one-column margin `indented()` reserves on
+each side (§1, §7). A mockup drawn at this file's usual 70-column page width
+shows the footer at that page's own stricter budget, the same convention
+[the command log line already follows](#2-element--widget).
+
+No footer of fixed text has ever needed the real floor's extra six columns to
+say what it says — the curation rule below is what keeps it that way. (The
+one footer that is *not* fixed text,
+[while a call is running](dialogs.md#while-the-call-is-running), is the
+exception a few paragraphs down, and it reaches the full 76 by design, not by
+accident.) A future fixed footer that does need the extra room would be drawn
+at the real 80-column width instead, the same move [alerts.md](alerts.md) and
+[detail.md](detail.md) already make for other lines on the page too wide for
+70, never a fifth truncation invented for the footer alone.
+
+**`? all keys` and `q quit` are one closed pair, drawn last, and they are what
+never gives way.** [help.md](help.md)'s own rule — `q` sits in the footer with
+the other keys valid right now, the same place every other screen puts it —
+is read here as the rule for *this* pair specifically, not as a mandate that
+every bound key appear on every footer: [README rule 2](README.md#the-five-rules-every-screen-obeys)
+already draws that line — the footer shows what is valid right now, `?` shows
+everything — so a footer has always been a curated subset, never an
+exhaustive one. What is new is naming the one subset that is never cut from
+it.
+
+**The rest of a footer is curated to fit, and a key that does not fit stays
+bound — it just is not the one this line spends room naming.** [D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted)
+fixes the key set; this is only which of them a given footer's one line
+shows, the same way `d describe` and `y view as YAML` were never shown on a
+list-view footer even though both work from one. Two places apply that same
+choice to a key that used to be shown and no longer is, once the anchor pair
+was added back in:
+
+- **Alerts and Resources share one footer** — `↑↓ move  ⏎ open  s scale
+  r restart  / filter  ? all keys  q quit` — because both are "a list with a
+  selected object" in the same sense. `l logs` and `ctrl-d delete` give way:
+  the first is one `⏎` and one `[`/`]` from either list already, and the
+  second is no more central to either than `describe`/`yaml` already were —
+  both stay reachable through `?`, neither stops working.
+- **The logs tab keeps `f follow` and `c container`, and gives up `⇧p
+  previous` and `/ search`** — the two kept are what a reader reaches for on
+  nearly every open pane; `⇧p` only matters once a container has crashed, and
+  the search key is the same `/` every other pane already carries without a
+  footer hint.
+
+**A modal's footer is a closed, complete list, and it never carries the
+anchor pair.** Every `Modal` variant but `Help` (§5) draws only the keys valid
+inside it — `⏎ do it  esc cancel`, `type the name to enable  esc cancel`,
+`esc dismiss`, `esc stop draining`, `↑↓ move  / filter  ⏎ switch  esc cancel`
+— because a modal this small has nothing left for `?` to reveal, and stacking
+`Help` over it is what the single-value enum already makes unrepresentable
+(§5): opening one would silently drop whatever the modal underneath was
+confirming. `q` is absent the same way — `esc` is always the way out of a
+modal, and a global quit sitting beside it on a pending mutation is a second,
+riskier way to leave that buys nothing `esc` does not. **`Help` is the one
+modal exempt from both halves of this rule**, because nothing is pending
+while it is open: it keeps `q quit` and replaces `? all keys` with its own
+`? or esc to close` — the map itself, not a pointer to one — drawn once, in
+[help.md](help.md), not repeated here.
+
+**One state is neither an ordinary footer nor a modal, and it is the one
+place a footer's own text can run long: [while a call is running](dialogs.md#while-the-call-is-running).**
+It is not a `Modal` — the screen behind it keeps working — so `?` still opens
+Help, but stripped of its `all keys` label to leave room for the reason
+clause, and `q` is refused rather than merely unshown. The object name inside
+that clause is the one string in any footer this file did not choose the
+length of, and it is cut on the same rule as every other truncation in this
+product ([§7](#7-text-that-came-from-the-api)), not a fifth convention.
+
+**The closed mode list** — every mode's own exact string is drawn once, in
+the file that owns it, cited here rather than copied:
+
+| Mode | Footer shape | Drawn in |
+|---|---|---|
+| Alerts | ordinary, anchor always present | [alerts.md](alerts.md) |
+| Resources | ordinary, identical to Alerts' | [resources.md](resources.md) |
+| Analysis, any of the seven reports | ordinary, fixed regardless of report — adds nothing to the key map | [analysis.md § How a report is drawn](analysis.md#how-a-report-is-drawn--the-grammar-every-pane-on-this-page-obeys) |
+| Detail — logs tab, every state of it | ordinary, anchor always present | [detail.md § The logs tab](detail.md#the-logs-tab) |
+| Detail — describe / yaml / events tab | ordinary, anchor always present | [detail.md](detail.md), each tab's own mockup |
+| Detail — yaml tab, a Secret with keys | ordinary, anchor always present, adds `v reveal` | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
+| Empty kind in the browser | ordinary, narrowed to what there is an object to act on — anchor still present | [states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser) |
+| Still loading | ordinary, narrowed to the anchor alone — nothing exists yet to move a cursor across | [states.md § Still loading](states.md#still-loading) |
+| Disconnected · login expired · clock skew · namespace-scoped · nothing-is-broken | ordinary, mutations withheld, anchor always present | [states.md](states.md), each state's own mockup |
+| While a call is running | not a modal — see the rule above | [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
+| Confirm · Restart · Delete (typed name) · The cluster said no · Already gone · Drain | modal — closed local set, no anchor | [dialogs.md](dialogs.md) |
+| The cluster picker, at `X` and at startup | modal — closed local set, no anchor; `esc` itself reads `quit` at startup | [context.md](context.md) |
+| The container picker | modal — closed local set, no anchor | [detail.md § Choosing a container, and when there is nothing to choose](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose) |
+| The secret-reveal modal | modal — closed local set (`esc close`) | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
+| The help modal (`?`) | its own fixed footer — the one modal keeping `q quit`, never `? all keys` | [help.md](help.md) |
+
 ## 3. Where the state lives
 
 **No `ListState`, `TableState` or `ScrollbarState` is stored anywhere.** What
@@ -316,6 +413,26 @@ enum Modal {
   not clear for you.
 - The centered rect comes from one helper (`Layout` twice, vertical then
   horizontal), used by every modal. Not six hand-computed rectangles.
+  **`Help` is the one exception, and it is a sizing exception, not a second
+  mechanism**: its `Rect` is the whole body region — the same 16 rows and
+  full width the sidebar and content pane would otherwise split
+  ([§1](#1-the-frame)), not a smaller box floating over a visible sidebar. Only
+  two of the three calls apply to that `Rect`: `Clear`, then the content —
+  a **borderless** `Paragraph`, never a second `Block::bordered()`, so all 16
+  rows are key map and none are spent on a border ratatui would otherwise
+  draw at the `Rect`'s own top and bottom row. The border that carries the
+  title `Keys` is the frame's own outer `Block::bordered()` — the one every
+  screen already has around body+log+footer, titleless everywhere else
+  ([§2](#2-element--widget)) — not a block drawn over the body `Rect` itself.
+  This is why every other modal's *outer* frame is plain, with the title on
+  its own smaller nested box, while Help's title sits on that outer frame
+  directly — Help has no nested box, because it has no sidebar or content
+  pane left showing to float over. The header, command log strip and footer
+  rows are unaffected either way: they are
+  siblings of the body in [§1](#1-the-frame)'s layout, not inside the `Rect`
+  a modal draws over, which is why Help's own log strip keeps showing real
+  commands and its footer is content this file already names
+  ([§2a](#2a-the-footer)).
 - `esc` closes exactly one level, always. A modal never traps the user.
 - The confirm button is a `Span` with a reversed style; it is **not** live
   until the dry-run has returned and, for a typed-name dialog, until the typed
@@ -359,18 +476,22 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   characters; `String::truncate` slices bytes and panics in the middle of a
   multi-byte name. Handing the full `Span` to the widget is both shorter and
   correct.
-- **Three places truncate on purpose, and they are the exceptions that prove
+- **Four places truncate on purpose, and they are the exceptions that prove
   the rule above:** the Alerts card's evidence line, capped at three wrapped
   lines with `…` at the cut
   ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall));
   the Resources browser's one-line summary under the table, whose name
   gives way to the sentence around it and is marked the same way
   ([resources.md § The line under the table](resources.md#the-line-under-the-table));
-  and the command log strip, when even its real 76-column budget at the
+  the command log strip, when even its real 76-column budget at the
   80×24 floor — pane width minus the outer border minus the one-column
   margin `indented()` reserves on each side (§1) — cannot hold the whole
-  teaching line. What § 7 forbids is a *silent* cut and a *byte* cut. None of
-  these three is: all are marked with a character the reader can see, and all
+  teaching line; and the footer's own in-flight reason, the one footer that
+  carries a string this product did not choose — the selected object's own
+  name, cut the same way the browser's row name is, on the same 76-column
+  budget (§2a, [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running)).
+  What § 7 forbids is a *silent* cut and a *byte* cut. None of
+  these four is: all are marked with a character the reader can see, and all
   step by whole characters. The evidence line and the command log both walk
   back to a whole word before they cut, because both are made of more than
   one token and a word with its last character sheared off would still look
@@ -380,13 +501,13 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   ([detail.md's yaml tab](detail.md#the-yaml-tab) draws the case: the whole
   flag gives way, `…` lands right after `yaml`, and deleting just the `…`
   leaves a real command — the one `kubectl get -o yaml` already runs by
-  default). The browser's line does not walk back — a name is one token, so
-  there is no word boundary to find, and cutting mid-token is what the mark
-  is for there. The full text is one `⏎` away in all three cases
-  ([detail.md](detail.md)) — which is what makes cutting any of them
-  legitimate at all. Everything else on a card, every other string in the
-  browser, and every command log line that fits is drawn whole and clips at
-  the pane edge like any other string, if it clips at all.
+  default). The browser's line and the footer's in-flight name do not walk
+  back — a name is one token, so there is no word boundary to find, and
+  cutting mid-token is what the mark is for there. The full text is one `⏎`
+  away in all four cases ([detail.md](detail.md)) — which is what makes
+  cutting any of them legitimate at all. Everything else on a card, every
+  other string in the browser, and every command log line that fits is drawn
+  whole and clips at the pane edge like any other string, if it clips at all.
 - Long values are bounded *before* they are stored, not at draw time — a 50 MB
   annotation must never become a `Text`.
 

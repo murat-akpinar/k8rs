@@ -23,11 +23,28 @@ tool for beginners may not hide its verbs behind memory.
 │    r       restart, at its own pace       (rollout restart)        │
 │    ctrl-d  delete — you type the name to confirm                   │
 ├────────────────────────────────────────────────────────────────────┤
-│                                                                    │
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
 ├────────────────────────────────────────────────────────────────────┤
 │ ? or esc to close                                          q quit  │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+**The command log strip is not covered, and it is not cleared.** Opening
+`?` runs no command of its own, so the two-line block keeps showing whatever
+was already there — here, the two permanent watches Alerts starts on top of
+the primary pod watch, because this mockup opens help from the default Alerts
+screen. The body above (16 lines, exactly [§1's own
+budget](widgets.md#1-the-frame)), the log strip (4 rows — border, two lines,
+border, [`LOG_LINES`](widgets.md#2-element--widget) never a mockup's
+choice) and the footer (1 row) are the same three regions every other screen
+draws in the same order; only the footer's own content and the body's own
+frame — one bordered block titled `Keys`, the full body width, no sidebar —
+differ from an ordinary screen ([widgets.md § 5](widgets.md#5-the-modal-layer)).
+Header (1) + top border (1) + body (16) + log block (4) + footer (1) + bottom
+border (1) is 24, the floor, not 23 — a fact about this screen's own fixed
+content, since nothing here depends on cluster state the way a card list or a
+sidebar count does.
 
 Rules:
 

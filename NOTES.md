@@ -280,6 +280,7 @@ its line moving with it.
 - [D256](#d256--the-events-pane-cannot-tell-a-warning-from-a-normal-the-deadline-for-saying-so-was-this-box-and-a-doc-comment-naming-a-future-box-is-a-reminder-nothing-enforces-2026-09-07) — the events pane cannot tell a Warning from a Normal, the deadline for saying so was this box, and a doc comment naming a future box is a reminder nothing enforces
 - [D257](#d257--the-command-logs-third-kind-of-line-a-read-the-user-asked-for-is-not-the-read-path-instrumenting-itself-2026-09-07) — the command log's third kind of line: a read the user asked for is not the read path instrumenting itself
 - [D258](#d258--the-command-log-panel-an-outcome-is-not-a-mutations-privilege-the-servers-own-sentence-had-to-be-bounded-before-it-reached-the-strip-and-a-cut-that-leaves-a-working-command-behind-2026-09-07) — the command log panel: an outcome is not a mutation's privilege, the server's own sentence had to be bounded before it reached the strip, and a cut that leaves a working command behind
+- [D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10) — the footer is a curated subset with one pair that never gives way, the help screen is the frame wearing a title rather than a box drawn inside it, and a gate verified against a substituted tree is not verified
 
 ## Why it exists — where the gap is
 
@@ -11323,7 +11324,10 @@ all**, which is the whole reason the build order puts the pure layers first:
 | 8 spike · 9 theme · 10 views · 11 ui | a terminal |
 | 2 fixtures · 5–6 reads · 7 ops · 12 wiring | kind, therefore a container runtime |
 
-- [x] **Rust** — 1.97.1 present (distro package). `rustup` is *not* installed;
+- [x] **Rust** — 1.98.1 present (distro package; it was 1.97.1 when this row was
+      written and pacman moved it on 2026-09-10, which is what
+      [D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+      moved the CI pin for). `rustup` is *not* installed;
       it is in the repos if a pinned toolchain is ever wanted. CI pins its own,
       so this is not blocking.
 - [ ] **Container runtime** — neither docker nor podman is installed *on this
@@ -22327,3 +22331,96 @@ separates them. Author and PM agreed independently. **The one real survivor besi
 guard's own boundary**: `clipped`'s narrow-budget arm returned the mark alone at one column and
 nothing at zero, and nothing had ever fed it either — the arm whose doc says this file *"has
 already been caught by once"* had never been shown to work at the end it exists for.
+
+### D259 — the footer is a curated subset with one pair that never gives way, the help screen is the frame wearing a title rather than a box drawn inside it, and a gate verified against a substituted tree is not verified (2026-09-10)
+
+Phase 11's *context-sensitive key footer + `?` full key map* box. `ui.rs` had drawn a footer row
+since the layout box and **nothing in `src/` had ever produced its text** — `Screen::keys` was a
+caller-supplied `&str` with no caller — and `views::Modal::Help` existed as a variant nothing
+constructed. Two committed screen files disagreed about what a footer contains before a line of
+this was written, which is why the round opened with `tui-designer` rather than with code.
+
+**1. `? all keys` and `q quit` are one pair, drawn last, and they are what never gives way.**
+`screens/help.md` already said `q` sits in the footer *"the same place every other screen puts
+it"*, and `resources.md`'s footer and all eighteen of `detail.md`'s had neither. It was not a slip
+that could be fixed by adding them: the footer is **76 columns** at the floor — the same budget as
+the command log strip, `indented()`'s — and `resources.md`'s 60 plus `  ? all keys  q quit` is 80,
+`detail.md`'s logs footer is 84. So the rule had to say what gives way instead. **A footer is a
+curated subset and always was** (`screens/README.md` rule 2 — the footer shows what is valid now,
+`?` shows everything); what was new is naming the one subset that is never cut. `l logs` and
+`ctrl-d delete` came off the two list footers and `⇧p previous` and `/ search` off the logs tab —
+**all four stay bound**, they are simply not what that line spends its room naming. Alerts and
+Resources landed on one shared string, both being *a list with a selected object*. The whole rule
+and the closed sixteen-row mode list live in `screens/widgets.md` § 2a, cited from every screen
+file and copied into none.
+
+**2. Fixed text is written to fit; only one footer carries a string k8rs did not choose.** No cut
+rule was invented for the footer, because none is needed — the curation happens in the words. The
+exception is `dialogs.md`'s in-flight line, which splices the selected object's own name into
+*finishing the change to … first*: prefix 47, suffix 6, **23 columns of room**, cut on a character
+boundary with the mark glued to the last character kept and no word-boundary walk-back, a name
+being one token. `screens/widgets.md` § 7 grew from three deliberate truncations to four. That
+footer belongs to the in-flight box, not this one.
+
+**3. Help is the frame wearing a title, not a box drawn inside it — and the arithmetic is what
+proved the first two drafts wrong.** § 5 said every modal is `Clear` over a **centered** `Rect`,
+then a bordered `Block`, then content; `help.md` drew the outer border carrying the title `Keys`
+with sixteen rows of key map under it. Two drafts of the carve-out still could not be transcribed:
+a `Block::bordered()` rendered into the 16-row body `Rect` spends its first and last row on a
+border, leaving **14**, and the mockup has no border on those rows. So Help asks the helper for the
+full body region and draws **two** of the three calls — `Clear`, then a **borderless**
+`Paragraph` — and the `Keys` title goes on the frame's own outer block, which every other screen
+already renders untitled. `Clear` is load-bearing under that order: the map's lines are shorter
+than the body is wide and a `Paragraph`'s style paints past its text where its symbols do not, so
+without it the sidebar shows through beside the map. **The divider is the one part of the frame
+Help does not keep** — it is drawn after the panes and would rule a sidebar edge down the cleared
+map. The mockup was also one row short of the floor (its command log strip drew one blank line
+where `LOG_LINES` is 2); the strip is neither covered nor cleared, because opening `?` runs no
+command, so it keeps showing whatever was already there.
+
+**4. One function, and `Screen::keys` is deleted.** `App::footer(&self, detail: bool) ->
+(&'static str, &'static str)` sits beside the `may_*` family in `views.rs`, exhaustive on both
+`Tab` and `View` with no `_` on the enums. Two zones and not one, because Help's footer
+right-aligns `q quit` and the alternative is a call site spelling half a footer; an empty right
+zone is a zero-width `Rect`, so the seven ordinary footers need no branch. **`&'static str` is the
+whole return type, and that is invariant 9 held structurally rather than by convention** — with no
+`leak` and no `static mut` in either file, the only inhabitants of that type are compile-time
+literals, so no API string can reach that row *by type*. `ui.rs` calls it and `main.rs` never
+touches it, which is why the field went: a footer with one home cannot be got wrong in a second
+one. `screens/help.md` is read as a **test fixture** by `ui_tests::mockup()`, the same shape the
+JSON fixtures already use, so the screen file is mechanically the requirement — and that is what
+caught a `\` line-continuation silently eating `Moving around`'s indent, after the first version of
+that test compared the render against the implementation's own `HELP` const.
+
+**5. What this box does not implement, named so its own boxes inherit it rather than rediscover
+it.** Five of § 2a's sixteen rows are drawn here. `Modal::Confirm` falls through to the mode
+underneath — pinned on both the list and the detail side by a test that says so, a hole with a box
+on it and not a decision. The eight states' footers withhold `s scale`/`r restart`, which needs
+`Screen`'s `Pane`; `detail.md`'s Secret yaml tab adds `v reveal`, which has no box at all and is in
+[`backlog.md`](backlog.md); and `screens/help.md` § Rules replaces the whole *Changing things*
+block under `--read-only`, which neither `App` nor `Screen` carries — so **the help screen today
+advertises `s`, `r` and `ctrl-d` to a reader who may not use them**, and that is now written into
+the `--read-only` box rather than left to be found.
+
+**6. The draw-order pair is a free choice, recorded rather than defended.** Drawing the panes and
+then covering them, versus skipping them under Help, render **byte-identical** frames — measured,
+not reasoned. Telling them apart needs a spy on `sidebar` and `content`, which asserts a call and
+not a screen. The comment claiming the landed order was *the only* one under which `Clear` is
+load-bearing was itself a claim no test could fail on — [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)'s
+shape, one level up — and the word `only` came out.
+
+**7. The process finding, and it is the one worth the most: a gate verified against a substituted
+tree is not verified.** `dev-ui` reported `just check` green while the landed tree was red on a
+102-column doc comment. It had run the gate against a **copy** holding HEAD's `dialogs.md` and the
+older toolchain, to route around two reds that were somebody else's — the right tool for
+*isolating* another agent's failure and the wrong one for *clearing* its own. `width-guard` depends
+on neither of the things that were substituted, so the copy was never a stand-in. `cargo fmt` does
+not touch doc comments, so nothing else would have caught it.
+
+**The toolchain pin moved 1.97.1 → 1.98.1**, which is
+[D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03) working rather than
+bending: pacman upgraded this machine mid-session, `toolchain-guard` went red at the desk, and
+there is no `rustup` here to pin backwards. `tester` read what the newer clippy finds before
+bumping — a cold `clippy --all-targets --all-features -D warnings` and the full suite, both green,
+`k8s.rs`'s `#[expect(result_large_err)]` still fulfilled — and the one thing the bump cannot cover
+is the four cross rows, which have no std on this machine and first compile on CI.

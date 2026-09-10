@@ -2937,3 +2937,19 @@ long-form version and stays the authority.*
   version is a second record of one event. **No code path produces this yet** — the caller is
   Phase 12's — which is why it is boxed rather than blocking, but it wants settling before that
   caller is written, because the answer decides whether a watch is `ran` or `sent`. 2026-09-07
+
+- **The Secret yaml tab's `v reveal` footer has no box.** `screens/detail.md:1390` gives that one
+  pane `[ ] tabs  v reveal  esc back  ? all keys  q quit`; measured at the footer box, the shipped
+  code draws it without `v reveal`, and it cannot do otherwise — `ui::Detail::secret_without_keys`
+  is the *opposite* case, so `App::footer` has no input that could decide it. Every other row of
+  `screens/widgets.md` § 2a that this box did not draw belongs to a Phase 11 box that exists; this
+  one belongs to the reveal, which no box in the phase names
+  ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+  ruling 5). 2026-09-10
+
+- **`ui.rs` is 2433 lines and `dialog.rs` is still unspent.** [D11](NOTES.md#d11--the-ninth-file-pre-approved)
+  pre-approves exactly one ninth file if `ui.rs` passes ~800 lines; it passed that three times over
+  and the file has stayed whole because nothing forced the split. The footer box added ~120 lines;
+  the four dialog boxes left in Phase 11 are the largest thing still to land in it, and they are
+  what D11 named the file *for*. Raised by `dev-ui` at the footer box — a size to read against the
+  dialogs when they are briefed, not a refactor to schedule. 2026-09-10

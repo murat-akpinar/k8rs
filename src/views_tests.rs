@@ -1563,6 +1563,218 @@ fn a_manual_scroll_turns_follow_mode_off() {
     assert_eq!(app.scroll, 0, "the offset went below the top of the buffer");
 }
 
+// --- THE FOOTER ---
+
+/// **Five of the sixteen rows of `screens/widgets.md` § 2a's closed list — this box's five** —
+/// each against the mockup that draws it: the strings are read off `screens/alerts.md`,
+/// `screens/resources.md`, `screens/analysis.md` and `screens/detail.md`, not off what the
+/// function happens to return.
+///
+/// **The other eleven rows are not tested here and are not implemented here.** The eight states'
+/// footers (`screens/states.md`), the dialogs' closed sets and the in-flight line
+/// (`screens/dialogs.md`), the two pickers (`screens/context.md`, `screens/detail.md`) and the
+/// Secret's `v reveal` are each their own box in todo.md § Phase 11 — and each needs an input
+/// [`App::footer`] does not take today, which is why none of them fell out of this one for free.
+#[test]
+fn every_mode_draws_the_footer_its_own_screen_file_draws() {
+    let list = "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit";
+    let logs = "[ ] tabs  f follow  c container  esc back  ? all keys  q quit";
+    let tabbed = "[ ] tabs  esc back  ? all keys  q quit";
+
+    for (view, detail, tab, expected) in [
+        // `screens/alerts.md` and `screens/resources.md` — one footer, because both are "a list
+        // with a selected object" in the same sense.
+        (View::Alerts, false, Tab::Logs, list),
+        (View::Resources(0), false, Tab::Logs, list),
+        (View::Resources(4), false, Tab::Events, list),
+        // `screens/analysis.md` — fixed regardless of which of the seven reports is open.
+        (
+            View::Analysis(0),
+            false,
+            Tab::Logs,
+            "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+        ),
+        (
+            View::Analysis(6),
+            false,
+            Tab::Yaml,
+            "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+        ),
+        // `screens/detail.md` — the logs tab keeps `f` and `c`; the other three have neither.
+        (View::Alerts, true, Tab::Logs, logs),
+        (View::Alerts, true, Tab::Describe, tabbed),
+        (View::Alerts, true, Tab::Yaml, tabbed),
+        (View::Alerts, true, Tab::Events, tabbed),
+        // A detail is drawn *over* a view, so which view it was opened from changes nothing.
+        (View::Resources(2), true, Tab::Logs, logs),
+        (View::Analysis(1), true, Tab::Describe, tabbed),
+    ] {
+        let app = App {
+            view,
+            tab,
+            ..App::default()
+        };
+        assert_eq!(
+            app.footer(detail),
+            (expected, ""),
+            "{view:?} · detail {detail} · {tab:?}"
+        );
+    }
+}
+
+/// **The pair that never gives way** (`screens/widgets.md` § 2a): `? all keys` and `q quit`,
+/// drawn last and in that order, on every ordinary footer there is.
+///
+/// **Asserted as a suffix and not as *contains*** — the rule is about where they sit, and a
+/// footer that named them first would pass a containment check while drawing the one thing the
+/// section forbids.
+#[test]
+fn the_anchor_pair_ends_every_ordinary_footer() {
+    for (view, detail, tab) in [
+        (View::Alerts, false, Tab::Logs),
+        (View::Resources(0), false, Tab::Logs),
+        (View::Analysis(3), false, Tab::Logs),
+        (View::Alerts, true, Tab::Logs),
+        (View::Alerts, true, Tab::Describe),
+        (View::Alerts, true, Tab::Yaml),
+        (View::Alerts, true, Tab::Events),
+    ] {
+        let app = App {
+            view,
+            tab,
+            ..App::default()
+        };
+        let (keys, quit) = app.footer(detail);
+        assert!(
+            keys.ends_with("? all keys  q quit"),
+            "{view:?} · detail {detail} · {tab:?} — {keys:?} does not end in the anchor pair"
+        );
+        assert_eq!(quit, "", "an ordinary footer grew a right-hand zone");
+    }
+}
+
+/// **Help is the one modal that keeps `q quit`, and the only footer with two zones**
+/// (`screens/widgets.md` § 2a, `screens/help.md`) — `? all keys` is replaced by the map itself,
+/// so the string that points at Help must not survive into Help.
+#[test]
+fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
+    let app = App {
+        modal: Some(Modal::Help),
+        ..App::default()
+    };
+    assert_eq!(app.footer(false), ("? or esc to close", "q quit"));
+    assert!(
+        !app.footer(false).0.contains("all keys"),
+        "the footer still pointed at a screen the reader is already on"
+    );
+}
+
+/// **Help wins over whatever is underneath it, and over a detail tab**, because it is drawn over
+/// the whole body region and the keys valid inside it are its own.
+#[test]
+fn help_is_the_footer_whatever_it_was_opened_from() {
+    for (view, detail, tab) in [
+        (View::Alerts, false, Tab::Logs),
+        (View::Resources(1), false, Tab::Logs),
+        (View::Analysis(2), false, Tab::Logs),
+        (View::Alerts, true, Tab::Logs),
+        (View::Resources(0), true, Tab::Events),
+    ] {
+        let app = App {
+            view,
+            tab,
+            modal: Some(Modal::Help),
+            ..App::default()
+        };
+        assert_eq!(
+            app.footer(detail),
+            ("? or esc to close", "q quit"),
+            "{view:?} · detail {detail} · {tab:?}"
+        );
+    }
+}
+
+/// **`esc` closes Help, and the footer goes back to the mode underneath** — the same one press
+/// `App::escape` already documents, seen from the footer's side.
+#[test]
+fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
+    let mut app = App {
+        view: View::Analysis(0),
+        modal: Some(Modal::Help),
+        ..App::default()
+    };
+    assert_eq!(app.footer(false).0, "? or esc to close");
+    app.escape();
+    assert_eq!(
+        app.footer(false).0,
+        "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
+    );
+}
+
+/// **`Modal::Confirm` has no footer of its own yet, and this is the test that will fail when it
+/// gets one** (todo.md § Phase 11, `screens/dialogs.md`). A dialog's footer is a closed local
+/// set — `⏎ do it  esc cancel` — and until that box lands the mode underneath is what is drawn.
+/// Nothing dispatches a key anywhere in `src/`, so the line is drawn and never acted on; this
+/// pins the hole rather than letting it read as a decision.
+#[test]
+fn a_confirmation_dialog_still_draws_the_footer_of_the_mode_underneath() {
+    let app = App {
+        modal: Some(Modal::Confirm(dialog(None))),
+        ..App::default()
+    };
+    assert_eq!(
+        app.footer(false).0,
+        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "a dialog footer landed — replace this test with the closed set screens/dialogs.md draws"
+    );
+    // **The same fall-through over an open detail tab**, which is the other side of the hole: a
+    // dialog is opened from a detail pane as readily as from a list, and pinning only the list
+    // would leave half of it able to change without a test noticing.
+    assert_eq!(
+        app.footer(true).0,
+        "[ ] tabs  f follow  c container  esc back  ? all keys  q quit",
+        "a dialog over a detail tab drew something other than the tab underneath"
+    );
+}
+
+/// **No footer needs the six columns the real floor has over this file's 70-column page**
+/// (`screens/widgets.md` § 2a). The ceiling is `ui::indented`'s 76 at 80×24; the mockups are
+/// drawn at 66, and the section's claim is that no fixed footer has ever needed the difference.
+///
+/// **Measured the way ratatui measures**, because `↑↓`, `⏎` and `·` are not one byte each and
+/// `str::len` would pass a footer that does not fit.
+#[test]
+fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
+    let mut seen = 0;
+    for (view, detail, tab, modal) in [
+        (View::Alerts, false, Tab::Logs, None),
+        (View::Resources(0), false, Tab::Logs, None),
+        (View::Analysis(0), false, Tab::Logs, None),
+        (View::Alerts, true, Tab::Logs, None),
+        (View::Alerts, true, Tab::Describe, None),
+        (View::Alerts, true, Tab::Yaml, None),
+        (View::Alerts, true, Tab::Events, None),
+        (View::Alerts, false, Tab::Logs, Some(Modal::Help)),
+    ] {
+        let app = App {
+            view,
+            tab,
+            modal,
+            ..App::default()
+        };
+        let (keys, quit) = app.footer(detail);
+        let width = ratatui::text::Span::raw(keys).width()
+            + usize::from(!quit.is_empty())
+            + ratatui::text::Span::raw(quit).width();
+        assert!(
+            width <= 66,
+            "{keys:?} + {quit:?} is {width} columns, past the 66 the mockups draw"
+        );
+        seen += 1;
+    }
+    assert_eq!(seen, 8, "a mode stopped being measured");
+}
+
 // --- THE SHAPES THE MUTATION GATE PROVED WERE NOT BEING FED ---
 
 /// **The clamp in [`Cursor::selected`] is the last line of defence, and it is reachable.** Every

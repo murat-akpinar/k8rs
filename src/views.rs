@@ -1282,6 +1282,54 @@ impl App {
         self.modal.is_none() && !self.changing
     }
 
+    /// **The footer — the keys valid right now, and the right-aligned zone beside them**
+    /// (`screens/widgets.md` § 2a). The left string is what the reader reads; the right is
+    /// empty for every mode but `?`, which is the only footer in the product with two zones.
+    ///
+    /// **One function, so no call site can spell a footer of its own.** `ui.rs` draws what this
+    /// returns and `main.rs` never touches it, which is why [`crate::ui::Screen`] carries no
+    /// `keys` field: a footer that has one home cannot be got wrong in a second one.
+    ///
+    /// **A footer is a curated subset and never an exhaustive one** — `? all keys` is what
+    /// completes it (`screens/README.md` rule 2). `l logs` and `ctrl-d delete` are bound on both
+    /// lists and named by neither footer; `⇧p previous` and `/ search` are bound in the logs tab
+    /// and its footer names neither. **What never gives way is the pair `? all keys  q quit`**,
+    /// drawn last, which is the one thing `screens/widgets.md` § 2a fixes about every ordinary
+    /// footer.
+    /// The key set itself is NOTES § D12's and nothing here adds to it.
+    ///
+    /// **`detail` is passed in because [`App`] cannot know it**: *whether* a detail tab is open
+    /// is `ui::Screen::detail`'s fact and *which* tab it would be is [`App::tab`]'s, so each
+    /// arrives from its one home and the two cannot come apart the way a second `open: Tab`
+    /// field here would let them.
+    ///
+    /// **`Modal::Confirm` deliberately falls through to the mode underneath, and that is a hole
+    /// with a box on it, not a decision.** `screens/dialogs.md`'s own closed footers — `⏎ do it
+    /// esc cancel`, `type the name to enable  esc cancel` — land with the dialogs themselves
+    /// (todo.md § Phase 11); until they do, no key is dispatched anywhere in `src/`, so the line
+    /// this returns under an open dialog is drawn but never true of a keypress.
+    pub fn footer(&self, detail: bool) -> (&'static str, &'static str) {
+        // **`Help` is the one modal that keeps `q quit` and the only footer with a right-hand
+        // zone** — nothing is pending while it is open, so a global quit beside it costs nothing
+        // (`screens/widgets.md` § 2a, `screens/help.md`).
+        if self.modal == Some(Modal::Help) {
+            return ("? or esc to close", "q quit");
+        }
+        // **Exhaustive on both enums on purpose**: a fifth tab or a fourth view is a compile
+        // error here rather than a screen that quietly draws the wrong keys.
+        let keys = match (detail, self.tab, self.view) {
+            (true, Tab::Logs, _) => "[ ] tabs  f follow  c container  esc back  ? all keys  q quit",
+            (true, Tab::Describe | Tab::Yaml | Tab::Events, _) => {
+                "[ ] tabs  esc back  ? all keys  q quit"
+            }
+            (false, _, View::Analysis(_)) => "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+            (false, _, View::Alerts | View::Resources(_)) => {
+                "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit"
+            }
+        };
+        (keys, "")
+    }
+
     /// **`esc` — closes exactly one level, always** (`screens/widgets.md` § 5, and those are its
     /// words). A modal never traps the user; with no modal open it backs out of a filter.
     ///

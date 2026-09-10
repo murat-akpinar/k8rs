@@ -4389,8 +4389,18 @@ string and key was settled in the design phase, so this phase is drawing.
       pane — and the manifest's own spelling, which is `main.rs`'s; the Secret
       caveat the headless surface has and the strip does not; and a `…` with no
       deadline. All in [`backlog.md`](backlog.md)
-- [ ] Context-sensitive key footer + `?` full key map, keys exactly as
-      [NOTES § D12](NOTES.md#d12--the-key-map-and-two-keys-deleted) assigns them
+- [x] Context-sensitive key footer + `?` full key map, keys exactly as
+      [NOTES § D12](NOTES.md#d12--the-key-map-and-two-keys-deleted) assigns them —
+      landed 2026-09-10. Two committed screen files disagreed about what a footer
+      holds before any code was written, so the round opened with `tui-designer`:
+      `? all keys` and `q quit` are the pair that never gives way, everything else
+      is curated to fit 76 columns, and the closed sixteen-row mode list is
+      `screens/widgets.md` § 2a. Help is the frame wearing a `Keys` title, not a
+      bordered box inside the body — that one costs two of the sixteen rows.
+      `App::footer` is the single producer and `ui::Screen::keys` is gone
+      ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)).
+      **Five of those sixteen rows are drawn here**; the eleven that are not are
+      named in D259 ruling 5 and carried into the boxes that own them
 - [ ] Confirmation dialogs: consequence in plain language above the kubectl
       line, and the typed-name variant for delete
 - [ ] **A dialog tracks its object while open** — the watch behind it turns the
@@ -4431,6 +4441,11 @@ string and key was settled in the design phase, so this phase is drawing.
       pods · nothing is broken · disconnected · **login expired** ·
       namespace-scoped fallback banner · and the three startup errors that
       print before the TUI exists.
+      **Their footers come with them, and they need an input `App::footer` does
+      not take.** `states.md` withholds `s scale` and `r restart` wherever there
+      is no object to act on — measured on both a loading and an empty pane, the
+      shipped footer offers both — and *which* pane state it is lives on
+      `ui::Screen`, not on `App` ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10) ruling 5).
       **And a ninth this phase owns outright: the audit log would not open**
       ([NOTES § D21](NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen) ·
       [D231](NOTES.md#d231--the-audit-box-was-built-under-three-other-boxes-and-d21s-startup-clause-belongs-to-a-screen-that-does-not-exist-2026-09-05)).
@@ -4456,7 +4471,12 @@ string and key was settled in the design phase, so this phase is drawing.
       one are not drawn as the same fact
       ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19) ·
       [screens/context.md](screens/context.md))
-- [ ] `--read-only` visibly marked in the header
+- [ ] `--read-only` visibly marked in the header — **and the help screen's
+      *Changing things* block replaced by one line**, which is
+      [screens/help.md](screens/help.md)'s own rule and is not built: neither
+      `views::App` nor `ui::Screen` carries the flag, so `?` today advertises
+      `s`, `r` and `ctrl-d` to a reader who may not use them ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10) ruling 5).
+      One flag, two readers — plumb it once
 
 **🔒 Security gate:** render a fixture containing ANSI escapes, a right-to-left
 override and a 10k-character single-line name — the screen must survive

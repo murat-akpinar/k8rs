@@ -25,7 +25,7 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 │ $ kubectl get statefulsets -A --watch                              │
 │ $ kubectl get daemonsets -A --watch                                │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit    │
+│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -43,6 +43,12 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 
 ## The rules this screen obeys
 
+- **The footer's exact set, and why `l logs` is not in it, is
+  [widgets.md § The footer](widgets.md#2a-the-footer)** — one rule shared with
+  [resources.md](resources.md), not redrawn here. `/ filter` narrows a list
+  that owner-grouping already shortened once ([D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)); it
+  is offered for the same reason `/` is offered on every other list in this
+  product, not because this list is expected to be long.
 - **One card per owner, never per pod.** `payments/web · 3 of 5 pods`, not
   three cards. A DaemonSet on forty nodes is still one card
   ([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)).
@@ -405,7 +411,7 @@ captures, and reaches all four caps at once:
 │ $ kubectl get statefulsets -A --watch                                        │
 │ $ kubectl get daemonsets -A --watch                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit              │
+│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -823,6 +823,34 @@ Navigation stays free. A **second mutation**, a **cluster switch** (`X`) and
 the audit log holding an attempt with no result. The `…` on the command line is
 replaced by the outcome, never removed.
 
+**`?` has no `all keys` beside it here, and neither `? all keys` nor `q quit`
+is what gives way if the name runs long — the reason clause is.** This is the
+one footer in the product carrying a string the cluster named rather than one
+this file chose, and `payments/web` above is the short case: the name is
+whatever object was selected when the mutation was confirmed, which can be as
+long as any name this product already truncates elsewhere. The rule is the
+one [the browser's own line under the
+table](resources.md#when-it-does-not-fit-the-name-gives-way--and-now-it-says-so)
+already states, read against this line's own fixed parts instead of that
+one's: `room` is 76 columns less the fixed prefix `↑↓ move  ⏎ open  ?  ·
+finishing the change to ` (47) and the fixed suffix ` first` (6) — 23 columns.
+A name that fits draws whole; one that does not is cut to `room − 1` columns,
+on a character boundary, with one `…` glued to the last character kept — no
+word-boundary walk-back, because a name is one token, the same reasoning the
+browser's own cut already gives. This is [widgets.md § 7](widgets.md#7-text-that-came-from-the-api)'s
+fourth truncation, not a new one — the same footer, the name now long enough
+to cut:
+
+```
+↑↓ move  ⏎ open  ?  ·  finishing the change to payments/checkout-work… first
+```
+
+76 columns, exactly the floor — `payments/checkout-worker-service-account-token-projector`
+cut to 22 characters plus the mark. `↑↓ move` and `⏎ open` do not give way
+either: they are what "navigation stays free" means on screen, and dropping
+them to buy the name more room would hide the one thing this state promises
+still works.
+
 ## Drain, which takes minutes
 
 The one operation long enough to need a screen of its own rather than an
