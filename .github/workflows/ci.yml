@@ -33,7 +33,17 @@ env:
   # **TO BUMP:** change this one line, run `just check`, read what the newer
   # clippy found, fix it, commit. That is the whole procedure and it is manual
   # on purpose — a new lint arrives when somebody chooses, not on a Tuesday.
-  RUST_TOOLCHAIN: "1.97.1"
+  #
+  # Bumped 1.97.1 → 1.98.1 on 2026-09-10, which is D211's own self-correcting
+  # clause firing: the dev machine's distro rust moved and the guard went red at
+  # the desk. `result_large_err` costs nothing here — the two `async fn`s carry
+  # `#[allow]` and `kubeconfig()` an `#[expect]` that 1.97.1 already fulfilled,
+  # so neither attribute changes meaning. Read, not assumed, on the host target:
+  # a cold `cargo clippy --all-targets --all-features -- -D warnings` under
+  # clippy 0.1.98 is 0 warnings and 1320 tests pass. **The cross rows were not
+  # measured** — this machine has no musl or darwin std, so `just cross` skipped
+  # all four; CI is where they are first compiled by 1.98.1.
+  RUST_TOOLCHAIN: "1.98.1"
 
 jobs:
   check:
