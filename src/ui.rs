@@ -22,12 +22,13 @@
 //! What this file does owe is not *building* a string that escapes that guarantee, which is why
 //! every span below is either a literal or a value that arrived stripped.
 //!
-//! **What it does not draw yet**: the confirmation dialogs (`screens/dialogs.md`).
-//! [`content`] dispatches on [`crate::views::View`] and has one arm per view, and on
-//! [`Screen::detail`] before any of them — a detail is open *over* a view, which is what
-//! `esc back` means. The one modal that *is* drawn is [`crate::views::Modal::Help`], and
-//! [`draw`] draws it rather than [`content`]: it replaces the whole body region, sidebar
-//! included, and not the content pane inside it (`screens/widgets.md` § 5).
+//! **A modal is drawn by [`draw`] and never by [`content`]**, because it floats over the body
+//! region rather than inside the content pane: [`content`] dispatches on
+//! [`crate::views::View`] and has one arm per view, and on [`Screen::detail`] before any of them
+//! — a detail is open *over* a view, which is what `esc back` means. `screens/widgets.md` § 5's
+//! three calls — `Clear`, the block, the content — are [`boxed`]'s, once, for every dialog on
+//! `screens/dialogs.md`; [`help`] is the sizing exception that file names, and the only modal
+//! that takes the whole body and leaves no sidebar showing to float over.
 
 // Nothing outside `#[cfg(test)]` calls this file yet: the event loop that will is Phase 12's
 // `main.rs`. Same attribute, same position and same accepted blind spot as `theme.rs`'s and
@@ -42,14 +43,14 @@
 )]
 
 use crate::analysis::{Badge, Report, Row as ReportRow};
-use crate::k8s::Browsable;
+use crate::k8s::{Browsable, Fault};
 use crate::rules::{ContainerSnapshot, Finding, ObjectId, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
 use crate::views::{self, App, Card, NavItem, Pane, Tab, View};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs,
@@ -113,6 +114,51 @@ const NAME: &str = "k8rs";
 /// (`screens/widgets.md` § 7). One character, two callers — the evidence line and the header —
 /// so the mark a reader learns is one mark.
 const CUT: &str = "…";
+
+/// **The three widths a nested dialog box picks from, and the only choice a dialog makes about
+/// its own shape** (`screens/widgets.md` § 5, read off every box in `screens/dialogs.md`). The
+/// margins are not a second choice: they are whatever centring one of these in the body leaves,
+/// which is [`boxed`]'s one `Rect::centered` and never a table of hand-computed rectangles.
+///
+/// The default, for a `Confirm` whose content fits it (`screens/dialogs.md` § Scale).
+const CONFIRM_BOX: u16 = 58;
+
+/// **[`CONFIRM_BOX`] does not fit** — a consequence past [`CONSEQUENCE_LINES`], or the
+/// typed-name field (`screens/dialogs.md` § Restart, § Delete). It is close to the real ceiling:
+/// the smaller margin cannot drop below 2 without touching the outer frame, and 61 leaves 2.
+const CROWDED_BOX: u16 = 61;
+
+/// **A dismiss-only box** — `Refused` and `Gone`, which have no `$ kubectl …` line and no input
+/// field, so there is consistently less to fit (`screens/dialogs.md` § The cluster said no,
+/// § The object went away).
+const DISMISS_BOX: u16 = 54;
+
+/// The margin between a nested box's left border and its text. **Left only, and it is a prefix
+/// on each line rather than `Padding` on the block**, so a centred row — the buttons — is centred
+/// on the box and not on what is left of it after a pad.
+///
+/// **Two columns is measured rather than chosen**: at `61 - 2` the restart and delete
+/// consequences wrap onto exactly the lines `screens/dialogs.md` draws them on, and at `58 - 2`
+/// the scale box holds its 55-column `$ kubectl scale …` line whole, which is the widest single
+/// thing any box has to fit.
+const MODAL_MARGIN: &str = "  ";
+
+/// **The two lines § Scale draws its consequence on** — and the test for whether a `Confirm` box
+/// can stay at [`CONFIRM_BOX`] (`screens/dialogs.md` § Scale, *the box draws these as two lines*).
+const CONSEQUENCE_LINES: usize = 2;
+
+/// **The rows a nested box has between its own borders**, at the 80×24 floor this product is
+/// drawn to (`screens/widgets.md` § 5). § Restart's paused variant and § Drain both land on
+/// exactly this; it is what bounds what the cluster sent back in a `Refused` box, which is the one
+/// string in a dialog that came off the API.
+const MODAL_ROWS: usize = 13;
+
+/// The rows a typed-name field takes: its label, and the three the box around it draws
+/// (`screens/dialogs.md` § Delete).
+const FIELD_ROWS: usize = 4;
+
+/// Between a dialog's two buttons (`screens/dialogs.md`, every box on it).
+const BUTTON_GAP: &str = "    ";
 
 /// **The one title the frame's outer border ever carries**, and it carries it only while `?` is
 /// open (`screens/widgets.md` § 5, `screens/help.md`). A space each side, because that is how
@@ -482,19 +528,22 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
     sidebar(frame, nav, app, screen);
     content(frame, pane, app, screen);
     // **Drawn over the body the normal pass just filled, and not instead of it** —
-    // `screens/widgets.md` § 5's own draw order. Under it the `Clear` inside [`help`] is
-    // load-bearing: the key map's lines are shorter than the body is wide, and a `Paragraph`'s
-    // style paints past its text while its symbols do not, so without the `Clear` the sidebar and
-    // the pane show through beside it. That is checked, and it is what this box's first draft got
-    // wrong by drawing no `Clear` at all.
+    // `screens/widgets.md` § 5's own draw order. Under it the `Clear` inside [`help`] and
+    // [`boxed`] is load-bearing: their lines are shorter than the region they are drawn in, and a
+    // `Paragraph`'s style paints past its text while its symbols do not, so without the `Clear`
+    // the sidebar and the pane show through beside them. That is checked, and it is what this
+    // box's first draft got wrong by drawing no `Clear` at all.
+    //
+    // **A dialog leaves the sidebar and the pane showing and [`help`] does not**, which is the
+    // whole of § 5's *Help has no sidebar or content pane left showing to float over*: every
+    // other modal is a small box over a screen that is still there. The mockups on
+    // `screens/dialogs.md` draw an empty body behind their boxes because the box is what they
+    // are about, not because the screen underneath goes away.
     //
     // **Skipping the pass underneath instead would draw the identical frame, and nothing here
     // claims otherwise** (`tester`, 2026-09-10: the two orders were rendered and diffed byte for
     // byte). Telling them apart needs a spy on [`sidebar`] and [`content`], which asserts a call
     // and not a screen — so this is the spec's order followed, not a behaviour a test defends.
-    if helping {
-        help(frame, body, screen);
-    }
     strip(frame, log, screen);
     footer(frame, keys, app, screen);
 
@@ -507,6 +556,16 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
     // `screens/help.md` draws the body as one field with no sidebar left to divide off.
     if !helping {
         divider(frame, split.x, rest.y, above_log.y, border);
+    }
+
+    // **The modal is the last thing drawn, after the frame has been ruled, and that is the fix
+    // for a defect this box's first draft shipped** (2026-09-10). The divider runs *through* the
+    // body and is drawn over the panes so its junctions land on the borders; a dialog drawn
+    // before it came out with a sidebar edge ruled straight down the middle of its own box.
+    // Nothing outside the body is touched here, so the header, the log strip and the footer are
+    // as untouched as [`help`]'s own note says (`screens/widgets.md` § 1).
+    if let Some(open) = &app.modal {
+        modal(frame, body, open, screen);
     }
 }
 
@@ -721,6 +780,511 @@ fn strip(frame: &mut Frame, area: Rect, screen: &Screen) {
 }
 
 // --- THE FRAME END ---
+
+// --- THE DIALOGS START ---
+
+/// **What is open over the body** (`screens/widgets.md` § 5). One match, so no screen can open a
+/// modal this file does not draw, and no modal can be drawn twice in two shapes.
+fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, screen: &Screen) {
+    match open {
+        views::Modal::Help => help(frame, body, screen),
+        views::Modal::Confirm(dialog) => confirm(frame, body, dialog, screen),
+        views::Modal::Refused { sent, fault, said } => {
+            refused(frame, body, *sent, fault, said.as_deref(), screen);
+        }
+        views::Modal::Gone { object, recreated } => gone(frame, body, object, *recreated, screen),
+    }
+}
+
+/// **One nested box, centred over the body** — `screens/widgets.md` § 5's three calls, in its
+/// order: `Clear`, the block, the content.
+///
+/// **The width is the caller's only choice and the margins are nobody's.** `Rect::centered` is
+/// `Layout` twice — vertical then horizontal — which is the one helper § 5 requires every modal
+/// to share, and what it leaves each side is the margin. At the 68 columns that file measures
+/// against, [`CONFIRM_BOX`] leaves 4/4, [`CROWDED_BOX`] 3/2 and [`DISMISS_BOX`] 6/6; at the real
+/// floor's 78 the same call leaves 9/9, 8/7 and 11/11. **Neither set is written down anywhere in
+/// this file**, which is the point of § 5's *not six hand-computed rectangles*.
+///
+/// **The title is cut here rather than by ratatui.** `Block` clips a title at its own border with
+/// nothing to show for it, and a 512-byte object name is a name the API server accepts
+/// (`k8s::IDENTIFIER`); a name is one token, so it is [`clipped`]'s cut and not [`command_cut`]'s
+/// (`screens/widgets.md` § 7). The room is the box's width less the space each side of the title.
+fn boxed(
+    frame: &mut Frame,
+    body: Rect,
+    width: u16,
+    title: &str,
+    lines: Vec<Line>,
+    screen: &Screen,
+) {
+    let rows = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    let area = body.centered(
+        Constraint::Length(width.saturating_add(2)),
+        Constraint::Length(rows.saturating_add(2)),
+    );
+    frame.render_widget(Clear, area);
+    // **The background is repainted with the foreground or neither is** — `theme.rs`
+    // § THE PALETTE's pairing, and the same reason [`help`] and [`draw`]'s base block set both:
+    // `Clear` resets the cells this `Rect` had been painted with.
+    let block = Block::bordered()
+        .border_style(screen.fg(theme::BORDER))
+        .title(Span::styled(
+            format!(" {} ", clipped(title, usize::from(width).saturating_sub(2))),
+            screen.fg(theme::TEXT),
+        ))
+        .style(Style::new().bg(ink(theme::BACKGROUND, screen.depth)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+/// The columns a nested box has for text — its width less [`MODAL_MARGIN`], which is on the left
+/// only (`screens/dialogs.md`, measured against every box on it).
+fn room(width: u16) -> usize {
+    usize::from(width).saturating_sub(MODAL_MARGIN.len())
+}
+
+/// Wrapped text at a nested box's own margin — [`indent`] over [`wrapped`], which is what every
+/// line inside a dialog but a centred button is.
+fn margined<'a>(text: &str, columns: usize, style: Style) -> Vec<Line<'a>> {
+    indent(wrapped(text, columns), MODAL_MARGIN, style)
+}
+
+/// **How wide a `Confirm`'s box is, and it is the only thing a dialog decides about its shape**
+/// (`screens/widgets.md` § 5).
+///
+/// **Read off [`views::Dialog::consequence`] and [`views::Dialog::asks`], which is what makes it
+/// hold still.** Both are fixed the moment the dialog opens; the verdict and the paused warning
+/// arrive later and neither may change the width, or the box would resize under the reader while
+/// they were deciding — `screens/dialogs.md` § Restart's *the two states of one dialog should not
+/// be shaped differently*, which is why its plain box is drawn at the width its paused variant
+/// needs.
+fn box_width(dialog: &views::Dialog) -> u16 {
+    let fits = wrapped(&dialog.consequence, room(CONFIRM_BOX)).len() <= CONSEQUENCE_LINES;
+    if dialog.asks.is_none() && fits {
+        CONFIRM_BOX
+    } else {
+        CROWDED_BOX
+    }
+}
+
+/// **A live confirm button, drawn as [`theme::FOCUS`] asks** — the reversal `screens/widgets.md`
+/// § 5 names by name, and `theme.rs`'s own answer for *the thing the keys act on*.
+///
+/// The role is consulted rather than a `REVERSED` written here, so the file that owns the theme
+/// stays the single point of change. Its mark half has no meaning on a button: a glyph drawn into
+/// `[ delete ]` would be a second signal for a state the reversal already carries.
+fn focused(screen: &Screen) -> Style {
+    let plain = screen.fg(theme::TEXT);
+    match theme::FOCUS {
+        Signal::Reverse => plain.add_modifier(Modifier::REVERSED),
+        Signal::Mark(_) => plain,
+    }
+}
+
+/// **The row of buttons at the foot of a `Confirm`** (`screens/dialogs.md`, every box on it).
+///
+/// **The confirm button is not live until [`views::Dialog::armed`] says so** — rule 3, and the
+/// ctrl-key-slip guard for a delete. `esc cancel` is always live and never dims: a modal never
+/// traps the user (`screens/widgets.md` § 5).
+///
+/// **A typed-name dialog prints its verb where the others print `⏎ do it`** — `[ delete ]`, the
+/// operation's own word, because by then the reader has typed a name rather than reached for a
+/// key.
+fn buttons(dialog: &views::Dialog, screen: &Screen) -> Line<'static> {
+    let confirm = match dialog.asks {
+        Some(_) => format!("[ {} ]", dialog.verb),
+        None => "[ ⏎ do it ]".to_owned(),
+    };
+    let style = if dialog.armed() {
+        focused(screen)
+    } else {
+        screen.fg(theme::DIM)
+    };
+    Line::from(vec![
+        Span::styled(confirm, style),
+        Span::raw(BUTTON_GAP),
+        Span::styled("[ esc cancel ]", screen.fg(theme::TEXT)),
+    ])
+    .centered()
+}
+
+/// **The one button on a dismiss-only box** (`screens/dialogs.md` § The cluster said no, § The
+/// object went away). It is never armed and never dims — there is nothing left to confirm.
+fn dismiss(screen: &Screen) -> Line<'static> {
+    Line::styled("[ esc dismiss ]", screen.fg(theme::TEXT)).centered()
+}
+
+/// **The typed-name field** — the label, and the box the name is typed into
+/// (`screens/dialogs.md` § Delete). Three rows drawn as text rather than a nested `Block`, so the
+/// whole dialog is one `Paragraph` and its height is the length of one `Vec`.
+///
+/// **The tail is what is kept when the typed line is longer than the field** ([`shortened`], the
+/// opposite end from [`clipped`]) — a name is typed left to right and the end is where the
+/// reader's cursor is. The line cannot be long: `views::Input` bounds it at `k8s::IDENTIFIER`,
+/// which is exactly the longest name a dialog can *ask* for.
+///
+/// **The kind is the label's own word** — *the pod's name*, *the node's name* — which is why
+/// `views::Object` carries one.
+fn typed_name(dialog: &views::Dialog, columns: usize, screen: &Screen) -> Vec<Line<'static>> {
+    let text = screen.fg(theme::TEXT);
+    let border = screen.fg(theme::BORDER);
+    // **A drawn frame is inset on the right where the text is not.** The text's margin is
+    // left-only because that is what puts the consequences on the lines `screens/dialogs.md`
+    // wraps them onto; a *border* sharing a column with the box's own border reads as one shape
+    // rather than two, and § Delete draws this field with the same margin each side.
+    let field = columns.saturating_sub(MODAL_MARGIN.len());
+    let rule = "─".repeat(field.saturating_sub(2));
+    let room = field.saturating_sub(3);
+    // The cursor is a drawn character and not a terminal cursor: a blinking one is a timer, and
+    // a timer is a frame rate by another name (invariant 7).
+    let line = shortened(&format!("{}_", dialog.typed.text()), room);
+    vec![
+        Line::styled(
+            format!(
+                "{MODAL_MARGIN}Type the {}'s name to confirm:",
+                dialog.object.kind
+            ),
+            text,
+        ),
+        Line::styled(format!("{MODAL_MARGIN}┌{rule}┐"), border),
+        Line::from(vec![
+            Span::styled(format!("{MODAL_MARGIN}│ "), border),
+            // **Padded in display columns and not in `char`s.** `{:<n$}` counts characters, and
+            // every other measurement in this file counts columns ([`width`], [`fits`],
+            // [`clipped`], [`shortened`]). `views::Input` accepts any printable character up to
+            // `k8s::IDENTIFIER` bytes, so one CJK glyph typed into a delete field pushed the
+            // field's right border a column out and ten of them pushed it off the box
+            // (`tester`, 2026-09-10).
+            Span::styled(
+                format!("{line}{}", " ".repeat(room.saturating_sub(width(&line)))),
+                text,
+            ),
+            Span::styled("│", border),
+        ]),
+        Line::styled(format!("{MODAL_MARGIN}└{rule}┘"), border),
+    ]
+}
+
+/// **A live confirmation — `screens/dialogs.md` § Scale, § Restart and § Delete are one box with
+/// one row order**, and what differs between them is which rows they have.
+///
+/// The order, top to bottom: the consequence, the warning a check added, the dry-run verdict, and
+/// then either the `$ kubectl …` line or the typed-name field that takes its place. **The
+/// consequence is above the command in all three**, which is this whole page's rule: the
+/// consequence is stated in plain language *above* the command, never instead of it.
+///
+/// **The verdict's row is drawn whether or not the verdict has arrived**, so the box does not
+/// grow by a row the moment the cluster answers. For `delete` it is `Some` from the first frame
+/// (NOTES § D225 ruling 1 — nothing is sent, so there is nothing to wait for); for `scale` and
+/// `restart` it is the real round trip, and the button below it stays dim until then.
+///
+/// **A typed-name dialog spends the `$` line's rows on the field, and the command is on the log
+/// strip beneath either way** (`screens/widgets.md` § 2, invariant 4). It is not a preference:
+/// § Delete's own node box already reaches [`MODAL_ROWS`] exactly with four consequence lines and
+/// the field, so a `$` row inside it would put the frame two rows past the 24 this product is
+/// drawn to.
+///
+/// **The blank row between the consequence and the verdict belongs to the [`CONFIRM_BOX`] box**
+/// (`screens/widgets.md` § 5: kept whenever there is room, dropped first — before any sentence is
+/// cut — whenever there is not). A box that had to widen is a box that had no room, so widening
+/// is what spends it: § Scale keeps the row, § Restart and § Delete do not.
+fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Screen) {
+    let width = box_width(dialog);
+    let columns = room(width);
+    let text = screen.fg(theme::TEXT);
+
+    let consequence = wrapped(&dialog.consequence, columns);
+    let warning = dialog
+        .warning
+        .as_ref()
+        .map_or_else(Vec::new, |warning| wrapped(warning, columns));
+    let verdict = dialog
+        .verdict
+        .map_or_else(Vec::new, |verdict| wrapped(&spoken(verdict), columns));
+    let field = usize::from(dialog.asks.is_some()) * FIELD_ROWS;
+
+    // **The rows nothing can give up**: the blank under the title bar, the verdict — one row even
+    // before it arrives, so the box does not grow when the cluster answers — the `$ kubectl …`
+    // line, the typed-name field, and the buttons.
+    let hard = 1 + verdict.len().max(1) + 1 + field + 1;
+
+    // **The four blank rows, given up in this order while the box is over [`MODAL_ROWS`]**
+    // (`screens/widgets.md` § 5: dropped first, before any sentence is cut). The order is least
+    // separation lost first — the row under the consequence is § 5's own, then the one between
+    // the command and the field it belongs to, then the one under the verdict; the row above the
+    // buttons is the last to go, because a button pressed by mistake is what these boxes exist to
+    // prevent.
+    let full = hard
+        + consequence.len()
+        + warning.len()
+        + usize::from(width == CONFIRM_BOX)
+        + usize::from(field > 0)
+        + 2;
+    let mut over = full.saturating_sub(MODAL_ROWS);
+    let give = |over: &mut usize, wanted: bool| {
+        if wanted && *over > 0 {
+            *over -= 1;
+            false
+        } else {
+            wanted
+        }
+    };
+    // **`b1` belongs to the [`CONFIRM_BOX`] box** — a box that had to widen is a box that had no
+    // room, so widening is what spends it (§ Scale keeps this row, § Restart and § Delete do not).
+    let under_text = give(&mut over, width == CONFIRM_BOX);
+    let under_command = give(&mut over, field > 0);
+    let under_verdict = give(&mut over, true);
+    let above_buttons = give(&mut over, true);
+
+    // **Whatever the blank rows could not absorb is what the sentences give up** — `over`, read
+    // once the four are decided. **This is deliberately not recomputed from a row budget**: a
+    // sum of `hard` and the surviving blanks says the same thing twice, and the mutation gate
+    // said so — four mutants of that arithmetic survived, every one of them equivalent, because
+    // a cut can only happen once every blank is already gone (2026-09-10).
+    //
+    // **The consequence gives way first and the warning only when it is down to its last row.**
+    // The warning is NOTES § D224's correction — without it the dialog claims copies were
+    // replaced when they were not. Every cut is marked.
+    let short = over;
+    let keep = consequence.len().saturating_sub(short).max(1);
+    let short = short.saturating_sub(consequence.len() - keep);
+    let said = marked(consequence, columns, keep);
+    let kept = warning.len().saturating_sub(short);
+    let warning = marked(warning, columns, kept);
+
+    let mut lines = vec![Line::raw("")];
+    lines.extend(indent(said, MODAL_MARGIN, text));
+    lines.extend(indent(warning, MODAL_MARGIN, text));
+    if under_text {
+        lines.push(Line::raw(""));
+    }
+    if verdict.is_empty() {
+        lines.push(Line::raw(""));
+    } else {
+        lines.extend(indent(verdict, MODAL_MARGIN, screen.fg(theme::DIM)));
+    }
+    if under_verdict {
+        lines.push(Line::raw(""));
+    }
+    // **Every `Confirm` draws the taught command inside its own frame, delete included**
+    // (NOTES § D233 ruling 1, `views::Log`). The strip underneath is *not* the same line: it
+    // carries a mutation only once `ops::ask` has answered `Confirmed`, so a dialog that left the
+    // command to the strip taught it on no surface at all — and the strip was still showing an
+    // unrelated earlier command, which at 3am reads as the one about to run.
+    lines.push(Line::styled(
+        format!(
+            "{MODAL_MARGIN}$ {}",
+            command_cut(&dialog.kubectl, columns.saturating_sub(2))
+        ),
+        screen.fg(theme::INFO),
+    ));
+    if under_command {
+        lines.push(Line::raw(""));
+    }
+    if dialog.asks.is_some() {
+        lines.extend(typed_name(dialog, columns, screen));
+    }
+    if above_buttons {
+        lines.push(Line::raw(""));
+    }
+    lines.push(buttons(dialog, screen));
+
+    // **`payments/web` and never `deployment/web`** — the title bar answers *which object*, and
+    // the kind is already spelled on the `$` line below it (`screens/dialogs.md` rule 1, its own
+    // § Scale paragraph). A node has no namespace and gets the bare `node-3`.
+    let title = format!(
+        "{} {}",
+        capitalised(dialog.verb),
+        name(dialog.object.namespace.as_deref(), &dialog.object.name)
+    );
+    boxed(frame, body, width, &title, lines, screen);
+}
+
+/// **The cluster said no** (`screens/dialogs.md` § The cluster said no) — a rejected write is a
+/// first-class state and not a toast that vanishes.
+///
+/// **What the cluster sent back is the one string in any dialog that came off the API**, so it is
+/// the one thing here that is bounded at draw time: `k8s::FREE_TEXT` allows 4096 bytes and a
+/// `fieldValidation=Strict` rejection hands back the object that was sent (NOTES § D217), which
+/// is eighty wrapped lines into a box with room for four. [`cut`] marks what it dropped, which is
+/// what keeps this out of `screens/widgets.md` § 7's ban on a silent truncation.
+///
+/// **The room left is counted from the rows already spent and never from the mockup's own three
+/// lines** — the closing sentence wraps to two at this width today and to more at another, and a
+/// number copied off the drawing would go stale the first time either sentence changed.
+///
+/// **A refusal with nothing quoted drops the heading with it.** `What the cluster sent back:` over
+/// an empty space says the cluster answered when it did not.
+fn refused(
+    frame: &mut Frame,
+    body: Rect,
+    sent: bool,
+    fault: &Fault,
+    said: Option<&str>,
+    screen: &Screen,
+) {
+    let columns = room(DISMISS_BOX);
+    let text = screen.fg(theme::TEXT);
+    let dim = screen.fg(theme::DIM);
+
+    // **Did the server answer at all?** It is the question both sentences below turn on, and it
+    // is [`Fault`]'s to answer rather than this file's: these five are answers, and the rest are
+    // *nothing came back* or a failure on this machine before anything was sent.
+    let answered = matches!(
+        fault,
+        Fault::Rejected | Fault::Expired | Fault::Refused | Fault::Gone | Fault::Conflict
+    );
+    let (title, outcome, because) = if !sent {
+        (
+            "The cluster refused this",
+            "Nothing was changed.",
+            "This is the check that runs before the real change — it stopped this one.",
+        )
+    } else if answered {
+        (
+            "The cluster refused this",
+            "Nothing was changed.",
+            "This was the real change, not a check.",
+        )
+    } else {
+        // **Invariant 2 names this state in these words.** A dead socket on a `delete` — which
+        // sends no check at all (NOTES § D225 ruling 1) — ends with the request on the wire and
+        // no answer, and *"Nothing was changed."* over it is a claim k8rs cannot make.
+        //
+        // **The title claims nothing about the server either** (`screens/dialogs.md` § The cluster
+        // said no, state 3): *the change did not go through* is the idiom for a completed failure —
+        // *my payment didn't go through* — so it contradicts the line the same box draws under it.
+        // That no answer arrived is the whole of what is known, and the title says that and stops.
+        (
+            "The cluster never answered",
+            "k8rs does not know whether the change was made.",
+            "This was the real change, not a check.",
+        )
+    };
+
+    let mut lines = vec![Line::raw("")];
+    lines.extend(margined(outcome, columns, text));
+    lines.push(Line::raw(""));
+    let tail: Vec<Line> = std::iter::once(Line::raw(""))
+        .chain(margined(because, columns, text))
+        .chain([Line::raw(""), dismiss(screen)])
+        .collect();
+
+    if let Some(said) = said.filter(|said| !said.is_empty()) {
+        // **The heading stopped promising prose** (invariant 14, `screens/dialogs.md` § The
+        // cluster said no): a `fieldValidation=Strict` rejection hands back the object that was
+        // sent (NOTES § D217), so *the cluster's own words* delivered JSON. *Sent back* is true of
+        // either, in all three states.
+        let heading = margined("What the cluster sent back:", columns, text);
+        let left = MODAL_ROWS.saturating_sub(lines.len() + heading.len() + tail.len());
+        let quoted = cut(said, columns.saturating_sub(2), left);
+        // **The heading goes with the quote and never stands over an empty space.** It is the
+        // same sentence a `None` here would tell: the cluster sent something back, or it did not.
+        if !quoted.is_empty() {
+            lines.extend(heading);
+            lines.extend(indent(quoted, "    ", dim));
+        }
+    }
+    lines.extend(tail);
+    boxed(frame, body, DISMISS_BOX, title, lines, screen);
+}
+
+/// **The object went away while the dialog was open** (`screens/dialogs.md` § The object went
+/// away, NOTES § D22) — the watch never stopped running behind the modal, so a dialog knows when
+/// the thing it is about stopped existing.
+///
+/// **The title names the outcome and the body names the object** (that page's rule 1): by the
+/// time this opens there is nothing left to confirm, so `Already gone` is what the border says
+/// and the identity moves inside where the reader can still see what disappeared.
+///
+/// **It claims a successor for nothing, and that is a repaired defect** (NOTES § D44). The box
+/// used to read `replaced by web-2c81a 3 seconds ago`; the timestamp was real and *"replaced by"*
+/// was an inference off a shared `ownerReference` that named the wrong pod whenever the ReplicaSet
+/// scaled for another reason at the same moment. There is no successor-matching anywhere in k8rs
+/// to back one, so this box claims only what the dialog's own identity fields back.
+///
+/// **The hedge is the pod's and the replicaset's, word for word from § Delete's own consequence**
+/// — reused rather than reworded, because it is the same unverified fact both times: k8rs has
+/// read no `ownerReferences` and does not know whether anything will put one back.
+fn gone(frame: &mut Frame, body: Rect, object: &views::Object, recreated: bool, screen: &Screen) {
+    let columns = room(DISMISS_BOX);
+    let text = screen.fg(theme::TEXT);
+    let hedge = if recreated {
+        "Whatever created it will normally replace it — k8rs has not checked whether anything did."
+    } else {
+        "Nothing will take its place on its own."
+    };
+
+    let mut lines = vec![Line::raw("")];
+    lines.extend(margined(
+        &format!(
+            "This {} is already gone — something else removed it while this was open. {hedge}",
+            object.kind
+        ),
+        columns,
+        text,
+    ));
+    lines.extend([
+        Line::raw(""),
+        Line::styled(
+            format!(
+                "    {}",
+                clipped(
+                    &name(object.namespace.as_deref(), &object.name),
+                    columns.saturating_sub(2),
+                )
+            ),
+            text,
+        ),
+        Line::raw(""),
+    ]);
+    lines.extend(margined("Nothing was changed.", columns, text));
+    lines.push(Line::raw(""));
+    lines.push(dismiss(screen));
+    boxed(frame, body, DISMISS_BOX, "Already gone", lines, screen);
+}
+
+/// **One of `ops.rs`'s verdict lines as a dialog draws it** — its first letter raised and a full
+/// stop added (`screens/dialogs.md` § Scale, § Delete).
+///
+/// **`ops.rs` keeps the one literal and this is the only place it is reshaped.** Those constants
+/// are lower case with no stop because that is right for the headless surface `main.rs` prints
+/// them on; the drawn box wants a sentence. Until this existed, the fixtures in `ui_tests.rs`
+/// carried a capitalised copy that no code path could produce — a test asserting a string the
+/// product does not build, which CLAUDE.md § Tests must not lie forbids by name (both reviewers,
+/// 2026-09-10).
+///
+/// **The product's own name is never raised**, which is why this is not [`capitalised`] alone:
+/// `k8rs did not check this one with the cluster first` starts with [`NAME`], and *"K8rs"* is a
+/// word this product never spells. `screens/dialogs.md` draws it lower case.
+fn spoken(line: &str) -> String {
+    let raised = if line.starts_with(NAME) {
+        line.to_owned()
+    } else {
+        capitalised(line)
+    };
+    if raised.ends_with('.') {
+        raised
+    } else {
+        format!("{raised}.")
+    }
+}
+
+/// A verb with its first letter raised, for a title bar — `scale` is `ops::Operation::verb`'s own
+/// spelling and `Scale payments/web` is `screens/dialogs.md`'s.
+///
+/// **ASCII, and that is a fact about the input rather than an assumption**: every verb this is
+/// handed is one of the literals the driver holds, never a word the API sent.
+fn capitalised(verb: &str) -> String {
+    let mut characters = verb.chars();
+    characters.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + characters.as_str()
+    })
+}
+
+// --- THE DIALOGS END ---
 
 // --- THE SIDEBAR START ---
 
@@ -1039,7 +1603,11 @@ fn lines<'a>(card: &Card, screen: &Screen, region: usize) -> Vec<Line<'a>> {
     // **Left out when there is none, never drawn blank** — a blank line is a hole in the middle
     // of a card (`crate::rules::Finding::evidence`).
     if !finding.evidence.is_empty() {
-        drawn.extend(indent(cut(&finding.evidence, body), "  ", dim));
+        drawn.extend(indent(
+            cut(&finding.evidence, body, EVIDENCE_LINES),
+            "  ",
+            dim,
+        ));
     }
     // **The action is never cut**: a fix the reader cannot finish reading is not a fix. Its
     // continuations indent under the text rather than under the arrow.
@@ -1117,7 +1685,7 @@ fn identity<'a>(card: &Card, screen: &Screen, region: usize) -> Line<'a> {
         body.saturating_sub(measured + GAP)
     };
 
-    let name = name(&card.owner);
+    let name = name(card.owner.namespace.as_deref(), &card.owner.name);
     let whole = match card.count() {
         Some(count) => format!("{name}  ·  {count}"),
         None => name.clone(),
@@ -1144,12 +1712,14 @@ fn identity<'a>(card: &Card, screen: &Screen, region: usize) -> Line<'a> {
 /// `payments/web`, or a bare `node-3` for something cluster-scoped — `None` is not `""`, which
 /// would draw as `/node-3` (`screens/README.md` § the five rules).
 ///
-/// **Over an [`ObjectId`] and not over a [`Card`]**, because a detail pane's own heading is the
-/// same spelling of the same fact and a second one would be a second answer for `node-3`.
-fn name(id: &ObjectId) -> String {
-    match &id.namespace {
-        Some(namespace) => format!("{namespace}/{}", id.name),
-        None => id.name.clone(),
+/// **Over the two fields and not over a type**, because the three things that spell this are a
+/// [`Card`]'s owner, a detail pane's own heading and a dialog's title bar — a [`ObjectId`] for
+/// two of them and a [`views::Object`] for the third. A second joiner beside this one is a second
+/// answer for `node-3`.
+fn name(namespace: Option<&str>, name: &str) -> String {
+    match namespace {
+        Some(namespace) => format!("{namespace}/{name}"),
+        None => name.to_owned(),
     }
 }
 
@@ -1729,7 +2299,10 @@ fn detail(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Deta
     ])
     .areas(area);
     frame.render_widget(
-        Paragraph::new(Line::styled(name(open.object), screen.fg(theme::TEXT))),
+        Paragraph::new(Line::styled(
+            name(open.object.namespace.as_deref(), &open.object.name),
+            screen.fg(theme::TEXT),
+        )),
         padded(head),
     );
     tabs(frame, row, under, app, screen);
@@ -2399,19 +2972,40 @@ fn wrapped(text: &str, columns: usize) -> Vec<String> {
     lines
 }
 
-/// The evidence, wrapped and **cut at [`EVIDENCE_LINES`] with a visible `…`**.
+/// Text, wrapped and **cut at `most` lines with a visible `…`**.
 ///
-/// It is the only unbounded thing on a card — everything else was written by a rule author, and
-/// this carries a controller's sentence quoted verbatim (NOTES § D37). The cut walks back to a
-/// whole word to make room for the marker, and steps by characters where there is no word
-/// boundary to find. The full text is one `⏎` away, which is what makes cutting it legitimate at
-/// all (`screens/widgets.md` § 7).
-fn cut(text: &str, columns: usize) -> Vec<String> {
-    let mut lines = wrapped(text, columns);
-    if lines.len() <= EVIDENCE_LINES {
+/// **Two callers and one rule.** A card's evidence is cut at [`EVIDENCE_LINES`], which is a
+/// measurement (`screens/alerts.md` § How wide a card is, and how tall); a `Refused` dialog's
+/// quoted cluster message is cut at whatever rows the box has left, which is arithmetic
+/// ([`refused`]). Both are the only unbounded thing on the screen they are drawn on — everything
+/// else there was written by a rule author, and these carry the cluster's own sentence verbatim
+/// (NOTES § D37, § D217).
+///
+/// The cut walks back to a whole word to make room for the marker, and steps by characters where
+/// there is no word boundary to find. The full text is one `⏎` away, which is what makes cutting
+/// it legitimate at all (`screens/widgets.md` § 7).
+fn cut(text: &str, columns: usize, most: usize) -> Vec<String> {
+    marked(wrapped(text, columns), columns, most)
+}
+
+/// [`cut`]'s own second half, over lines somebody else wrapped — **`most` of them, with [`CUT`]
+/// where the rest were dropped**.
+///
+/// Split out because [`confirm`] wraps two strings into one block — a consequence and the warning
+/// a check added — and a budget that covered only the first would let the second run past the box
+/// (`screens/widgets.md` § 5: the blank row goes first, *before any sentence is cut*).
+fn marked(mut lines: Vec<String>, columns: usize, most: usize) -> Vec<String> {
+    if lines.len() <= most {
         return lines;
     }
-    lines.truncate(EVIDENCE_LINES);
+    // **A budget of nothing still leaves the mark.** `truncate(0)` leaves no last line to put
+    // [`CUT`] on, so the whole text disappeared with nothing to say it had — the *silent* cut
+    // `screens/widgets.md` § 7 bans by name. One marked row is the floor, which is what lets
+    // every caller here hand over a budget it computed rather than one it had to clamp.
+    if most == 0 {
+        return vec![CUT.to_owned()];
+    }
+    lines.truncate(most);
     if let Some(last) = lines.last_mut() {
         let room = columns.saturating_sub(width(CUT));
         let mut kept = last.trim_end();

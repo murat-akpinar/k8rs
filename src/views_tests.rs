@@ -1032,10 +1032,16 @@ fn a_report_that_could_not_run_offers_the_cursor_nothing() {
 
 fn dialog(asks: Option<&str>) -> Dialog {
     Dialog {
-        object: "deployment/web".to_owned(),
-        namespace: Some("payments".to_owned()),
+        verb: "scale",
+        object: Object::new(
+            "deployment",
+            Some("payments".to_owned()),
+            "web".to_owned(),
+            Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
+        ),
         consequence: "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies."
             .to_owned(),
+        warning: None,
         kubectl: "kubectl scale deployment/web --replicas=3 -n payments".to_owned(),
         verdict: None,
         asks: asks.map(str::to_owned),
@@ -1614,8 +1620,9 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
             tab,
             ..App::default()
         };
+        let (keys, quit) = app.footer(detail);
         assert_eq!(
-            app.footer(detail),
+            (keys.as_ref(), quit),
             (expected, ""),
             "{view:?} · detail {detail} · {tab:?}"
         );
@@ -1662,7 +1669,8 @@ fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    assert_eq!(app.footer(false), ("? or esc to close", "q quit"));
+    let (keys, quit) = app.footer(false);
+    assert_eq!((keys.as_ref(), quit), ("? or esc to close", "q quit"));
     assert!(
         !app.footer(false).0.contains("all keys"),
         "the footer still pointed at a screen the reader is already on"
@@ -1688,7 +1696,7 @@ fn help_is_the_footer_whatever_it_was_opened_from() {
         };
         assert_eq!(
             app.footer(detail),
-            ("? or esc to close", "q quit"),
+            (Cow::Borrowed("? or esc to close"), "q quit"),
             "{view:?} · detail {detail} · {tab:?}"
         );
     }
@@ -1711,30 +1719,87 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
     );
 }
 
-/// **`Modal::Confirm` has no footer of its own yet, and this is the test that will fail when it
-/// gets one** (todo.md § Phase 11, `screens/dialogs.md`). A dialog's footer is a closed local
-/// set — `⏎ do it  esc cancel` — and until that box lands the mode underneath is what is drawn.
-/// Nothing dispatches a key anywhere in `src/`, so the line is drawn and never acted on; this
-/// pins the hole rather than letting it read as a decision.
+/// **A dialog's footer is its own closed set and the mode underneath is not asked**
+/// (`screens/dialogs.md`, which draws one under every box on it). This replaces the test that
+/// pinned the hole while `Modal::Confirm` fell through, and the hole is what it says it was: the
+/// footers below are the four that page draws.
+///
+/// **A typed-name dialog answers with what is true right now**, which is what a footer is
+/// (`screens/widgets.md` § 2a). Half a name typed is `type the name to enable`; the whole of it
+/// is the same `⏎ do it` every other confirmation has, because by then the key the first line
+/// names has already been pressed.
 #[test]
-fn a_confirmation_dialog_still_draws_the_footer_of_the_mode_underneath() {
-    let app = App {
-        modal: Some(Modal::Confirm(dialog(None))),
-        ..App::default()
+fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
+    let armed = |asks: Option<&str>, typed: &str| {
+        let mut dialog = dialog(asks);
+        dialog.verdict = Some("The cluster checked it first and accepted it.");
+        for character in typed.chars() {
+            dialog.typed.push(character);
+        }
+        App {
+            modal: Some(Modal::Confirm(dialog)),
+            ..App::default()
+        }
     };
-    assert_eq!(
-        app.footer(false).0,
-        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
-        "a dialog footer landed — replace this test with the closed set screens/dialogs.md draws"
-    );
-    // **The same fall-through over an open detail tab**, which is the other side of the hole: a
-    // dialog is opened from a detail pane as readily as from a list, and pinning only the list
-    // would leave half of it able to change without a test noticing.
-    assert_eq!(
-        app.footer(true).0,
-        "[ ] tabs  f follow  c container  esc back  ? all keys  q quit",
-        "a dialog over a detail tab drew something other than the tab underneath"
-    );
+
+    for (app, expected) in [
+        // **No verdict yet, so neither key is offered** — the dry-run is a real round trip and
+        // `esc` is inert until it answers (NOTES § D214). This arm used to read `⏎ do it` over a
+        // dim button, naming a key that did nothing; the typed-name arm below already had the
+        // two-state shape and now both do.
+        (
+            App {
+                modal: Some(Modal::Confirm(dialog(None))),
+                ..App::default()
+            },
+            "waiting for the cluster",
+        ),
+        (armed(None, ""), "⏎ do it  esc cancel"),
+        (
+            armed(Some("web"), ""),
+            "type the name to enable  esc cancel",
+        ),
+        (
+            armed(Some("web"), "we"),
+            "type the name to enable  esc cancel",
+        ),
+        // **The armed typed-name footer names the button's own word** (`Dialog::confirm`): the
+        // footer read `⏎ do it` while the button beside it read `[ delete ]` — two words for one
+        // action, one frame apart.
+        (armed(Some("web"), "web"), "⏎ scale  esc cancel"),
+        (
+            App {
+                modal: Some(Modal::Refused {
+                    sent: false,
+                    fault: crate::k8s::Fault::Rejected,
+                    said: None,
+                }),
+                ..App::default()
+            },
+            "esc dismiss  ⏎ open",
+        ),
+        (
+            App {
+                modal: Some(Modal::Gone {
+                    object: dialog(None).object,
+                    recreated: true,
+                }),
+                ..App::default()
+            },
+            "esc dismiss",
+        ),
+    ] {
+        assert_eq!(app.footer(false).0, expected);
+        assert_eq!(
+            app.footer(false).1,
+            "",
+            "a dialog grew the right-hand zone only `?` has"
+        );
+        // **The same answer over an open detail tab**, which is the other side of the hole the
+        // replaced test pinned: a dialog is opened from a detail pane as readily as from a list,
+        // and a footer that fell through for one of them would fall through for both.
+        assert_eq!(app.footer(true).0, expected);
+    }
 }
 
 /// **No footer needs the six columns the real floor has over this file's 70-column page**
@@ -1755,6 +1820,37 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
         (View::Alerts, true, Tab::Yaml, None),
         (View::Alerts, true, Tab::Events, None),
         (View::Alerts, false, Tab::Logs, Some(Modal::Help)),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::Confirm(dialog(None))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::Confirm(dialog(Some("web")))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::Refused {
+                sent: false,
+                fault: crate::k8s::Fault::Rejected,
+                said: None,
+            }),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::Gone {
+                object: dialog(None).object,
+                recreated: true,
+            }),
+        ),
     ] {
         let app = App {
             view,
@@ -1763,7 +1859,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
             ..App::default()
         };
         let (keys, quit) = app.footer(detail);
-        let width = ratatui::text::Span::raw(keys).width()
+        let width = ratatui::text::Span::raw(keys.as_ref()).width()
             + usize::from(!quit.is_empty())
             + ratatui::text::Span::raw(quit).width();
         assert!(
@@ -1772,7 +1868,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
         );
         seen += 1;
     }
-    assert_eq!(seen, 8, "a mode stopped being measured");
+    assert_eq!(seen, 12, "a mode stopped being measured");
 }
 
 // --- THE SHAPES THE MUTATION GATE PROVED WERE NOT BEING FED ---
@@ -2414,5 +2510,50 @@ fn a_pods_identity_line_drops_what_it_cannot_read_rather_than_guessing() {
         identity(&pod, &now())[1],
         "(Shutdown)",
         "a reason no table names falls through to its raw word with no phrase above it"
+    );
+}
+
+/// **`Object::new` refuses an empty `uid`** — the state that is strictly worse than `None`
+/// (`k8s::owner_uid`, which already refuses one a layer down).
+///
+/// `Some("")` sends `preconditions: { uid: "" }`, a `409` no re-read can ever clear, and a
+/// `Modal::Gone` check against it flips a healthy object to *Already gone* the instant the dialog
+/// opens. `k8s::Row::uid` does not filter, so this is where it is caught.
+#[test]
+fn an_empty_uid_is_no_uid_at_all() {
+    let empty = Object::new("pod", None, "web".to_owned(), Some(String::new()));
+    assert_eq!(empty.uid(), None, "an empty uid survived construction");
+
+    let absent = Object::new("pod", None, "web".to_owned(), None);
+    assert_eq!(absent.uid(), None);
+
+    let real = Object::new("pod", None, "web".to_owned(), Some("u-1".to_owned()));
+    assert_eq!(real.uid(), Some("u-1"), "a real uid was filtered away");
+}
+
+/// **The confirm word is spelled once** (`Dialog::confirm`) — the footer and the button beside it
+/// read the same action, which they did not: `⏎ do it` under `[ delete ]`.
+#[test]
+fn the_confirm_word_is_the_same_one_the_footer_and_the_button_use() {
+    assert_eq!(dialog(None).confirm(), "do it");
+    assert_eq!(
+        dialog(Some("web")).confirm(),
+        "scale",
+        "the verb is the word"
+    );
+
+    let mut armed = dialog(Some("web"));
+    armed.verdict = Some("the cluster checked it first and accepted it");
+    for character in "web".chars() {
+        armed.typed.push(character);
+    }
+    let app = App {
+        modal: Some(Modal::Confirm(armed.clone())),
+        ..App::default()
+    };
+    assert!(
+        app.footer(false).0.contains(armed.confirm()),
+        "the footer does not name the button's own word: {:?}",
+        app.footer(false).0
     );
 }

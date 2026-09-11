@@ -4401,9 +4401,14 @@ string and key was settled in the design phase, so this phase is drawing.
       ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)).
       **Five of those sixteen rows are drawn here**; the eleven that are not are
       named in D259 ruling 5 and carried into the boxes that own them
-- [ ] Confirmation dialogs: consequence in plain language above the kubectl
-      line, and the typed-name variant for delete
-- [ ] **A dialog tracks its object while open** — the watch behind it turns the
+- [x] Confirmation dialogs: consequence in plain language above the kubectl
+      line, and the typed-name variant for delete — landed 2026-09-12
+      ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)). **Every `Confirm` draws its `$ kubectl …`
+      line inside its own frame, `delete` included**: the command log strip
+      carries a mutation only once `ops::ask` has answered `Confirmed`
+      ([D233](NOTES.md#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05)), so a box that left the command to the strip
+      taught it on no surface at all
+- [x] **A dialog tracks its object while open** — the watch behind it turns the
       dialog into "already gone" instead of confirming a name that now belongs
       to something else
       ([NOTES § D22](NOTES.md#d22--a-confirmation-can-outlive-the-thing-it-confirms)).
@@ -4430,6 +4435,12 @@ string and key was settled in the design phase, so this phase is drawing.
       ([reports/2026-09-05](reports/2026-09-05-resourceversion-and-409-on-the-wire.md) § 4b).
       It is the guard against D22's *wrong pod deleted*, the worst case in the
       write path, and the dialog is the first thing that can carry it
+      **Landed 2026-09-12** ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)). The `preconditions.uid` half was already built in
+      Phase 7 ([D235](NOTES.md#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05)), so what this box owed was the dialog's:
+      `views::Object` carries the `uid`, `Object::new` is the one place an empty
+      one is refused, and the doc names per selection surface which kinds can
+      raise `Gone` at all — **an Alerts ReplicaSet cannot**, because nothing
+      watches it, and that is written down rather than assumed
 - [ ] **Keys the user is not allowed to use are dim from the start**, from the
       `may_i` result, with the reason in the footer. The typed-name delete
       exists to prevent an accident, not to waste the time of someone who was
@@ -4538,6 +4549,24 @@ Goal: one binary, live and safe.
       script that hangs forever. Proven by running `k8rs --once` with two
       contexts in the file and no terminal attached
       ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19))
+- [ ] **Every string a dialog draws is proven stripped, and this is the wiring
+      that makes it provable** — invariant 9. Phase 11 drew the boxes and
+      nothing outside a test constructs one, so `tester` could prove the strip
+      only for `Modal::Refused::said` (it can only arrive through `k8s::said`)
+      and `Dialog::typed` (bounded and filtered by `views::Input`).
+      `consequence`, `kubectl`, `asks`, `Object::name` and `Object::namespace`
+      are whatever this wiring hands them ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)). Feed a
+      crafted name — ANSI escape, right-to-left override, 10k on one line —
+      through the real path and watch the frame stay 80×24
+- [ ] **The two sentences `ops.rs` keeps to itself stop being copied** — this
+      wiring is the first code that hands a real `ops::Checked` to a
+      `views::Dialog`, so it is where `ops::ACCEPTED` / `ops::UNCHECKABLE` and
+      `ops::removal`'s pod hedge stop having a second copy in `src/ui.rs` and
+      `src/ui_tests.rs`. All three are private to a file frozen after Phase 7,
+      which is why Phase 11 named the seam instead of opening one
+      ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12) item 6): the fixtures already carry what
+      `ops.rs` really returns rather than the drawn form, and what is owed is
+      that they stop being retyped at all
 - [ ] Manual pass of the REQUIREMENTS error-state list (no kubeconfig, 403 on
       read, 403 on write, API down mid-run, watch drop, rejected admission,
       409 conflict)

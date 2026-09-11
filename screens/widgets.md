@@ -315,8 +315,10 @@ was added back in:
 **A modal's footer is a closed, complete list, and it never carries the
 anchor pair.** Every `Modal` variant but `Help` (§5) draws only the keys valid
 inside it — `⏎ do it  esc cancel`, `type the name to enable  esc cancel`,
-`esc dismiss`, `esc stop draining`, `↑↓ move  / filter  ⏎ switch  esc cancel`
-— because a modal this small has nothing left for `?` to reveal, and stacking
+`esc dismiss  ⏎ open` for `Refused`, the bare `esc dismiss` for `Gone` (it has
+nothing to reopen — the object is already gone), `esc stop draining`,
+`↑↓ move  / filter  ⏎ switch  esc cancel` — because a modal this small has
+nothing left for `?` to reveal, and stacking
 `Help` over it is what the single-value enum already makes unrepresentable
 (§5): opening one would silently drop whatever the modal underneath was
 confirming. `q` is absent the same way — `esc` is always the way out of a
@@ -400,10 +402,41 @@ Phase 11's dialog boxes to spend or not
 
 ```rust
 enum Modal {
-    None, Confirm(..), TypedDelete(..), Refused(..),
-    Help, ContainerPick(..), ContextPick(..),
+    Help,             // `?` — the key map (help.md)
+    Confirm(Dialog),  // every live confirm on dialogs.md — Scale, Restart,
+                      // and Delete's typed-name variant, told apart by
+                      // Dialog::asks, not by a second variant
+    Refused,          // "The cluster said no" (dialogs.md § The cluster
+                      // said no)
+    Gone,             // "Already gone" (dialogs.md § The object went away)
+    ContainerPick,    // pick a container before opening logs (detail.md)
+    ContextPick,      // the cluster picker, at startup and on `X` (context.md)
 }
 ```
+
+This replaces the enum this section used to list — `None, Confirm(..),
+TypedDelete(..), Refused(..), Help, ContainerPick(..), ContextPick(..)` — which
+had drifted from the code in two ways and was missing a screen this file
+already draws. **There is no `None` variant**: "nothing open" is
+`Option<Modal>::None` at the call site (`App::modal`), not a case inside the
+enum itself — the enum only ever names something that *is* open.
+**`Confirm` and `TypedDelete` are one variant, `Confirm(Dialog)`**, told apart
+by `Dialog::asks: Option<String>` — `None` for a dialog a plain `⏎` confirms,
+`Some(name)` for one that needs the name typed back (`src/views.rs` § THE
+MODAL LAYER). Folding them costs nothing a second variant would have bought:
+both are the same box with the same fields, and `armed()` already reads
+`asks` to decide whether a typed match is required.
+**`Refused` and `Gone` are their own variants, not `Confirm(Dialog)` wearing a
+different message** — the reason is structural, not cosmetic. `Confirm`'s
+button goes live once a verdict arrives (`Dialog::armed`); a refused write and
+a vanished object are *terminal* states that never arm and offer only
+`esc dismiss`, so a `Confirm` that could reach either state would need
+`armed()` to somehow stay false forever after a `Some` verdict, which is what
+`armed()` today has no way to express. Two dismiss-only screens are two small
+variants, not one overloaded one. **Neither `ContainerPick` nor `ContextPick`
+changed** — both are real, both are pickers over a list rather than a
+confirmation, and neither is this box's to touch; they are named here only so
+this list stays complete.
 
 - **One modal at a time — the enum makes stacking unrepresentable.** No modal
   stack, no z-index. A dialog that could open over a dialog is how a
@@ -433,6 +466,45 @@ enum Modal {
   a modal draws over, which is why Help's own log strip keeps showing real
   commands and its footer is content this file already names
   ([§2a](#2a-the-footer)).
+- **`Confirm`, `Refused` and `Gone` pick their box from three standard
+  widths, tried in this order, never a bespoke fit per mockup** — read off
+  every dialog box in [dialogs.md](dialogs.md), not asserted from a layout
+  formula. **The width is the only choice a dialog makes.** The margin is
+  never a second, separate choice — it is whatever centring that width
+  inside the 68-column body, by the one helper above, leaves on each side:
+
+  | Interior width | Used when | Margin, centred |
+  |---|---|---|
+  | 58 | the default for a `Confirm` box with a `$ kubectl …` line — used whenever the content fits ([dialogs.md § Scale](dialogs.md#scale--confirm-with-dry-run)) | 4 / 4 |
+  | 61 | 58 does not fit — a longer consequence sentence, or the typed-name field ([§ Restart](dialogs.md#restart--confirm-with-dry-run), [§ Delete](dialogs.md#delete--the-name-has-to-be-typed-and-nothing-is-checked-first)) | 3 / 2 — 5 columns split as evenly as an odd number allows |
+  | 54 | `Refused` or `Gone` — no `$ kubectl …` line and no typed-name field inside the box, so there is consistently less to fit ([§ The cluster said no](dialogs.md#the-cluster-said-no), [§ The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open), [§ Drain](dialogs.md#drain-which-takes-minutes)) | 6 / 6 |
+
+  **58 fits with room to spare either side. 61 is as wide as any dialog on
+  this page needs, and it is close to the real ceiling** — the smaller
+  margin cannot drop below 2 without the box touching the outer frame, and
+  61 leaves 2 already, one column short of it. **This file drew the three
+  dismiss-only boxes off-centre (4 / 8) until a review measured every box
+  against this same rule and found those three did not obey it** — fixed by
+  centring them, not by writing a second margin rule to excuse the
+  difference. Nothing here chooses a margin directly, on any of the three
+  widths.
+- **Height follows the same box, not a fourth number to memorise.** Every
+  dialog's full frame is 11 fixed rows — the header line, the outer top border,
+  one blank row, the nested box's own top and bottom border, one more blank
+  row, the two log-strip separators and its one line, the footer, and the outer
+  bottom border — plus however many rows sit between the nested box's own
+  borders. **24 is the ceiling**, because the whole frame is drawn inside the
+  80×24 floor this product supports at all ([README § How to read
+  them](README.md#how-to-read-them)), so content between the nested borders
+  never runs past 13 rows. **One blank row is kept between the consequence and
+  the dry-run verdict whenever there is room for it inside that ceiling, and
+  dropped — first, before any sentence is cut — whenever there is not.** §
+  Scale keeps it (9 content rows). § Restart and § Delete both need that row
+  for something else instead — an extra sentence, the typed-name field — so the
+  blank goes rather than a clause
+  [D223](../NOTES.md#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)/[D224](../NOTES.md#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)/[D225](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+  put there on purpose; § Restart's paused variant and § Drain both land on
+  exactly 13, the ceiling itself, with no blank left to spend.
 - `esc` closes exactly one level, always. A modal never traps the user.
 - The confirm button is a `Span` with a reversed style; it is **not** live
   until the dry-run has returned and, for a typed-name dialog, until the typed

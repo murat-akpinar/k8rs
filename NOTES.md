@@ -281,6 +281,7 @@ its line moving with it.
 - [D257](#d257--the-command-logs-third-kind-of-line-a-read-the-user-asked-for-is-not-the-read-path-instrumenting-itself-2026-09-07) — the command log's third kind of line: a read the user asked for is not the read path instrumenting itself
 - [D258](#d258--the-command-log-panel-an-outcome-is-not-a-mutations-privilege-the-servers-own-sentence-had-to-be-bounded-before-it-reached-the-strip-and-a-cut-that-leaves-a-working-command-behind-2026-09-07) — the command log panel: an outcome is not a mutation's privilege, the server's own sentence had to be bounded before it reached the strip, and a cut that leaves a working command behind
 - [D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10) — the footer is a curated subset with one pair that never gives way, the help screen is the frame wearing a title rather than a box drawn inside it, and a gate verified against a substituted tree is not verified
+- [D260](#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12) — the dialog family: the taught command belongs in the frame and not on a strip that has not drawn it yet, a refusal that followed no check may not say a check stopped it, and two sentences that must agree live in a file this one cannot reach
 
 ## Why it exists — where the gap is
 
@@ -22424,3 +22425,110 @@ there is no `rustup` here to pin backwards. `tester` read what the newer clippy 
 bumping — a cold `clippy --all-targets --all-features -D warnings` and the full suite, both green,
 `k8s.rs`'s `#[expect(result_large_err)]` still fulfilled — and the one thing the bump cannot cover
 is the four cross rows, which have no std on this machine and first compile on CI.
+
+### D260 — the dialog family: the taught command belongs in the frame and not on a strip that has not drawn it yet, a refusal that followed no check may not say a check stopped it, and two sentences that must agree live in a file this one cannot reach (2026-09-12)
+
+Phase 11's first two boxes, run as one family: *confirmation dialogs* and *a dialog tracks its
+object while open*. `views::Dialog` had existed since Phase 10 and `ui.rs` drew none of it. The
+second box's last clause — *"this is where `delete` gains `preconditions.uid`"* — was **stale at
+HEAD**: it landed in Phase 7 under [D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05)
+(`cb84727`), so the family was `dev-ui`'s alone and `ops.rs` was never opened
+([D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+premise re-check, which cost nothing here and saved a review round).
+
+**1. Every `Confirm` draws its `$ kubectl …` line inside its own frame, `delete` included — and
+the ruling that said otherwise was the PM's.** Told to settle a contradiction between
+`screens/widgets.md` § 5 (*one helper, not six hand-computed rectangles*) and § Delete's own
+measured row budget, the PM ruled that rule 3's *the command is shown* was discharged by the
+command log strip, and `tui-designer` wrote that into the file over text that had been correct.
+It is false, and one file away:
+[D233 ruling 1](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05)
+already says a mutation reaches the strip **the instant `ops::ask` answers `Confirmed`, never when
+the dialog opens**, and that `Cancelled`, `Gone` and `Changed` append nothing — *"the dialog prints
+its own before anyone has agreed to anything"*. So a delete dialog taught its command on **no
+surface at all**, over a strip still showing an unrelated earlier command; `k8s-admin` rendered it
+and found a delete on `payments/web-7d9f4` sitting above `$ kubectl scale deployment/web
+--replicas=3`. The room was already there and was counted rather than argued: `Delete · pod` was
+11 content rows against a 13 ceiling, and only `Delete · node` was at 13 — so the node box gave up
+one blank row and the product gave up nothing. **This is the *PM* half of
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21):
+a ruling reasoned from consistency instead of measured against the object one grep away**, and it
+is recorded because the process has no gate that would have caught it — every agent downstream
+built the thing they were told to.
+
+**2. `Modal::Refused` carries the fault, because two fixed sentences were false for half of what
+reaches it.** The variant kept only the server's words and printed *"Nothing was changed."* and
+*"This is the check that runs before the real change — it stopped this one."* over every refusal.
+`delete` is `checkable: false` ([D225 ruling 1](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)),
+so it sends no check and **every delete refusal is post-send**; and invariant 2 names the state
+where the first sentence is unknowable — a dead socket on a delete ends in *k8rs does not know
+whether the change was made*. A fallback sentence standing in for a typed error is
+[PRIOR-ART § C1](PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error), which this repo lists as a k9s defect to avoid. It now carries
+`sent: bool` **and** `fault`, and neither alone is enough: a `403` comes back from a `dryRun=All`
+and from a live `DELETE` alike, so only *did the call go out* separates them. Three states, and
+`screens/dialogs.md` § The cluster said no draws all three.
+
+**3. The `uid` comes off the selection, and what raises *Already gone* is what is watching
+afterwards — which is not the same question.** The box asked where a ReplicaSet's `uid` comes from,
+given invariant 6 never watches ReplicaSets. Answer: not from a watch at all — from the selected
+row (`rules::ObjectId::uid` in Alerts, `k8s::Row::uid` in the browser), and invariant 6's exclusion
+is `rules.rs`'s owner lookup, which opens no dialog. **But that answers the write guard and not the
+`Gone` guard**, and the first draft claimed it dissolved both. `k8s-admin` found the gap:
+`rules::ObjectId::name`'s own doc says W1's object *is* a ReplicaSet, so it is a real Alerts
+selection, and nothing watches it — such a dialog can never turn into *Already gone* and the
+operator meets a `409` from `preconditions.uid` instead. Safe, and the write still cannot land on
+the wrong object, but it is [PRIOR-ART § G1](PRIOR-ART.md#g1--k9s-arrived-where-invariant-2-starts)'s *refuses for no visible reason*.
+The behaviour stands and the doc now names, per selection surface, which kinds can raise `Gone`.
+**A name comparison is never the fallback**: a name that has gone is exactly when it belongs to
+somebody else, which is [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s whole
+defect.
+
+**4. `Some("")` is strictly worse than `None`, and `Object::new` is the one place it is refused.**
+`k8s::Row::uid` does not filter an empty uid; `preconditions: { uid: Some("") }` is a `409` no
+re-read can ever clear, and a `Gone` check against it flips a healthy object to *Already gone* the
+instant the dialog opens. `k8s::owner_uid` already refuses one a layer down; this is the same
+refusal at the other end, which is why `Object::uid` is the one private field here.
+
+**5. The nested box chooses a width and nothing else.** `screens/widgets.md` § 5 demanded one
+centring helper while § Scale, § Restart and § Delete each carried their own measured margins —
+two statements that could not both be transcribed. Read off every box rather than derived: three
+widths (58 the default, 61 when the consequence or the typed-name field will not fit, 54 for the
+dismiss-only boxes), and the margin is **whatever centring that width leaves**, never a second
+choice. Measured after: all ten boxes centred, every frame 70 columns. Mockups are drawn 70 wide to
+fit inside 80×24 (`screens/README.md`), so the body there is 68 and at the real floor it is 78 —
+which is exactly why the numbers live in no constant.
+
+**6. Two user-facing sentences are a second copy, and the seam is named rather than hidden.**
+`ops::ACCEPTED` / `ops::UNCHECKABLE` and `ops::removal`'s pod hedge are private to `ops.rs`, which
+is frozen after Phase 7. The test fixtures for the verdict had carried the *drawn* form — capital,
+full stop — which no code path produces, so the box was built from a string `ops::Checked::verdict`
+never returns and the reshaping was never exercised: a test asserting what the implementation hands
+it, which CLAUDE.md § Tests must not lie forbids by name. Both reviewers found it independently.
+The fixtures now carry what `ops.rs` really returns and `ui::spoken` does the reshaping — and
+`spoken` does **not** simply capitalise, because `k8rs did not check this one…` begins with the
+product's own name and *"K8rs"* is a word this product never spells. **Ruling: the retype stands,
+documented, and the visibility change is boxed in Phase 12**, where the wiring feeds
+`Checked::verdict()` into a `Dialog` for real; opening a frozen file for a test fixture is the
+plan being wrong in the other direction.
+
+**7. `Status.message` in a modal is a fourth surface, and it is acceptable — bounded, not
+redacted.** [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)
+measured a `fieldValidation=Strict` rejection handing back the whole submitted object there, 4859
+bytes. The gate's *environment variable values are never displayed* row names the command log, the
+audit log and `y`'s YAML — not a dialog. `k8s-admin` measured the window: 4 rows at 50 columns,
+**about 200 characters**, against a first `"env"` key at byte 2207 on the one fixture Deployment
+that has one. Ten times past the window, and the audit log already holds the full 4096 at 0600.
+**Not a breach; re-take this decision when `edit` lands**, because Strict then fires by design on
+operator YAML and this modal becomes its routine display.
+
+**8. A footer says which keys are live *now*, on both arms.** The typed-name dialog flips from
+`type the name to enable` to `⏎ do it` the moment it arms; the press-only arm was drawing
+`⏎ do it` while the verdict was still out and the button dim — naming a key that does nothing. One
+rule, both arms.
+
+**The family took two review rounds and both found real defects**, which is
+[the shape](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+this repo already expects: `tester` found a typed-name field whose padding counted `char`s where
+every other measurement counts display columns — one CJK glyph pushed the field's border a column
+out and ten pushed it off the box — and `k8s-admin` found items 1, 2 and 3. Neither is visible from
+inside a single box, which is what a family review is for.

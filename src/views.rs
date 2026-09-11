@@ -45,12 +45,13 @@
 )]
 
 use crate::analysis::Row as ReportRow;
-use crate::k8s::{Browsable, IDENTIFIER, text, unprintable};
+use crate::k8s::{Browsable, Fault, IDENTIFIER, text, unprintable};
 use crate::rules::{
     ContainerSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot, Severity,
     WorkloadSnapshot, age,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 // --- LOADED, EMPTY AND DENIED ARE THREE THINGS START ---
@@ -707,12 +708,171 @@ pub fn answers(row: &ReportRow) -> bool {
 /// **The enum makes stacking unrepresentable, and that is the point.** A dialog that can open over
 /// a dialog is how a confirmation ends up applying to the wrong object. There is no modal stack
 /// and no z-index; `esc` closes exactly one level, and one level is all there is.
+///
+/// **[`Self::Refused`] and [`Self::Gone`] are their own variants rather than a [`Dialog`] wearing
+/// a different message**, and the reason is structural (`screens/widgets.md` § 5): a `Confirm`
+/// arms the moment a verdict lands ([`Dialog::armed`]), while both of these are *terminal* — they
+/// never arm and they offer only `esc dismiss`. A `Confirm` that could reach either would need
+/// `armed()` to stay false forever after a `Some` verdict, which it has no way to express.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Modal {
     /// `?` — the full key map (`screens/help.md`).
     Help,
     /// A mutation waiting for the person at the keyboard (`screens/dialogs.md`).
     Confirm(Dialog),
+    /// **A write that did not land, or that k8rs cannot say landed** (`screens/dialogs.md` § The
+    /// cluster said no) — the third state is the second half of that sentence and not a weaker
+    /// form of the first (invariant 2).
+    ///
+    /// **It carries the fault and not just the words, because two of the sentences that box used
+    /// to print are false for half the cases that reach it.** `ops::Outcome` distinguishes
+    /// `NotSent { fault, said }` from `Failed { fault, said }`, and this variant threw both away:
+    /// *"Nothing was changed."* and *"This is the check that runs before the real change — it
+    /// stopped this one."* were fixed text. `delete` is `checkable: false` (NOTES § D225 ruling 1)
+    /// so **no check is ever sent** and every delete refusal is post-send; and invariant 2 names
+    /// the state where the first sentence is unknowable — a dead socket on a delete ends in *k8rs
+    /// does not know whether the change was made*. A hardcoded sentence standing in for a typed
+    /// fault is PRIOR-ART § C1, which this repo lists as the defect to avoid.
+    Refused {
+        /// **Whether the real call went out** — `ops::Outcome::Failed` rather than `NotSent`. It
+        /// is what decides whether a check can be said to have stopped anything, and [`Fault`]
+        /// cannot answer it: a `403` comes back from a `dryRun=All` and from a live `DELETE`
+        /// alike.
+        sent: bool,
+        /// **What went wrong, as `k8s.rs` classified it** — never a second vocabulary for the
+        /// same errors, and never a sentence built from what the server said.
+        fault: Fault,
+        /// **The cluster's own words, where it sent any** — `ops::Outcome::said`, which arrived
+        /// already stripped and bounded from `k8s::said` (invariant 9).
+        ///
+        /// **`None` is *it refused and explained nothing*, and the box then draws no quote block
+        /// at all** rather than the heading over an empty space.
+        ///
+        /// **It is still cut at draw time, and that is the security gate's *sizes are bounded*
+        /// row and not tidiness**: `k8s::FREE_TEXT` allows 4096 bytes, and a
+        /// `fieldValidation=Strict` rejection hands back the whole object that was sent —
+        /// 4859 bytes on a trivial Deployment (NOTES § D217). That is eighty wrapped lines into a
+        /// box that has room for four.
+        said: Option<String>,
+    },
+    /// **The object stopped existing while the dialog was open** (`screens/dialogs.md` § The
+    /// object went away, NOTES § D22).
+    Gone {
+        /// What the dialog opened on — the box claims this and nothing else.
+        object: Object,
+        /// **Whether anything normally puts one back** — which of § The object went away's two
+        /// sentences this box says. True for a pod and a replicaset, whose creator k8rs has not
+        /// read; false for a deployment, a statefulset, a daemonset and a node, which nothing
+        /// recreates on its own.
+        ///
+        /// **A field and not a match on [`Object::kind`] in the renderer**, so `ui.rs` grows no
+        /// kind table of its own. **It has no home below this yet, and saying it had was wrong**:
+        /// `main.rs`'s `KINDS` carries `singular`, `short` and `namespaced` and nothing about
+        /// what recreates a kind, so the caller Phase 12 writes is what decides this — and that
+        /// caller is the place a flag belongs if one is ever wanted.
+        ///
+        /// **Neither sentence names a successor, and that is a repaired defect rather than an
+        /// omission** (NOTES § D44): the box used to read `replaced by web-2c81a 3 seconds ago`,
+        /// an inference off a shared `ownerReference` that named the wrong pod whenever the
+        /// ReplicaSet scaled for another reason. There is no successor-matching anywhere in k8rs
+        /// to back one.
+        recreated: bool,
+    },
+}
+
+/// **Which object a modal is about, in the four facts a screen and a safety check need**
+/// (`screens/dialogs.md` rule 1).
+///
+/// **One type for [`Dialog`] and [`Modal::Gone`], because the second is the first after the watch
+/// answered** — `screens/dialogs.md` § The object went away's *this box now claims only what the
+/// dialog's own identity fields back*.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Object {
+    /// The kind in the word a manifest spells — `pod`, `deployment`, `node`. What
+    /// *"Type the pod's name to confirm"* and *"This pod is already gone"* interpolate.
+    ///
+    /// **`&'static str`, for [`Dialog::verdict`]'s own reason** (NOTES § D246): every sentence a
+    /// dialog draws is k8rs's own, and a `String` here is nothing structurally stopping a kind
+    /// word the API sent from being interpolated into one. The six kinds an operation can be
+    /// pointed at are literals in the driver.
+    pub kind: &'static str,
+    /// Its namespace, or `None` for something cluster-scoped. No namespace is drawn where there
+    /// is none — the title bar reads the bare `node-3`, never `/node-3`
+    /// (`screens/README.md` § the five rules).
+    pub namespace: Option<String>,
+    /// Its own name — `web`, `web-7d9f4`, `node-3`. The second half of every title bar, and what
+    /// a delete asks to have typed back.
+    pub name: String,
+    // **Private, and the only field here that is** — [`Object::new`] is the one way to set it and
+    // it is what refuses `Some("")`.
+    /// **The cluster's own name for *this* instance of that name** — what answers *is this still
+    /// the same object*, which is the question a dialog left open exists to ask
+    /// (NOTES § D22, `ops::Mutation::uid`, `ops::Deleting::uid`).
+    ///
+    /// **Deliberately not the `resourceVersion`** (NOTES § D228). That field answers *has anything
+    /// at all been written*, and it moves on a status-only write by the object's own controller:
+    /// measured, a `CrashLoopBackOff` Deployment whose spec never moved wrote 20 times in 99.4 s,
+    /// median gap 2.45 s. A modal keyed on it would kill its own confirm button every couple of
+    /// seconds on exactly the object an operator opened it for.
+    ///
+    /// **It comes off the selection and not off a watch, which is what answers the one kind that
+    /// has no watch.** Invariant 6 fetches ReplicaSets on demand and never watches them — but
+    /// that is `rules.rs`'s owner lookup, and no dialog opens on it. A dialog opens on a selected
+    /// row: `rules::ObjectId::uid` in Alerts, `k8s::Row::uid` in the browser, and a browser row
+    /// carries the `uid` the same `Table` fetch that drew it carried. What answers *is it still
+    /// there* is the pane behind the modal, which for a browsed kind is that kind's own watch —
+    /// open, because the view it belongs to is still open under the dialog.
+    ///
+    /// **`None` is *k8rs cannot tell this object from the next one to hold its name*, and both
+    /// guards are then off**: no [`Modal::Gone`] can be raised for it, and `ops::delete` sends no
+    /// `preconditions.uid` either (NOTES § D235). What must not happen is a fallback to comparing
+    /// *names*, because a name that has gone is exactly when it belongs to somebody else — the
+    /// defect NOTES § D22 exists for.
+    ///
+    /// **Which selections can raise [`Modal::Gone`] at all, said plainly so a Phase 12 wiring
+    /// cannot assume a guard that is not there.** The `uid` comes off the selection, but what
+    /// turns a dialog into *Already gone* is what is *watching* afterwards, and invariant 6
+    /// watches Pods, Nodes and Deployments/StatefulSets/DaemonSets and nothing else. So:
+    ///
+    /// - **an Alerts card** — raises `Gone` for those five kinds, and **not for a ReplicaSet**,
+    ///   which `crate::rules::ObjectId::name`'s own doc confirms is a real Alerts selection (rule
+    ///   W1's object is one). Nothing watches ReplicaSets;
+    /// - **a browser row** — raises `Gone` for whichever kind's view is open, because that view's
+    ///   own watch is running under the dialog.
+    ///
+    /// **Where `Gone` cannot be raised the operator meets a `409` from `preconditions.uid`
+    /// instead** (NOTES § D235) — safe, and the write does not land on the wrong object, but it
+    /// is PRIOR-ART § G1's *refuses for no visible reason*. Routing a watch is not this box's.
+    uid: Option<String>,
+}
+
+impl Object {
+    /// **The one way to build one**, because it is the one place [`Self::uid`]'s empty string is
+    /// refused.
+    ///
+    /// **`Some("")` is strictly worse than `None` and had no guard.** `k8s::Row::uid` does not
+    /// filter it, `preconditions: { uid: Some("") }` is a `409` no re-read can ever clear, and a
+    /// [`Modal::Gone`] check against it flips a healthy object to *Already gone* the instant the
+    /// dialog opens. `k8s::owner_uid` already refuses an empty uid one layer down; this is the
+    /// same refusal at the other end.
+    pub fn new(
+        kind: &'static str,
+        namespace: Option<String>,
+        name: String,
+        uid: Option<String>,
+    ) -> Self {
+        Self {
+            kind,
+            namespace,
+            name,
+            uid: uid.filter(|uid| !uid.is_empty()),
+        }
+    }
+
+    /// The cluster's own name for this instance, or `None` where there is none to trust.
+    pub fn uid(&self) -> Option<&str> {
+        self.uid.as_deref()
+    }
 }
 
 /// **What a confirmation dialog holds while it is open** — the drawable half of
@@ -722,22 +882,42 @@ pub enum Modal {
 /// `ops.rs`'s, they are the only route to a mutation, and nothing outside that file can build one
 /// — which is invariant 2's *"a confirmation cannot be forged"* made structural rather than
 /// remembered (`ops::Agreed`). The `Checked` lives in the task that is awaiting `ops::perform`'s
-/// `ask` callback; this is the state the screen draws while that task waits. Phase 11 wires the
+/// `ask` callback; this is the state the screen draws while that task waits. Phase 12 wires the
 /// two, and it passes [`Dialog::typed`] to `ops::Checked::typed`, which is what actually decides.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dialog {
-    /// The object as the reader knows it — `deployment/web`. The dialog's title bar, and the
-    /// reason a stale selection can never be confirmed blindly (`screens/dialogs.md` rule 1).
-    pub object: String,
-    /// Its namespace, or `None` for something cluster-scoped. No namespace is drawn where there is
-    /// none (`screens/README.md` § the five rules).
-    pub namespace: Option<String>,
+    /// **The operation, in `ops::Operation::verb`'s own spelling** — `scale`, `restart`,
+    /// `delete`. The title bar capitalises it and a typed-name dialog's button prints it as it
+    /// is: `┌ Scale payments/web ─` over `[ delete ]`.
+    ///
+    /// **Not a title built by the caller.** A pre-joined title would put rule 1's spelling —
+    /// which zone carries the namespace, and that a node has none — one layer *above* the file
+    /// that draws it, where the screen and the driver each keep their own copy of it
+    /// (NOTES § D254).
+    pub verb: &'static str,
+    /// **Which object, and the `uid` that says it is still that one** — the title bar, the name a
+    /// delete asks to have typed back, and the reason a stale selection can never be confirmed
+    /// blindly (`screens/dialogs.md` rule 1, NOTES § D22).
+    pub object: Object,
     /// What is about to happen, in plain language — *"This starts 1 more copy of your app. Right
     /// now: 2 copies. After: 3 copies."* **One string, wrapped by the renderer into the box's two
     /// lines**, never two fields: `ops::Mutation::consequence` is one string and a `\n` put here
     /// would not survive `k8s::text` on the way into the record (`screens/dialogs.md`
     /// § *Printed instead of drawn*).
     pub consequence: String,
+    /// **The one extra sentence a check can add to the consequence** — today only
+    /// *"This deployment is paused, so nothing will be replaced…"*, built by the driver's
+    /// `while_paused` off the `bool` `ops::Checked::returned` carries (NOTES § D224).
+    ///
+    /// **A warning and not a refusal**: the button still arms and `⏎` still does it. Writing the
+    /// annotation on a paused Deployment is not destructive — it takes effect the moment somebody
+    /// resumes the rollout. What was wrong before this line existed was the dialog claiming the
+    /// copies had already been replaced (`screens/dialogs.md` § The paused Deployment).
+    ///
+    /// **Its own paragraph and not appended to [`Self::consequence`]**, because it is a second
+    /// sentence that starts on its own line in the box; joined with a space it would wrap into
+    /// the middle of the line above.
+    pub warning: Option<String>,
     /// The equivalent kubectl command, for the `$ …` line. **Display text**: k8rs never executes
     /// it and nothing is fed back from it into a process (invariant 4, the security gate's
     /// *the command log is display text*).
@@ -758,6 +938,13 @@ pub struct Dialog {
     /// **The object's own name, where it has to be typed back** — `delete` and `drain`, and
     /// nothing else (invariant 2, `ops::Confirm::Type`). `None` is a dialog a deliberate yes
     /// confirms.
+    ///
+    /// **It is the name a second time and that is not a duplicate of [`Object::name`].** This one
+    /// is `ops::Checked::asks`, stripped by `ops::Record::of` and the same value
+    /// `ops::Checked::typed` will actually compare against — so [`Self::armed`] reads *this* one
+    /// and the title bar draws the other. `k8s::text` can shorten a 600-byte name to
+    /// `k8s::IDENTIFIER` on the way in, and a dialog that armed on the unstripped one would light
+    /// a button `ops.rs` then refuses.
     pub asks: Option<String>,
     /// What has been typed into it so far. Empty and unused on a press-only dialog.
     pub typed: Input,
@@ -777,6 +964,19 @@ impl Dialog {
     /// nothing. `ops.rs` refuses it in the one function every dialog routes through; this is the
     /// same refusal on the drawing side, so a name that `k8s::text` stripped to nothing cannot
     /// even light the button up.
+    /// **The word the confirm button and the footer both use** — `do it` for a dialog a press
+    /// confirms, and the operation's own verb for one that asks for a name.
+    ///
+    /// **One source, because they sat a frame apart saying different things**: the footer read
+    /// `⏎ do it` while the button beside it read `[ delete ]`, which is two words for one action
+    /// in one frame.
+    pub fn confirm(&self) -> &'static str {
+        match self.asks {
+            Some(_) => self.verb,
+            None => "do it",
+        }
+    }
+
     pub fn armed(&self) -> bool {
         self.verdict.is_some()
             && match self.asks.as_deref() {
@@ -1303,17 +1503,51 @@ impl App {
     /// arrives from its one home and the two cannot come apart the way a second `open: Tab`
     /// field here would let them.
     ///
-    /// **`Modal::Confirm` deliberately falls through to the mode underneath, and that is a hole
-    /// with a box on it, not a decision.** `screens/dialogs.md`'s own closed footers — `⏎ do it
-    /// esc cancel`, `type the name to enable  esc cancel` — land with the dialogs themselves
-    /// (todo.md § Phase 11); until they do, no key is dispatched anywhere in `src/`, so the line
-    /// this returns under an open dialog is drawn but never true of a keypress.
-    pub fn footer(&self, detail: bool) -> (&'static str, &'static str) {
+    /// **A modal answers for its own footer and the mode underneath is not asked**
+    /// (`screens/dialogs.md`, which draws one under each box). These are the *closed local sets*
+    /// `screens/widgets.md` § 2a names: nothing global is offered beside them, because under an
+    /// open confirmation there is nothing global to offer.
+    ///
+    /// **A confirmation says which keys are live *now*, and the same rule applies to both arms.**
+    /// A footer is § 2a's *the keys valid right now*, so it may not name `⏎` while the button is
+    /// dim: a typed-name dialog reads `type the name to enable` until [`Dialog::armed`], and a
+    /// press-only dialog reads `waiting for the cluster` until its dry-run answers. **Only the
+    /// typed-name arm had that shape**, and the press-only arm named a key that did nothing for
+    /// as long as a real round trip takes (NOTES § D214 — `esc` is inert then too, which is why
+    /// neither key is offered).
+    ///
+    /// **The confirm word is [`Dialog::confirm`]'s**, so the footer and the button beside it
+    /// cannot spell one action two ways.
+    ///
+    /// **The separator is two spaces, as every other footer in the product spells it**
+    /// (`screens/widgets.md` § 2a, the file that owns the footer). `screens/dialogs.md` draws
+    /// three under its boxes; one product cannot have two answers for the gap between two keys.
+    pub fn footer(&self, detail: bool) -> (Cow<'static, str>, &'static str) {
         // **`Help` is the one modal that keeps `q quit` and the only footer with a right-hand
         // zone** — nothing is pending while it is open, so a global quit beside it costs nothing
         // (`screens/widgets.md` § 2a, `screens/help.md`).
-        if self.modal == Some(Modal::Help) {
-            return ("? or esc to close", "q quit");
+        match &self.modal {
+            Some(Modal::Help) => return (Cow::Borrowed("? or esc to close"), "q quit"),
+            Some(Modal::Confirm(dialog)) => {
+                let keys = match (dialog.armed(), dialog.asks.is_some()) {
+                    (true, _) => Cow::Owned(format!("⏎ {}  esc cancel", dialog.confirm())),
+                    (false, true) => Cow::Borrowed("type the name to enable  esc cancel"),
+                    // **No verdict yet, so neither key is live** — the dry-run is a real round
+                    // trip for a scale and a restart, and `esc` is inert until it answers
+                    // (NOTES § D214). `delete` never sits here: it sends no check, so its verdict
+                    // is `Some` from the first frame (NOTES § D225 ruling 1).
+                    (false, false) => Cow::Borrowed("waiting for the cluster"),
+                };
+                return (keys, "");
+            }
+            // **Two dismiss-only screens, and only one of them offers a second key.** `Refused`
+            // reports on a write that was already sent, so the object it was about is still
+            // selected underneath and `⏎` still opens it; `Gone` is the one state where it is
+            // not, because the object stopped existing (`screens/dialogs.md` § The object went
+            // away).
+            Some(Modal::Refused { .. }) => return (Cow::Borrowed("esc dismiss  ⏎ open"), ""),
+            Some(Modal::Gone { .. }) => return (Cow::Borrowed("esc dismiss"), ""),
+            None => {}
         }
         // **Exhaustive on both enums on purpose**: a fifth tab or a fourth view is a compile
         // error here rather than a screen that quietly draws the wrong keys.
@@ -1327,7 +1561,7 @@ impl App {
                 "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit"
             }
         };
-        (keys, "")
+        (Cow::Borrowed(keys), "")
     }
 
     /// **`esc` — closes exactly one level, always** (`screens/widgets.md` § 5, and those are its

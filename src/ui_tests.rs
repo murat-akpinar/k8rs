@@ -11,6 +11,7 @@
 //! evidence quotes are the committed capture's bytes as that file prints them.
 
 use super::*;
+use crate::k8s::Fault;
 use crate::rules::{
     ClusterSnapshot, ContainerSnapshot, ContainerState, Finding, NodeSnapshot, ObjectId,
     ObjectKind, PodSnapshot,
@@ -3065,10 +3066,14 @@ fn fits_never_cuts_a_character_in_half() {
 #[test]
 fn the_cut_walks_back_to_a_whole_word_before_it_marks() {
     // Three lines and no more: nothing is cut, nothing is marked.
-    let short = cut("aa bb cc dd", 5);
+    let short = cut("aa bb cc dd", 5, EVIDENCE_LINES);
     assert_eq!(short, ["aa bb", "cc dd"]);
 
-    let long = cut("aaaa bbbb cccc dddd eeee ffff gggg hhhh", 10);
+    let long = cut(
+        "aaaa bbbb cccc dddd eeee ffff gggg hhhh",
+        10,
+        EVIDENCE_LINES,
+    );
     // Three, spelled out rather than read off the constant the code uses: a test that asserts
     // against `EVIDENCE_LINES` agrees with whatever that constant becomes.
     assert_eq!(long.len(), 3, "{long:?}");
@@ -3082,7 +3087,7 @@ fn the_cut_walks_back_to_a_whole_word_before_it_marks() {
     assert_eq!(long, ["aaaa bbbb", "cccc dddd", "eeee ffff…"]);
 
     // And where the third line fills the width, the walk-back is what makes room for the marker.
-    let full = cut("aaaaa bbbb ccccc dddd eeeee ffff ggggg", 10);
+    let full = cut("aaaaa bbbb ccccc dddd eeeee ffff ggggg", 10, EVIDENCE_LINES);
     assert_eq!(full, ["aaaaa bbbb", "ccccc dddd", "eeeee…"]);
     for line in &full {
         assert!(width(line) <= 10, "{full:?}");
@@ -4805,4 +4810,1255 @@ fn every_footer_on_the_screen_it_belongs_to() {
         ..App::default()
     };
     show("Help", &render(&helping, &plain));
+}
+
+// --- THE DIALOGS ---
+
+/// The scale dialog `screens/dialogs.md` § Scale draws, with the check already answered.
+fn scaling() -> views::Dialog {
+    views::Dialog {
+        verb: "scale",
+        object: views::Object::new(
+            "deployment",
+            Some("payments".to_owned()),
+            "web".to_owned(),
+            Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
+        ),
+        consequence: "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies."
+            .to_owned(),
+        warning: None,
+        kubectl: "kubectl scale deployment/web --replicas=3 -n payments".to_owned(),
+        verdict: Some(ACCEPTED),
+        asks: None,
+        typed: views::Input::default(),
+    }
+}
+
+fn restarting() -> views::Dialog {
+    views::Dialog {
+        verb: "restart",
+        consequence: "This asks Kubernetes to replace every copy of your app with a new one. How \
+                      many stop at the same time is a setting on this deployment — it can be a \
+                      few, or all of them at once. A paused deployment will not start until you \
+                      resume it."
+            .to_owned(),
+        kubectl: "kubectl rollout restart deployment/web -n payments".to_owned(),
+        ..scaling()
+    }
+}
+
+fn deleting() -> views::Dialog {
+    let mut typed = views::Input::default();
+    for character in "web-7d9f".chars() {
+        typed.push(character);
+    }
+    views::Dialog {
+        verb: "delete",
+        object: views::Object::new(
+            "pod",
+            Some("payments".to_owned()),
+            "web-7d9f4".to_owned(),
+            Some("f0a1b2c3-d4e5-4678-9abc-def012345678".to_owned()),
+        ),
+        consequence: "This removes the pod. Whatever created it will normally replace it — k8rs \
+                      has not checked whether anything did."
+            .to_owned(),
+        warning: None,
+        kubectl: "kubectl delete pod/web-7d9f4 -n payments".to_owned(),
+        verdict: Some(UNCHECKABLE),
+        asks: Some("web-7d9f4".to_owned()),
+        typed,
+    }
+}
+
+/// The paused Deployment's warning, `main.rs`'s `while_paused` sentence for a deployment
+/// (NOTES § D224).
+const PAUSED: &str = "This deployment is paused, so nothing will be replaced until somebody \
+                      resumes it with kubectl rollout resume — and the command above will refuse \
+                      to run until then.";
+
+/// **`ops.rs`'s own two verdict lines, copied here because they are private there.**
+///
+/// **They are lower case with no full stop, which is what `ops::Checked::verdict` really
+/// returns** — right for the headless surface `main.rs` prints them on, and reshaped for a drawn
+/// box by [`spoken`]. The fixtures used to carry the *drawn* form, so the box was built from a
+/// string no code path produces and the transformation was never exercised: a test asserting
+/// what the implementation happens to hand it, which CLAUDE.md § Tests must not lie forbids by
+/// name (both reviewers, 2026-09-10).
+///
+/// **They are still retyped, and that is a hole with a name on it.** `ops::ACCEPTED` and
+/// `ops::UNCHECKABLE` are private consts (`src/ops.rs`), so nothing outside that file can reach
+/// them; the PM has the visibility ruling. Until then this pair is a second copy, and the one
+/// thing keeping it honest is that `screens/dialogs.md` draws the reshaped form and
+/// `the_restart_boxes_…` and `the_delete_boxes_…` compare against the page.
+const ACCEPTED: &str = "the cluster checked it first and accepted it";
+const UNCHECKABLE: &str = "k8rs did not check this one with the cluster first";
+
+/// **Four rows of warning at [`CONFIRM_BOX`]'s own text width** — one row short of [`WORDY`], so
+/// the pair of them is the blank row under the consequence appearing and disappearing.
+const ROOMY: &str = "The cluster answered this check with a sentence longer than any it really \
+                     sends, long enough to take four whole rows of this box and no more than \
+                     four of them, which is what this one is for.";
+
+/// **Five rows of warning at [`CONFIRM_BOX`]'s own text width** — no operation sends anything
+/// like it, and that is the point: the row budget is a total guard on a `views::Dialog` anyone
+/// can build, and this is the only shape that crowds a 58-wide box from below.
+const WORDY: &str = "The cluster answered this check with a sentence far longer than any it \
+                     really sends, long enough to take five whole rows of this box on its \
+                     own and to leave the consequence above it a single row to live in, \
+                     which is what this case exists to say.";
+
+/// The webhook refusal `screens/dialogs.md` § The cluster said no quotes.
+const DENIED: &str = "admission webhook 'limits.example.com' denied the request: replicas may not \
+                      exceed 5 in this namespace";
+
+/// § Delete's second box — the one cluster-scoped object any operation reaches, whose title bar
+/// carries no namespace (rule 1).
+fn deleting_a_node() -> views::Dialog {
+    let mut typed = views::Input::default();
+    for character in "node-".chars() {
+        typed.push(character);
+    }
+    views::Dialog {
+        object: views::Object::new(
+            "node",
+            None,
+            "node-3".to_owned(),
+            Some("c0ffee00-0000-4000-8000-000000000000".to_owned()),
+        ),
+        consequence: "This asks the cluster to remove its record of node-3, not the machine. \
+                      Something attached to it, unread by k8rs, may delay this or act first. Left \
+                      alone, its pods are deleted and the machine keeps running until its kubelet \
+                      restarts."
+            .to_owned(),
+        kubectl: "kubectl delete node/node-3".to_owned(),
+        asks: Some("node-3".to_owned()),
+        typed,
+        ..deleting()
+    }
+}
+
+fn over(modal: views::Modal) -> App {
+    App {
+        modal: Some(modal),
+        ..App::default()
+    }
+}
+
+/// **Every dialog, printed whole** — `cargo test -- --nocapture`.
+#[test]
+fn every_dialog_on_the_screen_it_belongs_to() {
+    let now = now();
+    let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
+    let log = [
+        "$ kubectl get statefulsets -A --watch".to_owned(),
+        "$ kubectl scale deployment/web --replicas=3 -n payments".to_owned(),
+    ];
+    let mut plain = screen(&alerts, &now);
+    plain.log = &log;
+
+    let mut paused = restarting();
+    paused.warning = Some(PAUSED.to_owned());
+
+    for (title, modal) in [
+        ("Scale", views::Modal::Confirm(scaling())),
+        ("Restart", views::Modal::Confirm(restarting())),
+        ("Restart · paused", views::Modal::Confirm(paused)),
+        ("Delete · pod", views::Modal::Confirm(deleting())),
+        ("Delete · node", views::Modal::Confirm(deleting_a_node())),
+        (
+            "Refused",
+            views::Modal::Refused {
+                sent: false,
+                fault: crate::k8s::Fault::Rejected,
+                said: Some(DENIED.to_owned()),
+            },
+        ),
+        (
+            "Gone · pod",
+            views::Modal::Gone {
+                object: deleting().object,
+                recreated: true,
+            },
+        ),
+        (
+            "Gone · deployment",
+            views::Modal::Gone {
+                object: scaling().object,
+                recreated: false,
+            },
+        ),
+    ] {
+        println!(
+            "--- {title} ---\n{}\n",
+            rows(&render(&over(modal), &plain)).join("\n")
+        );
+    }
+}
+
+/// **The nested box out of a drawn frame or out of `screens/dialogs.md`, borders and all** — the
+/// same extraction over both, so a comparison between them is a comparison and not a coincidence.
+///
+/// It anchors on the first `┌` that is not in column 0, which is the frame's own border in both.
+/// The delete field's own `┌` is further in and on a later row, so it is never the anchor.
+fn nested(rows: &[String]) -> Vec<String> {
+    let (top, left) = rows
+        .iter()
+        .enumerate()
+        .find_map(|(y, row)| {
+            row.chars()
+                .position(|character| character == '┌')
+                .filter(|&x| x > 0)
+                .map(|x| (y, x))
+        })
+        .unwrap_or_else(|| panic!("no nested box in\n{}", rows.join("\n")));
+    let width = rows[top]
+        .chars()
+        .skip(left)
+        .position(|character| character == '┐')
+        .expect("a nested box closes its title bar")
+        + 1;
+    let mut box_ = Vec::new();
+    for row in &rows[top..] {
+        let line: String = row.chars().skip(left).take(width).collect();
+        let last = line.starts_with('└');
+        box_.push(line);
+        if last {
+            break;
+        }
+    }
+    box_
+}
+
+/// **`screens/dialogs.md` is the fixture, which is the point** (`mockup`'s own reason, one screen
+/// along). A test that compares the drawn box with a constant this file also wrote compares the
+/// implementation with itself; the screen file is the specification, so it is what the assertion
+/// reads. The blocks are in the file's own order: 0 scale · 1 restart · 2 restart paused ·
+/// 3 delete pod · 4 delete node · 5 refused · 6 gone · 7 drain.
+fn mockup_dialog(nth: usize) -> Vec<String> {
+    let path = format!("{}/screens/dialogs.md", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the screen file {path} could not be read: {e}"));
+    let mut blocks = Vec::new();
+    let mut open: Option<Vec<String>> = None;
+    for line in text.lines() {
+        match (&mut open, line.starts_with("```")) {
+            (None, false) => {}
+            (None, true) => open = Some(Vec::new()),
+            (Some(_), false) => open.as_mut().expect("open").push(line.to_owned()),
+            (Some(_), true) => {
+                let block = open.take().expect("open");
+                if block.first().is_some_and(|line| line.starts_with(" nodes")) {
+                    blocks.push(block);
+                }
+            }
+        }
+    }
+    assert_eq!(
+        blocks.len(),
+        8,
+        "screens/dialogs.md no longer draws eight screens"
+    );
+    nested(&blocks[nth])
+}
+
+/// The Alerts screen a dialog is opened over, with a real command log under it.
+fn opened_over<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time, log: &'a [String]) -> Screen<'a> {
+    let mut screen = screen(alerts, now);
+    screen.log = log;
+    screen
+}
+
+fn logged_pair() -> [String; 2] {
+    [
+        "$ kubectl get statefulsets -A --watch".to_owned(),
+        "$ kubectl scale deployment/web --replicas=3 -n payments".to_owned(),
+    ]
+}
+
+/// The box a modal draws at the floor, extracted from the real frame.
+fn box_of(modal: views::Modal) -> Vec<String> {
+    let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
+    let now = now();
+    let log = logged_pair();
+    nested(&rows(&render(
+        &over(modal),
+        &opened_over(&alerts, &now, &log),
+    )))
+}
+
+/// **§ Restart's two boxes are drawn exactly as `screens/dialogs.md` draws them, every row.**
+///
+/// **This is the pair that has no exception**, and it is what the whole geometry rests on: the
+/// box width, the left margin, the dropped blank row between consequence and verdict, the wrap
+/// points of a 232-column consequence and a 163-column warning, the `$` line and the buttons.
+/// Every one of those is a number `ui.rs` derives, and here they land on the screen file's own
+/// characters.
+#[test]
+fn the_restart_boxes_are_the_screen_files_boxes_row_for_row() {
+    assert_eq!(
+        box_of(views::Modal::Confirm(restarting())),
+        mockup_dialog(1),
+        "screens/dialogs.md § Restart"
+    );
+
+    let mut paused = restarting();
+    paused.warning = Some(PAUSED.to_owned());
+    assert_eq!(
+        box_of(views::Modal::Confirm(paused)),
+        mockup_dialog(2),
+        "screens/dialogs.md § Restart, its paused Deployment"
+    );
+}
+
+/// **§ Delete's two boxes, every row but the one between its buttons.**
+///
+/// **The exception is the gap and nothing else.** `screens/dialogs.md` widens delete's gap to five
+/// columns so the pair occupies the same 29 columns § Scale's `[ ⏎ do it ]` pair does; this file
+/// spends [`BUTTON_GAP`] between every pair of buttons on every box, which is one rule instead of
+/// a width per verb. The buttons themselves, and that the pair is centred, are asserted below.
+///
+/// **What it is not an exception about is the box** — the node box reaches [`MODAL_ROWS`] exactly
+/// with four consequence lines and a typed-name field, which is the measurement that says a `$`
+/// row cannot also fit inside a delete box.
+#[test]
+fn the_delete_boxes_are_the_screen_files_boxes_but_for_the_gap_between_two_buttons() {
+    for (nth, dialog) in [(3, deleting()), (4, deleting_a_node())] {
+        let drawn = box_of(views::Modal::Confirm(dialog));
+        let mockup = mockup_dialog(nth);
+        assert_eq!(drawn.len(), mockup.len(), "block {nth} changed height");
+        for (n, (drawn, mockup)) in drawn.iter().zip(&mockup).enumerate() {
+            if mockup.contains("esc cancel") {
+                continue;
+            }
+            assert_eq!(drawn, mockup, "screens/dialogs.md block {nth}, row {n}");
+        }
+    }
+}
+
+/// **Every box says what the screen file says, wherever the wrap lands** — the words, in order,
+/// none dropped and none invented, in a box of the same width and the same height.
+///
+/// **The wrap points themselves are deliberately not asserted for three of these boxes**, because
+/// `screens/dialogs.md` says they are not the specification: *"the wrap points shown are this
+/// box's choice of where to break for readability, not a second field"* (§ Restart, of a
+/// consequence that is one string). § Scale's, § The cluster said no's and § The object went
+/// away's differ from a real wrap at the same width; § Restart's and § Delete's do not, and those
+/// two are asserted character for character above.
+///
+/// **The button row is left out of the join** — its gap and its centring are the one difference
+/// this file keeps from the page, and it has its own test.
+#[test]
+fn every_dialog_says_the_words_the_screen_file_says() {
+    let words = |box_: &[String]| {
+        box_[1..box_.len() - 1]
+            .iter()
+            .filter(|row| !row.contains("esc cancel") && !row.contains("esc dismiss"))
+            .flat_map(|row| {
+                row.trim_matches('│')
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut paused = restarting();
+    paused.warning = Some(PAUSED.to_owned());
+    for (nth, modal) in [
+        (0, views::Modal::Confirm(scaling())),
+        (1, views::Modal::Confirm(restarting())),
+        (2, views::Modal::Confirm(paused)),
+        (3, views::Modal::Confirm(deleting())),
+        (4, views::Modal::Confirm(deleting_a_node())),
+        (
+            5,
+            views::Modal::Refused {
+                sent: false,
+                fault: crate::k8s::Fault::Rejected,
+                said: Some(DENIED.to_owned()),
+            },
+        ),
+        (
+            6,
+            views::Modal::Gone {
+                object: deleting().object,
+                recreated: true,
+            },
+        ),
+    ] {
+        let drawn = box_of(modal);
+        let mockup = mockup_dialog(nth);
+        assert_eq!(
+            width(&drawn[0]),
+            width(&mockup[0]),
+            "block {nth} is a different width from the box the screen file draws"
+        );
+        assert_eq!(
+            words(&drawn),
+            words(&mockup),
+            "block {nth} does not say what screens/dialogs.md says"
+        );
+
+        // **The button row is left out of the join above and asserted here instead**, because it
+        // is the one row whose *spacing* this file does not take from the page — the gap and the
+        // centring are its own (see the two tests above). Its **words** are still the screen
+        // file's, and nothing else on the box asserted them: a mutation run replaced `dismiss`
+        // with `Default::default()`, drew a `Refused` and an `Already gone` box with no button at
+        // all, and every test here stayed green (2026-09-10).
+        let buttons = |box_: &[String]| {
+            box_.iter()
+                .find(|row| row.contains("esc cancel") || row.contains("esc dismiss"))
+                .map(|row| {
+                    row.trim_matches('│')
+                        .split_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(|| panic!("no button row on\n{}", box_.join("\n")))
+        };
+        assert_eq!(
+            buttons(&drawn),
+            buttons(&mockup),
+            "block {nth} does not offer the buttons screens/dialogs.md draws"
+        );
+    }
+}
+
+/// **The three widths, and the margins that are nobody's choice** (`screens/widgets.md` § 5).
+///
+/// **The margins are asserted as *what centring leaves* and never as numbers off the page.** The
+/// screen file measures against a 68-column body and the product's floor gives 78, so the 4/4 it
+/// draws is 9/9 here; what has to hold at either width is that the two sides differ by at most
+/// one and that nothing chose them.
+#[test]
+fn a_dialog_picks_one_of_three_widths_and_centring_decides_the_rest() {
+    let mut wide = scaling();
+    wide.consequence = "This asks the cluster to remove the deployment and every copy of the app \
+                        it runs. k8rs has not read what may be attached to it, and something \
+                        there may delay this or act first — left alone, nothing is left running."
+        .to_owned();
+    for (expected, modal) in [
+        (CONFIRM_BOX, views::Modal::Confirm(scaling())),
+        (CROWDED_BOX, views::Modal::Confirm(wide)),
+        (CROWDED_BOX, views::Modal::Confirm(restarting())),
+        (CROWDED_BOX, views::Modal::Confirm(deleting())),
+        (
+            DISMISS_BOX,
+            views::Modal::Refused {
+                sent: false,
+                fault: crate::k8s::Fault::Rejected,
+                said: None,
+            },
+        ),
+        (
+            DISMISS_BOX,
+            views::Modal::Gone {
+                object: scaling().object,
+                recreated: false,
+            },
+        ),
+    ] {
+        let alerts = Pane::Ready(vec![oom()]);
+        let now = now();
+        let log = logged_pair();
+        let drawn = rows(&render(&over(modal), &opened_over(&alerts, &now, &log)));
+        let box_ = nested(&drawn);
+        assert_eq!(
+            width(&box_[0]),
+            usize::from(expected) + 2,
+            "the box is not {expected} columns of interior"
+        );
+
+        // The margins are read off the frame rather than chosen: the columns before the box's
+        // own `┌` and after its `┐`, inside the frame's borders.
+        let row = &box_[0];
+        let title = drawn
+            .iter()
+            .find(|line| line.contains(row.as_str()))
+            .expect("the title row");
+        let left = title.chars().position(|c| c == '┌').expect("a left corner") - 1;
+        let right = usize::from(MIN_WIDTH)
+            - 1
+            - title
+                .chars()
+                .position(|c| c == '┐')
+                .expect("a right corner")
+            - 1;
+        assert!(
+            left.abs_diff(right) <= 1,
+            "the box is off-centre: {left} left, {right} right"
+        );
+        assert_eq!(
+            left + right + width(row),
+            usize::from(MIN_WIDTH) - 2,
+            "the margins and the box do not fill the body"
+        );
+    }
+}
+
+/// **The confirm button is dim until [`views::Dialog::armed`], and then it is
+/// [`theme::FOCUS`]** (`screens/widgets.md` § 5, `screens/dialogs.md` rule 3) — the ctrl-key-slip
+/// guard, seen on the screen rather than asked of the type.
+///
+/// **`esc cancel` never dims**, because a modal never traps the user.
+#[test]
+fn the_confirm_button_is_only_lit_once_the_dialog_is_armed() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let screen = opened_over(&alerts, &now, &log);
+
+    // **The columns are found on the row rather than counted off it** — `x + 15` into
+    // `[ esc cancel ]` was this closure's first draft, and a hand-computed offset into a row this
+    // file also lays out is the test agreeing with the implementation's arithmetic.
+    let lit = |dialog: views::Dialog| {
+        let armed = dialog.armed();
+        let drawn = render(&over(views::Modal::Confirm(dialog)), &screen);
+        let text = rows(&drawn);
+        let (y, row) = text
+            .iter()
+            .enumerate()
+            .find(|(_, row)| row.contains("[ delete ]"))
+            .unwrap_or_else(|| panic!("no `[ delete ]` on\n{}", text.join("\n")));
+        let reversed = |needle: &str| {
+            let byte = row
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle:?} is not on {row:?}"));
+            let x = u16::try_from(row[..byte].chars().count()).expect("a column inside the frame");
+            drawn
+                .cell((x, u16::try_from(y).expect("a row inside the frame")))
+                .expect("a cell the row says is there")
+                .modifier
+                .contains(ratatui::style::Modifier::REVERSED)
+        };
+        (armed, reversed("[ delete ]"), reversed("[ esc cancel ]"))
+    };
+
+    let half = deleting();
+    assert_eq!(
+        lit(half),
+        (false, false, false),
+        "a half-typed name lit the delete button"
+    );
+
+    let mut whole = deleting();
+    whole.typed = views::Input::default();
+    for character in "web-7d9f4".chars() {
+        whole.typed.push(character);
+    }
+    assert_eq!(
+        lit(whole),
+        (true, true, false),
+        "the typed name did not light the button, or it lit `esc cancel` with it"
+    );
+}
+
+/// **A dialog floats over the screen it was opened from, and [`help`] is the one that does not**
+/// (`screens/widgets.md` § 5). The sidebar and the pane are still there beside the box; nothing
+/// of them shows through inside it, which is the `Clear`.
+#[test]
+fn a_dialog_floats_over_the_screen_and_clears_only_its_own_box() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let drawn = rows(&render(
+        &over(views::Modal::Confirm(scaling())),
+        &opened_over(&alerts, &now, &log),
+    ));
+
+    assert!(
+        drawn.iter().any(|row| row.contains("ALERTS")),
+        "the sidebar went away under a dialog — that is Help's exception, not every modal's"
+    );
+    assert!(
+        drawn[1].contains('┬') && drawn[18].contains('┴'),
+        "the frame lost the sidebar's own junctions: {:?} {:?}",
+        drawn[1],
+        drawn[18]
+    );
+    assert_eq!(drawn.len(), usize::from(MIN_HEIGHT), "the frame is 24 rows");
+    assert_eq!(
+        unframed(&drawn[19]),
+        "$ kubectl get statefulsets -A --watch",
+        "the command log strip stopped showing real commands behind the box"
+    );
+
+    // Nothing of the pane underneath survives inside the box: the divider is drawn before the
+    // modal, and its column is inside this box's own columns.
+    for row in nested(&drawn) {
+        let inside: String = row.chars().skip(1).take(row.chars().count() - 2).collect();
+        assert!(
+            !inside.contains('│'),
+            "the sidebar's divider was ruled through the dialog: {row:?}"
+        );
+    }
+}
+
+/// **A crafted object name cannot grow a title bar** — the security gate's *sizes are bounded*,
+/// and invariant 9's own class read at the one place a name is drawn inside a border
+/// (`screens/widgets.md` § 7).
+///
+/// **10 000 characters is past anything an API server accepts** and past `k8s::IDENTIFIER`'s own
+/// 512-byte bound; what is asserted is that the frame is still 80×24, that the box is still the
+/// width it chose, and that the cut is *marked* — a `Block` left to clip its own title would draw
+/// a name flush against the border with nothing to say it was cut.
+#[test]
+fn a_ten_thousand_character_name_does_not_grow_the_box_it_is_drawn_in() {
+    let mut dialog = deleting();
+    dialog.object.name = "w".repeat(10_000);
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let drawn = rows(&render(
+        &over(views::Modal::Confirm(dialog)),
+        &opened_over(&alerts, &now, &log),
+    ));
+
+    assert_eq!(drawn.len(), usize::from(MIN_HEIGHT));
+    for row in &drawn {
+        assert_eq!(width(row), usize::from(MIN_WIDTH), "{row:?}");
+    }
+    let box_ = nested(&drawn);
+    assert_eq!(width(&box_[0]), usize::from(CROWDED_BOX) + 2);
+    assert!(
+        box_[0].contains(CUT),
+        "the title was cut in silence: {:?}",
+        box_[0]
+    );
+}
+
+/// **What the cluster sent back is cut to the rows the box has left** — the one string in any
+/// dialog that came off the API, and the reason [`cut`] takes a line cap
+/// (NOTES § D217: a `fieldValidation=Strict` rejection hands back the object that was sent).
+#[test]
+fn a_four_kilobyte_refusal_is_cut_to_the_box_and_says_so() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let said = "denied: ".to_owned() + &"replicas may not exceed five ".repeat(140);
+    assert!(said.len() > 4000, "the fixture stopped being oversized");
+
+    let drawn = rows(&render(
+        &over(views::Modal::Refused {
+            sent: false,
+            fault: crate::k8s::Fault::Rejected,
+            said: Some(said.clone()),
+        }),
+        &opened_over(&alerts, &now, &log),
+    ));
+    assert_eq!(
+        drawn.len(),
+        usize::from(MIN_HEIGHT),
+        "a refusal blew the frame"
+    );
+    let box_ = nested(&drawn);
+    assert!(
+        box_.len() <= MODAL_ROWS + 2,
+        "the box grew to {} rows on a 4 kB message",
+        box_.len()
+    );
+    assert!(
+        box_.iter().any(|row| row.contains(CUT)),
+        "4 kB was dropped in silence:\n{}",
+        box_.join("\n")
+    );
+    // And the two sentences the box owns are still both on it — the quote gave way, not them.
+    assert!(box_.iter().any(|row| row.contains("Nothing was changed.")));
+    assert!(box_.iter().any(|row| row.contains("it stopped this one.")));
+
+    // A refusal the cluster did not explain drops the heading with the quote.
+    let quiet = nested(&rows(&render(
+        &over(views::Modal::Refused {
+            sent: false,
+            fault: crate::k8s::Fault::Rejected,
+            said: None,
+        }),
+        &opened_over(&alerts, &now, &log),
+    )));
+    assert!(
+        !quiet.iter().any(|row| row.contains("sent back")),
+        "an unexplained refusal still promised something sent back"
+    );
+}
+
+/// **The verdict's row is reserved before the verdict arrives**, so the box does not grow by one
+/// under the reader the moment the cluster answers (`screens/dialogs.md` § Scale — the check is a
+/// real round trip for a scale and a restart).
+#[test]
+fn a_dialog_is_the_same_height_before_and_after_the_check_answers() {
+    let mut waiting = scaling();
+    waiting.verdict = None;
+    assert_eq!(
+        box_of(views::Modal::Confirm(waiting)).len(),
+        box_of(views::Modal::Confirm(scaling())).len(),
+        "the box changed height when the dry-run came back"
+    );
+}
+
+/// **The typed name keeps its end** — a field shows where the cursor is, which is the opposite
+/// end from every other cut in this file ([`shortened`] against [`clipped`]).
+#[test]
+fn the_typed_field_keeps_the_end_of_a_name_too_long_for_it() {
+    let mut dialog = deleting();
+    dialog.object.name = "w".repeat(400);
+    dialog.asks = Some("w".repeat(400));
+    dialog.typed = views::Input::default();
+    for character in "abcdefghij".chars().cycle().take(400) {
+        dialog.typed.push(character);
+    }
+    let box_ = box_of(views::Modal::Confirm(dialog));
+    let field = box_
+        .iter()
+        .find(|row| row.contains('_'))
+        .expect("the field's own row");
+    assert!(
+        field.contains("hij_"),
+        "the field kept the head and lost the cursor: {field:?}"
+    );
+    assert!(field.contains(CUT), "the field cut in silence: {field:?}");
+    assert_eq!(
+        width(field),
+        usize::from(CROWDED_BOX) + 2,
+        "the field ran past its box"
+    );
+
+    // **And a character that is two columns wide, which is what the ASCII above could not see.**
+    // `views::Input::push` accepts any printable character up to `k8s::IDENTIFIER` bytes, so a
+    // pasted CJK name reaches this field; the padding counted `char`s until 2026-09-10, and one
+    // glyph pushed the field's right border a column out while ten pushed it off the box
+    // (`tester`). Every row of the box has to stay exactly as wide as the box.
+    //
+    // **Asserted on buffer cells and not on [`rows`]**, because both string views of a wide glyph
+    // lie in opposite directions: [`nested`] slices by `char` and ratatui stores the second cell
+    // of a wide character as its own symbol, so a reconstructed row measures one column long per
+    // glyph whether or not the renderer drifted. What cannot be faked is *which cell* the box's
+    // right border is written into.
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let screen = opened_over(&alerts, &now, &log);
+    // The x of every `│` on the row carrying the field's cursor.
+    let edges = |dialog: views::Dialog| {
+        let drawn = render(&over(views::Modal::Confirm(dialog)), &screen);
+        let row = (0..drawn.area.height)
+            .find(|y| {
+                (0..drawn.area.width)
+                    .any(|x| drawn.cell((x, *y)).is_some_and(|c| c.symbol() == "_"))
+            })
+            .expect("the field's own row");
+        (0..drawn.area.width)
+            .filter(|x| {
+                drawn
+                    .cell((*x, row))
+                    .is_some_and(|cell| cell.symbol() == "│")
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // Six: the frame's own two, the nested box's two, and the field's two.
+    let wanted = edges(deleting());
+    assert_eq!(wanted.len(), 6, "the field's row lost a border: {wanted:?}");
+    for count in [1, 10, 30] {
+        let mut wide = deleting();
+        wide.typed = views::Input::default();
+        for character in "宽".chars().cycle().take(count) {
+            wide.typed.push(character);
+        }
+        assert_eq!(
+            edges(wide),
+            wanted,
+            "{count} wide character(s) moved a border out of its column"
+        );
+    }
+}
+
+/// **A refusal says what is true of *this* fault, and never a sentence that fits the common
+/// case** (`screens/dialogs.md` § The cluster said no, PRIOR-ART § C1).
+///
+/// **Three shapes, and two of them the box used to get wrong.** `delete` sends no check at all
+/// (NOTES § D225 ruling 1), so every delete refusal is post-send — *"This is the check that runs
+/// before the real change"* is false of all of them. And invariant 2 names the state where
+/// *"Nothing was changed."* is unknowable in those words: a dead socket on a delete leaves the
+/// request on the wire with no answer.
+#[test]
+fn a_refusal_says_what_is_true_of_the_fault_it_carries() {
+    for (sent, fault, title, outcome, because) in [
+        (
+            false,
+            Fault::Rejected,
+            "The cluster refused this",
+            "Nothing was changed.",
+            "This is the check that runs before the real change",
+        ),
+        (
+            true,
+            Fault::Refused,
+            "The cluster refused this",
+            "Nothing was changed.",
+            "This was the real change, not a check.",
+        ),
+        (
+            true,
+            Fault::Unanswered,
+            "The cluster never answered",
+            "k8rs does not know whether the change was made.",
+            "This was the real change, not a check.",
+        ),
+    ] {
+        let drawn = spoken_box(&box_of(views::Modal::Refused {
+            sent,
+            fault,
+            said: None,
+        }));
+        for wanted in [title, outcome, because] {
+            assert!(
+                drawn.contains(wanted),
+                "sent {sent}: {wanted:?} is not on the box:\n{drawn}"
+            );
+        }
+    }
+
+    // The two sentences are exclusive — a post-send refusal never claims a check stopped it, and
+    // a refusal that cannot know never claims nothing changed.
+    let post = spoken_box(&box_of(views::Modal::Refused {
+        sent: true,
+        fault: Fault::Unanswered,
+        said: None,
+    }));
+    assert!(!post.contains("Nothing was changed."), "{post}");
+    assert!(!post.contains("check that runs before"), "{post}");
+}
+
+/// A box's text as one line — borders dropped and the wrap undone — so an assertion about a
+/// sentence is not an assertion about where it happened to break.
+fn spoken_box(box_: &[String]) -> String {
+    box_.iter()
+        .flat_map(|row| {
+            row.trim_matches(|c| {
+                c == '\u{250c}' || c == '\u{2510}' || c == '\u{2514}' || c == '\u{2518}'
+            })
+            .trim_matches('\u{2502}')
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// **Only a pod and a replicaset get the hedge** (`screens/dialogs.md` § The object went away):
+/// nothing recreates a deployment, a statefulset, a daemonset or a node on its own.
+///
+/// **And no variant names a successor** (NOTES § D44) — the line this box used to carry,
+/// `replaced by web-2c81a 3 seconds ago`, was an inference off a shared `ownerReference` that
+/// named the wrong pod whenever the ReplicaSet scaled for another reason.
+#[test]
+fn already_gone_hedges_only_where_something_puts_one_back() {
+    let hedged = spoken_box(&box_of(views::Modal::Gone {
+        object: deleting().object,
+        recreated: true,
+    }));
+    assert!(hedged.contains("This pod is already gone"), "{hedged}");
+    assert!(hedged.contains("k8rs has not checked whether"), "{hedged}");
+
+    let bare = spoken_box(&box_of(views::Modal::Gone {
+        object: scaling().object,
+        recreated: false,
+    }));
+    assert!(bare.contains("This deployment is already gone"), "{bare}");
+    assert!(
+        bare.contains("Nothing will take its place on its own."),
+        "{bare}"
+    );
+    assert!(
+        !bare.contains("has not checked whether"),
+        "a deployment was hedged as though something would recreate it: {bare}"
+    );
+
+    for box_ in [hedged, bare] {
+        assert!(
+            !box_.contains("replaced by"),
+            "the successor line NOTES § D44 removed is back: {box_}"
+        );
+    }
+}
+
+/// **A consequence longer than the box gives way with a mark, and the buttons never do**
+/// — the security gate's *sizes are bounded* read at the one place a dialog's own text could
+/// outgrow the 24 rows this product is drawn to.
+///
+/// **`views::Dialog::consequence` is a `String`**, so this is reachable by construction even
+/// though nothing `ops.rs` builds comes near it: the widest real one, a paused Deployment's
+/// restart, lands on the budget exactly, which is asserted below rather than assumed. Without the
+/// cut the box would simply be taller than the body and ratatui would clip it — with the confirm
+/// button, the last row, the first thing to go.
+#[test]
+fn a_consequence_too_long_for_the_box_gives_way_before_the_buttons_do() {
+    let mut dialog = scaling();
+    dialog.consequence = "this starts one more copy of your app and here is a sentence that goes \
+                          on "
+    .repeat(60);
+    assert!(
+        dialog.consequence.len() > 4000,
+        "the fixture stopped being oversized"
+    );
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let drawn = rows(&render(
+        &over(views::Modal::Confirm(dialog)),
+        &opened_over(&alerts, &now, &log),
+    ));
+
+    assert_eq!(drawn.len(), usize::from(MIN_HEIGHT), "the frame is 24 rows");
+    let box_ = nested(&drawn);
+    assert!(
+        box_.len() <= MODAL_ROWS + 2,
+        "the box grew to {} rows",
+        box_.len()
+    );
+    assert!(
+        box_.iter().any(|row| row.contains(CUT)),
+        "the consequence was clipped in silence:\n{}",
+        box_.join("\n")
+    );
+    for kept in ["[ ⏎ do it ]", "[ esc cancel ]", "$ kubectl scale"] {
+        assert!(
+            box_.iter().any(|row| row.contains(kept)),
+            "{kept:?} was pushed out of the box by a long consequence"
+        );
+    }
+
+    // **The narrow box has the same budget, and it is the only one the blank row under the
+    // consequence lives in.** A mutation run flipped `1 + spacer` to `1 - spacer` and nothing
+    // noticed (2026-09-10): every case above is 61 wide, where that row does not exist. The pair
+    // below is that row being counted — four rows of warning and it stays, five and it goes, and
+    // both land inside the ceiling.
+    //
+    // **`ops.rs` builds no such dialog**: its one warning is three rows and attaches only to a
+    // restart, whose consequences are four and five rows and so are never 58 wide. The budget is
+    // a total guard on a `views::Dialog` anyone can construct.
+    let narrow = |warning: &str| {
+        box_of(views::Modal::Confirm(views::Dialog {
+            consequence:
+                "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies."
+                    .to_owned(),
+            warning: Some(warning.to_owned()),
+            ..scaling()
+        }))
+    };
+
+    let roomy = narrow(ROOMY);
+    assert_eq!(
+        width(&roomy[0]),
+        usize::from(CONFIRM_BOX) + 2,
+        "the fixture stopped being the narrow box it is about"
+    );
+    assert_eq!(roomy.len(), MODAL_ROWS + 2, "{}", roomy.join("\n"));
+    // Four rows of warning: the blank under the consequence is still there, between the last
+    // warning row and the verdict.
+    let verdict_at = |box_: &[String]| {
+        box_.iter()
+            .position(|row| row.contains("checked it first"))
+            .expect("the verdict's row")
+    };
+    assert!(
+        roomy[verdict_at(&roomy) - 1]
+            .trim_matches('│')
+            .trim()
+            .is_empty(),
+        "the blank row under the consequence was already gone at four rows:\n{}",
+        roomy.join("\n")
+    );
+
+    let wordy = narrow(WORDY);
+    assert_eq!(wordy.len(), MODAL_ROWS + 2, "{}", wordy.join("\n"));
+    assert!(
+        !wordy[verdict_at(&wordy) - 1]
+            .trim_matches('│')
+            .trim()
+            .is_empty(),
+        "the blank row survived a box that had no room for it:\n{}",
+        wordy.join("\n")
+    );
+    // Nothing was cut to buy it — the blank goes first, before any sentence
+    // (`screens/widgets.md` § 5).
+    assert!(
+        !wordy.iter().any(|row| row.contains(CUT)),
+        "a sentence gave way before the blank row did:\n{}",
+        wordy.join("\n")
+    );
+}
+
+/// **The widest thing `ops.rs` actually builds lands on the budget exactly, and that is what
+/// makes the budget a measurement** (`screens/widgets.md` § 5 — § Restart's paused variant and
+/// § Drain both land on [`MODAL_ROWS`], the ceiling itself).
+///
+/// **Every consequence the shipped operations produce is fed here**, which is NOTES § D29's rule:
+/// a check is proven only for the shapes the real pipeline hands it. The three restart sentences
+/// are `ops::rollout`'s, the paused warning is the driver's `while_paused`, and the delete
+/// sentences are `screens/dialogs.md` § Delete's own bullets.
+///
+/// **The warning is paired only with the one kind that can carry it**, which is the defect this
+/// test found in its own first draft: `ops::paused` reads `/spec/paused`, a StatefulSet and a
+/// DaemonSet do not have one, and their dialogs never grow the line (NOTES § D224). A cartesian
+/// product over every consequence invented a box the pipeline cannot produce and failed on it.
+#[test]
+fn every_consequence_the_operations_build_fits_the_box_it_is_drawn_in() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let screen = opened_over(&alerts, &now, &log);
+
+    let scale_up = "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies.";
+    let scale_zero = "This stops all 3 copies of your app — nothing will be left running. Right \
+                      now: 3 copies. After: 0 copies.";
+    let deployment = "This asks Kubernetes to replace every copy of your app with a new one. How \
+                      many stop at the same time is a setting on this deployment — it can be a \
+                      few, or all of them at once. A paused deployment will not start until you \
+                      resume it.";
+    let statefulset = "This asks Kubernetes to replace every copy of your app with a new one, \
+                       working down from the highest-numbered copy. How many stop at the same \
+                       time, how far down it goes, and whether it waits for you to delete a copy \
+                       yourself are all settings on this statefulset.";
+    let daemonset = "This asks Kubernetes to replace the copy of your app on each node it runs \
+                     on. How many nodes it takes at a time, and whether it waits for you to \
+                     delete a copy yourself, are settings on this daemonset.";
+    let pod = "This removes the pod. Whatever created it will normally replace it — k8rs has not \
+               checked whether anything did.";
+    let replicaset = "This removes the replicaset and every pod it manages. Whatever created it \
+                      will normally replace it — k8rs has not checked whether anything did.";
+    let removed = "This asks the cluster to remove the deployment and every copy of the app it \
+                   runs. k8rs has not read what may be attached to it, and something there may \
+                   delay this or act first — left alone, nothing is left running.";
+    let per_node = "This asks the cluster to remove the daemonset and the copy of the app it \
+                    runs on every node. k8rs has not read what may be attached to it, and \
+                    something there may delay this or act first — left alone, nothing is left \
+                    running.";
+    let node = "This asks the cluster to remove its record of node-3, not the machine. Something \
+                attached to it, unread by k8rs, may delay this or act first. Left alone, its \
+                pods are deleted and the machine keeps running until its kubelet restarts.";
+
+    // **The relations `ops::scale` really builds**, one per arm of its own match: up by one, up by
+    // more, down by one, down to zero, down to zero from the only copy, and the count that is
+    // already running. `tester` fed these and the three `reverted` delete sentences on
+    // 2026-09-10; this is that list, kept rather than described.
+    let scale_more = "This starts 3 more copies of your app. Right now: 2 copies. After: 5 \
+                      copies.";
+    let scale_down = "This stops 1 copy of your app. Right now: 3 copies. After: 2 copies.";
+    let scale_only = "This stops the only copy of your app — nothing will be left running. Right \
+                      now: 1 copy. After: 0 copies.";
+    let scale_same = "This asks for the count web is already running. Right now: 3 copies. \
+                      After: 3 copies.";
+    let reverted_sts = "This asks the cluster to remove the statefulset and every copy of the \
+                        app it runs. k8rs has not read what may be attached to it, and something \
+                        there may delay this or act first — left alone, nothing is left running.";
+
+    let mut widest = 0;
+    let mut seen = 0;
+    for (consequence, asks, pausable) in [
+        (scale_up, false, false),
+        (scale_more, false, false),
+        (scale_down, false, false),
+        (scale_only, false, false),
+        (scale_same, false, false),
+        (reverted_sts, true, false),
+        (scale_zero, false, false),
+        (deployment, false, true),
+        (statefulset, false, false),
+        (daemonset, false, false),
+        (pod, true, false),
+        (replicaset, true, false),
+        (removed, true, false),
+        (per_node, true, false),
+        (node, true, false),
+    ] {
+        let warnings = if pausable {
+            vec![None, Some(PAUSED.to_owned())]
+        } else {
+            vec![None]
+        };
+        for warning in warnings {
+            let paused = warning.is_some();
+            let dialog = views::Dialog {
+                consequence: consequence.to_owned(),
+                warning,
+                asks: asks.then(|| "web".to_owned()),
+                ..scaling()
+            };
+            let drawn = rows(&render(&over(views::Modal::Confirm(dialog)), &screen));
+            assert_eq!(drawn.len(), usize::from(MIN_HEIGHT));
+            let box_ = nested(&drawn);
+            assert!(
+                !box_.iter().any(|row| row.contains(CUT)),
+                "a sentence ops.rs really builds had to be cut:\n{}",
+                box_.join("\n")
+            );
+            assert!(
+                box_.len() <= MODAL_ROWS + 2,
+                "{consequence:?} (paused: {paused}) drew {} rows",
+                box_.len()
+            );
+            widest = widest.max(box_.len());
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 16, "a consequence stopped being measured");
+    assert_eq!(
+        widest,
+        MODAL_ROWS + 2,
+        "nothing the operations build reaches the ceiling any more — the budget stopped being \
+         measured against anything"
+    );
+}
+/// **When the box runs out of rows the consequence gives way and the warning never does**
+/// (NOTES § D224, `screens/widgets.md` § 5's *dropped — first, before any sentence is cut*).
+///
+/// **This is a defect this box shipped and had sent back.** The consequence and the warning were
+/// wrapped into one block and cut at its end, so a consequence that filled the budget left
+/// *"This deployment is paused, so nothing will be replaced…"* — D224's own correction truncated
+/// to the half that names no fix, standing over a consequence a reader can half infer anyway.
+/// The warning exists because without it the dialog claims copies were replaced when they were
+/// not, so it is furniture the budget is counted *around*, like the verdict and the buttons.
+///
+/// **The consequence here is longer than anything `ops.rs` builds** — the real ones are measured
+/// against the budget by `every_consequence_the_operations_build_fits_the_box_it_is_drawn_in`,
+/// and none of them is cut. This one is what makes the ordering observable at all.
+#[test]
+fn a_full_box_cuts_the_consequence_and_never_the_warning_or_the_buttons() {
+    // Seven wrapped lines at 59 — one more than the budget a 61-wide box leaves once its
+    // three blank rows are gone, so the consequence is what has to give.
+    let long = "This asks Kubernetes to replace every copy of your app with a new one. How many \
+                stop at the same time is a setting on this deployment, it can be a few or all of \
+                them at once, and a paused deployment will not start again until somebody has \
+                gone and resumed it by hand with a command that this dialog does not run \
+                for you at all, and never has done so. Not once."
+        .to_owned();
+
+    let whole = box_of(views::Modal::Confirm(views::Dialog {
+        consequence: long.clone(),
+        warning: None,
+        ..restarting()
+    }));
+    assert!(
+        !whole.iter().any(|row| row.contains(CUT)),
+        "the fixture stopped landing on the budget exactly:\n{}",
+        whole.join("\n")
+    );
+
+    let warned = box_of(views::Modal::Confirm(views::Dialog {
+        consequence: long,
+        warning: Some(PAUSED.to_owned()),
+        ..restarting()
+    }));
+    assert_eq!(
+        warned.len(),
+        MODAL_ROWS + 2,
+        "the box grew past the ceiling instead of cutting:\n{}",
+        warned.join("\n")
+    );
+    // The warning is whole — every one of its three lines, including the one that names the fix.
+    for kept in [
+        "This deployment is paused, so nothing will be replaced",
+        "until somebody resumes it with kubectl rollout resume",
+        "the command above will refuse to run until then.",
+    ] {
+        assert!(
+            warned.iter().any(|row| row.contains(kept)),
+            "the warning gave way instead of the consequence — {kept:?} is gone:\n{}",
+            warned.join("\n")
+        );
+    }
+    // And the consequence is what gave way, visibly.
+    assert!(
+        warned.iter().any(|row| row.contains(CUT)),
+        "nothing was marked, so nothing was cut:\n{}",
+        warned.join("\n")
+    );
+    let marked_at = warned
+        .iter()
+        .position(|row| row.contains(CUT))
+        .expect("a marked row");
+    let warning_at = warned
+        .iter()
+        .position(|row| row.contains("This deployment is paused"))
+        .expect("the warning's first row");
+    assert!(
+        marked_at < warning_at,
+        "the mark landed after the warning, so the warning is what was cut:\n{}",
+        warned.join("\n")
+    );
+    // The three rows the reader acts on are still on the box.
+    for kept in [
+        "[ ⏎ do it ]",
+        "[ esc cancel ]",
+        "The cluster checked it first",
+    ] {
+        assert!(
+            warned.iter().any(|row| row.contains(kept)),
+            "{kept:?} was pushed off the box"
+        );
+    }
+}
+
+/// **A warning *and* a typed-name field together — the case that overruns the box, and the order
+/// the two sentences give way in.**
+///
+/// **`k8s-admin` constructed this and it was reachable**: five rows of warning plus the four a
+/// field takes is fifteen rows into a thirteen-row box, and ratatui clips a box that will not fit
+/// with the buttons — the last row — the first thing to go. `ops.rs` builds no such dialog today,
+/// because its one warning attaches only to a restart and a restart asks for no name; the budget
+/// is a total guard on a `views::Dialog` anyone can construct.
+///
+/// **The order is the whole of it.** Every blank row goes first (`screens/widgets.md` § 5), then
+/// the consequence down to its last row, and only then the warning — which is NOTES § D224's
+/// correction and the one sentence that may not vanish. Both cuts are marked, the field and the
+/// buttons are untouched, and the box lands on the ceiling rather than past it.
+#[test]
+fn a_warning_over_a_typed_name_field_cuts_in_order_and_still_fits() {
+    let crowded = box_of(views::Modal::Confirm(views::Dialog {
+        warning: Some(WORDY.to_owned()),
+        ..deleting()
+    }));
+    assert_eq!(
+        crowded.len(),
+        MODAL_ROWS + 2,
+        "the box did not land on the ceiling:\n{}",
+        crowded.join("\n")
+    );
+
+    let text: Vec<&String> = crowded.iter().filter(|row| row.contains(CUT)).collect();
+    assert_eq!(
+        text.len(),
+        2,
+        "both sentences should carry a mark, one each:\n{}",
+        crowded.join("\n")
+    );
+    // The consequence is down to its one row, and it is the first of the two. Row 0 is the
+    // titled border and row 1 is the box's own top blank, which is not one of the four the
+    // budget can give up.
+    assert!(
+        crowded[2].contains("This removes the pod") && crowded[2].contains(CUT),
+        "the consequence is not the row that gave way first:\n{}",
+        crowded.join("\n")
+    );
+    // The warning kept four of its five rows, and the row that names the fix is still there.
+    assert!(
+        crowded[3].contains("The cluster answered this check"),
+        "the warning did not start where the consequence stopped:\n{}",
+        crowded.join("\n")
+    );
+    // Nothing the reader acts on gave way.
+    for kept in [
+        "$ kubectl delete pod/web-7d9f4",
+        "Type the pod's name to confirm:",
+        "[ delete ]",
+        "[ esc cancel ]",
+    ] {
+        assert!(
+            crowded.iter().any(|row| row.contains(kept)),
+            "{kept:?} was pushed off the box:\n{}",
+            crowded.join("\n")
+        );
+    }
 }
