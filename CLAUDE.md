@@ -639,9 +639,16 @@ first, and it was still unable to vouch for its own doc comments — `rustfmt` a
 the tests cannot see a typo in a comment
 ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)).
 **An agent that wants a clean tree copies it** and gives the copy its own
-`CARGO_TARGET_DIR`; `k8s-admin` and `dev-core` both already do. An agent that
-wants a file gone deletes *that file by name*. Anything that would discard work
-is the PM's, and the PM backs up first.
+`CARGO_TARGET_DIR` — **under `$HOME`, never under the scratchpad**, which is a
+12 GiB tmpfs here. Two agents filled it on 2026-09-12 and one of them lost **all
+stdout and stderr for four consecutive commands**, which is indistinguishable
+from a command that printed nothing: [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+volume wearing a second hat — not *a full disk reads as a pass* but *a full disk
+reads as nothing at all* ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+item 12). `scripts/mutants.sh` names its own volume for exactly this; a hand-run
+`cargo` does not, and the scratchpad is where agents are told to work. An agent
+that wants a file gone deletes *that file by name*. Anything that would discard
+work is the PM's, and the PM backs up first.
 
 **And a sweep's restore goes to a snapshot it took, never to HEAD.** This is
 where the second occurrence came from: the trap was there, exactly as
