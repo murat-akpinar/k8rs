@@ -906,6 +906,12 @@ in order, no skipping:
   - **types:** `feat` `fix` `docs` `perf` `refactor` `style` `test` `chore` `ci` `revert`
   - **scopes:** `rules` `k8s` `ui` `theme` `main` `fixtures` `ci` `docs`
   - **subject:** English, imperative, lowercase, no trailing period
+  - **body:** never open a paragraph with `Word:` — git-conventional reads the
+    line as a *footer*, so `commit.body` loses it and the changelog entry ships
+    as a bare subject with no *why*. Measured 2026-09-12: a body opening
+    `App::changing is the object…` rendered with nothing after the link while
+    every sibling entry carried its first paragraph. Same silence as
+    `filter_unconventional`, one level down
   - breaking: `feat(rules)!: ...` plus a `BREAKING CHANGE:` footer
 - **All work happens on `development`** — one long-lived branch, never deleted.
   `main` only ever advances by merging `development` into it, at phase close.
