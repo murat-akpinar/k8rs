@@ -46,6 +46,7 @@
 
 use crate::analysis::Row as ReportRow;
 use crate::k8s::{Browsable, Fault, IDENTIFIER, text, unprintable};
+use crate::ops::Verdict;
 use crate::rules::{
     ContainerSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot, Severity,
     WorkloadSnapshot, age,
@@ -1461,6 +1462,139 @@ pub struct App {
     pub changing: bool,
 }
 
+/// **Which of the three mutating keys this login has been told it may not use**
+/// (`screens/widgets.md` § 2a, `screens/help.md` § *When a key is refused*, NOTES § D23).
+///
+/// **It is not a field on [`App`].** `App` is what the *user* did; this is what the *store*
+/// answered, which is [`crate::ui::Screen`]'s own half — the same reason `detail` is passed into
+/// [`App::footer`] rather than held here (NOTES § D259).
+///
+/// **A key can need more than one permission, and `s` does** — [`Self::SCALE_VERBS`] and the two
+/// beside it are each operation's own count, and [`Self::of`] takes exactly that many answers for
+/// it. Refused when *any* of them came back [`Verdict::No`], lit when none did.
+///
+/// **Only [`Verdict::No`] marks a key, and the one constructor is what makes that structural
+/// rather than remembered** (NOTES § D229 ruling 4). [`Verdict::Yes`], [`Verdict::CouldNotTell`]
+/// and *no answer yet* all draw the ordinary unmarked key, byte for byte. *No answer yet* is two
+/// facts at once and neither may mark: a probe still in flight — including the first frame of
+/// every run, before `may_i_in` has replied at all — and an operation the selected kind does not
+/// support, which is never asked (`ops::scalable` reaches no DaemonSet, `ops::restartable` no bare
+/// ReplicaSet, and neither reaches a Pod or a Node). A key the kind cannot act on is **withheld**,
+/// which is `screens/states.md`'s own word and its own later box; it is never *refused*.
+///
+/// **The fields are private for that reason and not for tidiness.** A caller that could write
+/// `Refused { scale: true, .. }` could dim a permitted key from a probe that never answered, which
+/// is the one thing D229 ruling 4 forbids outright.
+///
+/// **[`Verdict::CouldNotTell`]'s sentence is dropped here and never drawn**, so this file gains no
+/// third class of unstripped string over the two its module doc names.
+///
+/// **[`Self::resource`] is a `&'static str` for [`Object::kind`]'s own reason** (NOTES § D246):
+/// every sentence `?` draws is k8rs's own, and a `String` here is nothing structurally stopping a
+/// resource word the API sent from being interpolated into one. The kinds an operation can be
+/// pointed at are literals in the driver.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Refused {
+    resource: &'static str,
+    scale: bool,
+    restart: bool,
+    delete: bool,
+}
+
+impl Refused {
+    /// **Every permission `s` needs, as the verb of each, in the order `ops.rs` performs them.**
+    /// The resource half of each is [`Self::resource`] with `/scale` after it.
+    ///
+    /// **It is two, and this type modelled it as one until 2026-09-12.** `ops::scale` calls
+    /// `get_scale` before `patch_scale` — `src/ops.rs`'s own `SCALE` region comment says it in as
+    /// many words, *"`Api::get_scale` reads the count the consequence sentence is built from and
+    /// `Api::patch_scale` changes it"* — so `s` needs `get` *and* `patch` on `<plural>/scale`.
+    /// Measured on a cluster (`k8s-admin`, 2026-09-12) with a login granted exactly `patch` on
+    /// `deployments/scale`: the probe answered yes, the key drew lit, and the operation then
+    /// failed with `cannot get resource "deployments/scale"`. Both halves were wrong — a key lit
+    /// that cannot be used, and a clause naming a grant that does not work.
+    pub const SCALE_VERBS: [&'static str; 2] = ["get", "patch"];
+
+    /// Every permission `r` needs. **One, measured sufficient end to end** on the same cluster: a
+    /// login granted only `patch deployments` performed a restart.
+    pub const RESTART_VERBS: [&'static str; 1] = ["patch"];
+
+    /// Every permission `ctrl-d` needs. **One, measured sufficient end to end**: a login granted
+    /// only `delete deployments` performed a delete.
+    pub const DELETE_VERBS: [&'static str; 1] = ["delete"];
+
+    /// **The one place a [`Verdict`] becomes a mark on a key**, which is the whole of the
+    /// conversion (NOTES § D229 ruling 4).
+    ///
+    /// **An operation is refused when *any* permission it needs came back [`Verdict::No`], and lit
+    /// when none did** — so each argument is an array of answers, one slot per permission, and its
+    /// length is [`Self::SCALE_VERBS`]'s, [`Self::RESTART_VERBS`]'s or [`Self::DELETE_VERBS`]'s
+    /// own. **The count is the type, not the arity**, which is the defect this replaced: `scale`'s
+    /// second permission was silently assumed not to exist because the constructor took one
+    /// argument for it. An operation that gains a permission is one edit to the constant above and
+    /// a compile error at every caller; v0.2's cordon and drain bring their own counts the same
+    /// way.
+    ///
+    /// `resource` is the API plural of the selected object's kind — `deployments` — for the clause
+    /// `?` draws; the footer never names it (`screens/widgets.md` § 2a).
+    ///
+    /// **It is read only where something is refused, and a caller that refuses something owes a
+    /// real one.** Nothing here can supply a missing plural and nothing here may swallow the
+    /// refusal for want of one — the footer's `s no scale` is true with or without a resource
+    /// word, and dropping the mark to protect the `?` clause would hide a refusal the login
+    /// actually has. [`Self::default`] — nothing selected, nothing asked — is the one shape where
+    /// an empty `resource` is right, and it marks nothing.
+    pub fn of(
+        resource: &'static str,
+        scale: [Option<&Verdict>; Self::SCALE_VERBS.len()],
+        restart: [Option<&Verdict>; Self::RESTART_VERBS.len()],
+        delete: [Option<&Verdict>; Self::DELETE_VERBS.len()],
+    ) -> Self {
+        Self {
+            resource,
+            scale: refuses(&scale),
+            restart: refuses(&restart),
+            delete: refuses(&delete),
+        }
+    }
+
+    /// The plural the clause `?` draws names — `get+patch deployments/scale`.
+    pub fn resource(self) -> &'static str {
+        self.resource
+    }
+
+    /// `s`.
+    pub fn scale(self) -> bool {
+        self.scale
+    }
+
+    /// `r`.
+    pub fn restart(self) -> bool {
+        self.restart
+    }
+
+    /// `ctrl-d`. **Never reaches a footer, refused or not** — D259 took that key off both list
+    /// footers for width before this existed, so it is marked only where it is drawn, in
+    /// `screens/help.md`.
+    pub fn delete(self) -> bool {
+        self.delete
+    }
+}
+
+/// **Fail open, in one line: a probe may never be the reason a permitted action is marked**
+/// (NOTES § D229 ruling 4). Everything but a `No` — a yes, a review k8rs could not get an answer
+/// out of, and a question that was never asked — is the ordinary key.
+///
+/// **One `No` anywhere in the operation's answers refuses it**, which is the other half of the
+/// same rule read across a set: an operation the login cannot complete is not lit because most of
+/// what it needs was granted. An empty set — an operation with nothing asked — is lit, which is
+/// `any`'s own answer and is the *not asked* case above.
+fn refuses(answers: &[Option<&Verdict>]) -> bool {
+    answers
+        .iter()
+        .any(|answer| matches!(answer, Some(Verdict::No)))
+}
+
 impl App {
     /// **`q` — refused while a write is in flight**, and only then (NOTES § D12,
     /// `screens/dialogs.md` § *While the call is running*). Quitting mid-`PATCH` would leave the
@@ -1522,7 +1656,14 @@ impl App {
     /// **The separator is two spaces, as every other footer in the product spells it**
     /// (`screens/widgets.md` § 2a, the file that owns the footer). `screens/dialogs.md` draws
     /// three under its boxes; one product cannot have two answers for the gap between two keys.
-    pub fn footer(&self, detail: bool) -> (Cow<'static, str>, &'static str) {
+    ///
+    /// **`refused` arrives the same way `detail` does and for the same reason** — it is what the
+    /// *store* answered, not what the user did (NOTES § D259, [`Refused`]). It reaches exactly one
+    /// arm: a marked key stays on the line and gains the word `no` before its label, which is one
+    /// of the four fixed strings `screens/widgets.md` § 2a counts, never a string built here.
+    /// `ctrl-d` is not on this line to mark, and Analysis and the detail tabs name neither `s` nor
+    /// `r`, so a refusal cannot show on them.
+    pub fn footer(&self, detail: bool, refused: Refused) -> (Cow<'static, str>, &'static str) {
         // **`Help` is the one modal that keeps `q quit` and the only footer with a right-hand
         // zone** — nothing is pending while it is open, so a global quit beside it costs nothing
         // (`screens/widgets.md` § 2a, `screens/help.md`).
@@ -1557,8 +1698,24 @@ impl App {
                 "[ ] tabs  esc back  ? all keys  q quit"
             }
             (false, _, View::Analysis(_)) => "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+            // **The four rows of `screens/widgets.md` § 2a's own table, as four literals**
+            // (NOTES § D259 ruling 4): the one footer a refusal can reach still spells every state
+            // of itself at compile time.
             (false, _, View::Alerts | View::Resources(_)) => {
-                "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit"
+                match (refused.scale(), refused.restart()) {
+                    (false, false) => {
+                        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit"
+                    }
+                    (true, false) => {
+                        "↑↓ move  ⏎ open  s no scale  r restart  / filter  ? all keys  q quit"
+                    }
+                    (false, true) => {
+                        "↑↓ move  ⏎ open  s scale  r no restart  / filter  ? all keys  q quit"
+                    }
+                    (true, true) => {
+                        "↑↓ move  ⏎ open  s no scale  r no restart  / filter  ? all keys  q quit"
+                    }
+                }
             }
         };
         (Cow::Borrowed(keys), "")

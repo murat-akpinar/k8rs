@@ -49,6 +49,12 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
   that owner-grouping already shortened once ([D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)); it
   is offered for the same reason `/` is offered on every other list in this
   product, not because this list is expected to be long.
+- **An `s`/`r` this login may not use on the selected card is marked on this
+  footer, not hidden** — `s no scale`, `r no restart`, whichever `may_i_in`
+  answers `Verdict::No` for. The wording, the column arithmetic and the fuller
+  reason behind `?` are [widgets.md § The footer](widgets.md#2a-the-footer)'s
+  and [help.md § When a key is refused](help.md#when-a-key-is-refused)'s, not
+  repeated here — this list is the only other place either key is drawn.
 - **One card per owner, never per pod.** `payments/web · 3 of 5 pods`, not
   three cards. A DaemonSet on forty nodes is still one card
   ([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)).

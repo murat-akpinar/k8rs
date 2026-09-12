@@ -128,6 +128,7 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
         kinds: &[],
         reports: &[],
         log: &[],
+        refused: Refused::default(),
         detail: None,
     }
 }
@@ -4714,6 +4715,357 @@ fn help_replaces_the_body_and_leaves_the_rest_of_the_frame_alone() {
     }
 }
 
+/// **The three rows `screens/help.md` § *When a key is refused* draws**, read out of that
+/// section's own fenced block: the *Changing things* heading and the three keys under it, all
+/// three refused, which is the worst case that file draws.
+///
+/// **A second reader rather than a second literal**, for [`mockup`]'s reason: the block is four
+/// lines of plain text with no border to strip, and the `Changing things` heading in it is
+/// asserted below to be the very row [`mockup`] already returns, so the two readers cannot drift
+/// into describing two different screens.
+fn mockup_refused() -> Vec<String> {
+    let path = format!("{}/screens/help.md", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the screen file {path} could not be read: {e}"));
+    let rows: Vec<String> = text
+        .lines()
+        .skip_while(|line| !line.starts_with("## When a key is refused"))
+        .skip_while(|line| !line.starts_with("```"))
+        .skip(1)
+        .take_while(|line| !line.starts_with("```"))
+        .map(|line| line.trim_end().to_owned())
+        .collect();
+    assert_eq!(
+        rows.len(),
+        4,
+        "screens/help.md § When a key is refused no longer draws the heading and its three keys"
+    );
+    rows
+}
+
+/// **Every kind an operation can be pointed at, singular and plural** — `src/main.rs`'s own
+/// `KINDS`, the closed set NOTES § D246 means by *literals in the driver*. Transcribed rather than
+/// imported because that list is `dev-core`'s and goes away at Phase 12; the singular is what
+/// [`every_clause_names_the_plural_its_own_operation_would_send`] hands `ops`, and the plural is
+/// what the column budget is measured over.
+const KINDS: [(&str, &str); 6] = [
+    ("deployment", "deployments"),
+    ("statefulset", "statefulsets"),
+    ("daemonset", "daemonsets"),
+    ("replicaset", "replicasets"),
+    ("pod", "pods"),
+    ("node", "nodes"),
+];
+
+/// A refusal for each of the three keys, from the one answer that may mark one — every permission
+/// the operation needs refused at once, which is the shape the drawn row is the same for.
+/// [`an_operation_is_refused_when_any_one_of_its_permissions_is`] in `views_tests.rs` is where the
+/// slots are set apart.
+fn refusing(scale: bool, restart: bool, delete: bool, resource: &'static str) -> Refused {
+    let no = |refused: bool| refused.then_some(&crate::ops::Verdict::No);
+    Refused::of(resource, [no(scale); 2], [no(restart)], [no(delete)])
+}
+
+/// **Nothing refused draws [`HELP`] back, character for character** — the *fail open* half of
+/// NOTES § D229 ruling 4 seen from the screen: a run with no probe at all, a probe still in
+/// flight, a `Verdict::Yes` and a `Verdict::CouldNotTell` are one screen, and it is the screen
+/// `screens/help.md`'s main mockup draws.
+#[test]
+fn a_key_map_with_nothing_refused_is_the_mockup_untouched() {
+    let could_not_tell = crate::ops::Verdict::CouldNotTell("k8rs could not read it".to_owned());
+    for (what, answer) in [
+        ("no answer yet", None),
+        ("yes", Some(&crate::ops::Verdict::Yes)),
+        ("could not tell", Some(&could_not_tell)),
+    ] {
+        let refused = Refused::of("deployments", [answer; 2], [answer], [answer]);
+        assert_eq!(key_map(HELP, refused), HELP, "{what}");
+        assert_eq!(
+            key_map(HELP, refused).lines().collect::<Vec<_>>(),
+            mockup(),
+            "{what} — and the mockup is the fixture, not HELP"
+        );
+    }
+    assert_eq!(key_map(HELP, Refused::default()), HELP, "nothing selected");
+}
+
+/// **All three refused is `screens/help.md` § *When a key is refused*'s own block, row for row**,
+/// on top of the twelve rows of the main mockup that the section says do not change.
+///
+/// **Both halves are read off the screen file** ([`mockup`], [`mockup_refused`]). Comparing the
+/// drawn map with a literal this file also wrote would compare the implementation with itself,
+/// which is the defect NOTES § D259 shipped once already.
+#[test]
+fn all_three_refused_is_the_block_the_screen_file_draws() {
+    let base = mockup();
+    let clause = mockup_refused();
+    assert_eq!(
+        clause[0], base[12],
+        "the two readers disagree about which row the Changing things heading is"
+    );
+    let expected: Vec<String> = base[..12].iter().chain(&clause).cloned().collect();
+    assert_eq!(
+        key_map(HELP, refusing(true, true, true, "deployments"))
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<String>>(),
+        expected,
+        "screens/help.md § When a key is refused"
+    );
+}
+
+/// **The three keys are independent — one, two or all three, in any combination** — and each row
+/// only ever answers for itself (`screens/help.md` § *When a key is refused*). All eight.
+#[test]
+fn each_refused_row_answers_only_for_its_own_key() {
+    let base = mockup();
+    let clause = mockup_refused();
+    for scale in [false, true] {
+        for restart in [false, true] {
+            for delete in [false, true] {
+                let mut expected = base.clone();
+                for (nth, marked) in [scale, restart, delete].into_iter().enumerate() {
+                    if marked {
+                        expected[13 + nth] = clause[1 + nth].clone();
+                    }
+                }
+                assert_eq!(
+                    key_map(HELP, refusing(scale, restart, delete, "deployments"))
+                        .lines()
+                        .map(str::to_owned)
+                        .collect::<Vec<String>>(),
+                    expected,
+                    "s {scale} · r {restart} · ctrl-d {delete}"
+                );
+            }
+        }
+    }
+}
+
+/// **The body stays sixteen rows and every row stays inside the frame, for every kind and every
+/// combination** (`screens/help.md`'s own count, `screens/widgets.md` § 1's budget).
+///
+/// **The longest plural is what decides it**, which is why every entry of [`KINDS`] is fed and
+/// not just the `deployments` the mockup happens to draw. `s` and `r` are **tied**, not one
+/// tighter than the other — both are 65 columns plus the plural — so `statefulsets` puts both at
+/// 77 against the 78 a body row has at the floor: **one column of headroom** over the six kinds
+/// that ship, and **13 columns is the longest plural that fits at all**. Those boundaries are
+/// asserted below rather than left to this comment, because a number in a doc comment is what the
+/// next person builds on — and this comment's own first draft called `s` the tightest of the
+/// three, which it never was.
+#[test]
+fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
+    let mut seen = 0;
+    for (_, resource) in KINDS {
+        for scale in [false, true] {
+            for restart in [false, true] {
+                for delete in [false, true] {
+                    let drawn = key_map(HELP, refusing(scale, restart, delete, resource));
+                    let lines: Vec<&str> = drawn.lines().collect();
+                    assert_eq!(
+                        lines.len(),
+                        16,
+                        "{resource} — the body is no longer sixteen rows"
+                    );
+                    for line in lines {
+                        assert!(
+                            width(line) <= usize::from(MIN_WIDTH - 2),
+                            "{line:?} is {} columns, past the body at the floor",
+                            width(line)
+                        );
+                    }
+                    seen += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(seen, 48, "a kind or a combination stopped being measured");
+
+    // **The ceiling from both sides, and what a plural off discovery would do.** `deviceclasses`
+    // (13) is the longest plural that fits; `storageclasses` (14) is the shortest that does not;
+    // `customresourcedefinitions` (25) draws 90. All three are real API plurals and none is a kind
+    // `s` can be pointed at — which is the point of feeding them here rather than to [`KINDS`]:
+    // what stops a row overflowing is the closed set in the driver, not the arithmetic.
+    let widest = |resource| {
+        key_map(HELP, refusing(true, true, true, resource))
+            .lines()
+            .map(width)
+            .max()
+            .expect("a body with rows in it")
+    };
+    assert_eq!(
+        widest("deviceclasses"),
+        usize::from(MIN_WIDTH - 2),
+        "13 columns is no longer the longest plural that fills the body exactly"
+    );
+    assert_eq!(
+        widest("storageclasses"),
+        usize::from(MIN_WIDTH - 1),
+        "14 columns is no longer the shortest plural that overflows by one"
+    );
+    assert_eq!(
+        widest("customresourcedefinitions"),
+        90,
+        "the longest plural in a stock cluster no longer draws 90"
+    );
+}
+
+/// **The word the clause prints is the word the probe would send** — for every kind an operation
+/// can be pointed at, the plural in the drawn row is the one `ops` derives from that kind's own
+/// `ApiResource`, never a word this layer spelled (`k8s-admin`, 2026-09-12). Four hand-kept lists
+/// of these kinds exist — `ops`'s derived one, `main.rs`'s singulars, [`KINDS`] here and whatever
+/// Phase 12 passes — and nothing but this tied the word on screen to the word on the wire, so
+/// `""` was only the smallest wrong value: `statefulsets` under a selected Deployment is another,
+/// and no type catches either.
+///
+/// **The tie is through [`KINDS`] and is transitive, which is the whole of what is available
+/// here.** `ApiResource::plural` is a `String` and [`Refused::of`] takes a `&'static str`, so the
+/// drawn clause cannot literally be fed `ops`'s own word; both are checked against [`KINDS`]'s
+/// instead. What that catches is the list drifting — which is the one thing four uncoupled copies
+/// of these kinds does. What it cannot catch is Phase 12 handing one call the wrong kind's plural.
+///
+/// **`ctrl-d`'s row is not covered and cannot be from here.** The only place `delete` derives a
+/// plural is `ops::removal`, which is private in a frozen file; making it `pub` for a test is not
+/// a trade this box gets to make. Two of the three rows are proven — a reader must not take this
+/// test as covering the third.
+#[test]
+fn every_clause_names_the_plural_its_own_operation_would_send() {
+    let mut seen = 0;
+    for (kind, plural) in KINDS {
+        for (operation, resource, row, names) in [
+            (
+                "scale",
+                crate::ops::scalable(kind),
+                "    s ",
+                format!("{plural}/scale"),
+            ),
+            (
+                "restart",
+                crate::ops::restartable(kind),
+                "    r ",
+                format!(" {plural})"),
+            ),
+        ] {
+            // A kind the operation does not reach is never asked and is never *refused* — it is
+            // withheld, `screens/states.md`'s own word and its own later box.
+            let Ok(resource) = resource else { continue };
+            assert_eq!(
+                resource.plural, plural,
+                "{operation} {kind} — the driver's plural is not the one ops would send"
+            );
+            let drawn = key_map(HELP, refusing(true, true, true, plural));
+            let drawn = drawn
+                .lines()
+                .find(|line| line.starts_with(row))
+                .unwrap_or_else(|| panic!("no {row:?} row to carry the {operation} clause"));
+            assert!(
+                drawn.contains(&names),
+                "the {operation} clause does not name {names:?}: {drawn:?}"
+            );
+            seen += 1;
+        }
+    }
+    assert_eq!(
+        seen, 6,
+        "scale reaches three kinds and restart three; a kind stopped being measured"
+    );
+}
+
+/// **A key map that no longer draws the mutating keys loses nothing to a refusal** — the rows are
+/// found by their own key, never by counting from the end (`tester`, 2026-09-12).
+///
+/// **This is the `--read-only` swap simulated, not built**: `screens/help.md` says that swap is
+/// owed and not landed, and building it is its own box. What this box owes is that landing it
+/// cannot silently eat three rows of a neighbouring block, which is what the arithmetic version
+/// did — and it did it without a panic and without failing a test, which is why the guard is here
+/// and not in the box that makes the change.
+#[test]
+fn a_key_map_over_a_help_that_lost_those_keys_rewrites_nothing() {
+    let read_only = "  Looking at things (always available)
+    l  logs, with the log from before a crash
+    d  describe — the object and what happened to it
+    y  view as YAML
+
+  read-only mode — nothing can be changed from here";
+    for (kind, plural) in KINDS {
+        assert_eq!(
+            key_map(read_only, refusing(true, true, true, plural)),
+            read_only,
+            "{kind} — a refusal rewrote a row that is not its key's"
+        );
+    }
+}
+
+/// **The refused rows reach the real frame**, not just the string that feeds it — the same body
+/// region, the same sixteen rows, and the rest of the frame as untouched as it is with nothing
+/// refused (`screens/help.md`, its note under the mockup).
+#[test]
+fn the_refused_key_map_is_what_the_help_screen_draws() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = [
+        "$ kubectl get statefulsets -A --watch".to_owned(),
+        "$ kubectl get daemonsets -A --watch".to_owned(),
+    ];
+    let mut unmarked = screen(&alerts, &now);
+    unmarked.log = &log;
+    let mut refused = screen(&alerts, &now);
+    refused.log = &log;
+    refused.refused = refusing(true, true, true, "deployments");
+    let helping = App {
+        modal: Some(views::Modal::Help),
+        ..App::default()
+    };
+    let marked = rows(&render(&helping, &refused));
+    // **The screen itself, for a reader of the report to hold beside `screens/help.md`** —
+    // `every_footer_on_the_screen_it_belongs_to`'s own move, one screen along.
+    // `cargo test -- --nocapture`.
+    println!(
+        "--- ? with all three keys refused ---\n{}\n",
+        marked.join("\n")
+    );
+
+    let expected: Vec<String> = mockup()[..12]
+        .iter()
+        .chain(&mockup_refused())
+        .cloned()
+        .collect();
+    for (nth, line) in expected.iter().enumerate() {
+        assert_eq!(
+            marked[2 + nth],
+            format!("│{line:<width$}│", width = usize::from(MIN_WIDTH - 2)),
+            "body row {nth}"
+        );
+    }
+    assert_eq!(
+        marked.len(),
+        usize::from(MIN_HEIGHT),
+        "the frame is 24 rows"
+    );
+    assert!(
+        marked[1].starts_with("┌ Keys ─"),
+        "the title left the frame's own border: {:?}",
+        marked[1]
+    );
+    assert_eq!(
+        unframed(&marked[19]),
+        "$ kubectl get statefulsets -A --watch"
+    );
+
+    // **Only the body changes.** The header, the log strip and the footer are siblings of the
+    // body region (`screens/widgets.md` § 1) and a refusal reaches none of them — asserted against
+    // the same frame with nothing refused rather than against a padding this file would have to
+    // spell, which is the comparison the claim actually is.
+    let plain = rows(&render(&helping, &unmarked));
+    for nth in [0, 1, 18, 19, 20, 21, 22, 23] {
+        assert_eq!(
+            marked[nth], plain[nth],
+            "frame row {nth} moved under a refusal"
+        );
+    }
+    assert_ne!(marked[15], plain[15], "the `s` row did not change at all");
+}
+
 /// **The title is drawn only while `?` is open** — every other screen's frame is untitled
 /// (`screens/widgets.md` § 5), and a border that always said `Keys` would be the same defect
 /// seen from the other side.
@@ -4810,6 +5162,14 @@ fn every_footer_on_the_screen_it_belongs_to() {
         ..App::default()
     };
     show("Help", &render(&helping, &plain));
+
+    // **Alerts again, for a login that may not scale or restart the selected card** — the one
+    // footer a refusal reaches, and the only mode on this page whose text is not fixed by the
+    // mode alone (`screens/widgets.md` § 2a, NOTES § D23).
+    let mut denied = screen(&alerts, &now);
+    denied.log = &log;
+    denied.refused = refusing(true, true, false, "deployments");
+    show("Alerts · s and r refused", &render(&app(), &denied));
 }
 
 // --- THE DIALOGS ---

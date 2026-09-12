@@ -272,15 +272,20 @@ each side (§1, §7). A mockup drawn at this file's usual 70-column page width
 shows the footer at that page's own stricter budget, the same convention
 [the command log line already follows](#2-element--widget).
 
-No footer of fixed text has ever needed the real floor's extra six columns to
-say what it says — the curation rule below is what keeps it that way. (The
-one footer that is *not* fixed text,
-[while a call is running](dialogs.md#while-the-call-is-running), is the
-exception a few paragraphs down, and it reaches the full 76 by design, not by
-accident.) A future fixed footer that does need the extra room would be drawn
-at the real 80-column width instead, the same move [alerts.md](alerts.md) and
-[detail.md](detail.md) already make for other lines on the page too wide for
-70, never a fifth truncation invented for the footer alone.
+Most footers of fixed text stay inside the 70-column page's own 66-column
+budget — the curation rule below is what keeps it that way. (The one footer
+that is *not* fixed text,
+[while a call is running](dialogs.md#while-the-call-is-running), is a
+different exception, a few paragraphs down, and it reaches the full 76 by
+design, not by accident.) **One fixed footer already does not fit that
+budget**: the both-refused row in the table below is 71 real columns, past
+the 66 a 70-column page allows. A fixed footer that needs the extra room is
+drawn at the real 80-column width instead — ten columns more than a
+70-column page, not six — the same move
+[help.md § When a key is refused](help.md#when-a-key-is-refused) already
+makes for its own over-70 rows, and the same move [alerts.md](alerts.md) and
+[detail.md](detail.md) make for other lines too wide for 70; never a fifth
+truncation invented for the footer alone.
 
 **`? all keys` and `q quit` are one closed pair, drawn last, and they are what
 never gives way.** [help.md](help.md)'s own rule — `q` sits in the footer with
@@ -311,6 +316,77 @@ was added back in:
   nearly every open pane; `⇧p` only matters once a container has crashed, and
   the search key is the same `/` every other pane already carries without a
   footer hint.
+
+**A key this login may not use is marked where it is drawn, never omitted —
+omission is a different fact and belongs to a different box.**
+[D23](../NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)
+exists because a user who cannot `scale` still had to type a pod's name in
+full before finding out; [D229](../NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)
+built `may_i_in` to answer that before the keystroke, and this is where the
+answer reaches the screen. Two facts look alike from a glance and are not:
+**withheld** is a key this pane has nothing to act on — no object is
+selected, so the key is not drawn at all, the rule the eight states already
+follow ([states.md](states.md)); **refused** is a key this pane could act on
+if the login were allowed to — the key stays on the line, and what changes is
+the word after it. A reader tells the two apart by what is on the line, not
+by a colour: one line is shorter than the ordinary footer, the other is
+longer by one word.
+
+- **The word is `no`, inserted between the key and its label — `s no scale`,
+  `r no restart` — never a symbol.** [`theme.rs`](../src/theme.rs) gives two
+  non-colour carriers, `Signal::Mark` and `Signal::Reverse`; `Reverse` already
+  means *press this* twice over (`FOCUS`, a modal's live confirm button), and
+  reusing it here would tell the reader to press the one key they may not. A
+  new `Mark` glyph was considered and does not earn its keep — not for a
+  fit-width reason: the *reason* a key is refused lives behind `?` either
+  way, `no` does not carry it either (below), so which carrier fits this line
+  was never what decided between them. What does not earn its keep is the
+  vocabulary cost: `● ▲ ○` and `⚠` are one small set, taught once in
+  [rule 4](README.md#the-five-rules-every-screen-obeys) and read the same way
+  on every screen since; a fifth glyph invented for this one job — three
+  keys, one shared footer — would need its own legend before a reader who
+  had not met it before knew what it meant, in colour or out of it. `no` is
+  not new
+  vocabulary and needs none: it is the same word this product already
+  reaches for when there is nothing to soften
+  ([states.md](states.md#you-can-only-see-some-namespaces) — *"your user
+  can't list them"* is the same fact, spelled in a full sentence where there
+  is room for one) — and it is a literal, so it survives a copy-paste the way
+  every `Signal::Mark` here already has to.
+- **The reason is `?`'s, not this line's — counted, not assumed.** The
+  ceiling is 76 columns at the 80×24 floor (above); today's Alerts/Resources
+  footer is 65, leaving 11. `no` costs 3 columns a key (`s scale` → `s no
+  scale`, `r restart` → `r no restart`); both refused at once costs 6,
+  landing at 71 — inside the ceiling with 5 columns to spare. The shortest
+  honest reason this box could write for one key —
+  `get+patch deployments/scale` — is 27 columns on its own, before the
+  punctuation that would introduce it; there is no version of *both refused,
+  plus why, for each* that fits 11 columns, so the reason does not try to
+  live here. It is one `?` away, drawn
+  in [help.md § When a key is refused](help.md#when-a-key-is-refused) — the
+  same trade the browser's row and the evidence line already make: the
+  crowded surface marks, the roomy one explains
+  ([§ 7](#7-text-that-came-from-the-api)).
+
+  | State | Alerts / Resources footer | Columns |
+  |---|---|---|
+  | neither refused (today's footer, unchanged) | `↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit` | 65 |
+  | `s` refused | `↑↓ move  ⏎ open  s no scale  r restart  / filter  ? all keys  q quit` | 68 |
+  | `r` refused | `↑↓ move  ⏎ open  s scale  r no restart  / filter  ? all keys  q quit` | 68 |
+  | both refused | `↑↓ move  ⏎ open  s no scale  r no restart  / filter  ? all keys  q quit` | 71 |
+
+- **`Verdict::Yes`, `Verdict::CouldNotTell` and *not asked yet* draw the
+  ordinary key, unmarked — the *neither refused* row above, exactly.**
+  ([D229 ruling 4](../NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05):
+  a probe that could not be answered may never be the reason a permitted key
+  is hidden or dimmed, and the first frame of any run — before `may_i_in` has
+  replied at all — is the same case on screen as a probe the cluster refused
+  to answer.) Only `Verdict::No` changes the line.
+- **`ctrl-d delete` never reaches this line, refused or not.**
+  [D259](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+  already took it off both list footers for width, before this box existed —
+  it is marked only where it is drawn, in
+  [help.md § When a key is refused](help.md#when-a-key-is-refused).
 
 **A modal's footer is a closed, complete list, and it never carries the
 anchor pair.** Every `Modal` variant but `Help` (§5) draws only the keys valid

@@ -282,6 +282,7 @@ its line moving with it.
 - [D258](#d258--the-command-log-panel-an-outcome-is-not-a-mutations-privilege-the-servers-own-sentence-had-to-be-bounded-before-it-reached-the-strip-and-a-cut-that-leaves-a-working-command-behind-2026-09-07) — the command log panel: an outcome is not a mutation's privilege, the server's own sentence had to be bounded before it reached the strip, and a cut that leaves a working command behind
 - [D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10) — the footer is a curated subset with one pair that never gives way, the help screen is the frame wearing a title rather than a box drawn inside it, and a gate verified against a substituted tree is not verified
 - [D260](#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12) — the dialog family: the taught command belongs in the frame and not on a strip that has not drawn it yet, a refusal that followed no check may not say a check stopped it, and two sentences that must agree live in a file this one cannot reach
+- [D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12) — the refused-keys round: a permission that is two questions and was counted as one, a reason that did not fit the line it was promised to, and a row rewritten by arithmetic another box would have moved
 
 ## Why it exists — where the gap is
 
@@ -22532,3 +22533,164 @@ this repo already expects: `tester` found a typed-name field whose padding count
 every other measurement counts display columns — one CJK glyph pushed the field's border a column
 out and ten pushed it off the box — and `k8s-admin` found items 1, 2 and 3. Neither is visible from
 inside a single box, which is what a family review is for.
+
+### D261 — the refused-keys round: a permission that is two questions and was counted as one, a reason that did not fit the line it was promised to, and a row rewritten by arithmetic another box would have moved (2026-09-12)
+
+Phase 11's *keys the user is not allowed to use are dim from the start* box, and
+the first one where the defect that mattered was invisible to everybody without a
+cluster.
+
+**1. "The reason in the footer" could not be obeyed literally, and the arithmetic
+is what settled it.** [D23](#d23--permissions-are-discovered-by-failing-and-that-is-backwards)
+promised *keys the user cannot use are dim from the start and the footer says why*.
+Measured: the Alerts/Resources footer is 65 of its 76 columns, leaving **11**, and
+the shortest true reason for one key — `get+patch deployments/scale` — is **27**. It
+does not fit beside its own key even once, let alone twice. So the footer carries the
+*indication* (`s no scale`, `r no restart`, +3 columns each, 71 of 76 when both are
+refused) and `?` carries the reason. That is the trade the browser row and the
+evidence line already make: the crowded surface marks, the roomy one explains.
+**The word is `no` and not a glyph**, and the first recorded reason for that was a
+non-sequitur — *"the clause does not fit beside the key, so a glyph would still need
+the word"* — which argues for nothing, since `no` carries no reason either and both
+designs put it behind `?`. A trailing `✗` was measured fitting, at 75 of 76. The real
+reason is that `● ▲ ○ ⚠` are one small taught vocabulary and a fifth glyph for one job
+on three keys would need a legend, where `no` needs none.
+
+**2. Dim had nowhere to go down to, and the frozen palette is why.** The footer is
+already drawn entirely in `theme::DIM`, and `DIM` and `BORDER` both degrade to ANSI
+index **8** — there is no second grey at sixteen colours. `theme.rs` froze at Phase 9,
+so no role and no `Signal` could be added. The box's own title is therefore the one
+word in it that is not literally true, and the mark is a word rather than a shade.
+
+**3. `views.rs` imports `ops::Verdict`, deliberately, against the house style.**
+Before this box, `views.rs` and `ui.rs` named `ops::` only in prose — every `ops`
+concept was mirrored as a plain local type. That style keeps *machinery* out of the
+state file, and `Verdict` is not machinery: it is the three-valued answer being drawn.
+It had to be imported because [D229](#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)
+ruling 4's fail-open needs a test **that exists now** — the alternative put the
+conversion in Phase 12's `main.rs`, which does not exist to be tested, and a
+`views`-local mirror of `Verdict` is the second copy [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+is named for. Fail-open is one function, `refuses`, and only `Verdict::No` reaches it.
+
+**4. The blocker, and it is the entry's reason for existing: `scale` is two
+permissions and the screen named one.** `ops::scale` calls `Api::get_scale` before it
+patches — it is the read the *"Right now: N copies"* consequence sentence is built
+from, and `ops.rs`'s own region comment has said so since Phase 7. So `scale` needs
+**`get` and `patch`** on `<plural>/scale`. The clause named `patch` alone, which is
+wrong in both directions at once: a probe asking only `patch` answers `Yes`, so the key
+is drawn **lit** and then fails; and an operator who asks their admin for exactly what
+the screen names **still cannot scale**. Measured on a cluster with a login granted that
+pair verbatim: `may-i` said yes, `ops scale` exited 2 with *cannot get resource
+"deployments/scale"*. `restart` and `delete` were measured correct **and sufficient**
+end to end; `s` was the only wrong one of the three.
+**What this costs is a rule, not a patch.** The clause was reasoned from what the
+operation is *called* and never measured against what it *does* — [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+quiet half, one command away from the object the whole time. `tui-designer`, `dev-ui`,
+`tester` and the PM all passed it; the only reader who caught it had a cluster. So the
+fix is stated as a principle and made structural: **an operation is refused when *any*
+permission it needs came back `No`**, the count per operation is a named constant
+(`SCALE_VERBS`, `RESTART_VERBS`, `DELETE_VERBS`) sizing an array in `Refused::of`, and
+the clause's own verbs are interpolated from those same constants — so the grant the
+screen names and the questions the probe asks have one source and cannot drift again.
+A wrong count is now a compile error at every call site, which is what v0.2's cordon
+and drain will land against.
+**And the pair was then measured *sufficient*, which is the half the first round did
+not cover.** Finding that `patch` alone fails does not prove `get`+`patch` is the whole
+grant; a third verb would simply have moved the same defect four columns right, to be
+found by a user instead. Measured: one ClusterRole per kind, one rule, `get`+`patch` on
+`<plural>/scale` and no other binding — `scale` completed on a Deployment, a StatefulSet
+*and* a bare ReplicaSet, exit 0, replicas actually moved, with the `dryRun=All` preflight
+needing no grant the real call does not. **Minimal**, because each verb alone fails and
+the object does not move. **Complete**, and this is the part that could not be taken on
+trust: re-run under an identity carrying `system:unauthenticated` so that
+`system:authenticated`'s default `system:discovery` and `system:basic-user` bindings were
+gone, leaving exactly one grant in the cluster — `kubectl` could not enumerate the API at
+all, and k8rs still performed the whole operation. No discovery, no `nonResourceURL`, no
+read of the parent resource, no `/status`, no review. The clause names the whole grant.
+**One shape note for v0.2, so it is not discovered as a surprise:** these constants model
+*verbs on one resource*, which holds for all three operations today and was measured
+holding. `drain` will not fit it — `get nodes` + `patch nodes` + `create pods/eviction` is
+two resources — so the constant gains a resource beside each verb then.
+
+**5. `<plural>/scale` stays, and what changed is that the file says which of two
+readings it is.** [D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 1 already cost a round to this: in `kubectl auth can-i` *and* in `k8rs ops
+may-i`, a `/` after the resource is the object's **name**. Measured, for the very login
+the screen draws `s no scale` for, `kubectl auth can-i patch deployments/scale` answers
+**yes** — so the screen and k8rs's own question command contradict each other. The
+string is not false: it is the correct spelling inside a `Role.rules[].resources`, and
+the reader's next action is asking an admin for that rule. A disambiguating framing was
+measured at **83** columns against a 78 ceiling and does not fit, so the resolution is a
+bullet that says plainly this is the grant to ask for and not a string to paste into
+either tool.
+
+**6. A row targeted by arithmetic is a row another box moves.** `ui::key_map` first
+rewrote `rows[len - 3 ..]`. Correct against today's `HELP`, and `tester` simulated the
+`--read-only` box landing: it ate `y view as YAML`, the blank separator and the
+read-only sentence, and drew the three mutating keys that map exists to remove — no
+panic, no failing test, and it touches the security gate's `--read-only` row. Each
+clause is now anchored on its own key prefix, so a row that is not `s`/`r`/`ctrl-d` is
+never overwritten, and a `HELP` with no such row is skipped rather than panicking in a
+draw path. The same review found that `screens/help.md` asserted that `--read-only` and
+a refusal *cannot be on screen together* in the present tense, while
+`grep read_only src/views.rs src/ui.rs` returns nothing and `may_i` still runs under
+`--read-only` (D230 ruling 3) — rewritten as what that box **owes**, not what is landed.
+
+**7. What this box does not close, recorded rather than assumed.** D23's own motivating
+case is the typed-name delete, and `ctrl-d` is marked only behind `?`: a refused delete
+leaves both list footers unchanged, deliberately, because `ctrl-d no delete` is +16
+columns on a footer already at 71 of 76 ([D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)).
+So a user who never opens `?` still selects, presses `ctrl-d` and types the whole name.
+The cheap place is the delete confirmation dialog, before the name field, which is
+`screens/dialogs.md`'s box and not this one's. **The scenario the box cites is not
+closed by the box**, and that is written here rather than ticked.
+
+**8. Where the permission question may not be asked at all.** `scale` reaches a
+Deployment, a StatefulSet and a bare ReplicaSet, never a DaemonSet; `restart` reaches a
+Deployment, a StatefulSet and a DaemonSet, never a bare ReplicaSet — the two sets differ
+in **both** directions, measured against the API and not only against the code: a
+DaemonSet has no `/scale` subresource at all, and `kubectl rollout restart rs/…` refuses
+outright. Where the selected kind does not support the key, nothing is asked and the key
+is **withheld**, not *refused*; a screen that asked anyway and drew `s no scale` on a
+DaemonSet would name a permission that does not exist to hold. Drawing *withheld* is
+`screens/states.md`'s own later box.
+
+**9. Numbers, corrected once and asserted rather than claimed.** The longest resource
+plural that fits the 78-column help body is **13** columns — 14 overflows —
+`customresourcedefinitions` would draw **90**, and the headroom over the six kinds k8rs
+ships is **one** column (`statefulsets` at 77). The first report of these gave the
+`ctrl-d` row's figures for all three rows, `ctrl-d` being the shortest; they are now
+asserted in a test for every kind and combination instead of living in a doc comment.
+A longer plural is **silently clipped** by `Paragraph`, which has no `.wrap()` — a
+half-sentence with no closing paren, no panic, no failing test. Unreachable today,
+because there is no product caller of `Refused::of` at all until Phase 12 wires it.
+
+**10. Three things Phase 12's wiring owes, so it does not meet them as bugs.** Nothing
+forces one review per namespace and nothing forbids one per keypress: Alerts is
+cluster-wide and its cards span namespaces, so naive wiring is one
+`SelfSubjectRulesReview` per cursor move on a list that can be hundreds of cards long —
+D23's *one call answers a screenful* only holds if a `Permits` is cached per namespace.
+A namespaced rules review **does** list cluster-scoped grants, but `Permits::may`'s
+`is_none_or` guard sends a cluster-scoped question to `CouldNotTell`, so a selected
+Node's `ctrl-d` can never be marked off the rules review and needs its own `may_i`
+(D229 ruling 1 working as designed). And if the wiring ever reaches for `Box::leak` to
+satisfy `Refused`'s `&'static str` from a discovered plural, **invariant 9 and the
+sixteen-row body budget fall together** and nothing would notice — a `&'static str`
+carrying a `\n` was measured producing a seventeen-row body.
+
+**11. One question left open, and it is the only direction fail-open can still fail.**
+A Webhook authorizer that grants `patch deployments/scale` while the
+`SelfSubjectRulesReview` comes back `incomplete: false` would make `Permits::may` answer
+`No` and dim a key the login can in fact use — the one thing D229 ruling 4 forbids. The
+Node authorizer sets `incomplete` and was measured doing so; a webhook one was not
+tried. It is a `Permits` question, so no fix belonged in this diff either way, but it
+decides whether the `No` path is safe at all.
+
+**12. The process finding: a full disk reads as nothing at all.** Two agents filled the
+scratchpad's 12 GiB tmpfs with a scratch `CARGO_TARGET_DIR`, and for four consecutive
+commands one of them lost **all stdout and stderr** — indistinguishable from a command
+that printed nothing. [D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
+recorded the same volume reading a failed build as `unviable`; this is the same hazard
+wearing a second hat. `scripts/mutants.sh` names its own volume for exactly this reason.
+A hand-run `cargo` does not, and the scratchpad is where agents are told to work — so an
+agent's `CARGO_TARGET_DIR` goes under `$HOME`, never under `/tmp`.

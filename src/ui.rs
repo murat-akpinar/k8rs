@@ -46,7 +46,7 @@ use crate::analysis::{Badge, Report, Row as ReportRow};
 use crate::k8s::{Browsable, Fault};
 use crate::rules::{ContainerSnapshot, Finding, ObjectId, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
-use crate::views::{self, App, Card, NavItem, Pane, Tab, View};
+use crate::views::{self, App, Card, NavItem, Pane, Refused, Tab, View};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
@@ -198,6 +198,82 @@ const HELP: &str = "  Moving around
     r       restart, at its own pace       (rollout restart)
     ctrl-d  delete — you type the name to confirm";
 
+/// **[`HELP`]'s sixteen rows, with a *why not* clause on each key this login has been told it may
+/// not use** (`screens/help.md` § *When a key is refused*, NOTES § D23).
+///
+/// **Each clause is anchored on the row it is for, by that row's own key, and never by counting**
+/// (`tester`, 2026-09-12). The first draft rewrote the last three rows of [`HELP`] by arithmetic —
+/// correct for today's [`HELP`] and wrong the moment another box changes it. Simulated: the owed
+/// `--read-only` swap replaces the three key rows with one line, and the arithmetic version then
+/// ate `y view as YAML`, the blank line and the read-only sentence, and drew the three mutating
+/// keys that swap exists to remove — no panic, no failing test. A row that is not `s`, `r` or
+/// `ctrl-d` is now never written, and a [`HELP`] that has dropped a key simply has no row for its
+/// clause to land on.
+///
+/// **`help` is a parameter for that reason too**: what this does to a key map that no longer draws
+/// those keys is the thing to be able to test, and a `const` read from inside cannot be fed one.
+/// The one product caller passes [`HELP`].
+///
+/// No other row and no other block changes, and the body stays sixteen rows, so
+/// `screens/widgets.md` § 1's budget is untouched. Nothing is refused ⇒ the join is [`HELP`] back,
+/// character for character, which is what the *fail open* half of NOTES § D229 ruling 4 looks like
+/// from the screen's side.
+///
+/// **The clause extends the jargon parenthesis for `s` and `r` and opens a new one for `ctrl-d`**,
+/// and both `s`'s and `r`'s `(` move left to the 40th character where [`HELP`] has them at the
+/// 44th — the screen file's ruling, and forced: `s` now names two verbs, and holding either `(`
+/// at the 44th puts that row past the 78-column ceiling. The padding is written into the literals
+/// rather than computed, because what it lines up with is [`HELP`]'s own hand-set columns and
+/// there is no second budget to derive it from.
+///
+/// **The verbs come from [`Refused`]'s own permission lists**, so the sentence the reader is asked
+/// to hand their cluster owner cannot name fewer grants than the probe asked about — which is the
+/// half of the 2026-09-12 `scale` defect that survived a correct probe.
+///
+/// **The only other thing interpolated is [`Refused::resource`], a `&'static str` from k8rs's own
+/// closed set** (NOTES § D246) — never a plural discovery handed back, which is what would put a
+/// row past the ceiling as well as past invariant 9.
+fn key_map(help: &str, refused: Refused) -> String {
+    let resource = refused.resource();
+    let clauses = [
+        (
+            "    s ",
+            refused.scale().then(|| {
+                format!(
+                    "    s       run more or fewer copies   (scale — {} {resource}/scale)",
+                    Refused::SCALE_VERBS.join("+")
+                )
+            }),
+        ),
+        (
+            "    r ",
+            refused.restart().then(|| {
+                format!(
+                    "    r       restart, at its own pace   (rollout restart — {} {resource})",
+                    Refused::RESTART_VERBS.join("+")
+                )
+            }),
+        ),
+        (
+            "    ctrl-d ",
+            refused.delete().then(|| {
+                format!(
+                    "    ctrl-d  delete — you type the name to confirm ({} {resource})",
+                    Refused::DELETE_VERBS.join("+")
+                )
+            }),
+        ),
+    ];
+    let mut rows: Vec<&str> = help.lines().collect();
+    for (key, clause) in &clauses {
+        let Some(clause) = clause else { continue };
+        if let Some(row) = rows.iter_mut().find(|row| row.starts_with(key)) {
+            *row = clause;
+        }
+    }
+    rows.join("\n")
+}
+
 // --- THE NUMBERS THE MOCKUPS ARE DRAWN TO END ---
 
 // --- WHAT A FRAME IS DRAWN FROM START ---
@@ -302,6 +378,14 @@ pub struct Screen<'a> {
     /// The command log, oldest first. The strip draws the last [`LOG_LINES`] of it — display
     /// text, never executed and never fed back into a process (invariant 4).
     pub log: &'a [String],
+    /// **Which of the three mutating keys this login has been told it may not use, for the
+    /// selected object** (`crate::views::Refused`, `screens/widgets.md` § 2a).
+    ///
+    /// It is here and not on [`App`] for the same reason everything else on this struct is: a
+    /// permission answer is what the *store* answered, not what the user did. [`Refused::default`]
+    /// — nothing selected, nothing asked, nothing answered yet — draws every key exactly as a run
+    /// with no probe at all does (NOTES § D229 ruling 4).
+    pub refused: Refused,
     /// **The object a detail tab is open on, and what each of its four fetches answered** —
     /// `None` when nothing is open (`screens/detail.md`).
     ///
@@ -583,7 +667,7 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
 /// [`header`] uses for the context: an empty one is a zero-width `Rect` that draws nothing, so
 /// the ordinary single-zone footer needs no branch of its own.
 fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
-    let (keys, quit) = app.footer(screen.detail.is_some());
+    let (keys, quit) = app.footer(screen.detail.is_some(), screen.refused);
     let dim = screen.fg(theme::DIM);
     let row = indented(area);
     let [left, right] =
@@ -594,6 +678,9 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 
 /// **`?` — the full key map, drawn over the whole body region** (`screens/help.md`,
 /// `screens/widgets.md` § 5).
+///
+/// **[`key_map`] and not [`HELP`], because up to three of those rows answer for what this login
+/// may do** — the only part of this screen that is not fixed text.
 ///
 /// **`Clear` first, then a borderless `Paragraph`, and there is no third call.** ratatui does not
 /// clear for you, so without it the sidebar and the pane show through; and the block that would
@@ -612,7 +699,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 fn help(frame: &mut Frame, area: Rect, screen: &Screen) {
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(HELP).style(
+        Paragraph::new(key_map(HELP, screen.refused)).style(
             screen
                 .fg(theme::TEXT)
                 .bg(ink(theme::BACKGROUND, screen.depth)),

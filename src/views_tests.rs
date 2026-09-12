@@ -1620,7 +1620,7 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
             tab,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail);
+        let (keys, quit) = app.footer(detail, Refused::default());
         assert_eq!(
             (keys.as_ref(), quit),
             (expected, ""),
@@ -1651,7 +1651,7 @@ fn the_anchor_pair_ends_every_ordinary_footer() {
             tab,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail);
+        let (keys, quit) = app.footer(detail, Refused::default());
         assert!(
             keys.ends_with("? all keys  q quit"),
             "{view:?} · detail {detail} · {tab:?} — {keys:?} does not end in the anchor pair"
@@ -1669,10 +1669,10 @@ fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    let (keys, quit) = app.footer(false);
+    let (keys, quit) = app.footer(false, Refused::default());
     assert_eq!((keys.as_ref(), quit), ("? or esc to close", "q quit"));
     assert!(
-        !app.footer(false).0.contains("all keys"),
+        !app.footer(false, Refused::default()).0.contains("all keys"),
         "the footer still pointed at a screen the reader is already on"
     );
 }
@@ -1695,7 +1695,7 @@ fn help_is_the_footer_whatever_it_was_opened_from() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail),
+            app.footer(detail, Refused::default()),
             (Cow::Borrowed("? or esc to close"), "q quit"),
             "{view:?} · detail {detail} · {tab:?}"
         );
@@ -1711,10 +1711,10 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    assert_eq!(app.footer(false).0, "? or esc to close");
+    assert_eq!(app.footer(false, Refused::default()).0, "? or esc to close");
     app.escape();
     assert_eq!(
-        app.footer(false).0,
+        app.footer(false, Refused::default()).0,
         "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
     );
 }
@@ -1789,16 +1789,16 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
             "esc dismiss",
         ),
     ] {
-        assert_eq!(app.footer(false).0, expected);
+        assert_eq!(app.footer(false, Refused::default()).0, expected);
         assert_eq!(
-            app.footer(false).1,
+            app.footer(false, Refused::default()).1,
             "",
             "a dialog grew the right-hand zone only `?` has"
         );
         // **The same answer over an open detail tab**, which is the other side of the hole the
         // replaced test pinned: a dialog is opened from a detail pane as readily as from a list,
         // and a footer that fell through for one of them would fall through for both.
-        assert_eq!(app.footer(true).0, expected);
+        assert_eq!(app.footer(true, Refused::default()).0, expected);
     }
 }
 
@@ -1858,7 +1858,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
             modal,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail);
+        let (keys, quit) = app.footer(detail, Refused::default());
         let width = ratatui::text::Span::raw(keys.as_ref()).width()
             + usize::from(!quit.is_empty())
             + ratatui::text::Span::raw(quit).width();
@@ -1869,6 +1869,264 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
         seen += 1;
     }
     assert_eq!(seen, 12, "a mode stopped being measured");
+}
+
+/// **`screens/widgets.md` § 2a's own four-row table, read as the fixture** — the footer string and
+/// the column count that section counted it at, in the file's order: neither refused · `s` · `r` ·
+/// both.
+///
+/// **The screen file is the fixture, which is the point** (`ui_tests::mockup`'s own reason). A
+/// test that compared these four lines with the four literals `App::footer` returns would compare
+/// the implementation with itself.
+fn mockup_footers() -> Vec<(String, usize)> {
+    let path = format!("{}/screens/widgets.md", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the screen file {path} could not be read: {e}"));
+    let rows: Vec<(String, usize)> = text
+        .lines()
+        .skip_while(|line| {
+            !line
+                .trim_start()
+                .starts_with("| State | Alerts / Resources footer")
+        })
+        .skip(2)
+        .take_while(|line| line.trim_start().starts_with('|'))
+        .map(|line| {
+            let cells: Vec<&str> = line.trim().trim_matches('|').split('|').collect();
+            (
+                cells[1].trim().trim_matches('`').to_owned(),
+                cells[2]
+                    .trim()
+                    .parse()
+                    .expect("a column count in the last cell"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows.len(),
+        4,
+        "screens/widgets.md § 2a no longer tabulates the four states of the list footer"
+    );
+    rows
+}
+
+/// **The list footer marks exactly the keys this login may not use, in `screens/widgets.md`
+/// § 2a's own four strings and at its own four column counts** (NOTES § D23, § D229).
+///
+/// **The width is measured the way ratatui measures**, because `↑↓`, `⏎` and `·` are not one byte
+/// each — and it is checked against the section's counted number rather than an inequality, so a
+/// row that fits but says the wrong thing still fails.
+#[test]
+fn the_list_footer_marks_the_keys_this_login_may_not_use() {
+    let table = mockup_footers();
+    let states = [(false, false), (true, false), (false, true), (true, true)];
+    for (nth, (scale, restart)) in states.into_iter().enumerate() {
+        let refused = Refused::of(
+            "deployments",
+            [scale.then_some(&Verdict::No); 2],
+            [restart.then_some(&Verdict::No)],
+            [None],
+        );
+        let (expected, columns) = &table[nth];
+        for view in [View::Alerts, View::Resources(0)] {
+            let app = App {
+                view,
+                ..App::default()
+            };
+            let (keys, quit) = app.footer(false, refused);
+            assert_eq!(
+                (keys.as_ref(), quit),
+                (expected.as_str(), ""),
+                "{view:?} · s refused {scale} · r refused {restart}"
+            );
+            assert_eq!(
+                ratatui::text::Span::raw(keys.as_ref()).width(),
+                *columns,
+                "{keys:?} is not the width screens/widgets.md § 2a counted"
+            );
+        }
+        // The ceiling `ui::indented` leaves at the 80×24 floor (`screens/widgets.md` § 2a). The
+        // 66-column page the mockups are drawn at is not this row's budget: § 2a's own table puts
+        // both-refused at 71 and calls it *inside the ceiling with 5 columns to spare*.
+        assert!(*columns <= 76, "{expected:?} is {columns} columns");
+    }
+}
+
+/// **Only `Verdict::No` marks a key — a probe may never be the reason a permitted action is
+/// marked** (NOTES § D229 ruling 4). All four answers, for each of the three keys.
+///
+/// **`None` is two facts and neither may mark**: a probe still in flight, and an operation the
+/// selected kind does not support, which is never asked at all (`screens/help.md` § *When a key is
+/// refused*). Both reach `Refused::of` as the same absent answer, which is why one case tests
+/// both.
+///
+/// **Each key is set alone**, so a constructor that wired `restart`'s answer into `scale`'s field
+/// fails here rather than drawing a plausible screen.
+#[test]
+fn a_verdict_marks_a_key_only_when_it_is_a_no() {
+    let could_not_tell = Verdict::CouldNotTell("k8rs could not read the answer".to_owned());
+    for (what, answer, marked) in [
+        (
+            "no answer yet — in flight, or an operation this kind has not got",
+            None,
+            false,
+        ),
+        ("yes", Some(&Verdict::Yes), false),
+        ("could not tell", Some(&could_not_tell), false),
+        ("no", Some(&Verdict::No), true),
+    ] {
+        let scale = Refused::of("deployments", [answer; 2], [None], [None]);
+        let restart = Refused::of("deployments", [None; 2], [answer], [None]);
+        let delete = Refused::of("deployments", [None; 2], [None], [answer]);
+        assert_eq!(
+            (scale.scale(), scale.restart(), scale.delete()),
+            (marked, false, false),
+            "s — {what}"
+        );
+        assert_eq!(
+            (restart.scale(), restart.restart(), restart.delete()),
+            (false, marked, false),
+            "r — {what}"
+        );
+        assert_eq!(
+            (delete.scale(), delete.restart(), delete.delete()),
+            (false, false, marked),
+            "ctrl-d — {what}"
+        );
+        assert_eq!(scale.resource(), "deployments", "{what}");
+    }
+}
+
+/// **An operation is refused when *any* permission it needs came back `Verdict::No`, and lit when
+/// none did** (`k8s-admin`, 2026-09-12). Every pair of answers `scale`'s two slots can hold —
+/// sixteen — against the one rule, so *granted most of it* is not *lit*.
+///
+/// **`scale` is the only operation with two slots today and is the whole reason this test
+/// exists.** It needs `get` before `patch` on `<plural>/scale` because `ops::scale` reads the
+/// current replica count for the dialog's *"Right now: N copies"* sentence; a login granted only
+/// `patch` on `deployments/scale` was measured answering the probe yes and then failing the
+/// operation with `cannot get resource "deployments/scale"`. The other half of that defect — a
+/// clause telling the operator to ask for the grant that does not work — is
+/// `ui_tests::every_clause_names_the_plural_its_own_operation_would_send`'s and
+/// `ui_tests::all_three_refused_is_the_block_the_screen_file_draws`'s.
+///
+/// **Both slots are also fed the other three answers**, because *any* is only half the rule: an
+/// operation whose every permission came back anything but `No` — including two probes that could
+/// not be answered at all — is still lit (NOTES § D229 ruling 4).
+#[test]
+fn an_operation_is_refused_when_any_one_of_its_permissions_is() {
+    let could_not_tell = Verdict::CouldNotTell("k8rs could not read the answer".to_owned());
+    let answers = [
+        ("not asked", None),
+        ("yes", Some(&Verdict::Yes)),
+        ("could not tell", Some(&could_not_tell)),
+        ("no", Some(&Verdict::No)),
+    ];
+    let mut seen = 0;
+    for (read, get) in answers {
+        for (write, patch) in answers {
+            let refused = Refused::of("deployments", [get, patch], [None], [None]);
+            // The expectation is read off this loop's own table — the word beside the answer —
+            // and not re-derived from the `Verdict`, so it is the requirement's sentence and not
+            // the implementation's `matches!` written out a second time.
+            assert_eq!(
+                refused.scale(),
+                read == "no" || write == "no",
+                "get {read} · patch {write}"
+            );
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 16, "an answer stopped being fed to one of the slots");
+}
+
+/// **`ctrl-d delete` never reaches a footer, refused or not** (`screens/widgets.md` § 2a): D259
+/// took that key off both list footers for width before this box existed, so it is marked only
+/// where it is drawn, behind `?`.
+#[test]
+fn a_refused_delete_changes_no_footer() {
+    let refused = Refused::of("deployments", [None; 2], [None], [Some(&Verdict::No)]);
+    for view in [View::Alerts, View::Resources(0), View::Analysis(0)] {
+        for detail in [false, true] {
+            let app = App {
+                view,
+                ..App::default()
+            };
+            assert_eq!(
+                app.footer(detail, refused),
+                app.footer(detail, Refused::default()),
+                "{view:?} · detail {detail}"
+            );
+        }
+    }
+}
+
+/// **No footer but the two lists' can be marked** — Analysis and the four detail tabs name neither
+/// `s` nor `r`, and a modal's footer is its own closed set with the mode underneath not asked
+/// (`screens/widgets.md` § 2a). All three refused, which is the loudest input there is.
+#[test]
+fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
+    let all = Refused::of(
+        "deployments",
+        [Some(&Verdict::No); 2],
+        [Some(&Verdict::No)],
+        [Some(&Verdict::No)],
+    );
+    let mut seen = 0;
+    for (view, detail, tab, modal) in [
+        (View::Analysis(0), false, Tab::Logs, None),
+        (View::Alerts, true, Tab::Logs, None),
+        (View::Alerts, true, Tab::Describe, None),
+        (View::Alerts, true, Tab::Yaml, None),
+        (View::Alerts, true, Tab::Events, None),
+        (View::Alerts, false, Tab::Logs, Some(Modal::Help)),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::Confirm(dialog(None))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::Confirm(dialog(Some("web")))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::Refused {
+                sent: false,
+                fault: crate::k8s::Fault::Rejected,
+                said: None,
+            }),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::Gone {
+                object: dialog(None).object,
+                recreated: true,
+            }),
+        ),
+    ] {
+        let app = App {
+            view,
+            tab,
+            modal,
+            ..App::default()
+        };
+        assert_eq!(
+            app.footer(detail, all),
+            app.footer(detail, Refused::default()),
+            "{:?} · detail {detail} · {tab:?}",
+            app.view
+        );
+        seen += 1;
+    }
+    assert_eq!(seen, 10, "a footer stopped being measured");
 }
 
 // --- THE SHAPES THE MUTATION GATE PROVED WERE NOT BEING FED ---
@@ -2552,8 +2810,10 @@ fn the_confirm_word_is_the_same_one_the_footer_and_the_button_use() {
         ..App::default()
     };
     assert!(
-        app.footer(false).0.contains(armed.confirm()),
+        app.footer(false, Refused::default())
+            .0
+            .contains(armed.confirm()),
         "the footer does not name the button's own word: {:?}",
-        app.footer(false).0
+        app.footer(false, Refused::default()).0
     );
 }

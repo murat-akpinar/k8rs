@@ -2953,3 +2953,26 @@ long-form version and stays the authority.*
   the four dialog boxes left in Phase 11 are the largest thing still to land in it, and they are
   what D11 named the file *for*. Raised by `dev-ui` at the footer box — a size to read against the
   dialogs when they are briefed, not a refactor to schedule. 2026-09-10
+
+- **The typed-name delete is marked only behind `?`, so the box's own motivating case is not
+  closed.** D23's scenario is a user typing a pod's name in full and only then learning they were
+  never permitted; `ctrl-d` reaches no footer, deliberately, because `ctrl-d no delete` is +16
+  columns on a footer already at 71 of 76. The cheap place is the delete confirmation dialog,
+  before the name field — `screens/dialogs.md`'s, and no box names it
+  ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  item 7). 2026-09-12
+
+- **A webhook authorizer could make fail-open fail in the one direction it may not.** If a
+  `Webhook` in the chain grants a verb while the `SelfSubjectRulesReview` returns
+  `incomplete: false`, `Permits::may` answers `No` and dims a key the login can use. The Node
+  authorizer sets `incomplete` and was measured doing so; a webhook one was never tried. The
+  experiment is one kind cluster with `--authorization-mode=RBAC,Webhook`
+  ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  item 11). 2026-09-12
+
+- **The delete clause's plural is tied to nothing, because `ops::removal` is private and `ops.rs`
+  is frozen.** `s` and `r` are pinned against `ops::scalable`/`restartable`'s own `ApiResource`;
+  the `ctrl-d` arm cannot be, and the test says so rather than implying three-of-three. Either an
+  accessor when `ops.rs` next opens, or a different tie
+  ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  item 4). 2026-09-12

@@ -4441,10 +4441,30 @@ string and key was settled in the design phase, so this phase is drawing.
       one is refused, and the doc names per selection surface which kinds can
       raise `Gone` at all — **an Alerts ReplicaSet cannot**, because nothing
       watches it, and that is written down rather than assumed
-- [ ] **Keys the user is not allowed to use are dim from the start**, from the
+- [x] **Keys the user is not allowed to use are dim from the start**, from the
       `may_i` result, with the reason in the footer. The typed-name delete
       exists to prevent an accident, not to waste the time of someone who was
       never permitted ([NOTES § D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards))
+      — landed 2026-09-12
+      ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
+      **The reason could not go on the line it was promised to** — the footer has
+      11 spare columns of 76 and the shortest true reason is 27 — so the footer
+      *marks* (`s no scale`, `r no restart`, 71 when both) and `?` *explains*
+      (`(scale — get+patch deployments/scale)`). Dim itself was unavailable:
+      the footer is already `theme::DIM` and `DIM` and `BORDER` share ANSI 8, so
+      the carrier is a word. Fail-open is one function over a set and only
+      `Verdict::No` reaches it.
+      **`scale` is two permissions and the clause named one** — `ops::scale`
+      reads with `get_scale` before it patches — so a login granted exactly what
+      the screen said still could not scale, and the key drew lit. Caught by the
+      operator review after four passes had read the same wrong string; the pair
+      is now measured **sufficient, minimal and complete** on all three scalable
+      kinds, and each operation's permission count is a named constant sizing an
+      array, so a wrong count is a compile error at every call site.
+      **What it does not close, ruled rather than missed**: `ctrl-d` reaches no
+      footer (D259 took it off for width), so D23's own typed-name-delete case
+      still costs the typing unless `?` was opened first — the confirmation
+      dialog is its home, in [`backlog.md`](backlog.md) with two other findings
 - [ ] **The in-flight screen**: `changing…` in the header, `…` on the command
       line, `q`/`X`/a second mutation refused in the footer
       ([dialogs.md](screens/dialogs.md))

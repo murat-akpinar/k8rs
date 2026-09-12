@@ -87,6 +87,13 @@ own `Table` printing — the exact columns `kubectl get` would show.
   are the two keys that never give way; `ctrl-d delete` gives way to them here
   the same way `d describe` and `y view as YAML` already did, on every list
   view, before this footer was ever audited for width.
+- **`s`/`r` on the selected row are marked the same way as on Alerts, and no
+  differently for being over a table instead of a card** — `s no scale`,
+  `r no restart`, from the same `may_i_in` result Alerts reads
+  ([widgets.md § The footer](widgets.md#2a-the-footer),
+  [help.md § When a key is refused](help.md#when-a-key-is-refused)). One
+  mechanism, one place it is spelled out, cited from both list screens rather
+  than drawn twice.
 - **Alerts bleed through.** A row whose object has a finding is marked (`●`),
   so the browser never disagrees with the Alerts view.
 - **The `ns:` label follows the kind and disappears for the cluster-wide
