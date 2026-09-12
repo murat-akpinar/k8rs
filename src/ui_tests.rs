@@ -450,6 +450,117 @@ fn the_context_elides_its_name_and_never_its_tail() {
     }
 }
 
+/// An `App` with a write on the wire for one object — what `screens/dialogs.md` § *While the call
+/// is running* is drawn from.
+fn changing(namespace: Option<&str>, name: &str) -> App {
+    App {
+        changing: Some(views::Object::new(
+            "deployment",
+            namespace.map(str::to_owned),
+            name.to_owned(),
+            Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
+        )),
+        ..App::default()
+    }
+}
+
+/// **`changing…` joins the right zone last of all** — after `admin`/`read-only` and after any TLS
+/// warning, never ahead of them (`screens/widgets.md` § 1a, `screens/dialogs.md` § *While the call
+/// is running*, whose own header line is the first case below).
+///
+/// **The mark is `theme::CHANGING` and not a second literal**, which is why it is read off the
+/// palette here rather than typed again.
+///
+/// **The healthy case is the same frame with nothing running**, asserted first — a header that
+/// appended unconditionally could not pass it.
+///
+/// **What the mark costs comes out of the centred name and nothing else**, which is § 1a's own
+/// order of sacrifice and is unchanged by this box: **twelve** more columns of right zone push
+/// `k8rs` off the row — ` · ` is three and `changing…` is nine — and the vitals stay. The first
+/// draft of this comment said eleven, reasoned from the mark alone rather than measured off the
+/// two rows (`tester`, 2026-09-12; the assertion below was right all along).
+#[test]
+fn the_header_says_a_change_is_running_and_says_it_last_of_all() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let header = |app: &App, screen: &Screen| rows(&render(app, screen))[0].trim_end().to_owned();
+
+    let plain = screen(&alerts, &now);
+    let zone = "ctx: prod-eu · live · admin";
+    let quiet = header(&app(), &plain);
+    assert!(
+        quiet.ends_with(zone),
+        "the ordinary header moved: {quiet:?}"
+    );
+    assert!(
+        !quiet.contains(mark(theme::CHANGING)),
+        "a mark for a call nobody made: {quiet:?}"
+    );
+
+    // **The row `screens/dialogs.md` draws, read out of it** rather than typed here — the same
+    // reason [`mockup_dialog`] exists, applied to the one block that is labelled lines and not a
+    // frame.
+    let expected = labelled(&mockup_in_flight()[0], "header");
+    assert_eq!(
+        width(&expected),
+        width(zone) + 12,
+        "the twelve columns this test's own comment counts: {expected:?}"
+    );
+    let running = header(&changing(Some("payments"), "web"), &plain);
+    assert!(
+        running.ends_with(&expected),
+        "`screens/dialogs.md` draws this row verbatim: {running:?} against {expected:?}"
+    );
+    assert!(
+        quiet.contains("k8rs") && !running.contains("k8rs"),
+        "the centred name is what pays for the mark: {quiet:?} then {running:?}"
+    );
+    assert!(
+        running.starts_with(" nodes 3/3"),
+        "the vitals gave way before the name had: {running:?}"
+    );
+
+    // **Last of all means after the TLS warning too**, which is the segment a caller joining this
+    // in itself would most easily have put it in front of.
+    let mut guarded = screen(&alerts, &now);
+    guarded.context = "ctx: prod-eu · read-only · ⚠ TLS not verified";
+    let drawn = header(&changing(None, "node-3"), &guarded);
+    assert!(
+        drawn.ends_with("read-only · ⚠ TLS not verified · changing…"),
+        "the mark jumped ahead of what says what you may do here: {drawn:?}"
+    );
+}
+
+/// **The zone still gives way from its front, and the mark is in the half that never erodes**
+/// (`screens/widgets.md` § 1a, NOTES § D249). The EKS ARN that already overflows the row at 80
+/// columns overflows it by nine more with the mark appended, so the cut is real and the tail —
+/// `read-only`, the TLS warning and `changing…` — survives it whole.
+#[test]
+fn a_change_in_flight_survives_the_cut_the_clusters_own_name_does_not() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let arn = "ctx: arn:aws:eks:eu-west-1:123456789012:cluster/production-eu \
+               · ns: payments · live · read-only · ⚠ TLS not verified";
+    let mut screen = screen(&alerts, &now);
+    screen.context = arn;
+
+    let drawn = rows(&render(&changing(Some("payments"), "web"), &screen))[0].clone();
+    println!("{drawn}");
+    assert!(
+        drawn.starts_with('…'),
+        "the cut is marked where it happened: {drawn:?}"
+    );
+    assert!(
+        drawn.ends_with("read-only · ⚠ TLS not verified · changing…"),
+        "the tail is intact, mark included: {drawn:?}"
+    );
+    assert_eq!(
+        width(drawn.trim_end()),
+        80,
+        "the zone still fits the row it is drawn in"
+    );
+}
+
 /// **A vital gives way whole.** `screens/widgets.md` § 1a: *a vital that cannot be read is blank,
 /// never guessed* — and half of one is a guess with no marker on it. `nodes 3/3 (40s ago)` clipped
 /// to `nodes 3/3 (` reads as a complete count of three ready nodes out of three.
@@ -635,6 +746,45 @@ fn a_command_that_fits_the_strip_carries_no_mark() {
 fn one_column_draws_the_mark_alone_and_zero_draws_nothing() {
     assert_eq!(clipped("kubectl", 1), "\u{2026}");
     assert_eq!(clipped("kubectl", 0), "");
+}
+
+/// **The same narrow end for [`name_cut`], and it is a column tighter** — the `…/` it glues on is
+/// two columns where [`clipped`]'s mark is one, so its guard is `>`, not `>=`, and below two
+/// columns there is no room to say *namespaced* at all and the ordinary clip is what draws.
+///
+/// **Found by a mutation run, exactly as its sibling above was** (2026-09-12): `>=` survived every
+/// test in this file and underflowed a column budget one column in. The product's own room here is
+/// 33 at the 80×24 floor, so this is a guard on a helper rather than a state anything draws — and
+/// a guard whose boundary has never been drawn is not one.
+///
+/// **Both of rule 3's branches are walked here**, because the boundary between them is arithmetic
+/// on the same budget: at 13 columns `web` still fits and it is the namespace's front that goes,
+/// at 3 there is room for neither and the name is cut too.
+///
+/// **Nothing ever comes back wider than it was asked for**, which is the property the whole
+/// function exists to keep and the one another branch could silently break.
+#[test]
+fn the_slash_is_kept_only_while_there_are_two_columns_to_keep_it_in() {
+    assert_eq!(name_cut("payments/web", 12), "payments/web");
+    assert_eq!(name_cut("payments/web", 10), "payments/\u{2026}");
+    assert_eq!(name_cut("payments/web", 9), "\u{2026}ents/web");
+    assert_eq!(name_cut("payments/web", 6), "\u{2026}s/web");
+    assert_eq!(name_cut("payments/web", 5), "\u{2026}/web");
+    assert_eq!(name_cut("payments/web", 4), "\u{2026}/w\u{2026}");
+    assert_eq!(name_cut("payments/web", 3), "\u{2026}/\u{2026}");
+    assert_eq!(name_cut("payments/web", 2), "\u{2026}/");
+    assert_eq!(name_cut("payments/web", 1), "\u{2026}");
+    assert_eq!(name_cut("payments/web", 0), "");
+    for columns in 0..=13 {
+        for name in ["payments/web", "node-3", "/web", "payments/"] {
+            let drawn = name_cut(name, columns);
+            assert!(
+                width(&drawn) <= columns,
+                "{name:?} at {columns} drew {drawn:?}, {} columns",
+                width(&drawn)
+            );
+        }
+    }
 }
 
 // --- THE SIDEBAR ---
@@ -4743,6 +4893,78 @@ fn mockup_refused() -> Vec<String> {
     rows
 }
 
+/// **Every fenced block of one `##` section of a screen file, in the file's own order** — a third
+/// reader beside [`mockup`] and [`mockup_dialog`], for the reason both of those exist: a test that
+/// compares the drawn line with a constant this file also wrote compares the implementation with
+/// itself, and the two agreeing today is what makes the next edit to the screen file drift in
+/// silence rather than go red (`tester`, 2026-09-12).
+///
+/// **The section runs to the next `##` and takes its `###` subsections with it**, which is what
+/// `screens/dialogs.md` needs: its own § *Detail tabs and Analysis keep their own footer* sits
+/// inside § *While the call is running*.
+fn fenced(file: &str, section: &str) -> Vec<Vec<String>> {
+    let path = format!("{}/screens/{file}", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the screen file {path} could not be read: {e}"));
+    let mut blocks = Vec::new();
+    let mut open: Option<Vec<String>> = None;
+    for line in text
+        .lines()
+        .skip_while(|line| *line != section)
+        .skip(1)
+        .take_while(|line| !line.starts_with("## "))
+    {
+        match (&mut open, line.starts_with("```")) {
+            (None, false) => {}
+            (None, true) => open = Some(Vec::new()),
+            (Some(block), false) => block.push(line.trim_end().to_owned()),
+            (Some(_), true) => blocks.push(open.take().expect("open")),
+        }
+    }
+    assert!(
+        !blocks.is_empty(),
+        "{path} draws nothing under {section:?} — the heading moved or the section went"
+    );
+    blocks
+}
+
+/// The three fenced blocks of `screens/dialogs.md` § *While the call is running*, in its own
+/// order: **0** the three labelled rows the state draws · **1** the ordinary cut · **2** the cut
+/// that keeps the `/` an ordinary one would have eaten.
+fn mockup_in_flight() -> Vec<Vec<String>> {
+    let blocks = fenced("dialogs.md", "## While the call is running");
+    assert_eq!(
+        blocks.iter().map(Vec::len).collect::<Vec<_>>(),
+        [3, 1, 1],
+        "screens/dialogs.md § While the call is running no longer draws one state and two cuts"
+    );
+    blocks
+}
+
+/// One row of [`mockup_in_flight`]'s first block, by the label in its left column. That block is
+/// `header` / `log` / `footer` rather than a frame, which is why it needs this and
+/// [`mockup_dialog`]'s border strip does not fit it.
+fn labelled(block: &[String], label: &str) -> String {
+    let row = block
+        .iter()
+        .find(|row| row.starts_with(label))
+        .unwrap_or_else(|| panic!("no {label:?} row in {block:?}"));
+    row[label.len()..].trim_start().to_owned()
+}
+
+/// The three fenced blocks of `screens/help.md` § *While the call is running*, in its own order:
+/// **0** the rewritten `X` row · **1** the rewritten *Changing things* heading and the three rows
+/// left unchanged beneath it · **2** the footer, which that state already emptied.
+fn mockup_paused() -> Vec<Vec<String>> {
+    let blocks = fenced("help.md", "## While the call is running");
+    assert_eq!(
+        blocks.iter().map(Vec::len).collect::<Vec<_>>(),
+        [1, 4, 1],
+        "screens/help.md § While the call is running no longer draws two rows and a footer"
+    );
+    blocks
+}
+
 /// **Every kind an operation can be pointed at, singular and plural** — `src/main.rs`'s own
 /// `KINDS`, the closed set NOTES § D246 means by *literals in the driver*. Transcribed rather than
 /// imported because that list is `dev-core`'s and goes away at Phase 12; the singular is what
@@ -4779,14 +5001,18 @@ fn a_key_map_with_nothing_refused_is_the_mockup_untouched() {
         ("could not tell", Some(&could_not_tell)),
     ] {
         let refused = Refused::of("deployments", [answer; 2], [answer], [answer]);
-        assert_eq!(key_map(HELP, refused), HELP, "{what}");
+        assert_eq!(key_map(HELP, refused, false), HELP, "{what}");
         assert_eq!(
-            key_map(HELP, refused).lines().collect::<Vec<_>>(),
+            key_map(HELP, refused, false).lines().collect::<Vec<_>>(),
             mockup(),
             "{what} — and the mockup is the fixture, not HELP"
         );
     }
-    assert_eq!(key_map(HELP, Refused::default()), HELP, "nothing selected");
+    assert_eq!(
+        key_map(HELP, Refused::default(), false),
+        HELP,
+        "nothing selected"
+    );
 }
 
 /// **All three refused is `screens/help.md` § *When a key is refused*'s own block, row for row**,
@@ -4805,7 +5031,7 @@ fn all_three_refused_is_the_block_the_screen_file_draws() {
     );
     let expected: Vec<String> = base[..12].iter().chain(&clause).cloned().collect();
     assert_eq!(
-        key_map(HELP, refusing(true, true, true, "deployments"))
+        key_map(HELP, refusing(true, true, true, "deployments"), false)
             .lines()
             .map(str::to_owned)
             .collect::<Vec<String>>(),
@@ -4830,7 +5056,7 @@ fn each_refused_row_answers_only_for_its_own_key() {
                     }
                 }
                 assert_eq!(
-                    key_map(HELP, refusing(scale, restart, delete, "deployments"))
+                    key_map(HELP, refusing(scale, restart, delete, "deployments"), false)
                         .lines()
                         .map(str::to_owned)
                         .collect::<Vec<String>>(),
@@ -4860,7 +5086,7 @@ fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
         for scale in [false, true] {
             for restart in [false, true] {
                 for delete in [false, true] {
-                    let drawn = key_map(HELP, refusing(scale, restart, delete, resource));
+                    let drawn = key_map(HELP, refusing(scale, restart, delete, resource), false);
                     let lines: Vec<&str> = drawn.lines().collect();
                     assert_eq!(
                         lines.len(),
@@ -4887,7 +5113,7 @@ fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
     // `s` can be pointed at — which is the point of feeding them here rather than to [`KINDS`]:
     // what stops a row overflowing is the closed set in the driver, not the arithmetic.
     let widest = |resource| {
-        key_map(HELP, refusing(true, true, true, resource))
+        key_map(HELP, refusing(true, true, true, resource), false)
             .lines()
             .map(width)
             .max()
@@ -4953,7 +5179,7 @@ fn every_clause_names_the_plural_its_own_operation_would_send() {
                 resource.plural, plural,
                 "{operation} {kind} — the driver's plural is not the one ops would send"
             );
-            let drawn = key_map(HELP, refusing(true, true, true, plural));
+            let drawn = key_map(HELP, refusing(true, true, true, plural), false);
             let drawn = drawn
                 .lines()
                 .find(|line| line.starts_with(row))
@@ -4989,7 +5215,7 @@ fn a_key_map_over_a_help_that_lost_those_keys_rewrites_nothing() {
   read-only mode — nothing can be changed from here";
     for (kind, plural) in KINDS {
         assert_eq!(
-            key_map(read_only, refusing(true, true, true, plural)),
+            key_map(read_only, refusing(true, true, true, plural), false),
             read_only,
             "{kind} — a refusal rewrote a row that is not its key's"
         );
@@ -5082,6 +5308,367 @@ fn the_frame_carries_no_title_when_help_is_closed() {
     );
 }
 
+/// **The one footer carrying a string this product did not choose the length of**
+/// (`screens/dialogs.md` § *While the call is running*, `screens/widgets.md` § 7's fourth
+/// deliberate truncation).
+///
+/// **All three cases are read out of that file, not written here** (`tester`, 2026-09-12, and
+/// [`mockup_dialog`]'s own reason one screen along): the short name that draws whole, the
+/// ordinary cut, and rule 3's — the namespace giving way from its front so the object's own name
+/// survives whole. They agreed with this file's own literals byte for byte on the morning they
+/// were written, which is exactly what makes a literal drift rather than fail, and rule 3's line
+/// changed under them two days later.
+///
+/// **Rule 3's fixture is `openshift-cluster-node-tuning-operator`**, 38 characters and a namespace
+/// a real distribution ships. Under the tail-cut this replaces, *every object in it* drew one
+/// byte-identical line; the `/` clause held and the name was gone. That second assertion is
+/// [`every_object_in_one_long_namespace_still_draws_its_own_name`], because this test would pass
+/// on a line that identified nothing.
+///
+/// **Both cut lines are asserted at exactly 76 columns** — the ceiling [`indented`] leaves at the
+/// 80×24 floor — and no number in `ui.rs` says what `room` is: it is measured off this same
+/// footer asked for with an empty name.
+///
+/// **The bare cluster-scoped name is the one case `screens/dialogs.md` draws no line for**, so it
+/// is derived from that file's own short line rather than typed again: same fixed words, the one
+/// name swapped. `ui::name` joins `None` to nothing, and `/node-3` is the row a `Some("")` would
+/// draw instead.
+#[test]
+fn the_in_flight_footer_cuts_the_name_and_nothing_else() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let screen = screen(&alerts, &now);
+    let mockup = mockup_in_flight();
+    let expected = labelled(&mockup[0], "footer");
+
+    let short = footer_of(&render(&changing(Some("payments"), "web"), &screen));
+    assert_eq!(short, expected, "screens/dialogs.md's own mockup row");
+
+    for (nth, namespace, name) in [
+        (
+            1,
+            "payments",
+            "checkout-worker-service-account-token-projector",
+        ),
+        (2, "openshift-cluster-node-tuning-operator", "tuned"),
+    ] {
+        let drawn = footer_of(&render(&changing(Some(namespace), name), &screen));
+        println!("{drawn}");
+        assert_eq!(
+            drawn, mockup[nth][0],
+            "screens/dialogs.md § While the call is running, its case {nth} block"
+        );
+        assert_eq!(width(&drawn), 76, "the floor's own ceiling, exactly");
+    }
+
+    let node = footer_of(&render(&changing(None, "node-3"), &screen));
+    assert_eq!(node, expected.replace("payments/web", "node-3"));
+}
+
+/// **The drawn string contains a `/` whenever the full name does** — `screens/dialogs.md`
+/// § *While the call is running*'s rules 1–4, which is a hard clause and not a wider budget that
+/// makes the old defect less likely (`tui-designer`, 2026-09-12).
+///
+/// **Why it is a defect and not an ugly cut**: a bare name means cluster-scoped everywhere else in
+/// this product (`screens/README.md` § the five rules), so a flat cut that ate the `/` taught a
+/// reader that a namespaced Deployment is a Node. `team-alpha-payments-platform/web` drew as
+/// `team-alpha-payments-pl…` at the budget this line had before this round.
+///
+/// **Every namespace length across the boundary is fed**, because the interesting cases are the
+/// three columns either side of where the `/` stops surviving an ordinary clip — 1 to 60, which
+/// walks case 1 into case 2 into case 3 and out the other side. The bare name is swept beside it:
+/// it has no `/` to protect and must not grow one.
+///
+/// **Which end of the namespace gives way is swept with it, and that is rule 3's reversal**
+/// (`k8s-admin`, 2026-09-12). Stated as the invariant rather than by re-deriving the branches
+/// here: the namespace on screen is **either whole — rule 2, where the `/` survived a plain clip
+/// and nothing of it was cut — or behind a leading `…`**. An unmarked *prefix* of a namespace is
+/// the one thing no rule may draw, and it is exactly what the first draft of rule 3 drew.
+/// Behind that mark the object's own name is whole, unless the namespace has already given up the
+/// whole of itself and there is still nothing left to give.
+#[test]
+fn the_cut_never_takes_the_slash_that_says_the_object_is_namespaced() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let screen = screen(&alerts, &now);
+    for length in 1..=60 {
+        let namespace = "n".repeat(length);
+        let drawn = footer_of(&render(&changing(Some(&namespace), "web"), &screen));
+        assert!(
+            drawn.contains('/'),
+            "a namespaced object drew as cluster-scoped at {length}: {drawn:?}"
+        );
+        let cut = drawn
+            .split_once("changing ")
+            .and_then(|(_, tail)| tail.rsplit_once(" first"))
+            .expect("the in-flight footer's own fixed words")
+            .0;
+        let (shown, named) = cut.split_once('/').expect("the slash asserted above");
+        assert!(
+            shown == namespace || shown.starts_with(CUT),
+            "an unmarked front of a namespace at {length}: {drawn:?}"
+        );
+        assert!(
+            named == "web" || shown == CUT || shown == namespace,
+            "the object's own name gave way while the namespace still had a front at {length}: \
+             {drawn:?}"
+        );
+        assert!(
+            width(&drawn) <= 76,
+            "{length} — {drawn:?} is {} columns",
+            width(&drawn)
+        );
+
+        let bare = footer_of(&render(&changing(None, &namespace), &screen));
+        assert!(
+            !bare.contains('/'),
+            "a cluster-scoped object grew a namespace at {length}: {bare:?}"
+        );
+        assert!(width(&bare) <= 76, "{length} — {bare:?}");
+    }
+}
+
+/// **Two objects in one namespace too long for the line still draw two different footers** —
+/// rule 3's whole reason (`screens/dialogs.md` § *While the call is running*).
+///
+/// **This is the blue/green collision this box fixed once and then reintroduced, total instead of
+/// partial** (`k8s-admin`, 2026-09-12). `openshift-cluster-node-tuning-operator` is 38 characters
+/// and real; under the tail-cut, `tuned`, `cluster-node-tuning-operator` and anything else in it
+/// all drew `openshift-cluster-node-tuning-o/…` — the same 33 columns, naming nothing. The
+/// namespace's front is what a reader can afford to lose; the object's name is what every later
+/// command needs typed.
+///
+/// **The last branch is stated rather than claimed distinct**: once the name alone passes
+/// `room − 2` there is nothing left to give, and two names sharing a 30-character head genuinely
+/// do draw alike — what rule 3 promises there is only that the head kept is the **name's** and
+/// not the namespace's, which is the half that decides whether the line names an object at all.
+#[test]
+fn every_object_in_one_long_namespace_still_draws_its_own_name() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let screen = screen(&alerts, &now);
+    let namespace = "openshift-cluster-node-tuning-operator";
+    let drawn = |name: &str| footer_of(&render(&changing(Some(namespace), name), &screen));
+
+    let mut seen: Vec<String> = Vec::new();
+    for name in [
+        "tuned",
+        "tuned-render",
+        "cluster-node-tuning-operator",
+        "cluster-node-tuning-operator-x",
+    ] {
+        let line = drawn(name);
+        println!("{line}");
+        assert!(line.contains('/'), "{name} lost the slash: {line:?}");
+        assert!(
+            line.contains(&format!("/{name} ")),
+            "{name} was cut while the namespace still had a front to lose: {line:?}"
+        );
+        assert!(
+            !seen.contains(&line),
+            "{name} drew a line another object in the same namespace already drew: {line:?}"
+        );
+        assert_eq!(width(&line), 76, "{name} — the floor's own ceiling");
+        seen.push(line);
+    }
+
+    // **Past `room − 2` the namespace goes whole and the name is cut at its own tail**, so what is
+    // on screen is still the object's head and not a namespace every object shares.
+    let long = drawn("cluster-node-tuning-operator-metrics-reader-binding");
+    println!("{long}");
+    assert!(
+        long.contains("changing …/cluster-node-tuning-operator-m… first"),
+        "the namespace kept a front the name needed: {long:?}"
+    );
+    assert_eq!(width(&long), 76);
+}
+
+/// **A detail tab keeps its own footer and loses exactly one word, `q quit`**
+/// (`screens/dialogs.md` § *Detail tabs and Analysis keep their own footer, not this line*,
+/// `screens/detail.md`'s own sentence above the tab sections).
+///
+/// The logs tab is the one that shows it, because it is the richest ordinary footer there is and
+/// the one the first draft of this box broke hardest: over a call confirmed on Alerts it drew
+/// `⏎ open` on a pane with nothing to select, dropped the `esc back` that is the only way out of
+/// the tab, and left `[ ] tabs`, `f follow` and `c container` bound and unnamed (`k8s-admin`,
+/// 2026-09-12).
+#[test]
+fn a_detail_tabs_footer_keeps_itself_and_loses_only_the_quit() {
+    let open = Open::new();
+    let detail = open.open();
+    let quiet = footer_of(&detailed(&on(Tab::Logs), &detail));
+    assert_eq!(
+        quiet,
+        "[ ] tabs  f follow  c container  esc back  ? all keys  q quit"
+    );
+
+    let mut running = changing(Some("payments"), "web");
+    running.tab = Tab::Logs;
+    let drawn = footer_of(&detailed(&running, &detail));
+    println!("{drawn}");
+    assert_eq!(
+        format!("{drawn}  q quit"),
+        quiet,
+        "more than one word gave way"
+    );
+}
+
+/// **Help over a call in flight loses its right-hand zone, and its body says why**
+/// (`screens/help.md` § *While the call is running*): `? or esc to close` alone, `q quit` gone
+/// rather than marked `q no quit`, and the two rewritten rows on the screen the reader pressed
+/// `?` to read.
+///
+/// The row is read whole, not through [`footer_of`], because what this is about is the zone at the
+/// **right** edge — a trimmed line cannot tell an empty zone from one drawn somewhere else.
+///
+/// **This is where the threading is proven and not only [`key_map`]**: the flag reaches `ui::help`
+/// through `ui::modal`, and a body that paused nothing would pass every test in the region below
+/// and still draw four keys it refuses.
+#[test]
+fn help_over_a_call_in_flight_draws_no_quit_at_the_right_edge() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let screen = screen(&alerts, &now);
+
+    let helping = App {
+        modal: Some(views::Modal::Help),
+        ..App::default()
+    };
+    let quiet = rows(&render(&helping, &screen));
+    assert!(
+        quiet[22].ends_with("q quit │"),
+        "help's ordinary footer lost the quit it is the one modal to keep"
+    );
+    assert!(
+        !quiet[2..18].iter().any(|row| row.contains("paused")),
+        "a row paused with nothing on the wire"
+    );
+
+    let paused = mockup_paused();
+    let mut running = changing(Some("payments"), "web");
+    running.modal = Some(views::Modal::Help);
+    let body = rows(&render(&running, &screen));
+    let drawn = body[22].clone();
+    println!("{drawn}");
+    assert!(
+        drawn.starts_with(&format!("│ {}", paused[2][0])),
+        "the body of help's own line moved: {drawn:?}"
+    );
+    assert!(
+        !drawn.contains("quit"),
+        "a key the running call refuses was promised anyway: {drawn:?}"
+    );
+    assert!(
+        !drawn.contains("changing"),
+        "the in-flight line reached a modal that draws its own: {drawn:?}"
+    );
+
+    // **The two rewritten rows reach the screen**, which `ui::modal` threading the flag to
+    // `ui::help` is the whole of. Anchored on the screen file's own text, never on a row number.
+    for block in [&paused[0][0], &paused[1][0]] {
+        assert!(
+            body[2..18].iter().any(|row| row.contains(block.trim())),
+            "screens/help.md's {block:?} never reached the screen"
+        );
+    }
+}
+
+/// **Help's body pauses the four keys the running call refuses, and promises none of them**
+/// (`screens/help.md` § *While the call is running*).
+///
+/// **This is the blocker both reviewers found independently** (2026-09-12). The body drew
+/// `X switch cluster`, `s run more or fewer copies`, `r restart, at its own pace` and
+/// `ctrl-d delete` exactly as if all four worked, while `App::may_switch_cluster` and
+/// `App::may_mutate` were both false: the footer has gone quiet, the operator presses `?` to find
+/// out what changed, the map says `s run more or fewer copies`, they press it and nothing
+/// happens — PRIOR-ART § G1's *refuses for no visible reason*, arriving through the one screen
+/// that exists to answer *what may I press*.
+///
+/// **Both rewritten rows are read off the screen file**, and the three rows under the heading are
+/// cross-checked against [`mockup`]'s own — so the two readers cannot drift into describing two
+/// different screens, which is what [`all_three_refused_is_the_block_the_screen_file_draws`]
+/// already does for the refusal block.
+///
+/// **The body is still sixteen rows and every other row is untouched**, which is the whole of
+/// `screens/widgets.md` § 1's budget surviving this state.
+#[test]
+fn help_pauses_the_four_keys_a_running_call_refuses() {
+    let base = mockup();
+    let paused = mockup_paused();
+    assert_eq!(
+        &paused[1][1..],
+        &base[13..16],
+        "the two readers disagree about the three rows under the Changing things heading"
+    );
+
+    let expected: Vec<String> = base
+        .iter()
+        .map(|row| {
+            if row.starts_with("    X ") {
+                paused[0][0].clone()
+            } else if row.starts_with("  Changing things") {
+                paused[1][0].clone()
+            } else {
+                row.clone()
+            }
+        })
+        .collect();
+    assert_eq!(expected.len(), 16, "the body is no longer sixteen rows");
+    assert_eq!(
+        expected.iter().filter(|row| row.contains("paused")).count(),
+        2,
+        "the two rows the screen file rewrites did not both land: {expected:?}"
+    );
+
+    let drawn: Vec<String> = key_map(HELP, Refused::default(), true)
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    for row in &drawn {
+        println!("{row}");
+    }
+    assert_eq!(
+        drawn, expected,
+        "screens/help.md § While the call is running"
+    );
+    assert_eq!(
+        key_map(HELP, Refused::default(), false),
+        HELP,
+        "nothing running and the map is the mockup untouched"
+    );
+}
+
+/// **A permission clause and the wait are never reconciled on the same row** (`screens/help.md`
+/// § *While the call is running*, its third bullet). While a call is in flight `s`, `r` and
+/// `ctrl-d` are inactionable for the wait's reason alone, whatever a probe would otherwise say
+/// about any one of them — so the map is the same sixteen rows for all eight combinations, and
+/// `no` (a permission this login lacks) never lands beside `paused` (a wait).
+#[test]
+fn a_call_in_flight_draws_no_permission_clause_on_any_row() {
+    let expected = key_map(HELP, Refused::default(), true);
+    for scale in [false, true] {
+        for restart in [false, true] {
+            for delete in [false, true] {
+                let drawn = key_map(HELP, refusing(scale, restart, delete, "deployments"), true);
+                assert_eq!(drawn, expected, "s {scale} · r {restart} · ctrl-d {delete}");
+                assert!(
+                    !drawn.contains("(scale — ")
+                        && !drawn.contains("rollout restart — ")
+                        && !drawn.contains("(delete "),
+                    "a permission clause drew over the wait: {drawn}"
+                );
+                for line in drawn.lines() {
+                    assert!(
+                        width(line) <= usize::from(MIN_WIDTH - 2),
+                        "{line:?} is {} columns, past the body at the floor",
+                        width(line)
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// **Every mode's whole screen, printed, footer row and all** — not an assertion about a column
 /// but the eight frames a reader of the report compares with `screens/`, line by line.
 /// `cargo test -- --nocapture`.
@@ -5170,6 +5757,46 @@ fn every_footer_on_the_screen_it_belongs_to() {
     denied.log = &log;
     denied.refused = refusing(true, true, false, "deployments");
     show("Alerts · s and r refused", &render(&app(), &denied));
+
+    // **The in-flight screens** (`screens/dialogs.md` and `screens/help.md`, each § *While the
+    // call is running*) — the header's mark and the footer's reason clause, both of that file's
+    // cuts, the logs tab keeping its own line less `q quit`, and Help over the same call with no
+    // `q quit` and two rows paused.
+    show(
+        "Alerts · a change in flight",
+        &render(&changing(Some("payments"), "web"), &plain),
+    );
+    let mut helping = changing(
+        Some("payments"),
+        "checkout-worker-service-account-token-projector",
+    );
+    show("Alerts · a long name in flight", &render(&helping, &plain));
+    show(
+        "Alerts · a namespace that has used up the line",
+        &render(
+            &changing(Some("openshift-cluster-node-tuning-operator"), "tuned"),
+            &plain,
+        ),
+    );
+    show(
+        "Alerts · and a name that has used up what was left",
+        &render(
+            &changing(
+                Some("openshift-cluster-node-tuning-operator"),
+                "cluster-node-tuning-operator-metrics-reader-binding",
+            ),
+            &plain,
+        ),
+    );
+    let open = Open::new();
+    let mut running = changing(Some("payments"), "web");
+    running.tab = Tab::Logs;
+    show(
+        "Detail · logs, with a change in flight",
+        &detailed(&running, &open.open()),
+    );
+    helping.modal = Some(views::Modal::Help);
+    show("Help · a change in flight", &render(&helping, &plain));
 }
 
 // --- THE DIALOGS ---

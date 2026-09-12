@@ -4465,9 +4465,21 @@ string and key was settled in the design phase, so this phase is drawing.
       footer (D259 took it off for width), so D23's own typed-name-delete case
       still costs the typing unless `?` was opened first — the confirmation
       dialog is its home, in [`backlog.md`](backlog.md) with two other findings
-- [ ] **The in-flight screen**: `changing…` in the header, `…` on the command
+- [x] **The in-flight screen**: `changing…` in the header, `…` on the command
       line, `q`/`X`/a second mutation refused in the footer
-      ([dialogs.md](screens/dialogs.md))
+      ([dialogs.md](screens/dialogs.md)) — landed 2026-09-12
+      ([D262](NOTES.md#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12)).
+      The command line's `…` was already built two boxes ago and the three
+      refusals were already predicates; what this box owed was the header's
+      mark, the footer that says why, and `App::changing` becoming the object it
+      names. Three review rounds: the blocker was on a screen this box does not
+      draw — `?` is on the in-flight footer, so Help opens over a running call
+      and its body promised four keys that call refuses.
+      **What it does not close, ruled rather than missed**: nothing sets
+      `changing` and nothing calls the three predicates, so invariant 9 end to
+      end on this path, clearing `changing` on a transport failure, and
+      [D20](NOTES.md#d20--a-call-that-takes-time-is-a-state-and-there-was-none)'s
+      *`q` … quits when the call returns* are Phase 12's (D262 ruling 8)
 - [ ] States, all eight of [screens/states.md](screens/states.md): loading N
       pods · nothing is broken · disconnected · **login expired** ·
       namespace-scoped fallback banner · and the three startup errors that

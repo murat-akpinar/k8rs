@@ -277,9 +277,10 @@ something else is in flight:
   [widgets.md § 5](widgets.md#5-the-modal-layer) makes a picker over a
   confirmation unrepresentable.
 - If a write has been confirmed and its call has not returned, `X` refuses in
-  the footer: *"finishing the change to payments/web first"*. Swapping the
-  client out from under an in-flight mutation is how an operation gets
-  attributed to the wrong cluster in the audit log.
+  the footer: *"changing payments/web first"*
+  ([dialogs.md § While the call is running](dialogs.md#while-the-call-is-running)).
+  Swapping the client out from under an in-flight mutation is how an
+  operation gets attributed to the wrong cluster in the audit log.
 
 ## What the command log shows — and what it must not
 

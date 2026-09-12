@@ -2976,3 +2976,44 @@ long-form version and stays the authority.*
   accessor when `ops.rs` next opens, or a different tie
   ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
   item 4). 2026-09-12
+
+- **Two screen files still say the header context is never truncated, and it has not been true
+  since Phase 11's layout box.** `screens/alerts.md:37` says *"It is never truncated"* and cites
+  the very section that now says the opposite; `screens/states.md:259` uses the same claim as a
+  premise (its conclusion survives — a 171-character sentence does not fit a one-line header
+  however it is cut). Both predate
+  [D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06),
+  which shortened the zone from its front behind a visible `…`, and `screens/widgets.md` § 1a was
+  corrected at the in-flight box. Raised by `tui-designer` there, which named a third spot,
+  `alerts.md:190` — **that one is the age column and is not this claim**, measured before writing
+  it down. `states.md` is the eight-states box's own file and can take its copy with it.
+  2026-09-12
+
+- **`Dialog::armed` has no doc comment and `Dialog::confirm` carries two.** `src/views.rs`'s block
+  at the head of `confirm` opens *"Whether the confirm button is drawn live"* and spends four
+  paragraphs on the dry-run, the empty-name guard and what the method authorises — all of it about
+  `armed`, which sits below it with nothing — before switching mid-block to `confirm`'s own
+  sentence with no separator. Landed with the dialog family
+  ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12));
+  nothing mechanical can see it, which is
+  [D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)'s
+  *rustfmt and the tests cannot see a typo in a comment* as a live example. Found by the PM
+  reading the region while briefing the in-flight box. 2026-09-12
+
+- **`ui::name` draws the `/node-3` its own doc forbids, and five callers share it.** `Some("")` is
+  not `None`: `views::Object::new` filters an empty `uid` and nothing else, and `k8s::text` **can**
+  return an empty string — a namespace of only bidi or control characters strips to nothing — so
+  `k8s::Row::bound`'s `maybe(&mut self.namespace, IDENTIFIER)` can hand one over. A namespaced
+  object then draws as the bare token `screens/README.md` § the five rules reserves for a
+  cluster-scoped one. Measured by `tester` at the in-flight box with
+  `Object::new("deployment", Some(String::new()), "node-3", None)`; the five callers are the
+  dialog title, the `Gone` body, the card owner, the detail heading and now the in-flight footer,
+  so the fix is one guard in `ui::name` or in `Object::new`, not five. 2026-09-12
+
+- **`ui::fits` is O(n²) and a zero-width character never advances it** — `"\u{202e}" × 10_000` as
+  an object name drew one frame in **1463 ms**, against 0 ms for the same length of `x` (`tester`,
+  2026-09-12, measured over `ui::render`). It walks a growing prefix and breaks only when the
+  measured width passes `columns`, which a zero-width character never does. Not reachable from
+  `metadata.name` (DNS-1123, ≤253 bytes) and shared with the browser's row name, so it is not the
+  in-flight box's — but it is the security gate's *sizes are bounded* row, and the box that first
+  hands `clipped` a server-printed `Table` cell is the one that meets it. 2026-09-12

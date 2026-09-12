@@ -67,6 +67,97 @@ Rules:
   then exec and port-forward, then edit) — see
   [NOTES § Operations](../NOTES.md#operations--the-full-admin-surface).
 
+## While the call is running
+
+Help is drawn over an ordinary screen everywhere else in this file, but
+[a mutation in flight](dialogs.md#while-the-call-is-running) is not a
+`Modal` — the screen behind it keeps working, so `?` still opens Help on top
+of it. There, unlike anywhere else Help opens, something is still pending: a
+second mutation, a cluster switch and `q` are all refused until the call
+returns — and the body used to say nothing of that. It promised `X switch
+cluster`, `s run more or fewer copies`, `r restart, at its own pace` and
+`ctrl-d delete` exactly as if all four worked, on the one screen a reader
+opens to find out what they may press; pressing any of them did nothing, with
+no line anywhere saying why.
+
+**The body still has sixteen rows — nothing is added or removed — but two of
+them are rewritten while a call is on the wire, anchored on their own leading
+text and never by counting, the same mechanism [§ When a key is
+refused](#when-a-key-is-refused) already uses for a permission this login
+lacks:**
+
+In **Moving around**, the `X` row:
+
+```
+    X            switch cluster (paused while a change is running)
+```
+
+In **Changing things**, the heading and its three rows, unchanged beneath it:
+
+```
+  Changing things (paused while a change is running)
+    s       run more or fewer copies       (scale)
+    r       restart, at its own pace       (rollout restart)
+    ctrl-d  delete — you type the name to confirm
+```
+
+- **The `X` row keeps its own label and gains a clause** — `switch cluster`
+  is unchanged, only what follows it is new — the same append the
+  permission-refused rows below already make to their own jargon
+  parenthesis. It is anchored on `    X `, its own unique leading text, the
+  same way `    s `, `    r ` and `    ctrl-d ` already are.
+- **The *Changing things* heading is rewritten instead of its three rows,
+  because the reason is one fact for all three, not three separate ones.**
+  A call in flight refuses `s`, `r` and `ctrl-d` uniformly — a missing
+  permission never does; one key can be refused while the other two are not.
+  Rewriting all three rows to say the same six words three times over would
+  be the second copy of a fact this codebase already has one home for; the
+  heading governs the group and says it once, anchored on `  Changing
+  things`, its own unique leading text.
+- **This state and a permission refusal are never reconciled on the same
+  row.** While a call is in flight, `s`, `r` and `ctrl-d` are inactionable
+  for the wait's reason alone, whatever a permission probe would otherwise
+  say about any one of them — the rewritten heading is what draws, and the
+  ordinary key map or [§ When a key is refused](#when-a-key-is-refused)'s own
+  per-key clauses take over again the moment the call returns.
+- **Neither clause names the object**, and neither needs to: "a change is
+  running" is true regardless of which one, and the object it names is one
+  `?` away — dismiss Help and the ordinary screen underneath, including the
+  in-flight footer, is exactly where it was.
+- **This is not the `no` this screen's own *When a key is refused* section
+  reserves for a missing permission** — a call finishing is a wait, not a
+  permission this login lacks, and `paused` is the word for a wait
+  everywhere else this product uses it (`screens/dialogs.md`'s own paused
+  Deployment). The moment the call returns, both rows read exactly as they
+  did before it started, or as [§ When a key is
+  refused](#when-a-key-is-refused) draws them if a permission is what is
+  actually missing.
+- **What this costs, once, rather than left for a reader to notice on their
+  own:** while a call is in flight, this section's rewritten rows draw for
+  every login the same way, whether or not a permission probe would also
+  refuse `s`, `r` or `ctrl-d` on its own account. A login that in fact may
+  never scale reads `paused`, the same as one that may scale but is waiting
+  out someone else's restart — not the harder truth, *"and you may never do
+  this either way."* It self-corrects the moment the call returns: the
+  ordinary key map comes back, or [§ When a key is
+  refused](#when-a-key-is-refused)'s own `s no scale` does, whichever this
+  login was always going to see. One state suppresses a fact the other
+  already shows correctly, on purpose, rather than the two states agreeing
+  to show two different guesses at it.
+
+The footer's right zone still empties the same way this state already did:
+
+```
+? or esc to close
+```
+
+`q quit` is gone, not marked `q no quit`, for the same reason as before.
+**The footer does not also spell out why** — the two rewritten rows above
+already do, so a reader who presses `?` to find out why `s` went quiet now
+reads the answer in the one place every other key's reason already lives on
+this screen, rather than a second sentence squeezed into a footer that has
+never carried one.
+
 ## When a key is refused
 
 The mockup above is the case this login can use every key it lists, or

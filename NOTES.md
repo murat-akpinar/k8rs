@@ -283,6 +283,7 @@ its line moving with it.
 - [D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10) — the footer is a curated subset with one pair that never gives way, the help screen is the frame wearing a title rather than a box drawn inside it, and a gate verified against a substituted tree is not verified
 - [D260](#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12) — the dialog family: the taught command belongs in the frame and not on a strip that has not drawn it yet, a refusal that followed no check may not say a check stopped it, and two sentences that must agree live in a file this one cannot reach
 - [D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12) — the refused-keys round: a permission that is two questions and was counted as one, a reason that did not fit the line it was promised to, and a row rewritten by arithmetic another box would have moved
+- [D262](#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12) — the in-flight screen: the state that had to name its object, the cut that gave way at the wrong end, and the screen that answers what may I press promising four keys it refuses
 
 ## Why it exists — where the gap is
 
@@ -22694,3 +22695,115 @@ recorded the same volume reading a failed build as `unviable`; this is the same 
 wearing a second hat. `scripts/mutants.sh` names its own volume for exactly this reason.
 A hand-run `cargo` does not, and the scratchpad is where agents are told to work — so an
 agent's `CARGO_TARGET_DIR` goes under `$HOME`, never under `/tmp`.
+
+### D262 — the in-flight screen: the state that had to name its object, the cut that gave way at the wrong end, and the screen that answers *what may I press* promising four keys it refuses (2026-09-12)
+
+[D20](#d20--a-call-that-takes-time-is-a-state-and-there-was-none) settled what the
+screen is between *confirm* and the cluster answering; this is the box that drew it.
+Two of its three clauses were already true at HEAD — `views::Log::sent`/`outcome`
+carry the command line's `…` ([D257](#d257--the-command-logs-third-kind-of-line-a-read-the-user-asked-for-is-not-the-read-path-instrumenting-itself-2026-09-07) ·
+[D258](#d258--the-command-log-panel-an-outcome-is-not-a-mutations-privilege-the-servers-own-sentence-had-to-be-bounded-before-it-reached-the-strip-and-a-cut-that-leaves-a-working-command-behind-2026-09-07)),
+and `may_quit`/`may_switch_cluster`/`may_mutate` already refused the three keys. What
+was missing was everything that *says so*, and saying so cost three review rounds.
+
+**1. The flag had to become the object.** `App::changing` was a `bool`; the footer's
+reason clause names the object, so it is now `Option<Object>` — `Modal::Confirm`'s own
+`Dialog::object`, carried across the moment the modal closes, not re-derived from a
+cursor. A `bool` beside a `String` is two fields that can disagree, which is the defect
+class this repo has paid most for.
+
+**2. The sentence is `views.rs`'s and the cut is `ui.rs`'s.** Measuring columns needs
+`Span::width` and [D241](#d241--the-two-rulings-phase-9-could-not-be-briefed-without-themers-names-no-ratatui-type-and-declaring-a-module-is-part-of-writing-it-2026-09-05)
+forbids a `ratatui` type below `ui.rs`; a `chars().count()` there would be a second
+measurement of one thing, disagreeing at the first wide character. So `App::footer`
+takes the already-spelled, already-cut name — `ui::name` spells it, `ui::name_cut` cuts
+it — and stays the single producer of every footer string. **The arm is chosen by
+`App::changing` and never by the argument**, which is what lets `ui::footer` ask for the
+same line with an empty name purely to *measure* its own fixed parts: `room` is the row
+less that width, and no number in `ui.rs` restates it
+(`screens/resources.md` § *When it does not fit* rule 1, read against this line).
+
+**3. The header's mark is appended in `ui::header`, last of all.** A caller that cannot
+reach the join cannot put `changing…` ahead of `read-only` or `⚠ TLS not verified`, and
+`ui::shortened` eats the *front*, so the tail the security gate cares about survives —
+measured against an EKS ARN at 80 columns with the scope, the flag, the warning and the
+mark all present.
+
+**4. The fixed words were what was spending the line.** The first draft gave 53 of 76
+columns to fixed English and 23 to the object. *finishing the change to … first* became
+*changing … first* and the bare `?` became `? keys` — which also ends the one footer
+entry in the product that broke the `key label` convention, `⏎ open  ?  ·` reading at a
+glance as `⏎ open?`. Room 23 → **33**, prefix 37 and suffix 6, and both defects the
+operator review named were that one cause: `payments/checkout-worker-green` and `-blue`
+drew identically, and `team-alpha-payments-platform/web` drew with no `/` at all —
+a bare token being what this product reserves for *cluster-scoped*, so a namespaced
+Deployment read as a Node. **This supersedes [D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+ruling 2's numbers**, which were that draft's.
+
+**5. The cut keeps the `/`, and the namespace gives way from its front.** The hard
+clause: *the drawn string contains a `/` whenever the full name does*. When a plain tail
+cut would land before the slash, the **namespace** is cut — from its front, behind one
+leading `…`, reusing `ui::shortened` itself — and the object's own name is kept:
+`…uster-node-tuning-operator/tuned`. `openshift-cluster-node-tuning-operator` is 38
+characters and real, and the branch it replaced drew `openshift-cluster-node-tuning-o/…`
+for *every object in that namespace*, byte-identical. The direction is the header's own,
+for the header's own reason: `prod-eu` and `prod-eu-2` differ in their last character,
+and so do `team-a-prod` and `team-a-staging`.
+**The reviewer's proposal was taken in the case it named and refused in the one it did
+not check** — it also replaced the ordinary cut, which would have drawn
+`…/checkout-worker-service-accoun…` where the shipped rule draws
+`payments/checkout-worker-service…`, throwing away a namespace that fits. Both are 33
+columns; the PM ran them. *Strictly better in every branch* was true of one branch.
+
+**6. Help is reachable from this footer, and it promised four keys the call refuses.**
+The blocker, found independently by both reviewers. `?` is on the in-flight line, so
+Help opens over a running call — and its body named `X`, `s`, `r` and `ctrl-d` live
+while `may_switch_cluster` and `may_mutate` are false. The 3am case is exact: the footer
+goes quiet, the operator presses `?` to find out what changed, the map says
+`s run more or fewer copies`, they press it, nothing happens — `PRIOR-ART.md` § G1's
+*refuses for no visible reason*, arriving through the one screen that exists to answer
+*what may I press*. Two of the sixteen rows are now rewritten while a call is on the
+wire — the `X` row and the *Changing things* heading, anchored on their own leading text
+the way `ui::key_map` already anchors a permission clause — and the word is **`paused`**,
+never the `no` this product reserves for a permission this login lacks. The heading
+governs three keys at once because a wait is one fact for all three, where a refusal
+never is. **The cost is on the page rather than discovered later**: while the wait
+governs, the grant sentences [D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+built do not draw, so a login that may *never* scale reads the same `paused` as one
+waiting out somebody else's restart, until the call returns.
+
+**7. The anchor pair has one named exception, and the brief that said *every mode* was
+wrong.** Only Alerts and Resources are replaced outright, because only they name `s` and
+`r` and neither `no` nor silence would be true of those keys. Analysis and the four
+detail tabs keep their own footer and lose exactly one word — `q quit`, dropped and not
+marked, the same drop Help's own footer makes. My brief had said the line replaces every
+mode, and over a logs tab that drew `⏎ open` on a pane with nothing to select, dropped
+`esc back` — the only way out of the tab — and left `[ ] tabs`, `f follow` and
+`c container` bound and unnamed. It is a `strip_suffix("  q quit")` on a `&'static str`,
+so a mode **cannot** lose more than the one word however its literal is edited, and
+`screens/widgets.md` § 2a's *never gives way* now names its one exception in the rule
+itself rather than in six cells that contradicted it.
+
+**8. What this box could not prove, and Phase 12 owes.** Nothing sets `changing` and
+nothing calls the three predicates, so: invariant 9 end to end on this path (the name is
+stripped at ingest and no product code builds an `Object` yet); that `changing` is
+cleared on **every** return path, including a transport failure, where the header's
+mark, the command log's `…` and the four `paused` clauses would otherwise stand forever;
+and D20's *`q` … quits when the call returns*, for which there is no queue and no place
+to put one.
+
+**9. Two mutants survived across the three rounds and only one was a defect.** A `>` /
+`>=` on the cut's guard was real — `>=` takes the namespace branch at one column and the
+subtraction underflows — and got the boundary test it was missing. The second, a `-`
+flipped to a `/` in the same guard, was **equivalent**: with the mark one column wide the
+term decided nothing that `shortened`'s own empty answer did not already decide. It was
+deleted rather than argued, which took the site count from 39 to 34 and left the
+boundary on `checked_sub`, where it belongs. Arithmetic defending a boundary it does not
+own is what a mutation run is for.
+
+**10. The process note: the round that found the blocker was reading a screen this box
+did not touch.** The operator review was pointed at the footer and the header; what it
+found was the *other* screen the new footer can reach. Three rounds, and each one found
+something the green suite could not — which is the shape
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+predicts and the reason the review is not skipped when everything upstream passed.

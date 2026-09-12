@@ -233,37 +233,75 @@ const HELP: &str = "  Moving around
 /// **The only other thing interpolated is [`Refused::resource`], a `&'static str` from k8rs's own
 /// closed set** (NOTES § D246) — never a plural discovery handed back, which is what would put a
 /// row past the ceiling as well as past invariant 9.
-fn key_map(help: &str, refused: Refused) -> String {
+///
+/// **`changing` rewrites two other rows, and while it is set the three permission clauses do not
+/// draw at all** (`screens/help.md` § *While the call is running*). This screen exists to answer
+/// *what may I press*, and it promised `X switch cluster`, `s`, `r` and `ctrl-d` as live while
+/// `App::may_switch_cluster` and `App::may_mutate` were both false — the reader presses one, gets
+/// nothing, and no line anywhere says why (`tester` and `k8s-admin`, both independently,
+/// 2026-09-12; PRIOR-ART § G1's *refuses for no visible reason*).
+///
+/// **The heading governs `s`, `r` and `ctrl-d` at once and each row is left alone, where a
+/// permission rewrites the rows and leaves the heading.** That is not a layout preference: a call
+/// in flight refuses all three uniformly and a missing permission never does — one key can be
+/// refused while the other two are not — so the wait is one fact with one home and a permission is
+/// three. It is also why the two never draw on the same row: while a call is in flight those three
+/// rows are inactionable for the wait's reason alone, whatever a probe would otherwise say, and
+/// § *When a key is refused*'s per-key clauses take over again the moment the call returns.
+///
+/// **`paused`, not `no`** — `no` is this product's word for a permission this login lacks
+/// (invariant 14, `screens/help.md`), and a call finishing is a wait. **Neither clause names the
+/// object, and neither needs to**: *a change is running* is true whichever one it is, and the
+/// object is one `?` away — dismissing Help puts the in-flight footer, which does name it, back
+/// on screen. An earlier wording pointed at the command log strip beneath instead, and that was
+/// dropped because the strip cannot be relied on to still hold the pending line after two
+/// navigations (`tui-designer`, 2026-09-12).
+fn key_map(help: &str, refused: Refused, changing: bool) -> String {
     let resource = refused.resource();
-    let clauses = [
-        (
-            "    s ",
-            refused.scale().then(|| {
-                format!(
-                    "    s       run more or fewer copies   (scale — {} {resource}/scale)",
-                    Refused::SCALE_VERBS.join("+")
-                )
-            }),
-        ),
-        (
-            "    r ",
-            refused.restart().then(|| {
-                format!(
-                    "    r       restart, at its own pace   (rollout restart — {} {resource})",
-                    Refused::RESTART_VERBS.join("+")
-                )
-            }),
-        ),
-        (
-            "    ctrl-d ",
-            refused.delete().then(|| {
-                format!(
-                    "    ctrl-d  delete — you type the name to confirm ({} {resource})",
-                    Refused::DELETE_VERBS.join("+")
-                )
-            }),
-        ),
-    ];
+    let clauses = if changing {
+        vec![
+            (
+                "    X ",
+                Some(
+                    "    X            switch cluster (paused while a change is running)".to_owned(),
+                ),
+            ),
+            (
+                "  Changing things",
+                Some("  Changing things (paused while a change is running)".to_owned()),
+            ),
+        ]
+    } else {
+        vec![
+            (
+                "    s ",
+                refused.scale().then(|| {
+                    format!(
+                        "    s       run more or fewer copies   (scale — {} {resource}/scale)",
+                        Refused::SCALE_VERBS.join("+")
+                    )
+                }),
+            ),
+            (
+                "    r ",
+                refused.restart().then(|| {
+                    format!(
+                        "    r       restart, at its own pace   (rollout restart — {} {resource})",
+                        Refused::RESTART_VERBS.join("+")
+                    )
+                }),
+            ),
+            (
+                "    ctrl-d ",
+                refused.delete().then(|| {
+                    format!(
+                        "    ctrl-d  delete — you type the name to confirm ({} {resource})",
+                        Refused::DELETE_VERBS.join("+")
+                    )
+                }),
+            ),
+        ]
+    };
     let mut rows: Vec<&str> = help.lines().collect();
     for (key, clause) in &clauses {
         let Some(clause) = clause else { continue };
@@ -308,6 +346,10 @@ pub struct Screen<'a> {
     /// this string — see [`shortened`], which is where the reason that end and not the other is
     /// written down. So the caller's order inside it is not cosmetic: **the cluster's name goes
     /// first and what the reader is allowed to do goes last.**
+    ///
+    /// **`changing…` is the one segment the caller does not join in**, and [`header`] appends it
+    /// after this string for exactly the reason above: it is `screens/widgets.md` § 1a's last
+    /// segment of all, and a caller holding the join could put it anywhere.
     pub context: &'a str,
     /// The Alerts list, in the three answers a pane has (`crate::views::Pane`) — and a refusal
     /// carries whatever did come back with it, which is what the banner is drawn *over*.
@@ -574,7 +616,7 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
     }
 
     let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-    header(frame, top, screen);
+    header(frame, top, app, screen);
 
     // **`?` is the one mode where the frame's own border carries a title, and it is the whole
     // of how `Keys` gets onto the screen** (`screens/widgets.md` § 5). Help draws no block of
@@ -649,7 +691,7 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
     // Nothing outside the body is touched here, so the header, the log strip and the footer are
     // as untouched as [`help`]'s own note says (`screens/widgets.md` § 1).
     if let Some(open) = &app.modal {
-        modal(frame, body, open, screen);
+        modal(frame, body, open, app.changing.is_some(), screen);
     }
 }
 
@@ -658,18 +700,48 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
 ///
 /// **Nothing here chooses a word.** [`crate::views::App::footer`] answers with both zones and
 /// this places them, so a mode's footer is spelled once, in the file that already knows which
-/// keys a mode has. **It also cuts nothing**: every string it can be handed is a literal that
-/// fits the 76 columns [`indented`] leaves at the floor, which is what
-/// `screens/widgets.md` § 2a means by *curated to fit* — the curation happens in the words, not
-/// in a truncation here.
+/// keys a mode has. **One string reaching it is not a literal**, and it is the only cut this
+/// function makes: the in-flight footer's object name (`screens/dialogs.md` § *While the call is
+/// running*, `screens/widgets.md` § 7's fourth deliberate truncation). Every other footer is
+/// *curated to fit* — the curation happens in the words, not in a truncation here.
+///
+/// **`room` is measured off this line's own fixed parts and never restated as a number** (PM
+/// ruling, 2026-09-12, and `screens/resources.md` § *When it does not fit* rule 1: *the same
+/// measurement already made off the spans about to be drawn, not a sum restated separately*).
+/// The same footer is asked for twice — once with an empty name, whose width **is** the fixed
+/// prefix and suffix, and once with what is left of the name after [`name_cut`]. The arm is
+/// [`crate::views::App::changing`]'s and never the argument's, so the empty first call cannot
+/// draw a different line from the one being measured. The second call is reached only with a
+/// write on the wire, and every arm that does not interpolate the name — every modal, and the
+/// three modes that keep their own footer less `q quit` — hands back what the first call already
+/// said, so the pair needs no guard of its own.
+///
+/// **[`name_cut`] and not [`command_cut`]**: a name is one token — or two joined by one `/` —
+/// so there is no word boundary to walk back to (`screens/widgets.md` § 7 — the browser's row
+/// name is cut the same way and for the same reason). What [`name_cut`] adds over [`clipped`] is
+/// the `/`, the one character here whose loss changes what the object *is*, and the namespace's
+/// **front** rather than its tail as the thing that gives way once it has to.
 ///
 /// **The right zone is laid out first and takes exactly its own width**, the same shape
 /// [`header`] uses for the context: an empty one is a zero-width `Rect` that draws nothing, so
 /// the ordinary single-zone footer needs no branch of its own.
 fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
-    let (keys, quit) = app.footer(screen.detail.is_some(), screen.refused);
     let dim = screen.fg(theme::DIM);
     let row = indented(area);
+    let (line, quit) = app.footer(screen.detail.is_some(), screen.refused, "");
+    let keys = match &app.changing {
+        Some(object) => {
+            let room = usize::from(row.width).saturating_sub(width(&line));
+            let whole = name(object.namespace.as_deref(), &object.name);
+            app.footer(
+                screen.detail.is_some(),
+                screen.refused,
+                &name_cut(&whole, room),
+            )
+            .0
+        }
+        None => line,
+    };
     let [left, right] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(width(quit) as u16)]).areas(row);
     frame.render_widget(Paragraph::new(Line::styled(quit, dim)), right);
@@ -696,10 +768,10 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 /// doing rather than this function's**: they are siblings of the body in `screens/widgets.md`
 /// § 1, not inside the `Rect` handed here — which is why the log strip behind Help keeps showing
 /// the real commands the run made (`screens/help.md`, its note under the mockup).
-fn help(frame: &mut Frame, area: Rect, screen: &Screen) {
+fn help(frame: &mut Frame, area: Rect, changing: bool, screen: &Screen) {
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(key_map(HELP, screen.refused)).style(
+        Paragraph::new(key_map(HELP, screen.refused, changing)).style(
             screen
                 .fg(theme::TEXT)
                 .bg(ink(theme::BACKGROUND, screen.depth)),
@@ -768,9 +840,26 @@ fn indented(area: Rect) -> Rect {
 /// its line is clipped by ratatui with nothing to show for it, and `nodes 3/3 (40s ago)` clipped
 /// to `nodes 3/3 (` reads as a complete count of three ready nodes: *a vital that cannot be read
 /// is blank, never guessed*. What the context does instead is [`shortened`].
-fn header(frame: &mut Frame, area: Rect, screen: &Screen) {
+///
+/// **`changing…` is appended here and not by the caller, which is what fixes its place in the
+/// order** (`screens/widgets.md` § 1a, `theme::CHANGING`). The zone is one string joined by
+/// ` · `, and this segment is last of all — after `admin`/`read-only` and after any TLS warning,
+/// never ahead of them. A caller that joined it into [`Screen::context`] itself could put it
+/// anywhere in that string; a caller that cannot reach the join cannot. It is
+/// [`crate::views::App::changing`]'s fact rather than the store's, which is the other reason it
+/// is not a field on [`Screen`].
+///
+/// **Being last is also why [`shortened`] needs no case for it**: that cut eats the *front* of
+/// the zone, so the cluster's name erodes and the tail — `read-only`, the TLS warning and this
+/// mark — never does.
+fn header(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let dim = screen.fg(theme::DIM);
-    let context = shortened(screen.context, usize::from(area.width));
+    let whole: Cow<str> = if app.changing.is_some() {
+        Cow::Owned(format!("{} · {}", screen.context, mark(theme::CHANGING)))
+    } else {
+        Cow::Borrowed(screen.context)
+    };
+    let context = shortened(&whole, usize::from(area.width));
     let [left, zone] = Layout::horizontal([
         Constraint::Min(0),
         Constraint::Length(width(&context) as u16),
@@ -872,9 +961,14 @@ fn strip(frame: &mut Frame, area: Rect, screen: &Screen) {
 
 /// **What is open over the body** (`screens/widgets.md` § 5). One match, so no screen can open a
 /// modal this file does not draw, and no modal can be drawn twice in two shapes.
-fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, screen: &Screen) {
+///
+/// **`changing` reaches [`help`] and no other box**: Help is the one modal that can be open over a
+/// call on the wire (`screens/dialogs.md` § *While the call is running* — it is not a `Modal`, so
+/// `?` still opens on top of it), and the other three are each built from that call's own before
+/// or after.
+fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, screen: &Screen) {
     match open {
-        views::Modal::Help => help(frame, body, screen),
+        views::Modal::Help => help(frame, body, changing, screen),
         views::Modal::Confirm(dialog) => confirm(frame, body, dialog, screen),
         views::Modal::Refused { sent, fault, said } => {
             refused(frame, body, *sent, fault, said.as_deref(), screen);
@@ -2997,6 +3091,86 @@ fn command_cut(line: &str, columns: usize) -> Cow<'_, str> {
         Some(at) => Cow::Owned(format!("{}{CUT}", line[..at].trim_end())),
         None => clipped(line, columns),
     }
+}
+
+/// [`clipped`], **keeping the `/` that says the object is namespaced** — the in-flight footer's
+/// own cut, and the one place in the product where losing a character changes what an object *is*
+/// rather than only how much of it can be read (`screens/dialogs.md` § *While the call is
+/// running*, its numbered rules 1–4).
+///
+/// **Rule 1 and rule 2 are [`clipped`]'s** — a name that fits draws whole, and one that does not
+/// but whose `/` survives an ordinary clip gets exactly that clip.
+/// `team-alpha-payments-platform/web`
+/// drew as `team-alpha-payments-pl…` at the budget this line had before 2026-09-12 — **no slash
+/// anywhere in it**, and a bare name means cluster-scoped everywhere else in this product
+/// (`screens/README.md` § the five rules), so a reader watching that footer would have learnt that
+/// a namespaced Deployment is a Node. Rule 4 is the same clip again: a bare name has no `/` to
+/// protect.
+///
+/// **Rule 3 is the whole of why this is not [`clipped`], and it gives way from the namespace's
+/// *front*** — one leading `…`, the `/` and the object's own name kept in full:
+/// `…uster-node-tuning-operator/tuned`. **The first draft cut the namespace's tail instead and it
+/// was wrong for a reason this file had already written down at the other end of the same screen**
+/// (`k8s-admin`, 2026-09-12): [`shortened`] cuts the header's context from its front *because
+/// `prod-eu` and `prod-eu-2` differ in their last character*, and a namespace fails identically —
+/// `team-a-prod` and `team-a-staging` share a front and differ in a tail. Cutting the tail made
+/// `openshift-cluster-node-tuning-operator`, 38 characters and a namespace a real distribution
+/// ships, draw one byte-identical line for **every object in it**: the blue/green collision this
+/// same box had just fixed, back again and total instead of partial.
+///
+/// **So the namespace is cut by [`shortened`] and not by a second front-cut written here.** Two
+/// cuts in one product disagreeing about which end of a name identifies it is the defect class
+/// CLAUDE.md names as the costliest, and the budget handed over is this line's own arithmetic:
+/// `columns` less the `/` less the name.
+///
+/// **The name is cut only when it alone will not fit** — past `columns − 2`, the two left once the
+/// leading `…` and the `/` are paid for — and then the namespace gives up the *whole* of itself
+/// behind that same mark rather than a part of it: `…/checkout-worker-service-accou…`. Giving up a
+/// namespace that fits, to buy a name room it did not need, is what rule 2 already refuses; this
+/// branch is reached only when there is nothing else left to give.
+///
+/// **The visible string contains a `/` whenever `whole` does, in every branch** — that is the hard
+/// clause, not a consequence of the budget being generous.
+///
+/// **`columns` below the two `…/` itself takes falls back to [`clipped`]**, for that function's
+/// own reason: a cut wider than the row it is drawn in is worse than one that shows less. The
+/// product's own room here is 33 columns at the 80×24 floor, so that floor is a guard rather than
+/// a state anything draws.
+fn name_cut(whole: &str, columns: usize) -> Cow<'_, str> {
+    let plain = clipped(whole, columns);
+    let Some((namespace, name)) = whole.split_once('/') else {
+        return plain;
+    };
+    if plain.contains('/') || columns <= width(CUT) {
+        return plain;
+    }
+    // What is left once the `/` is paid for. Both branches spend it whole, so neither can draw
+    // wider than `columns` — which is the property the sweep in `ui_tests.rs` asserts rather than
+    // this comment.
+    //
+    // **The namespace is cut first and the branch is chosen on what came back**, because
+    // [`shortened`] keeps *nothing* rather than a bare mark when a budget is too narrow for the
+    // mark plus one character — its own documented answer, and the right one for a header zone.
+    // Here an empty one would draw `/web`, which is the row a `Some("")` namespace draws and which
+    // `screens/README.md` § the five rules calls a misreading. A namespace that cannot be
+    // represented at all *is* the second branch's case, so it takes it; this is one cut asked a
+    // question, not two cuts disagreeing.
+    //
+    // **So the boundary is `checked_sub` and [`shortened`]'s own empty answer, and not a column
+    // count written here** — the first draft also subtracted `width(CUT)` from this condition, and
+    // a mutation run flipped that `-` to a `/` with no test able to tell (2026-09-12). It was
+    // right: with `CUT` one column wide the term changed nothing the filter below did not already
+    // decide, so it was arithmetic defending a boundary it did not own. `None` here is the one
+    // case it really was guarding — a name that will not fit even with the namespace gone.
+    let room = columns - 1;
+    let kept = room
+        .checked_sub(width(name))
+        .map(|budget| shortened(namespace, budget))
+        .filter(|kept| !kept.is_empty());
+    Cow::Owned(match kept {
+        Some(kept) => format!("{kept}/{name}"),
+        None => format!("{CUT}/{}", clipped(name, room - width(CUT))),
+    })
 }
 
 /// **Word wrap, with a character break for a token wider than the line.**

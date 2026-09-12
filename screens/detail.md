@@ -35,11 +35,17 @@ whole debugging loop without a typed command.
 | **yaml** | the object as YAML | Key order is the API's, not alphabetised. Secret values are hidden behind an explicit reveal, and a revealed value never enters the command log, the audit log or this pane's copy buffer. |
 | **events** | this object's events, newest first | Plain-language reason word, the controller's own message kept beside it: `Unhealthy` reads "the health check failed" next to "Readiness probe failed: …", never instead of it. |
 
+**Every footer on every tab below loses exactly one word while a call
+confirmed elsewhere is still on the wire: `q quit`. Nothing else on any of
+them changes**
+([dialogs.md § Detail tabs and Analysis keep their own footer, not this line](dialogs.md#detail-tabs-and-analysis-keep-their-own-footer-not-this-line)).
+
 **The logs tab's footer carries `f follow` and `c container`, not `⇧p
 previous` or `/ search`.** Both keys still work — `⇧p` and `/` are bound
 exactly as [NOTES § D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted)
 says — they are just not two of the six things this one line has room to
-name before `? all keys  q quit`, the pair that never gives way
+name before `? all keys  q quit`, the pair that never gives way outside its
+own one named exception, above
 ([widgets.md § The footer](widgets.md#2a-the-footer)). Follow and the
 container picker are what a reader reaches for on nearly every open log pane;
 `⇧p` only matters once a container has actually crashed, and a text search is

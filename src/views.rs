@@ -1457,9 +1457,17 @@ pub struct App {
     pub following: bool,
     /// What is open over the screen, or nothing.
     pub modal: Option<Modal>,
-    /// **A mutation is on the wire** (`ops::perform` has been given its yes and has not returned).
-    /// The header's `changing…` (`theme::CHANGING`), and what refuses `q` below.
-    pub changing: bool,
+    /// **The object a mutation is on the wire for**, or `None` when nothing is running
+    /// (`ops::perform` has been given its yes and has not returned). The header's `changing…`
+    /// (`theme::CHANGING`), what refuses `q` below, and the name the in-flight footer says it is
+    /// waiting on.
+    ///
+    /// **An [`Object`] and not a `bool` beside a `String`** (PM ruling, 2026-09-12). The footer's
+    /// reason clause has to name the object, and the only honest source for that name is the one
+    /// the dialog was about; two fields are two facts that can disagree, which is the defect class
+    /// this repo has paid most for. It is [`Modal::Confirm`]'s own [`Dialog::object`], carried
+    /// across the moment the modal closes.
+    pub changing: Option<Object>,
 }
 
 /// **Which of the three mutating keys this login has been told it may not use**
@@ -1600,25 +1608,26 @@ impl App {
     /// `screens/dialogs.md` § *While the call is running*). Quitting mid-`PATCH` would leave the
     /// audit log holding an attempt with no result.
     pub fn may_quit(&self) -> bool {
-        !self.changing
+        self.changing.is_none()
     }
 
     /// **`X` — unbound while a modal is open, and while a write is in flight** (NOTES § D12,
     /// § D16). Switching clusters under an open confirmation is how a dialog ends up naming an
     /// object on a cluster it was never read from.
     pub fn may_switch_cluster(&self) -> bool {
-        self.modal.is_none() && !self.changing
+        self.modal.is_none() && self.changing.is_none()
     }
 
     /// **A second mutation is refused while one is running** (`screens/dialogs.md` § *While the
     /// call is running*). Navigation stays free; this is only about opening another dialog.
     pub fn may_mutate(&self) -> bool {
-        self.modal.is_none() && !self.changing
+        self.modal.is_none() && self.changing.is_none()
     }
 
     /// **The footer — the keys valid right now, and the right-aligned zone beside them**
-    /// (`screens/widgets.md` § 2a). The left string is what the reader reads; the right is
-    /// empty for every mode but `?`, which is the only footer in the product with two zones.
+    /// (`screens/widgets.md` § 2a). The left string is what the reader reads; **`?` is the only
+    /// mode that can fill the right one, and even it does not always** — over a call in flight the
+    /// `q quit` it normally keeps is refused, and the zone is empty there too (below).
     ///
     /// **One function, so no call site can spell a footer of its own.** `ui.rs` draws what this
     /// returns and `main.rs` never touches it, which is why [`crate::ui::Screen`] carries no
@@ -1627,9 +1636,13 @@ impl App {
     /// **A footer is a curated subset and never an exhaustive one** — `? all keys` is what
     /// completes it (`screens/README.md` rule 2). `l logs` and `ctrl-d delete` are bound on both
     /// lists and named by neither footer; `⇧p previous` and `/ search` are bound in the logs tab
-    /// and its footer names neither. **What never gives way is the pair `? all keys  q quit`**,
-    /// drawn last, which is the one thing `screens/widgets.md` § 2a fixes about every ordinary
-    /// footer.
+    /// and its footer names neither. **The pair `? all keys  q quit` is drawn last and never gives
+    /// way — with the one named exception `screens/widgets.md` § 2a now carries in the rule
+    /// itself**: while a call is running, every footer it reaches loses `q quit` at least, and
+    /// Alerts and Resources lose the whole line, pair included. Both halves of that exception are
+    /// below — the `strip_suffix` and the guard arm — and this sentence used to state only the
+    /// half that was still true, which nothing mechanical could see (`k8s-admin`, 2026-09-12;
+    /// NOTES § D216 — `rustfmt` and the tests cannot read a comment).
     /// The key set itself is NOTES § D12's and nothing here adds to it.
     ///
     /// **`detail` is passed in because [`App`] cannot know it**: *whether* a detail tab is open
@@ -1663,12 +1676,63 @@ impl App {
     /// of the four fixed strings `screens/widgets.md` § 2a counts, never a string built here.
     /// `ctrl-d` is not on this line to mark, and Analysis and the detail tabs name neither `s` nor
     /// `r`, so a refusal cannot show on them.
-    pub fn footer(&self, detail: bool, refused: Refused) -> (Cow<'static, str>, &'static str) {
-        // **`Help` is the one modal that keeps `q quit` and the only footer with a right-hand
-        // zone** — nothing is pending while it is open, so a global quit beside it costs nothing
-        // (`screens/widgets.md` § 2a, `screens/help.md`).
+    ///
+    /// **`changing` is the one string in any footer this product did not choose the length of** —
+    /// the selected object's own name, already spelled `payments/web` and already cut to the room
+    /// this line has left (`screens/dialogs.md` § *While the call is running*,
+    /// `screens/widgets.md` § 7's fourth deliberate truncation). Both of those are `ui::name` and
+    /// `ui::name_cut`'s, because measuring columns needs `Span::width` and this file may name no
+    /// `ratatui` type (NOTES § D241); a `chars().count()` here would be a second measurement of
+    /// the same thing, disagreeing on the first wide character (PM ruling, 2026-09-12).
+    ///
+    /// **The arm is chosen by [`App::changing`] and never by the argument.** A caller that hands
+    /// over an empty name cannot turn the in-flight footer off — which is what lets `ui::footer`
+    /// ask for this same line with `""` to measure its own fixed parts, rather than restate their
+    /// width as a number that goes stale the first time a word here changes.
+    ///
+    /// **That replacement reaches Alerts and Resources and no other mode**
+    /// (`screens/dialogs.md` § *Detail tabs and Analysis keep their own footer, not this line*).
+    /// Those two are the only ordinary footers naming `s` and `r`, which a call in flight makes
+    /// inactionable and which neither `no` nor silence can honestly say — so the whole line goes.
+    /// **Every other mode keeps its own footer and loses exactly one word, `q quit`**: nothing
+    /// else on a detail tab's or Analysis's line is made false by a call on the wire, and the
+    /// first draft of this box replaced them too — drawing `⏎ open` over a logs pane with nothing
+    /// to select, dropping the `esc back` that is the only way out of the tab, and leaving
+    /// `[ ] tabs`, `f follow` and `c container` bound and unnamed (`k8s-admin`, 2026-09-12).
+    ///
+    /// **One word is structural here, not a promise.** The drop is a [`str::strip_suffix`] of
+    /// that word and its own two-space separator off a `&'static str`, so a mode cannot lose a
+    /// second one however the literals above are edited; what guarantees the word is there to
+    /// strip is `views_tests::the_anchor_pair_ends_every_ordinary_footer`, which says so for
+    /// every mode.
+    pub fn footer(
+        &self,
+        detail: bool,
+        refused: Refused,
+        changing: &str,
+    ) -> (Cow<'static, str>, &'static str) {
+        // **`Help` is the one modal that keeps `q quit` — except over a call in flight, when the
+        // key it names is refused** (`screens/help.md` § *While the call is running*,
+        // `screens/widgets.md` § 2a). It is dropped and not marked `q no quit`: the `no` this
+        // product spells beside a key is a permission this login lacks, and a call finishing is a
+        // wait. The moment it returns, `q` is back.
+        //
+        // **Every other modal answers here unchanged, and the combination is unreachable rather
+        // than merely undrawn.** `Confirm` closes when the yes is given, which is *before*
+        // `changing` is set; `Refused` and `Gone` open from what the call answered, which is
+        // *after* it is cleared. Phase 12's wiring is what makes that true — so these arms are
+        // stated to answer first on purpose: a modal drawing its own closed set over a call it
+        // cannot have coexisted with is the one honest thing to draw if the wiring ever slips,
+        // and it is `screens/widgets.md` § 2a's rule for a modal either way.
         match &self.modal {
-            Some(Modal::Help) => return (Cow::Borrowed("? or esc to close"), "q quit"),
+            Some(Modal::Help) => {
+                let quit = if self.changing.is_some() {
+                    ""
+                } else {
+                    "q quit"
+                };
+                return (Cow::Borrowed("? or esc to close"), quit);
+            }
             Some(Modal::Confirm(dialog)) => {
                 let keys = match (dialog.armed(), dialog.asks.is_some()) {
                     (true, _) => Cow::Owned(format!("⏎ {}  esc cancel", dialog.confirm())),
@@ -1698,6 +1762,27 @@ impl App {
                 "[ ] tabs  esc back  ? all keys  q quit"
             }
             (false, _, View::Analysis(_)) => "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+            // **One line replaces the whole footer, and only on the two modes that name `s` and
+            // `r`** — `screens/dialogs.md` § *While the call is running* and its § *Detail tabs
+            // and Analysis keep their own footer, not this line*, NOTES § D20. The guard sits
+            // inside this match and not above it so that *which mode is which* is decided in one
+            // place; the unguarded arm below keeps the match exhaustive.
+            //
+            // **`?` reads `? keys` and `q quit` is gone outright**, which is the room the reason
+            // clause is spending: `q` is not merely unshown here, it is refused — quitting
+            // mid-`PATCH` would leave the audit log holding an attempt with no result. `? keys`
+            // rather than the bare `?` this line drew first, because `⏎ open  ?  ·` reads at a
+            // glance as `⏎ open?` and every other key on every footer carries a label. `↑↓ move`
+            // and `⏎ open` stay, because *navigation stays free* is the one thing this state
+            // promises and dropping them to buy the name more room would hide it.
+            (false, _, View::Alerts | View::Resources(_)) if self.changing.is_some() => {
+                return (
+                    Cow::Owned(format!(
+                        "↑↓ move  ⏎ open  ? keys  ·  changing {changing} first"
+                    )),
+                    "",
+                );
+            }
             // **The four rows of `screens/widgets.md` § 2a's own table, as four literals**
             // (NOTES § D259 ruling 4): the one footer a refusal can reach still spells every state
             // of itself at compile time.
@@ -1717,6 +1802,16 @@ impl App {
                     }
                 }
             }
+        };
+        // **The three modes that keep their own footer lose one word and no more**
+        // (`screens/dialogs.md` § *Detail tabs and Analysis keep their own footer, not this
+        // line*). `q quit` is dropped, not marked `q no quit`: the `no` this product spells
+        // beside a key is a permission this login lacks, and a call finishing is a wait — the
+        // same one-word drop Help's own footer already makes in this state, and the header's
+        // `changing…` plus `? all keys` are where the reason lives.
+        let keys = match self.changing {
+            Some(_) => keys.strip_suffix("  q quit").unwrap_or(keys),
+            None => keys,
         };
         (Cow::Borrowed(keys), "")
     }

@@ -1109,7 +1109,7 @@ fn quit_and_the_cluster_switcher_are_refused_exactly_where_the_key_map_says() {
     );
 
     app.modal = None;
-    app.changing = true;
+    app.changing = Some(dialog(None).object);
     assert!(!app.may_quit(), "q was allowed mid-write");
     assert!(!app.may_switch_cluster());
     assert!(!app.may_mutate(), "a second mutation was allowed");
@@ -1620,7 +1620,7 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
             tab,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail, Refused::default());
+        let (keys, quit) = app.footer(detail, Refused::default(), "");
         assert_eq!(
             (keys.as_ref(), quit),
             (expected, ""),
@@ -1635,6 +1635,13 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
 /// **Asserted as a suffix and not as *contains*** — the rule is about where they sit, and a
 /// footer that named them first would pass a containment check while drawing the one thing the
 /// section forbids.
+///
+/// **Ordinary means nothing on the wire, and that scope is now written down rather than left to
+/// [`App::default`]** (`tester`, 2026-09-12): `changing` is `None` in the literal below, on
+/// purpose. While a call is running these same footers lose exactly one word of this pair —
+/// [`a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit`] is where that is
+/// asserted, and what *this* test guarantees it is that there is a `  q quit` to strip at all. A
+/// mode that stopped ending in the pair would drop nothing there and go green.
 #[test]
 fn the_anchor_pair_ends_every_ordinary_footer() {
     for (view, detail, tab) in [
@@ -1649,9 +1656,10 @@ fn the_anchor_pair_ends_every_ordinary_footer() {
         let app = App {
             view,
             tab,
+            changing: None,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail, Refused::default());
+        let (keys, quit) = app.footer(detail, Refused::default(), "");
         assert!(
             keys.ends_with("? all keys  q quit"),
             "{view:?} · detail {detail} · {tab:?} — {keys:?} does not end in the anchor pair"
@@ -1669,10 +1677,12 @@ fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    let (keys, quit) = app.footer(false, Refused::default());
+    let (keys, quit) = app.footer(false, Refused::default(), "");
     assert_eq!((keys.as_ref(), quit), ("? or esc to close", "q quit"));
     assert!(
-        !app.footer(false, Refused::default()).0.contains("all keys"),
+        !app.footer(false, Refused::default(), "")
+            .0
+            .contains("all keys"),
         "the footer still pointed at a screen the reader is already on"
     );
 }
@@ -1695,7 +1705,7 @@ fn help_is_the_footer_whatever_it_was_opened_from() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail, Refused::default()),
+            app.footer(detail, Refused::default(), ""),
             (Cow::Borrowed("? or esc to close"), "q quit"),
             "{view:?} · detail {detail} · {tab:?}"
         );
@@ -1711,10 +1721,13 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    assert_eq!(app.footer(false, Refused::default()).0, "? or esc to close");
+    assert_eq!(
+        app.footer(false, Refused::default(), "").0,
+        "? or esc to close"
+    );
     app.escape();
     assert_eq!(
-        app.footer(false, Refused::default()).0,
+        app.footer(false, Refused::default(), "").0,
         "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
     );
 }
@@ -1789,16 +1802,212 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
             "esc dismiss",
         ),
     ] {
-        assert_eq!(app.footer(false, Refused::default()).0, expected);
+        assert_eq!(app.footer(false, Refused::default(), "").0, expected);
         assert_eq!(
-            app.footer(false, Refused::default()).1,
+            app.footer(false, Refused::default(), "").1,
             "",
             "a dialog grew the right-hand zone only `?` has"
         );
         // **The same answer over an open detail tab**, which is the other side of the hole the
         // replaced test pinned: a dialog is opened from a detail pane as readily as from a list,
         // and a footer that fell through for one of them would fall through for both.
-        assert_eq!(app.footer(true, Refused::default()).0, expected);
+        assert_eq!(app.footer(true, Refused::default(), "").0, expected);
+    }
+}
+
+/// **One line replaces the ordinary footer of Alerts and Resources while a write is on the
+/// wire — and of no other mode** (`screens/dialogs.md` § *While the call is running* and its
+/// § *Detail tabs and Analysis keep their own footer, not this line*, `screens/widgets.md` § 2a's
+/// closed mode list).
+///
+/// Read off that file's own mockup: `?` reads `? keys`, `q quit` is absent rather than marked, and
+/// `↑↓ move` and `⏎ open` stay — *navigation stays free* is what this state promises, so the two
+/// keys that mean it do not give way.
+///
+/// **Those two modes and not the rest, because those two are the only ordinary footers that name
+/// `s` and `r`** — the keys a call in flight makes inactionable, which neither `no` (a permission
+/// this login lacks) nor silence can honestly say.
+///
+/// **The healthy case is the same `App` with nothing running**, asserted first, so a footer that
+/// drew the in-flight line unconditionally could not pass. **A refusal on top changes nothing**:
+/// the line has no `s` or `r` left on it to mark.
+#[test]
+fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
+    for view in [View::Alerts, View::Resources(3), View::Resources(0)] {
+        let mut app = App {
+            view,
+            ..App::default()
+        };
+        assert!(
+            app.footer(false, Refused::default(), "payments/web")
+                .0
+                .ends_with("? all keys  q quit"),
+            "{view:?} — nothing is running and the ordinary footer went"
+        );
+
+        app.changing = Some(dialog(None).object);
+        let no = |refused: bool| refused.then_some(&Verdict::No);
+        for (scale, restart) in [(false, false), (true, false), (false, true), (true, true)] {
+            let refused = Refused::of("deployments", [no(scale); 2], [no(restart)], [None]);
+            let (keys, quit) = app.footer(false, refused, "payments/web");
+            assert_eq!(
+                (keys.as_ref(), quit),
+                (
+                    "↑↓ move  ⏎ open  ? keys  ·  changing payments/web first",
+                    ""
+                ),
+                "{view:?} · s refused {scale} · r refused {restart}"
+            );
+        }
+    }
+}
+
+/// **Analysis and all four detail tabs keep their own footer and lose exactly one word: `q quit`**
+/// (`screens/dialogs.md` § *Detail tabs and Analysis keep their own footer, not this line*,
+/// `screens/detail.md`'s own sentence above the tab sections).
+///
+/// **The assertion is the relationship and not five more literals**, which is what makes *no mode
+/// may lose more than that one word* provable rather than promised: the in-flight line plus
+/// `  q quit` back is the ordinary line, character for character. A mode that dropped `esc back`
+/// as well, or that drew the in-flight replacement, fails here whatever its literal says.
+///
+/// **This is the defect `k8s-admin` found in the box's first draft** (2026-09-12): the logs tab
+/// over a call confirmed on Alerts drew `⏎ open` on a pane with nothing to select, dropped the
+/// `esc back` that is the only way out of the tab, and left `[ ] tabs`, `f follow` and
+/// `c container` bound and unnamed — three of five keys failing `screens/widgets.md` § 2a's own
+/// rule that a footer is *the keys valid right now*.
+#[test]
+fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
+    for (view, detail, tab) in [
+        (View::Analysis(2), false, Tab::Yaml),
+        (View::Analysis(0), false, Tab::Logs),
+        (View::Alerts, true, Tab::Logs),
+        (View::Alerts, true, Tab::Describe),
+        (View::Alerts, true, Tab::Yaml),
+        (View::Resources(1), true, Tab::Events),
+    ] {
+        let mut app = App {
+            view,
+            tab,
+            ..App::default()
+        };
+        let ordinary = app.footer(detail, Refused::default(), "payments/web").0;
+
+        app.changing = Some(dialog(None).object);
+        let (keys, quit) = app.footer(detail, Refused::default(), "payments/web");
+        assert_eq!(
+            format!("{keys}  q quit"),
+            ordinary,
+            "{view:?} · detail {detail} · {tab:?} — more than the one word gave way"
+        );
+        assert_eq!(
+            quit, "",
+            "a mode that keeps its own footer grew a second zone"
+        );
+        assert!(
+            !keys.contains("quit") && !keys.contains("changing"),
+            "{view:?} · detail {detail} · {tab:?} — {keys:?}"
+        );
+    }
+}
+
+/// **The arm is [`App::changing`]'s and never the argument's** (PM ruling, 2026-09-12).
+///
+/// A caller that hands over a name with nothing running may not turn this footer on, and one that
+/// hands over an empty name with a call running may not turn it off — which is what lets
+/// `ui::footer` ask for this same line with `""` purely to measure its own fixed parts. That
+/// second string is asserted whole here, because it **is** the prefix and suffix `room` is
+/// measured off: a word changed in either of them moves a number `ui.rs` never restates.
+#[test]
+fn the_in_flight_arm_is_changings_and_never_the_names() {
+    let mut app = App::default();
+    assert_eq!(
+        app.footer(false, Refused::default(), "payments/web").0,
+        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "a name alone turned the in-flight footer on"
+    );
+
+    app.changing = Some(dialog(None).object);
+    assert_eq!(
+        app.footer(false, Refused::default(), "").0,
+        "↑↓ move  ⏎ open  ? keys  ·  changing  first",
+        "an empty name turned the in-flight footer off"
+    );
+}
+
+/// **Help over a call in flight drops `q quit`, and does not mark it** (`screens/help.md`
+/// § *While the call is running*, `screens/widgets.md` § 2a).
+///
+/// The `no` this product spells beside a key is a permission this login lacks; a call finishing is
+/// a wait, and the two stay two different facts. The right zone empties instead — and Help's
+/// ordinary footer keeps `q quit` exactly as it does today, which is the healthy case here.
+#[test]
+fn help_over_a_call_in_flight_drops_the_quit_it_cannot_promise() {
+    let mut app = App {
+        modal: Some(Modal::Help),
+        ..App::default()
+    };
+    assert_eq!(
+        app.footer(false, Refused::default(), ""),
+        (Cow::Borrowed("? or esc to close"), "q quit"),
+        "help's ordinary footer changed"
+    );
+
+    app.changing = Some(dialog(None).object);
+    let (keys, quit) = app.footer(false, Refused::default(), "");
+    assert_eq!(
+        keys.as_ref(),
+        "? or esc to close",
+        "the body of help's own line moved"
+    );
+    assert_eq!(quit, "", "help promised a quit the running call refuses");
+    assert!(
+        !format!("{keys} {quit}").contains("no quit"),
+        "a wait was marked as a permission this login lacks: {keys:?} {quit:?}"
+    );
+}
+
+/// **What every other modal does while a call is running, stated rather than left implicit.**
+///
+/// The combination is unreachable by the wiring Phase 12 will write — `Modal::Confirm` closes
+/// when the yes is given, which is *before* [`App::changing`] is set, and `Modal::Refused` and
+/// `Modal::Gone` are built from what the call answered, which is *after* it is cleared. What is
+/// asserted is that the modal arms still answer first if it ever happens: a closed local set is
+/// the one honest thing to draw under an open box (`screens/widgets.md` § 2a), and a footer
+/// offering `⏎ open` on a screen whose box says *Already gone* would be the defect the next box
+/// inherits.
+#[test]
+fn a_modal_keeps_its_own_closed_set_even_with_a_call_running_under_it() {
+    let running = dialog(None).object;
+    for (modal, expected) in [
+        (Modal::Confirm(dialog(None)), "waiting for the cluster"),
+        (
+            Modal::Refused {
+                sent: true,
+                fault: crate::k8s::Fault::Rejected,
+                said: None,
+            },
+            "esc dismiss  ⏎ open",
+        ),
+        (
+            Modal::Gone {
+                object: running.clone(),
+                recreated: false,
+            },
+            "esc dismiss",
+        ),
+    ] {
+        let app = App {
+            modal: Some(modal.clone()),
+            changing: Some(running.clone()),
+            ..App::default()
+        };
+        let (keys, quit) = app.footer(false, Refused::default(), "payments/web");
+        assert_eq!((keys.as_ref(), quit), (expected, ""), "{modal:?}");
+        assert!(
+            !keys.contains("changing"),
+            "the in-flight line reached a modal's closed set: {keys:?}"
+        );
     }
 }
 
@@ -1858,7 +2067,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
             modal,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail, Refused::default());
+        let (keys, quit) = app.footer(detail, Refused::default(), "");
         let width = ratatui::text::Span::raw(keys.as_ref()).width()
             + usize::from(!quit.is_empty())
             + ratatui::text::Span::raw(quit).width();
@@ -1933,7 +2142,7 @@ fn the_list_footer_marks_the_keys_this_login_may_not_use() {
                 view,
                 ..App::default()
             };
-            let (keys, quit) = app.footer(false, refused);
+            let (keys, quit) = app.footer(false, refused, "");
             assert_eq!(
                 (keys.as_ref(), quit),
                 (expected.as_str(), ""),
@@ -2053,8 +2262,8 @@ fn a_refused_delete_changes_no_footer() {
                 ..App::default()
             };
             assert_eq!(
-                app.footer(detail, refused),
-                app.footer(detail, Refused::default()),
+                app.footer(detail, refused, ""),
+                app.footer(detail, Refused::default(), ""),
                 "{view:?} · detail {detail}"
             );
         }
@@ -2119,8 +2328,8 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail, all),
-            app.footer(detail, Refused::default()),
+            app.footer(detail, all, ""),
+            app.footer(detail, Refused::default(), ""),
             "{:?} · detail {detail} · {tab:?}",
             app.view
         );
@@ -2810,10 +3019,10 @@ fn the_confirm_word_is_the_same_one_the_footer_and_the_button_use() {
         ..App::default()
     };
     assert!(
-        app.footer(false, Refused::default())
+        app.footer(false, Refused::default(), "")
             .0
             .contains(armed.confirm()),
         "the footer does not name the button's own word: {:?}",
-        app.footer(false, Refused::default()).0
+        app.footer(false, Refused::default(), "").0
     );
 }

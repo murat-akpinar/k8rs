@@ -56,12 +56,22 @@ body → Layout::horizontal([
 |---|---|---|
 | left | cluster vitals — `nodes 3/3`, and how stale they are when the connection is gone | left |
 | centre | `k8rs` | centred on the **full** width |
-| right | context · namespace scope · connection state · `admin` / `read-only` · a TLS warning | right |
+| right | context · namespace scope · connection state · `admin` / `read-only` · a TLS warning · `changing…` | right |
 
-- **The context is never truncated and never clipped.** `prod-eu` and
-  `prod-eu-2` differ by one character, and the header is what tells you which
-  cluster a `ctx`+`s` keypress is about to scale. It is laid out first and
-  keeps its full width.
+- **The right zone is one string, its segments joined by ` · ` in the table's
+  order above, `changing…` last of all** — after `admin`/`read-only` and any
+  TLS warning, never ahead of them, matching how
+  [dialogs.md](dialogs.md#while-the-call-is-running) already draws it
+  (`ctx: prod-eu · live · admin · changing…`). **It shortens from its front
+  behind a visible `…` when the row is too narrow — it is never clipped, but
+  it is no longer true that it is never truncated.** Which end gives way is a
+  security question, not a layout preference: the tail carries `read-only`
+  and a TLS warning, what the reader believes they are allowed to do, so the
+  cluster's own name is what erodes first and the tail — `changing…`
+  included — never does (`ui::shortened`,
+  [NOTES § D249](../NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)).
+  `prod-eu` and `prod-eu-2` differ by one character, which is why the cut is
+  marked rather than silent.
 - **The centred name is dropped first when the row fills up.** It is the only
   zone carrying no information; on the disconnected and namespace-scoped
   screens it is already gone. Order of sacrifice: name, then vitals, never the
@@ -288,14 +298,17 @@ makes for its own over-70 rows, and the same move [alerts.md](alerts.md) and
 truncation invented for the footer alone.
 
 **`? all keys` and `q quit` are one closed pair, drawn last, and they are what
-never gives way.** [help.md](help.md)'s own rule — `q` sits in the footer with
-the other keys valid right now, the same place every other screen puts it —
-is read here as the rule for *this* pair specifically, not as a mandate that
-every bound key appear on every footer: [README rule 2](README.md#the-five-rules-every-screen-obeys)
-already draws that line — the footer shows what is valid right now, `?` shows
-everything — so a footer has always been a curated subset, never an
-exhaustive one. What is new is naming the one subset that is never cut from
-it.
+never gives way — with exactly one named exception, below: while a call is
+running, every footer it reaches loses `q quit` at least, and two of them
+lose the whole line, pair included.** [help.md](help.md)'s own rule — `q`
+sits in the footer with the other keys valid right now, the same place every
+other screen puts it — is read here as the rule for *this* pair specifically,
+not as a mandate that every bound key appear on every footer:
+[README rule 2](README.md#the-five-rules-every-screen-obeys) already draws
+that line — the footer shows what is valid right now, `?` shows everything —
+so a footer has always been a curated subset, never an exhaustive one. What
+is new is naming the one subset that is never cut from it, and the one state
+where it is.
 
 **The rest of a footer is curated to fit, and a key that does not fit stays
 bound — it just is not the one this line spends room naming.** [D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted)
@@ -405,35 +418,62 @@ while it is open: it keeps `q quit` and replaces `? all keys` with its own
 `? or esc to close` — the map itself, not a pointer to one — drawn once, in
 [help.md](help.md), not repeated here.
 
+**That reasoning covers every modal Help could stack over — none is reachable
+while it is open (§5) — but not the one screen that is not a modal at all:**
+[while a call is running](dialogs.md#while-the-call-is-running) is not a
+`Modal`, so `?` still opens Help over it, and there something *is* pending.
+Help's footer drops `q quit` in that one state — `? or esc to close` alone —
+rather than promise a key the running call has already refused; the omission
+matches the one the in-flight footer itself already makes for the same key.
+It is not the `no`-marked refusal above, which is a permission this login
+lacks — a call finishing is a wait, not a permission, and the two stay two
+different facts. Drawn in
+[help.md § While the call is running](help.md#while-the-call-is-running).
+
 **One state is neither an ordinary footer nor a modal, and it is the one
-place a footer's own text can run long: [while a call is running](dialogs.md#while-the-call-is-running).**
-It is not a `Modal` — the screen behind it keeps working — so `?` still opens
-Help, but stripped of its `all keys` label to leave room for the reason
-clause, and `q` is refused rather than merely unshown. The object name inside
-that clause is the one string in any footer this file did not choose the
-length of, and it is cut on the same rule as every other truncation in this
-product ([§7](#7-text-that-came-from-the-api)), not a fifth convention.
+place a footer's own text can run long: [while a call is running](dialogs.md#while-the-call-is-running) —
+and only on Alerts and Resources.** Those two are the only ordinary footers
+that name `s` and `r`, and marking either `no` right now would say the wrong
+thing (dialogs.md's own reasoning: `no` means a permission this login lacks,
+and a call finishing is a wait). So on Alerts and Resources alone, the whole
+line is replaced: `?` still opens Help, but reads `? keys` rather than the
+ordinary `? all keys`, to leave room for the reason clause, and `q` is
+refused rather than merely unshown. The object name inside that clause is the
+one string in any footer this file did not choose the length of, and it is
+cut on the same rule as every other truncation in this product
+([§7](#7-text-that-came-from-the-api)), not a fifth convention.
+
+**Every other mode keeps its own footer while a call is in flight, less one
+word.** Analysis and every detail tab never name `s` or `r` on their own
+footer, so none of them has anything on the line a call in flight makes
+false — except `q quit`, which every one of them carries and which drops
+silently, the same way it already drops from Help's own footer in this same
+state: not marked `q no quit`, because a call finishing is a wait, not a
+permission. `[ ] tabs`, `f follow`, `c container`, `esc back`, `⏎ open` and
+`↑↓ move` all stay bound and stay named — they are viewing and moving, not
+mutating (`screens/dialogs.md § Detail tabs and Analysis keep their own
+footer`).
 
 **The closed mode list** — every mode's own exact string is drawn once, in
 the file that owns it, cited here rather than copied:
 
 | Mode | Footer shape | Drawn in |
 |---|---|---|
-| Alerts | ordinary, anchor always present | [alerts.md](alerts.md) |
-| Resources | ordinary, identical to Alerts' | [resources.md](resources.md) |
-| Analysis, any of the seven reports | ordinary, fixed regardless of report — adds nothing to the key map | [analysis.md § How a report is drawn](analysis.md#how-a-report-is-drawn--the-grammar-every-pane-on-this-page-obeys) |
-| Detail — logs tab, every state of it | ordinary, anchor always present | [detail.md § The logs tab](detail.md#the-logs-tab) |
-| Detail — describe / yaml / events tab | ordinary, anchor always present | [detail.md](detail.md), each tab's own mockup |
-| Detail — yaml tab, a Secret with keys | ordinary, anchor always present, adds `v reveal` | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
+| Alerts | ordinary, anchor always present — the pair's own named exception applies (above): replaced outright | [alerts.md](alerts.md), [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
+| Resources | ordinary, identical to Alerts', the same exception and all | [resources.md](resources.md), [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
+| Analysis, any of the seven reports | ordinary, fixed regardless of report — adds nothing to the key map — the pair's own named exception applies (above): `q quit` alone | [analysis.md § How a report is drawn](analysis.md#how-a-report-is-drawn--the-grammar-every-pane-on-this-page-obeys) |
+| Detail — logs tab, every state of it | ordinary, anchor always present — the pair's own named exception applies (above): `q quit` alone | [detail.md § The logs tab](detail.md#the-logs-tab) |
+| Detail — describe / yaml / events tab | ordinary, anchor always present — the pair's own named exception applies (above): `q quit` alone | [detail.md](detail.md), each tab's own mockup |
+| Detail — yaml tab, a Secret with keys | ordinary, anchor always present, adds `v reveal` — the pair's own named exception applies (above): `q quit` alone | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
 | Empty kind in the browser | ordinary, narrowed to what there is an object to act on — anchor still present | [states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser) |
 | Still loading | ordinary, narrowed to the anchor alone — nothing exists yet to move a cursor across | [states.md § Still loading](states.md#still-loading) |
 | Disconnected · login expired · clock skew · namespace-scoped · nothing-is-broken | ordinary, mutations withheld, anchor always present | [states.md](states.md), each state's own mockup |
-| While a call is running | not a modal — see the rule above | [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
+| While a call is running, over Alerts or Resources | not a modal — see the rule above | [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
 | Confirm · Restart · Delete (typed name) · The cluster said no · Already gone · Drain | modal — closed local set, no anchor | [dialogs.md](dialogs.md) |
 | The cluster picker, at `X` and at startup | modal — closed local set, no anchor; `esc` itself reads `quit` at startup | [context.md](context.md) |
 | The container picker | modal — closed local set, no anchor | [detail.md § Choosing a container, and when there is nothing to choose](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose) |
 | The secret-reveal modal | modal — closed local set (`esc close`) | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
-| The help modal (`?`) | its own fixed footer — the one modal keeping `q quit`, never `? all keys` | [help.md](help.md) |
+| The help modal (`?`) | its own fixed footer — the one modal keeping `q quit`, never `? all keys` — except while a call is running underneath it, when `q quit` itself drops and two of its sixteen body rows carry a `paused` clause instead | [help.md](help.md) |
 
 ## 3. Where the state lives
 

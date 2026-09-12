@@ -931,41 +931,178 @@ change and the rest of the screen keeps working
 ```
 header   ctx: prod-eu · live · admin · changing…
 log      $ kubectl scale deployment/web --replicas=3 -n payments   …
-footer   ↑↓ move  ⏎ open  ?  ·  finishing the change to payments/web first
+footer   ↑↓ move  ⏎ open  ? keys  ·  changing payments/web first
 ```
 
 Navigation stays free. A **second mutation**, a **cluster switch** (`X`) and
 **`q`** are refused until the call returns — quitting mid-`PATCH` would leave
 the audit log holding an attempt with no result. The `…` on the command line is
-replaced by the outcome, never removed.
+replaced by the outcome, never removed. None of that is spelled out on this
+line, and it does not need to be any more: `? keys` (below) is now an
+unambiguous pointer to [help.md § While the call is
+running](help.md#while-the-call-is-running), which is where all four —
+`s`, `r`, `ctrl-d` and `X` — are now named as paused, and why.
 
-**`?` has no `all keys` beside it here, and neither `? all keys` nor `q quit`
-is what gives way if the name runs long — the reason clause is.** This is the
-one footer in the product carrying a string the cluster named rather than one
-this file chose, and `payments/web` above is the short case: the name is
-whatever object was selected when the mutation was confirmed, which can be as
-long as any name this product already truncates elsewhere. The rule is the
-one [the browser's own line under the
-table](resources.md#when-it-does-not-fit-the-name-gives-way--and-now-it-says-so)
-already states, read against this line's own fixed parts instead of that
-one's: `room` is 76 columns less the fixed prefix `↑↓ move  ⏎ open  ?  ·
-finishing the change to ` (47) and the fixed suffix ` first` (6) — 23 columns.
-A name that fits draws whole; one that does not is cut to `room − 1` columns,
-on a character boundary, with one `…` glued to the last character kept — no
-word-boundary walk-back, because a name is one token, the same reasoning the
-browser's own cut already gives. This is [widgets.md § 7](widgets.md#7-text-that-came-from-the-api)'s
-fourth truncation, not a new one — the same footer, the name now long enough
-to cut:
+**`?` reads `? keys` here, not the bare `?` this line drew before this
+round.** A bare `?` sits directly after the word `open` with only two spaces
+between them — `⏎ open  ?  ·` reads, at a glance, as `⏎ open?` — and it is
+the one key on this whole product that broke the `key label` convention
+every other footer entry already follows (`⏎ open`, `esc cancel`, `q quit`).
+`keys` costs four columns and removes the ambiguity; it is short for the
+ordinary footer's own `? all keys`, not a second label for the same thing.
+Neither `? keys` nor `q quit` (already gone, above) is what gives way if the
+name runs long — the reason clause is.
+
+**The reason clause's own fixed words changed too, and that is where the
+room for the name actually came from.** *"finishing the change to … first"*
+said the same thing *"changing … first"* does, in five more words; shortening
+it is not a cosmetic trim, it is the fix for the two defects below, which
+both come from the same cause — too little of the 76 columns was left for a
+name that has to carry a `/`. `room` is 76 columns less the fixed prefix
+`↑↓ move  ⏎ open  ? keys  ·  changing ` (37) and the fixed suffix ` first`
+(6) — **33 columns**, ten more than the 23 this line had before this round.
+
+- **A cut used to be able to remove the object's own `/`.** The old cut was a
+  flat `room − 1` characters wherever `room` landed, with no regard for what
+  character sat at the cut point. `team-alpha-payments-platform/web` (32
+  characters) drew as `team-alpha-payments-pl…` at the old 22-character
+  budget — no slash anywhere in it. [README § the five rules](README.md#the-five-rules-every-screen-obeys)
+  is what makes that a misreading and not merely an ugly cut: a bare name
+  means cluster-scoped everywhere else in this product, so a reader watching
+  this line would learn that a namespaced Deployment is a Node.
+- **Two names sharing a long common prefix used to draw identically.**
+  `payments/checkout-worker-green` and `payments/checkout-worker-blue` both
+  cut to `payments/checkout-work…` at the old budget — nine columns spent on
+  `payments/` left thirteen for the name, and the two names do not differ
+  until `-green` vs `-blue`, their 26th character — well past the 13 the old
+  cut had room to show.
+
+**The rule now has a second clause, on top of the one [the browser's own line
+under the table](resources.md#when-it-does-not-fit-the-name-gives-way--and-now-it-says-so)
+already states — and it is a hard rule, not a wider budget that merely makes
+the two bugs above less likely:**
+
+1. The name fits in `room` → it draws whole. No mark. (All three names above
+   now fit whole in 33 columns of room — 32, 30 and 29 characters — and no
+   longer collide or lose their slash, because there is nothing left to cut.)
+2. It does not fit, and cutting to `room − 1` characters would still keep the
+   object's own `/` (that is, the `/` sits at or before column `room − 2`) →
+   cut there and glue one `…` to the last character kept, exactly as the
+   browser's own line does. **The visible string still contains a `/`
+   whenever the full name does**, because the cut never had to touch it.
+3. It does not fit, and a plain `room − 1` cut would land *before* the `/`
+   (the namespace alone is longer than the room left for it) → the
+   **namespace** gives way, not the name. It is cut from its own **front**,
+   behind one leading `…`, and the object's own name is kept in full —
+   `…<tail of the namespace>/<name>`. Only when the name alone is too long
+   even for that — past `room − 2` columns, the two left over once the
+   leading `…` and the `/` are paid for — is the name cut too, at its own
+   tail, with its own `…`, and the namespace gives up the rest of itself
+   rather than a part of it: `…/<name, cut at its tail>…`. **The visible
+   string still contains a `/` whenever the full name does, in both
+   branches** — and unlike the case this replaces, it also still contains
+   the object's own name, whole far more often than not, because a
+   namespace losing its front is what a reader loses first, not the one
+   thing every later command needs to type.
+4. Nothing here changes for a bare, cluster-scoped name (a node) — no `/`
+   exists to protect, so case 2's plain cut is exactly what a bare name
+   already got.
+
+**Why the namespace gives way from its front and not its tail — the same
+question [the header's own cut](widgets.md#1a-the-header-row) already
+answered, the other way round.** `ui::shortened` cuts the header's context
+zone from its front because `prod-eu` and `prod-eu-2` differ in their *last*
+character — cutting the tail there would make every environment of one
+cluster read alike. A namespace fails the identical way: `team-a-prod` and
+`team-a-staging`, `payments-and-billing` and `payments-and-shipping` share
+their front and differ in their tail, so a cut that kept the front and
+dropped the tail is the one direction guaranteed to erase the one thing that
+told two namespaces apart. Case 3's namespace is therefore cut the header's
+way, front first, not case 2's way — two cuts in one product disagreeing
+about which end of a *namespace* identifies it is the same shape of defect
+[CLAUDE.md's own rule](../CLAUDE.md) names as the most expensive kind this
+repo has: two things reading one fact and answering it differently.
+
+No word-boundary walk-back in any case — a name is one token (or two joined
+by one `/`), the same reasoning the browser's own cut already gives — and
+this is still [widgets.md § 7](widgets.md#7-text-that-came-from-the-api)'s
+fourth truncation, not a new one. Case 2, the ordinary cut, unchanged in kind
+from before this round:
 
 ```
-↑↓ move  ⏎ open  ?  ·  finishing the change to payments/checkout-work… first
+↑↓ move  ⏎ open  ? keys  ·  changing payments/checkout-worker-service… first
 ```
 
 76 columns, exactly the floor — `payments/checkout-worker-service-account-token-projector`
-cut to 22 characters plus the mark. `↑↓ move` and `⏎ open` do not give way
-either: they are what "navigation stays free" means on screen, and dropping
-them to buy the name more room would hide the one thing this state promises
-still works.
+cut to 32 characters plus the mark, up from 22 before this round. Case 3, a
+namespace real distributions ship and this page had no example for until now:
+
+```
+↑↓ move  ⏎ open  ? keys  ·  changing …uster-node-tuning-operator/tuned first
+```
+
+`openshift-cluster-node-tuning-operator/tuned` — a real OpenShift namespace,
+38 characters, and a real object in it, `tuned` (5 characters). The
+namespace alone is 38, more than the 31 a plain `room − 1` cut can still keep
+before the `/`, so case 3 applies: `room − 2 − len(name)` = `33 − 2 − 5` = 26
+characters of the namespace's own tail are kept, behind a leading `…`, ahead
+of the `/` and the name in full — `…uster-node-tuning-operator/tuned`, 33
+columns exactly. Every object in this namespace used to draw the same line,
+byte-identical, under the case this replaces; now `tuned`, a Deployment and
+anything else in it each draw their own name in full, and only the shared
+namespace prefix is what the cut agrees to lose. `↑↓ move` and
+`⏎ open` do not give way in any of these cases: they are what "navigation
+stays free" means on screen, and dropping them to buy the name more room
+would hide the one thing this state promises still works.
+
+### Detail tabs and Analysis keep their own footer, not this line
+
+The reason Alerts' and Resources' footers are replaced outright by the line
+above is that `s scale` and `r restart` sit on them, and marking either `no`
+right now would say the wrong thing — `no` is this product's own word for a
+permission this login lacks
+([help.md § When a key is refused](help.md#when-a-key-is-refused)), and a
+call in flight is a wait, not a permission. Those two footers have no third
+word for "off for now" that is not one of those two wrong ones, so the whole
+line is replaced instead.
+
+**A detail tab's footer and Analysis's never had that problem, because
+neither ever names `s` or `r` at all**
+([widgets.md § 2a](widgets.md#2a-the-footer)'s own closed mode list: the logs
+tab reads `[ ] tabs  f follow  c container  esc back  ? all keys  q quit`;
+describe/yaml/events read `[ ] tabs  esc back  ? all keys  q quit`; Analysis
+reads `↑↓ move  ⏎ open  esc back  ? all keys  q quit`). Nothing on any of
+those three lines is made false by a call in flight, except the one word all
+three share: `q quit`. **That word drops, silently, for the same reason it
+already drops from Help's own footer in this same state** — not marked `q no
+quit`, because a call finishing is a wait
+([help.md § While the call is running](help.md#while-the-call-is-running)).
+Everything else on the line stays bound and stays named: `[ ] tabs`,
+`f follow`, `c container` and `esc back` are viewing and moving, not
+mutating, and *navigation stays free* is the one promise this whole state
+makes — a promise a tab's own footer keeps by staying whole, not by being
+replaced with a line that has nothing on it to open or move to.
+
+This is reached exactly as it sounds: confirm a scale on Alerts, then press
+`⏎` on a pod to watch its logs while that scale is still on the wire. Until
+this round, the logs tab's footer over that call drew the line above instead
+of its own — `⏎ open` on a pane with nothing to select, `esc back` gone with
+no other way out of the tab, and `[ ] tabs`, `f follow`, `c container` all
+still bound and none of them named. **No second in-flight line and no new
+mockup is needed to fix it** — every mode's own footer is already drawn, in
+the file that owns it; the one change is that `q quit` is missing from it
+while a call is on the wire, the same one-word drop
+[help.md § While the call is running](help.md#while-the-call-is-running)
+already makes. `detail.md` carries that note now, once, above its own tab
+table, governing all four tabs' footers rather than repeated under each one.
+
+**Where the reason lives, if a tab's own footer never carried one even in the
+ordinary case, is unchanged by any of this.** The header's own `· changing…`
+mark is on screen regardless of which view or tab is open
+([widgets.md § 1a](widgets.md#1a-the-header-row)), and `? all keys` still
+opens Help over a detail tab exactly as it does over Alerts — and Help now
+says why, in the body itself, not only in a footer
+([help.md § While the call is running](help.md#while-the-call-is-running)).
 
 ## Drain, which takes minutes
 
