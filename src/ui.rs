@@ -46,7 +46,7 @@ use crate::analysis::{Badge, Report, Row as ReportRow};
 use crate::k8s::{Browsable, Fault};
 use crate::rules::{ContainerSnapshot, Finding, ObjectId, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
-use crate::views::{self, App, Card, NavItem, Pane, Refused, Tab, View};
+use crate::views::{self, App, Card, NavItem, Offer, Pane, Refused, Tab, View};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
@@ -101,7 +101,27 @@ const EVIDENCE_LINES: usize = 3;
 
 /// The centred block an empty or still-loading pane draws its sentences in
 /// (`screens/states.md`).
-const BLOCK: u16 = 34;
+///
+/// **Measured off that page's own widest already-drawn line, not chosen** (§ The audit log could
+/// not be opened, which states the number and shows the three lines it is read off): `84 pods and
+/// 3 nodes checked, none of` is 36 (§ Nothing is broken), `Large clusters take a moment. Findings`
+/// is 38 (§ Still loading), and that section's own `No space left on device (os error 28) —` is
+/// 39 — the longest the file draws anywhere this block speaks. At 34 the audit sentence needed
+/// nine lines against the 13 [`FLOOR`] leaves and was cut with a visible mark; at 39 it is 12 of
+/// them and the file's line is drawn whole, which is the check this number exists to pass.
+const BLOCK: u16 = 39;
+
+/// **The rows the list — or the calm block — keeps whatever queues above it**
+/// (`screens/states.md` § Your clock and a scoped namespace together, which states the arithmetic
+/// once for all three banners: the body is 16 rows, this is 3 of them, and everything stacked over
+/// the list shares the other 13). The number is
+/// [`screens/alerts.md` § How wide a card is, and how tall]'s own — *"`shop/api` gets three rows
+/// and that is the floor"* — so a card under a stack of banners is still a card.
+const FLOOR: u16 = 3;
+
+/// The browser's own title and the blank under it, which come out of what a caveat leaves rather
+/// than out of the table's rows.
+const HEADING: u16 = 2;
 
 /// `▸ ` — [`theme::SELECTION`] plus the column that keeps it off the label. Two columns, so a
 /// group's row reads `▸  workloads` exactly as `screens/resources.md` draws it.
@@ -378,6 +398,11 @@ pub struct Screen<'a> {
     /// between them. They count what the store actually read — *"84 pods and 3 nodes checked…"*,
     /// *"reading the cluster… 2,140 pods"* — which is a fact about the store and not about the
     /// screen, so the sentence is assembled where the numbers are (`screens/states.md`).
+    ///
+    /// **Order is the caller's, and it is the rank**: on Alerts the audit sentence is drawn above
+    /// every one of these, and when the 13 rows run out it is the *last* paragraph here that gives
+    /// way (`screens/states.md` § On a healthy or a still-loading Alerts screen). A pointer the
+    /// reader can do without belongs at the end.
     pub note: &'a [String],
     /// Every browsable kind the cluster said it serves, for the sidebar's rows under an open
     /// group. **Never a list written here** (invariant 12).
@@ -428,6 +453,34 @@ pub struct Screen<'a> {
     /// — nothing selected, nothing asked, nothing answered yet — draws every key exactly as a run
     /// with no probe at all does (NOTES § D229 ruling 4).
     pub refused: Refused,
+    /// **Whether a write can happen at all in this run** ([`Writes`]) — the session half of
+    /// *may a mutating key be offered right now*, where [`Screen::alerts`] and [`Screen::browser`]
+    /// are the half that moves frame to frame (`crate::views::Offer`, PM ruling 2026-09-12).
+    pub writes: Writes<'a>,
+    /// **The sentence a clock more than five minutes out of step with the cluster's puts above the
+    /// pane, or `None`** (`screens/states.md` § Your computer's clock is off).
+    ///
+    /// **It is the caller's sentence because both of the facts in it are the store's** — the size
+    /// of the gap and which way it runs — and the two directions are two sentences, because they
+    /// break differently (that section's own table, NOTES § D177). This file draws whichever
+    /// arrived and picks neither. **The `⚠` is part of the sentence**, as it is in every other
+    /// banner this pane draws (`Pane::Denied`'s own): it marks the alarmed, left-flush family, and
+    /// the calm family drops it — which is a choice about the screen the sentence lands on, so it
+    /// belongs to whoever wrote the sentence and not to [`banner`].
+    ///
+    /// **It withholds `s` and `r` for as long as it holds**, which is that section's own reason: an
+    /// age that reads fresher than it is decides which card somebody reacts to first, and reacting
+    /// means pressing one of those two keys on it.
+    ///
+    /// **Nothing is drawn from it while [`Screen::alerts`] is [`Pane::Loading`] or empty**: there
+    /// the sentence is one of [`Screen::note`]'s own paragraphs, because *clock skew is drawn in
+    /// whichever family the rest of the screen is already in — it does not bring its own* (that
+    /// section, § Nothing is broken, and the clock is still off).
+    pub clock: Option<&'a str>,
+    /// **What the connection to this cluster is doing** ([`Link`]) — the fact
+    /// [`crate::views::Pane`] cannot carry, and the one that decides whether k8rs is in a position
+    /// to offer a write at all.
+    pub link: Link,
     /// **The object a detail tab is open on, and what each of its four fetches answered** —
     /// `None` when nothing is open (`screens/detail.md`).
     ///
@@ -435,6 +488,94 @@ pub struct Screen<'a> {
     /// not a fourth [`View`]**: `esc` goes back to the pane the reader came from, and a view that
     /// had to be re-derived to go back to would be a second place holding where they were.
     pub detail: Option<&'a Detail<'a>>,
+}
+
+/// **Whether a write can happen at all in this run, and the sentence that says why not**
+/// (`screens/states.md` § The audit log could not be opened, NOTES § D21, § D231).
+///
+/// **One value, and the footer, the header's own `read-only` mark and `?`'s *Changing things* block
+/// all read it** (PM ruling, 2026-09-12). D21 — *k8rs says so and continues in read-only mode; it
+/// does not exit* — has never been true of any binary: a headless run has no *continue* to continue
+/// into. A TUI can start, draw, and leave the write keys dead, and this is the value that makes
+/// them dead: [`offered`] turns it into a `crate::views::Offer` that is not `Act`, which
+/// `crate::views::App::may_mutate` then refuses. **Unreachable, not a banner over live keys** —
+/// invariant 2's own bar.
+///
+/// **`--read-only` is the second cause and belongs here as a second variant, not as a second
+/// signal.** `screens/states.md` requires *one signal true for both causes* — the header draws the
+/// same `read-only` word either way, because its job is to say what is true now and not why — so
+/// every reader asks [`Writes::live`] and has nothing to change when that box lands.
+///
+/// **Not a `bool` beside a `String`**: the sentence belongs to the one cause that has one, and two
+/// fields are two facts that can disagree. It is `ops::audit_log`'s own returned sentence, cleaned
+/// and bounded where it was built (invariant 9, `ops::named`) and never a second one written here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Writes<'a> {
+    /// Writes are reachable. Whether *this login* may scale *this object* is
+    /// `crate::views::Refused`'s separate answer, and the only one that may mark a key `no`.
+    Live,
+    /// **`--read-only` was asked for, and that is its only cause.**
+    ///
+    /// **Not a login that may not change anything**, which this doc named as a second cause until
+    /// 2026-09-12 and which does not exist: RBAC has no whole-session answer, only per verb,
+    /// resource and namespace, and that answer is `crate::views::Refused`'s. **And never a
+    /// namespace scope** — `screens/states.md` § You can only see some namespaces now draws a
+    /// scoped `live · admin` session with `s scale` and `r restart` live, and states that the scope
+    /// is not a permission. A Phase 12 wire from *namespace fallback* to this variant would take
+    /// every mutating key from the commonest non-admin shape there is, which is the defect [`Link`]
+    /// was introduced to close.
+    ///
+    /// **It carries no sentence because it needs none**: the header says it, and the box that owns
+    /// § 1a's zone table wires that word off [`Writes::live`]. Nothing constructs this in product
+    /// code until then, which is why it is drawn nowhere and drops no banner.
+    ReadOnly,
+    /// **[`crate::ops::audit_log`] could not open the log**, carrying the sentence it returned.
+    Unaudited(&'a str),
+}
+
+impl<'a> Writes<'a> {
+    /// **The one question every reader asks**, so a second cause is one arm here and no call site
+    /// anywhere.
+    fn live(self) -> bool {
+        matches!(self, Writes::Live)
+    }
+
+    /// The banner's own sentence, or nothing to draw.
+    fn said(self) -> Option<&'a str> {
+        match self {
+            Writes::Live | Writes::ReadOnly => None,
+            Writes::Unaudited(said) => Some(said),
+        }
+    }
+}
+
+/// **What the connection to this cluster is doing** (`screens/states.md` § The connection dropped,
+/// § Your login expired, NOTES § D19).
+///
+/// **It is a session fact and [`crate::views::Pane`] cannot hold it**, which is the defect this
+/// type closes (`k8s-admin`, 2026-09-12). `Pane::Denied` is *what this pane was answered*, and its
+/// own doc says it is the namespace-scoped fallback as much as the refusal — so reading a `Denied`
+/// as *we cannot reach the cluster* took every mutating key away from the commonest non-admin shape
+/// there is: a developer with a `RoleBinding` in one namespace, whose `may_i` answers `Yes` and
+/// whose header reads `live · admin`. The link is what decides that, and a `String` in a pane
+/// cannot say it.
+///
+/// **No `Default`, on purpose** (`k8s-admin`, 2026-09-12, round two): the only default there is to
+/// derive is `Live`, the one answer that leaves `s` and `r` live over stale cards, and a later
+/// `..Default::default()` would pick it without anyone deciding to. Every [`Screen`] names its
+/// link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    /// Requests are completing.
+    Live,
+    /// **The stream is gone and k8rs is retrying.** Stale data stays visible and stays labelled;
+    /// what it costs is the two mutating keys, because k8rs cannot ask whether a write would be
+    /// allowed and `s no scale` would claim a verdict nobody gave.
+    Lost,
+    /// **The kubeconfig's short-lived token ran out** — not a 403 and not a dropped socket. It
+    /// costs the same two keys and promotes `X switch cluster` onto the footer, because renewing
+    /// and reconnecting is *the* next step.
+    Expired,
 }
 
 /// **What the four detail tabs were answered**, one field per tab (`screens/detail.md`).
@@ -728,13 +869,15 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
 fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let dim = screen.fg(theme::DIM);
     let row = indented(area);
-    let (line, quit) = app.footer(screen.detail.is_some(), screen.refused, "");
+    let offer = offered(app, screen);
+    let (line, quit) = app.footer(screen.detail.is_some(), offer, screen.refused, "");
     let keys = match &app.changing {
         Some(object) => {
             let room = usize::from(row.width).saturating_sub(width(&line));
             let whole = name(object.namespace.as_deref(), &object.name);
             app.footer(
                 screen.detail.is_some(),
+                offer,
                 screen.refused,
                 &name_cut(&whole, room),
             )
@@ -746,6 +889,79 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
         Layout::horizontal([Constraint::Min(0), Constraint::Length(width(quit) as u16)]).areas(row);
     frame.render_widget(Paragraph::new(Line::styled(quit, dim)), right);
     frame.render_widget(Paragraph::new(Line::styled(keys, dim)), left);
+}
+
+/// **Which footer shape this frame is in** ([`Offer`]) — the one place a screen becomes one, so the
+/// line that is drawn and the key that is live cannot disagree: `crate::views::App::may_mutate` is
+/// handed this same value.
+///
+/// **Four facts decide it and none stands in for another** (PM rulings, 2026-09-12). *Is there
+/// anything to act on* is read off the open pane and moves frame to frame. *Is the connection
+/// answering* is [`Screen::link`] and nothing else — **never [`Pane::Denied`]**, which is also the
+/// namespace-scoped fallback, and reading it as *we cannot reach the cluster* took both mutating
+/// keys from a developer whose `RoleBinding` allows them. *Can a write happen in this run* is
+/// [`Screen::writes`]. *Can the times on the page be trusted* is [`clock`]. Any one of the last
+/// three answering no gives `Move`, with no key marked `no`: that mark is reserved for
+/// `crate::views::Refused`.
+///
+/// **`switch` is set wherever the login has expired, whatever the pane is drawing** — an expired
+/// login over a still-loading pane is `Nothing { switch: true }` and over an empty kind
+/// `Filter { switch: true }`, because `X` never acted on a selected row and *nothing is selected*
+/// was never its condition (`screens/states.md` § Over a pane with nothing to show yet).
+///
+/// **Analysis and an open detail tab return `Move { switch: false }`, and that value is not idle.**
+/// Their footers are drawn above it in `crate::views::App::footer` from their own closed lines, so
+/// no footer is built from it — but `may_mutate` is handed it, and it is what leaves no mutating
+/// key pressable behind a footer that names none (PRIOR-ART § G2).
+pub fn offered(app: &App, screen: &Screen) -> Offer {
+    let switch = screen.link == Link::Expired;
+    // **A mode whose own footer names no mutating key may not leave one pressable behind it**
+    // (PRIOR-ART § G2 — *read-only enforced per view is a hole per view*, and k9s #3858 is that
+    // hole in its XRay view). Analysis and the detail tabs answer above this value in
+    // `crate::views::App::footer`, so what they draw is unchanged; what changes is that
+    // `crate::views::App::may_mutate` now says no from them, instead of acting on whatever the
+    // Analysis cursor happens to point at the moment Phase 12 binds `s` globally.
+    if screen.detail.is_some() {
+        return Offer::Move { switch: false };
+    }
+    let rows = match app.view {
+        View::Analysis(_) => return Offer::Move { switch: false },
+        View::Alerts => match screen.alerts {
+            Pane::Loading => return Offer::Nothing { switch },
+            // **Alerts' own empty pane keeps the cursor keys where the browser's loses them**, and
+            // that is each section's own wording rather than a rule derived here: *the sidebar's
+            // own rows are still there to move across and open* once its badges have settled
+            // (`screens/states.md` § Nothing is broken) against *there is nothing to move a cursor
+            // across* (§ An empty kind in the browser).
+            //
+            // **Both answers are read the same way, and a refusal is not one of the reasons a key
+            // is withheld** ([`Link`]): `Pane::Denied` carries whatever did come back, and a
+            // namespace-scoped developer's cards are as selectable as anybody's.
+            Pane::Ready(cards) | Pane::Denied(_, cards) => !cards.is_empty(),
+        },
+        View::Resources(_) => match screen.browser {
+            Pane::Loading => return Offer::Nothing { switch },
+            // **Zero rows is zero rows whichever answer holds them** — a 403 on `list jobs` that
+            // came back with nothing promised `⏎ open` over fourteen blank rows until this arm
+            // read both (`k8s-admin`, 2026-09-12).
+            Pane::Ready(table) | Pane::Denied(_, table) if table.rows.is_empty() => {
+                return Offer::Filter { switch };
+            }
+            Pane::Ready(_) | Pane::Denied(..) => true,
+        },
+    };
+    // **Four reasons, one line, and none of them a `Refused` mark**: nothing selected · the link
+    // is not answering · no time on the page can be trusted · writes are off for this run.
+    //
+    // **The clock is read through [`clock`] and not off the field**, so a reading suppressed for
+    // being stale cannot withhold a key it is not on screen to justify. The two agree today
+    // — a link that is not `Live` already answers `Move` on the line above — and asking the one
+    // function is what keeps them agreeing when one of them next changes.
+    if rows && screen.link == Link::Live && screen.writes.live() && clock(screen).is_none() {
+        Offer::Act
+    } else {
+        Offer::Move { switch }
+    }
 }
 
 /// **`?` — the full key map, drawn over the whole body region** (`screens/help.md`,
@@ -1611,19 +1827,99 @@ fn content(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     match app.view {
         View::Resources(nth) => browser(frame, area, app, screen, screen.kinds.get(nth)),
         View::Analysis(nth) => match screen.reports.get(nth).and_then(|(_, report)| *report) {
-            None => note(frame, area, screen, false),
+            None => note(frame, area, screen, false, None),
             Some(report) => analysis(frame, area, app, screen, report),
         },
         View::Alerts => match screen.alerts {
-            Pane::Loading => note(frame, area, screen, false),
+            // **The two states that draw the centred block draw no banner over it**, because there
+            // the caveat is one of [`Screen::note`]'s own paragraphs instead: *clock skew is drawn
+            // in whichever family the rest of the screen is already in — it does not bring its own*
+            // (`screens/states.md` § Nothing is broken, and the clock is still off).
+            //
+            // **The audit sentence is the exception, and it is passed here rather than appended
+            // inside [`note`]** (`screens/states.md` § On a healthy or a still-loading Alerts
+            // screen, re-ruled 2026-09-12): this is the only pane that draws the block with no
+            // [`caveats`] above it, so without it a healthy cluster — empty all session — and the
+            // first frame of every run said nothing about a dead write path. It is read off
+            // [`Screen::writes`] and not left to the caller, because the caller is Phase 12's and
+            // NOTES § D21 is a rule nothing would enforce otherwise.
+            Pane::Loading => note(frame, area, screen, false, screen.writes.said()),
             Pane::Denied(said, cards) => {
-                let rest = banner(frame, area, screen, said);
+                let rest = caveats(frame, area, screen, Some(said), FLOOR);
                 alerts(frame, rest, app, screen, cards);
             }
-            Pane::Ready(cards) if cards.is_empty() => note(frame, area, screen, true),
-            Pane::Ready(cards) => alerts(frame, area, app, screen, cards),
+            Pane::Ready(cards) if cards.is_empty() => {
+                note(frame, area, screen, true, screen.writes.said());
+            }
+            Pane::Ready(cards) => {
+                let rest = caveats(frame, area, screen, None, FLOOR);
+                alerts(frame, rest, app, screen, cards);
+            }
         },
     }
+}
+
+/// **The sentences that are true of the screen rather than of the list under it**, stacked above
+/// whatever the pane answered.
+///
+/// **A rank, not a draw order that happens to cut the last one** (`screens/states.md` § Your clock
+/// and a scoped namespace together, re-ruled 2026-09-12): the clock, then the pane's own reason,
+/// then the audit sentence — and each is handed what the ones above it left, so **the audit
+/// sentence is the first to give way and neither of the other two ever gives way to feed it**. It
+/// is the one fact on the screen with a second carrier: the footer already withholds `s` and `r`,
+/// and the header will read `read-only`. The clock and the pane's reason — which namespace, which
+/// check is off, what command renews a login — are said nowhere else. The order before this put the
+/// audit sentence second, and the pane's own reason was the one cut: *"One node check is off"*
+/// beside a namespace scope, `aws sso login` beside an expired login, and with all three queued the
+/// namespace banner gone with no mark (`k8s-admin`, 2026-09-12, round two).
+///
+/// **One function because both panes stack them**, and because a second copy is how the browser and
+/// Alerts come to draw one run's caveats in two different orders.
+fn caveats(frame: &mut Frame, area: Rect, screen: &Screen, said: Option<&str>, keep: u16) -> Rect {
+    let mut rest = area;
+    let mut left = usize::from(area.height.saturating_sub(keep));
+    for sentence in [clock(screen), said, screen.writes.said()]
+        .into_iter()
+        .flatten()
+    {
+        // **Two rows is the least a banner can say anything in** — one marked line and the blank
+        // under it. Below that the banner draws nothing at all, not a fragment and not a dangling
+        // mark. **Only the audit sentence reaches this in practice, and that is arithmetic, not a
+        // guard**: the clock's two sentences are four or five rows at the floor, so the pane's own
+        // reason is always handed at least eight.
+        if left < 2 {
+            break;
+        }
+        let before = rest.height;
+        rest = banner(frame, rest, screen, sentence, left);
+        // **Saturating, because a renderer may not panic on arithmetic.** [`banner`] clamps its own
+        // height to the `Rect` it was handed as well as to this budget, so a wider one than was
+        // granted is not reachable today — and a subtraction that only happens not to underflow is
+        // one edit away from taking the terminal with it.
+        left = left.saturating_sub(usize::from(before.saturating_sub(rest.height)));
+    }
+    rest
+}
+
+/// **The rows a banner may spend over a pane that has content of its own** — everything but
+/// [`FLOOR`]. One function because five panes draw a refusal over something, and a budget computed
+/// per pane is how two of them come to disagree about what a list is owed.
+fn floor(area: Rect) -> usize {
+    usize::from(area.height.saturating_sub(FLOOR))
+}
+
+/// **The clock sentence, or nothing while k8rs is not completing requests** (`screens/states.md`
+/// § While disconnected, or while the login has expired).
+///
+/// **Structural rather than the caller's to remember**, because the caller is Phase 12's and will
+/// meet that section long after this one: a skew is measured off a live response's `Date` header,
+/// and one kept from the *last* successful request is exactly the guess *a vital that cannot be
+/// read is blank, never guessed* refuses. **[`Writes::Unaudited`] does not hide with it** and that
+/// is stated in the same section: a state directory that could not be opened is fixed for the run
+/// and goes nowhere while the connection is down, so a sentence that had hidden itself would have
+/// to reappear from nowhere with no event to explain it.
+fn clock<'a>(screen: &Screen<'a>) -> Option<&'a str> {
+    screen.clock.filter(|_| screen.link == Link::Live)
 }
 
 /// The centred block an empty or still-loading pane draws (`screens/states.md`).
@@ -1638,26 +1934,48 @@ fn content(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 /// one screen (PRIOR-ART § C2). `reading the cluster…` is `screens/states.md`'s own line without
 /// the count it has no source for, which is the same rule the header's vitals obey — blank, not
 /// guessed.
-fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool) {
+///
+/// **`first` is a sentence ranked above every paragraph the caller handed over, and only
+/// [`content`]'s Alerts arm passes one** — the audit sentence, on the one pane that draws this
+/// block with no [`caveats`] above it (`screens/states.md` § On a healthy or a still-loading Alerts
+/// screen, re-ruled 2026-09-12). Every other caller either stacks its banners already or has no
+/// seat for the sentence once it answers, and appending it here for all seven drew it twice on the
+/// browser and made it flicker on every detail tab (`k8s-admin`, 2026-09-12, round two).
+fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool, first: Option<&str>) {
     let mut lines: Vec<Line> = Vec::new();
-    if !healthy && screen.note.is_empty() {
-        lines.push(Line::styled("reading the cluster…", screen.fg(theme::DIM)));
-    }
+    let mut budget = usize::from(area.height.saturating_sub(FLOOR));
     if healthy {
         lines.push(calm(screen, "nothing is broken").centered());
         lines.push(Line::default());
+        budget = budget.saturating_sub(lines.len());
+    }
+    let measure = usize::from(BLOCK);
+    let waiting = ["reading the cluster…".to_owned()];
+    let handed = if !healthy && screen.note.is_empty() {
+        &waiting[..]
+    } else {
+        screen.note
+    };
+    // **The rank is positional, and each paragraph is handed what the ones above it left** — the
+    // banners' own rule in [`caveats`], so *whatever the caller put last is what gives way* and a
+    // paragraph with no room left draws nothing rather than a mark on the whole sentence above it.
+    // One run of lines cut as a block put `…` on the end of a finished sentence, and one row more
+    // drew a line holding nothing but the mark. **Still the same 13-of-16 cap the banner path
+    // keeps**: `centred` clips whatever it is handed with no mark of its own.
+    let mut text: Vec<String> = Vec::new();
+    for paragraph in first.into_iter().chain(handed.iter().map(String::as_str)) {
+        let gap = usize::from(!text.is_empty());
+        let share = budget.saturating_sub(text.len());
+        if share <= gap {
+            break;
+        }
+        if gap == 1 {
+            text.push(String::new());
+        }
+        text.extend(marked(wrapped(paragraph, measure), measure, share - gap));
     }
     let dim = screen.fg(theme::DIM);
-    for (nth, paragraph) in screen.note.iter().enumerate() {
-        if nth > 0 {
-            lines.push(Line::default());
-        }
-        lines.extend(
-            wrapped(paragraph, usize::from(BLOCK))
-                .into_iter()
-                .map(|line| Line::styled(line, dim)),
-        );
-    }
+    lines.extend(text.into_iter().map(|line| Line::styled(line, dim)));
     centred(frame, area, lines);
 }
 
@@ -1694,7 +2012,7 @@ fn calmly(frame: &mut Frame, area: Rect, screen: &Screen, headline: &str, said: 
 /// **[`BLOCK`] is a floor, not a ceiling.** It is the measure several paragraphs of prose want,
 /// and a caller whose line is legitimately wider — `screens/states.md` § *An empty kind in the
 /// browser*, one line of dim text that the file draws unbroken — would otherwise have it clipped
-/// at 34 columns. The pane is the real ceiling. [`note`]'s own lines are wrapped at `BLOCK`
+/// at `BLOCK` columns. The pane is the real ceiling. [`note`]'s own lines are wrapped at `BLOCK`
 /// before they arrive, so nothing about the Alerts block moves.
 fn centred(frame: &mut Frame, area: Rect, lines: Vec<Line>) {
     let widest = lines.iter().map(Line::width).max().unwrap_or(0);
@@ -1721,8 +2039,43 @@ fn centred(frame: &mut Frame, area: Rect, lines: Vec<Line>) {
 /// **It returns the pane that is left under it**, so the caller draws its own list there — cards
 /// for Alerts, a table for the browser. A banner that also drew the list could only ever serve
 /// one pane, and the sentence is the half both share.
-fn banner(frame: &mut Frame, area: Rect, screen: &Screen, said: &str) -> Rect {
-    let text = wrapped(said, usize::from(padded(area).width));
+///
+/// **A banner that opens with the alarm mark spends it once, and everything under it hangs at the
+/// column the text started on** (`screens/states.md` § Rules that hold across every state on this
+/// page, `tui-designer` 2026-09-12). It is a rule about the *paragraph* and not about word wrap:
+/// § *The connection dropped* and § *Your login expired* both draw three whole sentences that way,
+/// so a renderer that indented only a wrapped continuation would put the mark back at the head of
+/// the next sentence and make it read as repeating once per sentence. The unmarked family —
+/// § *You can only see some namespaces*, the audit sentence — hangs by nothing, which is the same
+/// arithmetic with no mark to pay for.
+fn banner(frame: &mut Frame, area: Rect, screen: &Screen, said: &str, most: usize) -> Rect {
+    // **`most` is rows, and one of them is the trailing blank** — so the text gets one fewer, and
+    // a sentence past that budget is cut at a word boundary behind a visible [`CUT`], the same
+    // rule the card's evidence line and the command log already follow (`screens/widgets.md` § 7,
+    // `screens/states.md` § Your clock and a scoped namespace together). Nothing here is bounded
+    // by the sentence's own length: `ops::audit_log` measured 1383 characters against a pane that
+    // holds about 880 at the floor, and an unbounded banner took the whole list with it
+    // (`k8s-admin`, 2026-09-12).
+    let columns = usize::from(padded(area).width);
+    // **The mark is read off `theme.rs` and not spelled again here** ([`theme::ALARM`], the one
+    // place `⚠` is written): the sentence is still the caller's and still carries its own mark —
+    // what this file owns is the column everything after the first line starts at.
+    let alarm = format!("{} ", mark(theme::ALARM));
+    let hang = if said.starts_with(&alarm) {
+        width(&alarm)
+    } else {
+        0
+    };
+    // **Plain `saturating_sub` and no floor under it**: with no mark this is `columns` exactly, so
+    // an unmarked banner is drawn at the width it was drawn at before this hang existed.
+    let mut text = paragraphed(said, columns.saturating_sub(hang));
+    // **Blank rows stay blank** — a paragraph separator carrying trailing spaces is a row that
+    // reads empty and measures wide, and [`marked`] would then hang [`CUT`] off one.
+    let under = " ".repeat(hang);
+    for line in text.iter_mut().skip(1).filter(|line| !line.is_empty()) {
+        line.insert_str(0, &under);
+    }
+    let text = marked(text, columns, most.saturating_sub(1).max(1));
     // The banner, then the blank row that separates it from the first card — the same blank a
     // card puts between itself and the next one.
     let height = u16::try_from(text.len() + 1)
@@ -1754,9 +2107,30 @@ fn padded(area: Rect) -> Rect {
 fn alerts(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, cards: &[Card]) {
     let area = padded(area);
     let region = usize::from(area.width);
-    let items: Vec<ListItem> = cards
+    let mut drawn: Vec<Vec<Line>> = cards
         .iter()
-        .map(|card| ListItem::new(Text::from(lines(card, screen, region))))
+        .map(|card| lines(card, screen, region))
+        .collect();
+    // **A card taller than the room left is cut down, never dropped.** ratatui's `List` skips an
+    // item whole when it does not fit — `ratatui_widgets::list::rendering::get_items_bounds` breaks
+    // on `height_from_offset + item.height() > max_height`, read off the crate — so under a stack
+    // of banners at the floor the sidebar went on counting a card nobody could see (`k8s-admin`,
+    // 2026-09-12). What is kept is what `screens/states.md` draws in exactly that case: the
+    // identity line and its title, *"trimmed to its title… the full text is one `⏎` away"*
+    // (§ Your clock and a scoped namespace together). No [`CUT`] mark, because the card is not a
+    // sentence with its end shaved off — every part of it is whole, and the parts that did not fit
+    // are behind a key the footer names.
+    //
+    // **Every card, not the first**: `List` scrolls its offset to the *selected* item before it
+    // measures, so trimming card 0 alone left the cursor on card 1 skipped whole at the floor — one
+    // `↓` from an empty pane (`k8s-admin`, 2026-09-12, round two). A card no taller than the region
+    // is untouched by this.
+    for card in &mut drawn {
+        card.truncate(usize::from(area.height).max(1));
+    }
+    let items: Vec<ListItem> = drawn
+        .into_iter()
+        .map(|card| ListItem::new(Text::from(card)))
         .collect();
     let anchors: Vec<Option<&str>> = cards.iter().map(|_| None).collect();
     let mut state = ListState::default().with_selected(app.content.selected(&anchors));
@@ -1924,10 +2298,15 @@ fn indent<'a>(text: Vec<String>, prefix: &'static str, style: Style) -> Vec<Line
 /// kind it is about — and the three answers below it are the same three [`content`] gives the
 /// Alerts pane, for the same reason.
 fn browser(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, kind: Option<&Browsable>) {
-    let area = match screen.browser {
-        Pane::Denied(said, _) => banner(frame, area, screen, said),
-        _ => area,
+    // **Above the title, where this pane already puts its own banner** — a caveat about the run or
+    // the clock is not about the kind named on that row ([`caveats`]). **The floor it keeps is two
+    // rows wider than the Alerts pane's**, because the title and the blank under it come out of
+    // what is left here and out of the list's own rows there.
+    let denial = match screen.browser {
+        Pane::Denied(said, _) => Some(said.as_str()),
+        _ => None,
     };
+    let area = caveats(frame, area, screen, denial, FLOOR + HEADING);
     let [head, _, body] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -1942,7 +2321,7 @@ fn browser(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, kind: Opti
     heading(frame, padded(head), screen, kind);
     let scoped = scope(kind, screen).is_some();
     match screen.browser {
-        Pane::Loading => note(frame, body, screen, false),
+        Pane::Loading => note(frame, body, screen, false, None),
         // **A refusal draws whatever did come back and never the empty sentence below**, which is
         // [`banner`]'s rule one line up: *we were not allowed to look* is not *there is nothing*.
         // A refusal that came back with no rows at all draws the banner and an empty grid.
@@ -2008,9 +2387,10 @@ fn empty(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable
     let dim = screen.fg(theme::DIM);
     // **The measure is the pane, not [`BLOCK`]** — every row of that table is one line of dim
     // text, and `BLOCK` is the width the *Alerts* pane's several paragraphs of prose are set to.
-    // At 34 it breaks the third sentence in half. The pane still bounds it, so one too narrow for
-    // the sentence wraps rather than overruns; the two scoped sentences are shorter than `BLOCK`,
-    // which [`centred`] keeps as its floor, so their block is the same 34 columns it always was.
+    // At `BLOCK` it breaks the third sentence in half — 41 columns against 39. The pane still
+    // bounds it, so one too narrow for the sentence wraps rather than overruns; the two scoped
+    // sentences are shorter than `BLOCK`, which [`centred`] keeps as its floor, so their block is
+    // `BLOCK` wide and centred in the pane.
     let lines = wrapped(&said, usize::from(area.width))
         .into_iter()
         .map(|line| Line::styled(line, dim).centered())
@@ -2643,9 +3023,9 @@ fn set<'a>(text: &str, columns: usize, style: Style) -> Vec<Line<'a>> {
 /// pane drew `○  none right now` under its own banner.
 fn logs(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, pane: &Pane<Logs>) {
     match pane {
-        Pane::Loading => note(frame, area, screen, false),
+        Pane::Loading => note(frame, area, screen, false, None),
         Pane::Denied(said, held) => {
-            let rest = banner(frame, area, screen, said);
+            let rest = banner(frame, area, screen, said, floor(area));
             stream(frame, rest, app, screen, held);
         }
         Pane::Ready(held) => stream(frame, area, app, screen, held),
@@ -2738,8 +3118,8 @@ fn stream(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, logs: &Logs
 /// (`screens/detail.md` § The describe tab).
 fn describe(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Detail) {
     let (area, read) = match open.read {
-        Pane::Loading => return note(frame, area, screen, false),
-        Pane::Denied(said, read) => (banner(frame, area, screen, said), read),
+        Pane::Loading => return note(frame, area, screen, false, None),
+        Pane::Denied(said, read) => (banner(frame, area, screen, said, floor(area)), read),
         Pane::Ready(read) => (area, read),
     };
     let area = padded(area);
@@ -2852,12 +3232,12 @@ fn events(
     pane: &Pane<crate::k8s::Happened>,
 ) {
     let happened = match pane {
-        Pane::Loading => return note(frame, area, screen, false),
+        Pane::Loading => return note(frame, area, screen, false, None),
         // **A refusal draws whatever did come back and never the empty sentence below.** A read
         // that was refused and answered with nothing draws the banner and an empty pane, which is
         // the browser's own rule one region up.
         Pane::Denied(said, happened) => {
-            let rest = banner(frame, area, screen, said);
+            let rest = banner(frame, area, screen, said, floor(area));
             return rows_into(frame, rest, app, screen, happened);
         }
         Pane::Ready(happened) => happened,
@@ -2989,8 +3369,8 @@ fn rows<'a>(happened: &crate::k8s::Happened, screen: &Screen, region: usize) -> 
 /// 20-line `Corefile` onto one line and call it the object.
 fn yaml(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Detail) {
     let (area, document) = match open.yaml {
-        Pane::Loading => return note(frame, area, screen, false),
-        Pane::Denied(said, document) => (banner(frame, area, screen, said), document),
+        Pane::Loading => return note(frame, area, screen, false, None),
+        Pane::Denied(said, document) => (banner(frame, area, screen, said, floor(area)), document),
         Pane::Ready(document) => (area, document),
     };
     let region = usize::from(area.width);
@@ -3247,6 +3627,26 @@ fn wrapped(text: &str, columns: usize) -> Vec<String> {
 /// it legitimate at all (`screens/widgets.md` § 7).
 fn cut(text: &str, columns: usize, most: usize) -> Vec<String> {
     marked(wrapped(text, columns), columns, most)
+}
+
+/// **One sentence that is several paragraphs, wrapped, with the blank row the screen file puts
+/// between them** — [`wrapped`] collapses every run of whitespace, so a banner built on it alone
+/// drew four paragraphs as one block of prose.
+///
+/// **Two of the nine states need it**: `screens/states.md` § *Your login expired* separates the
+/// explanation, the renewal command and the staleness note, and § *You can only see some
+/// namespaces* separates the fallback from the check it switched off — a section that file titles
+/// *"The second paragraph is the point of this screen"*. A `crate::views::Pane::Denied` carries one
+/// `String`, so the break is spelled in it the way it is spelled anywhere else, as a blank line.
+fn paragraphed(text: &str, columns: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for paragraph in text.split("\n\n").filter(|part| !part.trim().is_empty()) {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.extend(wrapped(paragraph, columns));
+    }
+    lines
 }
 
 /// [`cut`]'s own second half, over lines somebody else wrapped — **`most` of them, with [`CUT`]

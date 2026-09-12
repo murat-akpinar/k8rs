@@ -1603,6 +1603,75 @@ fn refuses(answers: &[Option<&Verdict>]) -> bool {
         .any(|answer| matches!(answer, Some(Verdict::No)))
 }
 
+/// **Which shape the list footer is in** — `screens/states.md`'s own four, the two `switch` adds to
+/// them, and [`Offer::Act`], the ordinary one that is none of them. It is the input
+/// [`App::footer`] did not take, and the reason it could not be on [`App`]: *which answer the open
+/// pane came back with* is [`crate::ui::Screen`]'s half, not what the reader navigated to
+/// (NOTES § D259 ruling 5).
+///
+/// **It answers one question — may a mutating key be offered right now — and two different facts
+/// hide behind it** (PM ruling, 2026-09-12). *There is nothing to act on* is about the pane's
+/// content and moves frame to frame; *writes are off for this whole run* is a property of the
+/// session ([`crate::ui::Writes`]). They are separate values and this is where they meet, because
+/// they end in the same drawn line.
+///
+/// **Neither of them is a [`Refused`] mark, and that is the distinction this type exists to keep**
+/// (`screens/widgets.md` § 2a, `screens/help.md` § *When a key is refused*): **withheld** is the
+/// key not being on the line at all, **refused** is the key on the line with `no` before its label.
+/// `no` is `may_i`'s answer about *this login's grant* — a dropped connection, an empty pane and a
+/// dead audit log asked nobody, so marking a key `no` for any of them would claim a verdict nobody
+/// gave. Only [`Offer::Act`] can carry a mark.
+///
+/// **One value and not a bool per key**, because these are the closed set `screens/states.md`
+/// draws and nothing may invent another: [`crate::ui::offered`] is the one place a screen becomes
+/// one of them, and [`App::may_mutate`] is handed the same value — so a key that is not on the line
+/// cannot be pressed either, which is the bar `--read-only` is held to (invariant 2).
+/// **`switch` is the one key this page promotes off `?`, and it is a second fact rather than a
+/// fifth shape** (`screens/states.md` § Your login expired). Which keys the *pane* offers and
+/// whether *switching cluster is the next step* are independent: the file draws their `Move`
+/// combination and states the reason — *"so a reader does not have to hold `aws sso login` in
+/// their head while hunting the key map"* — which is at its strongest on the two frames with
+/// nothing else on them at all, where an expired login used to lose the key outright
+/// (`k8s-admin`, 2026-09-12).
+///
+/// **The `Nothing` and `Filter` rows it produces were this box's composition first and are the
+/// page's now** — § *Over a pane with nothing to show yet* draws both, with `X switch cluster`
+/// where § *Your login expired* already put it, after the cursor keys and before `/ filter`. They
+/// are literals rather than a built string, so every line this footer can draw is spelled at
+/// compile time (NOTES § D259 ruling 4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Offer {
+    /// **Nothing has arrived yet** — nothing to move a cursor across, open, or narrow
+    /// (`screens/states.md` § Still loading).
+    Nothing {
+        /// `X switch cluster`, promoted onto the line.
+        switch: bool,
+    },
+    /// **A list that came back with no rows.** `/ filter` stays — a pane-level control, not an
+    /// operation on an object — and the cursor keys go with the rows
+    /// (§ An empty kind in the browser). **Whichever [`Pane`] answer holds those rows**: a 403 on
+    /// `list jobs` that came back with nothing is as empty as a `Ready` that did, and promising
+    /// `⏎ open` over fourteen blank rows is the same broken promise either way (`k8s-admin`,
+    /// 2026-09-12).
+    Filter {
+        /// `X switch cluster`, promoted onto the line.
+        switch: bool,
+    },
+    /// **Rows to move across and open, and no mutating key** — the states `screens/widgets.md`
+    /// § 2a's closed mode list groups as *ordinary, mutations withheld*: nothing is selected, the
+    /// link is down or the login has expired, no time on the page can be trusted, or writes are
+    /// off for this run. **It is also what Analysis and an open detail tab answer**, whose own
+    /// footers name neither mutating key and must not leave one pressable behind them
+    /// (PRIOR-ART § G2).
+    Move {
+        /// `X switch cluster`, promoted onto the line.
+        switch: bool,
+    },
+    /// **The ordinary footer**, the one line a [`Refused`] mark can reach — and the only one
+    /// [`App::may_mutate`] says yes to.
+    Act,
+}
+
 impl App {
     /// **`q` — refused while a write is in flight**, and only then (NOTES § D12,
     /// `screens/dialogs.md` § *While the call is running*). Quitting mid-`PATCH` would leave the
@@ -1620,8 +1689,15 @@ impl App {
 
     /// **A second mutation is refused while one is running** (`screens/dialogs.md` § *While the
     /// call is running*). Navigation stays free; this is only about opening another dialog.
-    pub fn may_mutate(&self) -> bool {
-        self.modal.is_none() && self.changing.is_none()
+    ///
+    /// **A mutating key is live exactly where the footer draws it** (`screens/states.md`, NOTES
+    /// § D21): [`Offer::Act`] is the one shape whose line carries `s` and `r`, so this is handed
+    /// the same value [`crate::ui::offered`] gave the footer rather than re-deriving one. A dead
+    /// audit log and an empty pane both land here as *not `Act`*, which is invariant 2's
+    /// *unreachable, not merely unbound* — the bar `--read-only` is held to — instead of a banner
+    /// over live keys.
+    pub fn may_mutate(&self, offer: Offer) -> bool {
+        self.modal.is_none() && self.changing.is_none() && matches!(offer, Offer::Act)
     }
 
     /// **The footer — the keys valid right now, and the right-aligned zone beside them**
@@ -1705,9 +1781,18 @@ impl App {
     /// second one however the literals above are edited; what guarantees the word is there to
     /// strip is `views_tests::the_anchor_pair_ends_every_ordinary_footer`, which says so for
     /// every mode.
+    ///
+    /// **`offer` is `screens/states.md`'s own input and it reaches one arm, the same way `refused`
+    /// does** ([`Offer`]). The seven lines under it are `Nothing`, `Filter` and `Move` each with
+    /// and without `X switch cluster`, plus the ordinary one, byte for byte, as seven literals —
+    /// the same reason the four refusal rows below them are four (NOTES § D259 ruling 4): the one
+    /// footer these states can reach still spells every state of itself at compile time. Analysis
+    /// and the detail tabs draw their own closed lines above this, which is `screens/widgets.md`
+    /// § 2a's closed mode list; the `Offer` they are handed still decides `App::may_mutate`.
     pub fn footer(
         &self,
         detail: bool,
+        offer: Offer,
         refused: Refused,
         changing: &str,
     ) -> (Cow<'static, str>, &'static str) {
@@ -1783,11 +1868,22 @@ impl App {
                     "",
                 );
             }
-            // **The four rows of `screens/widgets.md` § 2a's own table, as four literals**
-            // (NOTES § D259 ruling 4): the one footer a refusal can reach still spells every state
-            // of itself at compile time.
-            (false, _, View::Alerts | View::Resources(_)) => {
-                match (refused.scale(), refused.restart()) {
+            // **The seven lines `screens/states.md` draws, as seven literals** ([`Offer`]).
+            (false, _, View::Alerts | View::Resources(_)) => match offer {
+                // **`s` and `r` are on none of these six and are never marked `no` on one**
+                // ([`Offer`]): nothing here asked `may_i` anything.
+                Offer::Nothing { switch: false } => "? all keys  q quit",
+                Offer::Nothing { switch: true } => "X switch cluster  ? all keys  q quit",
+                Offer::Filter { switch: false } => "/ filter  ? all keys  q quit",
+                Offer::Filter { switch: true } => "X switch cluster  / filter  ? all keys  q quit",
+                Offer::Move { switch: false } => "↑↓ move  ⏎ open  / filter  ? all keys  q quit",
+                Offer::Move { switch: true } => {
+                    "↑↓ move  ⏎ open  X switch cluster  / filter  ? all keys  q quit"
+                }
+                // **The four rows of `screens/widgets.md` § 2a's own table, as four literals**
+                // (NOTES § D259 ruling 4): the one footer a refusal can reach still spells every
+                // state of itself at compile time.
+                Offer::Act => match (refused.scale(), refused.restart()) {
                     (false, false) => {
                         "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit"
                     }
@@ -1800,8 +1896,8 @@ impl App {
                     (true, true) => {
                         "↑↓ move  ⏎ open  s no scale  r no restart  / filter  ? all keys  q quit"
                     }
-                }
-            }
+                },
+            },
         };
         // **The three modes that keep their own footer lose one word and no more**
         // (`screens/dialogs.md` § *Detail tabs and Analysis keep their own footer, not this

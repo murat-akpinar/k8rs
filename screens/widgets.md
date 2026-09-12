@@ -467,7 +467,7 @@ the file that owns it, cited here rather than copied:
 | Detail — yaml tab, a Secret with keys | ordinary, anchor always present, adds `v reveal` — the pair's own named exception applies (above): `q quit` alone | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
 | Empty kind in the browser | ordinary, narrowed to what there is an object to act on — anchor still present | [states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser) |
 | Still loading | ordinary, narrowed to the anchor alone — nothing exists yet to move a cursor across | [states.md § Still loading](states.md#still-loading) |
-| Disconnected · login expired · clock skew · namespace-scoped · nothing-is-broken | ordinary, mutations withheld, anchor always present | [states.md](states.md), each state's own mockup |
+| Disconnected · login expired · clock skew · namespace-scoped · nothing-is-broken · the audit log could not be opened | ordinary, mutations withheld, anchor always present | [states.md](states.md), each state's own mockup |
 | While a call is running, over Alerts or Resources | not a modal — see the rule above | [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
 | Confirm · Restart · Delete (typed name) · The cluster said no · Already gone · Drain | modal — closed local set, no anchor | [dialogs.md](dialogs.md) |
 | The cluster picker, at `X` and at startup | modal — closed local set, no anchor; `esc` itself reads `quit` at startup | [context.md](context.md) |

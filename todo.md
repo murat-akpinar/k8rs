@@ -4480,7 +4480,7 @@ string and key was settled in the design phase, so this phase is drawing.
       end on this path, clearing `changing` on a transport failure, and
       [D20](NOTES.md#d20--a-call-that-takes-time-is-a-state-and-there-was-none)'s
       *`q` … quits when the call returns* are Phase 12's (D262 ruling 8)
-- [ ] States, all eight of [screens/states.md](screens/states.md): loading N
+- [x] States, all eight of [screens/states.md](screens/states.md): loading N
       pods · nothing is broken · disconnected · **login expired** ·
       namespace-scoped fallback banner · and the three startup errors that
       print before the TUI exists.
@@ -4499,7 +4499,17 @@ string and key was settled in the design phase, so this phase is drawing.
       so it is the first that can obey D21. `ops::audit_log` already returns the
       sentence to say; what is missing is a screen that keeps running after
       reading it, and the keys being dead has to be structural rather than a
-      banner over live keys — the same bar `--read-only` is held to
+      banner over live keys — the same bar `--read-only` is held to.
+      **Landed 2026-09-12** ([D263](NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)):
+      nine states, each drawing the footer its mockup gives it, and the
+      ninth's write keys unreachable rather than undrawn. Four review rounds;
+      the blocker was a namespace-scoped developer left write-dead because a
+      refusal was read as a lost link.
+      **What it does not close, ruled rather than missed**: nothing sets
+      `Screen::link`, `writes` or `clock` and nothing calls `may_mutate`, so
+      the unreachability holds for a value Phase 12 has not yet produced
+      (D263 ruling 10). `Writes::ReadOnly` is built and constructed nowhere;
+      the `--read-only` box below is its first reader
 - [ ] **Cluster switcher** (`X`), [screens/context.md](screens/context.md):
       picker over `Kubeconfig::contexts`, then the Phase 5 `connect()` call
       again with everything from the old context dropped. Refused while a

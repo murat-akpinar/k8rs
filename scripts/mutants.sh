@@ -107,12 +107,50 @@ avail_gib() { df -Pk "$1" | tail -1 | avail_field; }
 # The filesystem's own words, in the logs of a run that has already finished.
 # Both spellings, because the message reaches the log through two different
 # writers — rustc's own error and the `os error 28` a std::io error renders as.
+#
+# **And only where cargo is the writer, which was the defect** (2026-09-12): this
+# was a flat `grep -rlF` over the whole file, and a mutant log holds more than
+# cargo's output. `screens/states.md` § *The audit log could not be opened* drew
+# `open_log`'s full-disk refusal, so every mutant the Phase 11 tests **caught**
+# printed `No space left on device` into its own assertion dump, and this gate
+# refused the run — on a filesystem 9% full with 869 GiB free. The box worked
+# around it by drawing a different one of `audit_log`'s four refusals and writing
+# the reason into `screens/states.md`, which left what the product may say on
+# screen a function of this grep. That is the wrong end: a guard that decides
+# what a screen may say has stopped being a guard.
+#
+# Identity is the region, never the payload — the same shape `lint_denied_logs`
+# uses for the same reason. Three writers, three regions, and a log names them
+# all itself:
+#
+#   *** mutation diff:    …source, until the next *** line — code, not output
+#   *** <argv>            …cargo's, until *** result: — the build phase and the
+#                          test phase's own compile, where D133's lie is made
+#   running N tests       …libtest's, until test result: — the captured stdout
+#                          and the panic dumps, the only place a *test* can write
+#
+# Ceiling: a test whose own stdout holds a line reading exactly `test result:`
+# closes libtest's region early and re-exposes the rest of it. Loud, not quiet —
+# the failure is a refusal somebody reads, which is the whole of D133.
 enospc_logs() { # $1 = a mutants.out directory
-  # No `[ -d ]` fast path: grep on a directory that is not there already returns
-  # non-zero, and a branch whose removal changes nothing is a branch that cannot
-  # fail. The missing-directory case is *said out loud* at the bottom of this
-  # file instead, where it has its own sentence.
-  grep -rlF -e "No space left on device" -e "os error 28" "$1/log" 2>/dev/null
+  # No `[ -d ]` fast path: `find` on a directory that is not there prints nothing
+  # and the `grep .` below already returns non-zero for that, and a branch whose
+  # removal changes nothing is a branch that cannot fail. The missing-directory
+  # case is *said out loud* at the bottom of this file instead, where it has its
+  # own sentence.
+  find "$1/log" -type f 2>/dev/null | while read -r f; do
+    awk '
+      # A phase boundary ends the libtest region whether or not libtest said so:
+      # a test phase killed on a timeout never prints its own test result line.
+      /^\*\*\* mutation diff:/ { diff = 1; harness = 0; next }   # source, not output
+      /^\*\*\*/                { diff = 0; harness = 0; next }   # every other cargo-mutants marker
+      /^running [0-9]+ tests?$/ { harness = 1; next }    # libtest opens its region …
+      /^test result:/           { harness = 0; next }    # … and closes it
+      diff || harness { next }
+      index($0, "No space left on device") || index($0, "os error 28") \
+                 { print FILENAME; exit }
+    ' "$f"
+  done | grep .
 }
 
 # The **second** cause of the same lie, measured 2026-08-21: a mutated body
@@ -309,8 +347,102 @@ self_test() {
                 'Caused by: os error 28' \
                 '*** result: Failure(101)' > "$d/full28/log/src__rules.rs_line_1300_col_9.log"
 
+  # --- the third framing: who put the words in the log (measured 2026-09-12) ---
+  # The two fixtures above are the message with nothing around it. A real log has
+  # *regions*, and only some of them are cargo's: cargo-mutants opens each phase
+  # with the command line it is about to run and closes it with `*** result:`,
+  # and inside the test phase libtest opens its own with `running N tests` and
+  # closes it with `test result:`. A string a **test** rendered can only ever be
+  # in that innermost one — which is exactly where six of them turned up.
+  #
+  # Cut from `mutants.out.old/log/src__ui.rs_line_507_col_9.log`, the Phase 11
+  # states box, 2026-09-12: the fixture for `screens/states.md` § *The audit log
+  # could not be opened* was `open_log`'s **full-disk** refusal, so all six
+  # mutants the new tests *caught* printed that sentence into their own assertion
+  # dump, and this gate refused the whole run on a filesystem 9% full with 869
+  # GiB free. The box worked around it by picking a different one of `audit_log`'s
+  # four refusals and wrote the reason into the screen file — which left the
+  # product's own wording constrained by this grep. It is the grep that was wrong.
+  mkdir -p "$d/rendered/log"
+  printf '%s\n' \
+    "*** src/ui.rs:507:9: replace Writes<'a>::said -> Option<&'a str> with None" \
+    '*** mutation diff:' \
+    '--- src/ui.rs' \
+    '*** /usr/bin/cargo test --no-run --verbose --package=k8rs@0.0.0' \
+    '   Compiling k8rs v0.0.0 (/home/x/.cache/k8rs-mutants/cargo-mutants-k8rs-gc4G1o.tmp)' \
+    '*** result: Success' \
+    '*** /usr/bin/cargo test --verbose --package=k8rs@0.0.0' \
+    '     Running `target/debug/deps/k8rs-e798a1ecd497c6ff`' \
+    '' \
+    'running 1335 tests' \
+    '---- ui::tests::the_audit_banner_is_the_sentence_it_was_handed stdout ----' \
+    "thread 'ui::tests::the_audit_banner_is_the_sentence_it_was_handed' panicked at src/ui_tests.rs:1764:5:" \
+    'assertion `left == right` failed: the banner is not the sentence it was handed' \
+    '  left: ""' \
+    ' right: "k8rs could not open its audit log at ~/.local/state/k8rs/audit.log: No space left on device — every change k8rs makes is written to that log before it is sent"' \
+    '' \
+    'failures:' \
+    '    ui::tests::the_audit_banner_is_the_sentence_it_was_handed' \
+    '' \
+    'test result: FAILED. 1334 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.63s' \
+    '' \
+    'error: test failed, to rerun pass `-p k8rs --bin k8rs`' \
+    '' \
+    '*** result: Failure(101)' > "$d/rendered/log/src__ui.rs_line_507_col_9.log"
+  # The one D133 actually measured, in its own region: the build phase, where
+  # nothing but the toolchain writes and every word is cargo's. This is the shape
+  # that becomes `unviable` and reads like a pass.
+  mkdir -p "$d/buildfull/log"
+  printf '%s\n' \
+    '*** src/rules.rs:1298:9: replace age -> Option<String> with None' \
+    '*** mutation diff:' \
+    '*** /usr/bin/cargo test --no-run --verbose --package=k8rs@0.0.0' \
+    '   Compiling k8rs v0.0.0' \
+    'error: failed to write bytecode to target/debug/deps/k8rs.bc' \
+    '' \
+    'Caused by:' \
+    '  No space left on device (os error 28)' \
+    '*** result: Failure(101)' > "$d/buildfull/log/src__rules.rs_line_1298_col_9.log"
+  # And the same words from cargo in the **test** phase — the second `cargo test`
+  # builds too, so a volume that fills between the phases fails there. Outside
+  # libtest's own region, so nothing a test printed can reach it. Without this
+  # fixture, a fix that simply skipped the whole test phase would go green.
+  mkdir -p "$d/testfull/log"
+  printf '%s\n' \
+    '*** src/rules.rs:1300:9: replace age -> Option<String> with None' \
+    '*** mutation diff:' \
+    '*** /usr/bin/cargo test --no-run --verbose --package=k8rs@0.0.0' \
+    '*** result: Success' \
+    '*** /usr/bin/cargo test --verbose --package=k8rs@0.0.0' \
+    'running 1335 tests' \
+    'test result: ok. 1335 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.31s' \
+    'error: could not write `target/debug/deps/k8rs.d`: No space left on device (os error 28)' \
+    '*** result: Failure(101)' > "$d/testfull/log/src__rules.rs_line_1300_col_9.log"
+  # The region that is not output at all: cargo-mutants prints the mutation as a
+  # unified diff with context, so any string literal near the mutated line lands
+  # in the log as *source*. `src/ops.rs` is one edit away from putting the
+  # filesystem's own words there — `open_log` is the function that reports them.
+  mkdir -p "$d/diffonly/log"
+  printf '%s\n' \
+    '*** src/ops.rs:3354:9: replace open_log -> Result<(File, Vec<String>), String> with Err("xyzzy".into())' \
+    '*** mutation diff:' \
+    '--- src/ops.rs' \
+    '+++ replace open_log with Err("xyzzy".into())' \
+    '-            Err(failed) if failed.to_string() == "No space left on device" => {' \
+    '+        return Err("xyzzy".into());' \
+    '*** /usr/bin/cargo test --no-run --verbose --package=k8rs@0.0.0' \
+    '*** result: Success' \
+    '*** /usr/bin/cargo test --verbose --package=k8rs@0.0.0' \
+    'running 1335 tests' \
+    'test result: ok. 1335 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.31s' \
+    '*** result: Success' > "$d/diffonly/log/src__ops.rs_line_3354_col_9.log"
+
   enospc_logs "$d/full" >/dev/null || { echo "FAIL  self-test: a log spelling the message out was not caught — the whole point of this script"; fail=1; }
   enospc_logs "$d/full28" >/dev/null || { echo "FAIL  self-test: a log carrying only the 'os error 28' spelling was not caught"; fail=1; }
+  enospc_logs "$d/buildfull" >/dev/null || { echo "FAIL  self-test: the filesystem's words in the build phase of a real log were not caught — that is the exact run NOTES § D133 measured, and it is filed 'unviable'"; fail=1; }
+  enospc_logs "$d/testfull" >/dev/null || { echo "FAIL  self-test: cargo's own disk failure in the test phase, outside libtest's region, was not caught — skipping the whole phase is not the fix"; fail=1; }
+  enospc_logs "$d/rendered" >/dev/null && { echo "FAIL  self-test: a sentence a *test* rendered into its own assertion dump was called a disk failure — that refuses a real result on a disk with room, and it makes what this product may say on screen a function of this grep (2026-09-12)"; fail=1; }
+  enospc_logs "$d/diffonly" >/dev/null && { echo "FAIL  self-test: a source line printed in the mutation diff was called a disk failure — that region is code, not output"; fail=1; }
   enospc_logs "$d/honest" >/dev/null && { echo "FAIL  self-test: an honest unviable (a type error) was called a disk failure"; fail=1; }
   enospc_logs "$d/empty" >/dev/null && { echo "FAIL  self-test: an empty log directory reported a hit"; fail=1; }
   enospc_logs "$d/missing" >/dev/null && { echo "FAIL  self-test: a mutants.out with no log/ at all reported a hit"; fail=1; }
@@ -547,7 +679,7 @@ self_test() {
   lock_tree "$d/does-not-exist" && { echo "FAIL  self-test: lock_tree reported success for a path it could not open"; fail=1; }
 
   [ $fail -eq 0 ] || return 1
-  echo "mutants: self-test passed — both spellings of the filesystem's message are refused, alone on a line and inside one; all three spellings of a denied lint are refused while the same note under a 'warning:' header is not, and neither scan answers the other's question; an honest unviable, a real compiler error with an E-code and one without, an empty log directory and a missing one are refused by neither; the headroom reader turns a captured df line into $roomy GiB and a 94%-full tmpfs into $tight; and the refusal fires below the requirement and not at it; a report whose lock stamp did not move across the run is refused as this run's while a stamp that moved and a first run in an empty tree are not, and neither is a report that vanished; a real outcomes.json reads 20 while a directory with no result in it, a missing one, an empty one and a truncated one all read 'none'; and the gate passes a count and refuses zero, no report, an empty reading and a non-number; and this script's own environment still forces cargo's logs plain; --jobs is read out of the argv in all four spellings and the last one wins, CARGO_MUTANTS_JOBS is read under an explicit flag and over the default, and the headroom moves with the answer; and a second run in a tree another process holds is refused while a free tree and a missing path are not confused for each other"
+  echo "mutants: self-test passed — both spellings of the filesystem's message are refused, alone on a line and inside one, and in the build phase and the test phase of a real log — while the same words a *test* rendered into its own assertion dump, and a source line printed in the mutation diff, are not; all three spellings of a denied lint are refused while the same note under a 'warning:' header is not, and neither scan answers the other's question; an honest unviable, a real compiler error with an E-code and one without, an empty log directory and a missing one are refused by neither; the headroom reader turns a captured df line into $roomy GiB and a 94%-full tmpfs into $tight; and the refusal fires below the requirement and not at it; a report whose lock stamp did not move across the run is refused as this run's while a stamp that moved and a first run in an empty tree are not, and neither is a report that vanished; a real outcomes.json reads 20 while a directory with no result in it, a missing one, an empty one and a truncated one all read 'none'; and the gate passes a count and refuses zero, no report, an empty reading and a non-number; and this script's own environment still forces cargo's logs plain; --jobs is read out of the argv in all four spellings and the last one wins, CARGO_MUTANTS_JOBS is read under an explicit flag and over the default, and the headroom moves with the answer; and a second run in a tree another process holds is refused while a free tree and a missing path are not confused for each other"
 }
 
 # `--gate` is read here and not passed on, because it is the *caller's* policy and

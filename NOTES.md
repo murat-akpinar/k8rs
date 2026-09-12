@@ -284,6 +284,7 @@ its line moving with it.
 - [D260](#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12) — the dialog family: the taught command belongs in the frame and not on a strip that has not drawn it yet, a refusal that followed no check may not say a check stopped it, and two sentences that must agree live in a file this one cannot reach
 - [D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12) — the refused-keys round: a permission that is two questions and was counted as one, a reason that did not fit the line it was promised to, and a row rewritten by arithmetic another box would have moved
 - [D262](#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12) — the in-flight screen: the state that had to name its object, the cut that gave way at the wrong end, and the screen that answers what may I press promising four keys it refuses
+- [D263](#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12) — the nine states: a refusal that was also a scope, a stack that cut the one banner with nothing else to say, and a test named for a body it never compared
 
 ## Why it exists — where the gap is
 
@@ -22807,3 +22808,115 @@ found was the *other* screen the new footer can reach. Three rounds, and each on
 something the green suite could not — which is the shape
 [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
 predicts and the reason the review is not skipped when everything upstream passed.
+
+### D263 — the nine states: a refusal that was also a scope, a stack that cut the one banner with nothing else to say, and a test named for a body it never compared (2026-09-12)
+
+`screens/states.md` drew eight states and gave none of them a footer the code could
+produce, and a ninth — the audit log that would not open — had no screen at all.
+[D21](#d21--if-the-write-cannot-be-audited-the-write-does-not-happen) says k8rs *says so
+and continues in read-only mode*; a TUI is the first program that can obey it. Four
+review rounds, and every one found a real defect.
+
+**1. The footer's missing input is `views::Offer`, and the same value is what `may_mutate`
+reads.** Four shapes over the nine states, seven literals once `X switch cluster` is counted,
+and `s`/`r` on none of them — **withheld, never marked `no`**, because `no` is `may_i`'s word
+for a permission this login lacks ([D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
+`ui::offered` is the one place a screen becomes a shape, and because `may_mutate` takes
+the same `Offer`, a key that is not on the line cannot be pressed — the bar `--read-only`
+is held to, and it now holds from Analysis and from an open detail tab too, which answered
+`Act` in the first draft (PRIOR-ART § G2, *read-only enforced per view is a hole per view*).
+
+**2. Two session facts, and neither is a pane.** `ui::Writes { Live, ReadOnly, Unaudited }`
+says whether writes are reachable this run; `ui::Link { Live, Lost, Expired }` says what the
+connection is doing. Both live on `Screen`, because what the store answered is not what the
+user did ([D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+ruling 5). `Link` derives no `Default`, checked at compile time: `Live` is the one answer
+that leaves `s` and `r` live over stale cards, and it must be chosen, never fallen into.
+
+**3. The blocker: `Pane::Denied` was read as the link, and it is also the namespace
+scope.** `Denied(String, T)` carries whatever did come back, so the namespace-scoped
+fallback **is** a `Denied` with cards — and the first draft withheld every mutation from
+it for the life of the run. A developer with a `RoleBinding` in `payments`, `may_i`
+answering `Yes`, could neither see nor press `s`; so could an admin who simply typed
+`--namespace payments`. The screen file had said the scope withheld the keys *"for the
+reason the badge already names"*, which conflated *cannot list pods cluster-wide* with
+*cannot write here* — two RBAC facts the API answers separately. Now `Denied` is only what
+the pane was answered; zero rows is zero rows whichever variant holds them; and
+**`Writes::ReadOnly` has exactly one cause, `--read-only`** — never a namespace fallback,
+which would reopen this through a new door.
+
+**4. The ninth state says so everywhere a reader can be.** A banner over a **live** list
+carrying `ops::audit_log`'s own sentence, and on Alerts' two calm panes — empty for a whole
+healthy session, and the first frame of every run — the same sentence inside the calm
+block. **My brief put that append in `ui::note`, and `note` has seven callers**: the
+browser's loading pane drew the sentence twice and every detail tab showed it until the
+tab loaded. It lives in Alerts' own arm of `content`. The principle survived — the renderer
+says it, not a Phase 12 caller that does not exist yet — and the placement did not.
+
+**5. The body is sixteen rows, and a stack of banners has a rank rather than an order.**
+Every mockup on the page had been drawn at fifteen. The list or calm block keeps a floor of
+three rows; the caveats share the other thirteen. **The audit sentence gives way first**,
+because it is the one fact with a second carrier — the footer withholds `s`/`r`, the header
+will say `read-only` — while the clock and the pane's own reason (which namespace, which
+check is off, what command renews a login) have none. The first draft ruled *the last
+banner drawn gives way*, drew the audit sentence above the pane's own banner, and measured
+it cutting *"One node check is off"* — the paragraph the page titles *the point of this
+screen* — and *"Renew it, then press X"*; with three at once the namespace banner vanished
+with no mark. **A banner whose share falls under two rows draws nothing at all**, and under
+this rank that is only ever the audit sentence. Every card, not just the first, is trimmed to
+the region, because ratatui's `List` skips a selected item that does not fit whole and one
+`↓` had blanked the pane again.
+
+**6. The calm block's rank is positional, and it is a different rule from the banners'.**
+The page first said the audit sentence *outranks "Worth a look anyway"* — a paragraph the
+caller hands in, which `ui.rs` could only find by recognising its words. Now the audit
+sentence sits directly under the headline and the caller's paragraphs follow in order, so
+the caller's last line gives way. That makes the audit sentence **last** to give way here
+and **first** on a banner stack; the page states them as two rules because they answer two
+problems. The one case where that costs a reader is in `backlog.md`.
+
+**7. The clock hides while the link is not live; the audit line does not.** A clock
+reading is a staleness claim that needs a live response's `Date` header; an unopenable
+state directory is a fixed local fact. `ui::clock` filters at assembly and `offered` reads
+through it, so the line and the key cannot disagree. **`X switch cluster` is promoted
+wherever the login has expired on Alerts and Resources**, over a loading or an empty pane
+too — it never acted on a selection, which is exactly what separates it from `s`/`r`.
+`BLOCK` is 39, measured off the page's widest drawn lines, and a `⚠` banner hangs every
+line after the first under its text.
+
+**8. A test named for a body it never compared.** `every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`
+filtered each mockup to the rows containing `q quit` and then asserted the drawn screen
+held strings the test itself had handed in; `tester` replaced a whole mockup body with
+*"the moon is made of cheese and k8rs approves"* and the suite stayed at 1335 green. The
+comparison now reads the file's paragraphs, the section list comes from the file, and a
+sweep that found **8 of 16 frames never visited** now fails on any unvisited frame and
+asserts the count (20). Its audit fixture had been a sentence `ops.rs` cannot produce — a
+`($HOME)` clause and a full stop neither `Source::clause` nor `without` writes. **The rule
+against splitting a returned sentence back into paragraphs was cited as D245 by the
+implementer and repeated by the PM; it is
+[D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)'s**,
+and `tui-designer` refused to cite the wrong number rather than guess.
+
+**9. The mutation gate filed a test's own screen as a full disk.** `scripts/mutants.sh`
+grepped every mutant log for `No space left on device`; a fixture drawing the full-disk
+refusal printed that phrase into each caught mutant's assertion dump, and the gate refused
+its own result on a disk 9% full. It now reads the log's regions — cargo's phases against
+libtest's — so a real ENOSPC is still caught and a rendered one is not
+([D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+guard, one level more exact).
+
+**10. What this box could not prove, and Phase 12 owes.** Nothing sets `Screen::link`,
+`writes` or `clock`, and nothing calls `may_mutate`. The unreachability is real *given the
+value*; the value has no producer, and a Phase 12 that never wires `ops::audit_log`'s `Err`
+arm compiles, draws a healthy screen and leaves the write keys live. The audit sentence's
+shape is transcribed from the page, because `ops::without`, `STILL_READS` and `Source` are
+private and `ops.rs` is frozen.
+
+**11. The fourth operator read was not repeated, and that is a ruling.** Round four
+implemented the operator's own round-three findings, with every frame it asked for pasted;
+the only divergences the implementer then measured were the page's own arithmetic —
+outcomes computed at the 70-column page and stated as the product's, a 55-column wrap
+against a 53-wide banner, *12 of 13* that was 13 — and those were corrected in the page,
+which the tests read. Two dispatches in this box died on an account rate limit and were
+re-sent from a clean tree; `k8s-admin`'s agent definition grants no `Write`, so the PM
+transcribed both of its reports (`backlog.md`).

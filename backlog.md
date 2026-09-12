@@ -3017,3 +3017,31 @@ long-form version and stays the authority.*
   `metadata.name` (DNS-1123, ≤253 bytes) and shared with the browser's row name, so it is not the
   in-flight box's — but it is the security gate's *sizes are bounded* row, and the box that first
   hands `clipped` a server-printed `Table` cell is the one that meets it. 2026-09-12
+
+- **The audit sentence opens lowercase on screen, because `ops` writes it for a prefix the TUI
+  does not draw.** `main.rs` prints `format!("k8rs: {refusal}")`; in the pane there is no prefix, so
+  three of `ops::audit_log`'s four refusals put *"there is something at …"* at the top of the content
+  pane where every other banner opens with `⚠` or a capital. The drawn example happens to be the one
+  that starts `k8rs could not open…`. `ops.rs` is frozen (`k8s-admin`, the nine-states box). 2026-09-12
+
+- **The audit fixture reads the screen file, not `ops.rs`, because the pieces it would be built
+  from are private and `ops.rs` is frozen.** `ops::without`, `STILL_READS` and `Source` cannot be
+  named from `ui_tests.rs`, so `dead_log()` reads § *The audit log could not be opened*'s mockup and
+  checks it carries one of `Source::clause`'s two answers. A `pub(crate)` on those three would make the
+  sentence structural rather than transcribed — `dev-core`'s or the PM's call when `ops.rs` next
+  opens. 2026-09-12
+
+- **A worst-case audit sentence takes the whole calm block, including `reading the cluster…`.** The
+  calm block ranks by position — the audit sentence directly under the headline, the caller's
+  paragraphs after — so at the measured 1383-character sentence (an `XDG_STATE_HOME` of five
+  200-character segments) it fills all 13 rows and the count goes with it; on *Still loading* so does
+  the only line saying the pane is loading. The banner stack has the opposite rank on purpose. Not
+  reachable from an ordinary path, and it is the one place the two ranks' disagreement costs a
+  reader something (`dev-ui`, the nine-states box). 2026-09-12
+
+- **`k8s-admin`'s agent definition grants no `Write`, and CLAUDE.md's ownership table says
+  `reports/` is the one tree it writes.** `.claude/agents/k8s-admin.md` lists `Read, Grep, Glob, Bash,
+  WebFetch, WebSearch`; two of today's reviews could not land their own measurements and the PM
+  transcribed them. Adding `Write` to that list was refused by the permission classifier, so it is
+  the user's to grant — or the table's row changes to say the PM lands `k8s-admin`'s reports.
+  2026-09-12

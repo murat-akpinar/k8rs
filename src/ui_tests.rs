@@ -129,6 +129,9 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
         reports: &[],
         log: &[],
         refused: Refused::default(),
+        writes: Writes::Live,
+        clock: None,
+        link: Link::Live,
         detail: None,
     }
 }
@@ -1480,6 +1483,1376 @@ fn a_refusal_is_a_banner_over_the_list_and_does_not_clear_it() {
         !holds(&drawn, "nothing is broken"),
         "a refusal is the one moment k8rs cannot claim the cluster is clean"
     );
+}
+/// **One screen `screens/states.md` draws** — the pane side of its body rows, and the footer under
+/// them.
+///
+/// **The pane side and not the whole row**, because the sidebar a mockup draws is that file's
+/// illustration of a sidebar and not this box's subject; what the nine states are about is what the
+/// content pane says and which keys the footer offers.
+struct Mockup {
+    /// The footer, frame stripped.
+    footer: String,
+    /// One entry per body row, pane side, trimmed — blank rows kept, because they are what
+    /// separates one paragraph from the next.
+    pane: Vec<String>,
+}
+
+/// **Every fenced block of one `##` section that draws a whole screen** — a block with no footer is
+/// a fragment (the two narrow ones under § *An empty kind*) or a stderr message (§ *Before the TUI
+/// ever starts*), and neither is a state this file draws.
+///
+/// **It reads the file rather than asserting against it**, so
+/// [`every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`] can ask *which sections
+/// draw a screen at all* and refuse to leave one untested — where [`fenced`] panics on a section
+/// with no block, which is right for its own callers and wrong for a sweep.
+fn mockups(section: &str) -> Vec<Mockup> {
+    let path = format!("{}/screens/states.md", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the screen file {path} could not be read: {e}"));
+    let mut drawn = Vec::new();
+    let mut open: Option<(Vec<String>, Option<String>, bool)> = None;
+    for line in text
+        .lines()
+        .skip_while(|line| *line != section)
+        .skip(1)
+        .take_while(|line| !line.starts_with("## "))
+    {
+        let fence = line.starts_with("```");
+        match (&mut open, fence) {
+            (None, false) => {}
+            (None, true) => open = Some((Vec::new(), None, true)),
+            (Some((pane, footer, body)), false) => {
+                if line.contains("q quit") {
+                    *footer = Some(unframed(line));
+                } else if line.starts_with('├') {
+                    *body = false;
+                } else if *body && line.starts_with('│') {
+                    // The last cell of the row is the content pane; a row with no sidebar has one
+                    // cell and this is still it.
+                    let cell = line
+                        .trim_end()
+                        .trim_end_matches('│')
+                        .rsplit('│')
+                        .next()
+                        .unwrap_or("");
+                    pane.push(cell.trim().to_owned());
+                }
+            }
+            (Some(_), true) => {
+                let (pane, footer, _) = open.take().expect("open");
+                if let Some(footer) = footer {
+                    drawn.push(Mockup { footer, pane });
+                }
+            }
+        }
+    }
+    drawn
+}
+
+/// **The paragraphs above the list** — consecutive non-blank rows grouped, each collapsed to single
+/// spaces, and the walk stopped at the first card so a mockup that draws a card in outline is not
+/// compared with the four lines a real one has.
+///
+/// **`●` and `▲` end it and `○` does not**: the first two are a card's own severity, and the third
+/// is the calm block's headline, which is one of the paragraphs being compared
+/// (`screens/README.md` § the five rules, item 4).
+fn said_above(pane: &[String]) -> Vec<String> {
+    let mut paragraphs: Vec<String> = Vec::new();
+    for row in pane
+        .iter()
+        .take_while(|row| !row.starts_with('●') && !row.starts_with('▲'))
+    {
+        let words = row.split_whitespace().collect::<Vec<_>>().join(" ");
+        match (words.is_empty(), paragraphs.last_mut()) {
+            (true, _) => paragraphs.push(String::new()),
+            (false, Some(last)) if !last.is_empty() => {
+                last.push(' ');
+                last.push_str(&words);
+            }
+            (false, _) => {
+                paragraphs.pop();
+                paragraphs.push(words);
+            }
+        }
+    }
+    paragraphs.retain(|paragraph| !paragraph.is_empty());
+    paragraphs
+}
+
+/// **The whole content pane as one run of words** — for a needle that wraps, which [`holds`]
+/// cannot see because it reads one row at a time.
+fn body_text(drawn: &Buffer) -> String {
+    rows(drawn)[2..18]
+        .iter()
+        .flat_map(|row| {
+            pane(row)
+                .trim_end_matches('│')
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// **A sentence as [`body_text`] reads one** — every run of whitespace one space — so a sentence
+/// handed to the renderer can be searched for across the rows it wrapped onto.
+fn words(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// [`said_above`] over a rendered frame — the sixteen body rows, pane side.
+fn drawn_above(drawn: &Buffer) -> Vec<String> {
+    let pane: Vec<String> = rows(drawn)[2..18]
+        .iter()
+        .map(|row| pane(row).trim_end_matches('│').trim().to_owned())
+        .collect();
+    said_above(&pane)
+}
+
+/// **The mockup's own paragraphs, as the sentences a caller would hand over** — so a fixture is
+/// read out of `screens/states.md` rather than typed beside it, and a mockup that is edited feeds
+/// the edit straight into the screen this test draws.
+/// **Nothing is stripped on the way through, [`CUT`] included.** `reading the cluster…` and
+/// `Retrying…` are sentences with an ellipsis in them and a capped banner ends on the same
+/// character, so no rule here can tell the two apart — which is why [`against`] is pointed only at
+/// mockups that draw their sentences whole, and the capped ones are
+/// [`a_stack_of_caveats_never_takes_the_list_below_its_own_floor`]'s.
+fn fed(section: &str, nth: usize, from: usize) -> Vec<String> {
+    said_above(&mockups(section)[nth].pane).split_off(from)
+}
+
+/// **What every one of the nine owes its own mockup**: the footer byte for byte, the paragraphs
+/// above the list word for word, and each mutating key on the screen exactly where the mockup's own
+/// footer draws it and nowhere else.
+///
+/// **Which keys a frame offers is read off that footer and not written here.** Every mockup once
+/// withheld `s` and `r`, and this helper asserted it for all of them; § *You can only see some
+/// namespaces* now draws both live, because a namespace scope is not a permission (re-ruled
+/// 2026-09-12), and a list of withheld keys kept here would have gone on asserting the old page.
+///
+/// **The paragraphs are compared and not merely searched for.** The half that decides this is the
+/// rows the *code* writes — `○  nothing is broken`, `reading the cluster…`, `no jobs in this
+/// cluster` — which no fixture hands over and which a wrong screen file therefore fails on. The
+/// rest of a paragraph is a caller's sentence read out of the same mockup, so what it proves is
+/// narrower and worth saying: that this renderer draws the sentence it was handed, whole, in the
+/// order and the position the file draws it, above the list and never instead of it.
+fn against(section: &str, nth: usize, app: &App, screen: &Screen) {
+    let drawn = render(app, screen);
+    println!("{section} [{nth}]\n{}\n", rows(&drawn).join("\n"));
+    let mockup = &mockups(section)[nth];
+    assert_eq!(
+        unframed(&rows(&drawn)[22]),
+        mockup.footer,
+        "{section} [{nth}] — the footer"
+    );
+    assert_eq!(
+        drawn_above(&drawn),
+        said_above(&mockup.pane),
+        "{section} [{nth}] — the paragraphs above the list"
+    );
+    for key in ["s scale", "r restart", "s no scale", "r no restart"] {
+        assert_eq!(
+            holds(&drawn, key),
+            mockup.footer.contains(key),
+            "{section} [{nth}] — {key:?} is drawn exactly where the mockup's footer puts it"
+        );
+    }
+}
+
+/// **The nine states of `screens/states.md`, each drawn at 80×24 against its own mockup.**
+///
+/// **`s scale` and `r restart` are on none of them and are marked `no` on none of them either** —
+/// the two halves of that file's own rule, and the distinction `screens/widgets.md` § 2a keeps:
+/// **withheld** is the key not being on the line at all, **refused** is the key on the line with
+/// `no` before its label, and `no` stays reserved for a `may_i` verdict about this login
+/// (NOTES § D261). The ordinary screen that is none of them is
+/// [`the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key`], the must-not-fire half.
+///
+/// **The list is the file's, not this test's, and it is counted in *mockups* and not in sections.**
+/// A hand-written list of eight closed over whatever the file happened to hold when it was written,
+/// so the sweep was made to ask the file instead — but it asked which `##` *sections* draw a
+/// screen, and a `###` subsection is inside its `##` parent as far as [`mockups`] reads. Every
+/// frame after the first in a section it had already ticked was therefore invisible to it: when
+/// `screens/states.md` grew § *Over a pane with nothing to show yet* under § *Your login expired*,
+/// two new screens arrived and the sweep stayed green (`dev-ui`, 2026-09-12). Twenty frames carry
+/// a footer today, and each one is either drawn here or named below with the test that owns it.
+#[test]
+fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
+    let now = now();
+    let mut seen: Vec<(&str, usize)> = Vec::new();
+
+    // § Still loading — nothing has arrived, so there is nothing to move across, open or narrow.
+    // The count in the sentence is the store's; `reading the cluster…` is `ui::note`'s own.
+    let section = "## Still loading";
+    let loading = Pane::Loading;
+    let reading = fed(section, 0, 0);
+    let mut still = screen(&loading, &now);
+    still.note = &reading;
+    against(section, 0, &app(), &still);
+    seen.push((section, 0));
+
+    // § Nothing is broken — an empty Alerts list keeps the cursor keys, because the sidebar's own
+    // rows have finished filling in, and withholds the two that need a selection. The headline is
+    // the code's; the three paragraphs under it are the caller's.
+    let section = "## Nothing is broken";
+    let empty = Pane::Ready(Vec::new());
+    let counted = fed(section, 0, 1);
+    let mut clean = screen(&empty, &now);
+    clean.note = &counted;
+    against(section, 0, &app(), &clean);
+    seen.push((section, 0));
+
+    // § An empty kind in the browser — the one state that keeps `/ filter` and loses the cursor
+    // keys with the rows. **The kind is read out of the mockup's own title row**, so
+    // `no jobs in this cluster` is composed by `ui::empty` from the file's word and compared with
+    // the file's sentence: nothing in this state is a literal this test also wrote.
+    let section = "## An empty kind in the browser";
+    let titled = said_above(&mockups(section)[0].pane);
+    let kinds = [browsable(&titled[0], true)];
+    let none = Pane::Ready(crate::k8s::Table::default());
+    against(section, 0, &opened(), &browsing(&none, &kinds, &now));
+    seen.push((section, 0));
+
+    // § The connection dropped — a stale card is still a selected object in principle, and k8rs
+    // cannot ask whether a write would be allowed, so the two keys go rather than being marked.
+    let section = "## The connection dropped";
+    let dropped = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let mut lost = screen(&dropped, &now);
+    lost.link = Link::Lost;
+    against(section, 0, &app(), &lost);
+    seen.push((section, 0));
+
+    // § Your login expired — the one state on the page that promotes a key off `?`.
+    let section = "## Your login expired";
+    let timed_out = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let mut expired = screen(&timed_out, &now);
+    expired.link = Link::Expired;
+    against(section, 0, &app(), &expired);
+    seen.push((section, 0));
+
+    // § Over a pane with nothing to show yet — the same expired login over the two panes that have
+    // no card to relabel as stale. **`X` is promoted wherever the link is `Link::Expired`, whatever
+    // the pane under it is drawing**, which is what separates it from `s` and `r`: it never acted
+    // on a selected object, so *nothing is selected* was never its condition. Each pane otherwise
+    // keeps its own shape — Still loading still drops the cursor keys, the empty kind still keeps
+    // `/ filter`. **Each frame is fed its own mockup and not the one it resembles**, so an edit to
+    // either drawing arrives here rather than being masked by the section it was copied from.
+    let waited = fed(section, 1, 0);
+    let mut waiting = screen(&loading, &now);
+    waiting.note = &waited;
+    waiting.link = Link::Expired;
+    against(section, 1, &app(), &waiting);
+    seen.push((section, 1));
+
+    let named = said_above(&mockups(section)[2].pane);
+    let open_kind = [browsable(&named[0], true)];
+    let mut bare = browsing(&none, &open_kind, &now);
+    bare.link = Link::Expired;
+    against(section, 2, &opened(), &bare);
+    seen.push((section, 2));
+
+    // § Your computer's clock is off — a banner over a *live* list: the header still reads
+    // `live · admin`, so this is neither the connection's reason nor a permission's, and the keys
+    // go because an age that reads fresher than it is decides which card somebody acts on first.
+    let section = "## Your computer's clock is off";
+    let live = Pane::Ready(vec![oom()]);
+    let behind = fed(section, 0, 0).join("\n\n");
+    let mut skewed = screen(&live, &now);
+    skewed.clock = Some(&behind);
+    against(section, 0, &app(), &skewed);
+    seen.push((section, 0));
+
+    // § Ahead of the cluster — the other direction, and a second sentence rather than the same one
+    // with a sign flipped: this one loses no times, it only makes them read large (NOTES § D177).
+    let ahead = fed(section, 1, 0).join("\n\n");
+    let mut fast = screen(&live, &now);
+    fast.clock = Some(&ahead);
+    against(section, 1, &app(), &fast);
+    seen.push((section, 1));
+
+    // § Nothing is broken, and the clock is still off — the skew joins `ui::note`'s own paragraphs
+    // instead of bringing a banner, because *clock skew is drawn in whichever family the rest of
+    // the screen is already in*. The calm pane's keys are the calm pane's.
+    let calm = fed(section, 2, 1);
+    let mut quiet = screen(&empty, &now);
+    quiet.note = &calm;
+    against(section, 2, &app(), &quiet);
+    seen.push((section, 2));
+
+    // § Your clock and a scoped namespace together is the capped frame — its last banner ends on
+    // `…`, which [`fed`]'s own doc rules out of [`against`]'s reach. What it draws is the 13-of-16
+    // budget rather than a state of its own, and that rule is
+    // [`a_stack_of_caveats_never_takes_the_list_below_its_own_floor`]'s — over sentences of its own
+    // length, **not this mockup's words**, which no test compares.
+    seen.push((section, 3));
+
+    // § You can only see some namespaces — an ordinary `live · admin` session that happens to be
+    // scoped, so `s scale` and `r restart` are live: **a namespace scope is not a permission**
+    // (re-ruled 2026-09-12). This mockup read `read-only` once and this frame was fed
+    // `Writes::ReadOnly` to match it, which is the wiring that section now names as the mistake.
+    let section = "## You can only see some namespaces";
+    let scoped = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let partial = screen(&scoped, &now);
+    against(section, 0, &app(), &partial);
+    seen.push((section, 0));
+
+    // § Nothing broken, and something not checked — the same sentence with no list under it, which
+    // is the one screen where silence and *nothing is broken* would look identical. The check that
+    // could not run says so beneath the verdict rather than instead of it.
+    let unchecked = fed(section, 1, 1);
+    let mut said_anyway = screen(&empty, &now);
+    said_anyway.note = &unchecked;
+    against(section, 1, &app(), &said_anyway);
+    seen.push((section, 1));
+
+    // § The audit log could not be opened — `ops::audit_log`'s own sentence over a live list, and
+    // the state this phase owns outright (NOTES § D21, § D231).
+    let section = "## The audit log could not be opened";
+    let dead = dead_log();
+    let mut unaudited = screen(&live, &now);
+    unaudited.writes = Writes::Unaudited(&dead);
+    against(section, 0, &app(), &unaudited);
+    seen.push((section, 0));
+
+    // § And when the clock is off at the same time, § And when a namespace is all you can see, too,
+    // § And when the login has also expired and § All three at once are the rank, not four states:
+    // who stays whole, who is cut and who is absent when banners queue.
+    // [`the_audit_sentence_gives_way_first_and_the_pane_s_own_reason_never_does`] draws the last
+    // three from the page's own uncut sentences, and
+    // [`a_stack_of_caveats_never_takes_the_list_below_its_own_floor`] the first. **Neither compares
+    // these mockups word for word, and that is a measurement and not a shortcut**: three of the
+    // four are drawn at 70 columns, below the 80×24 floor, and the fourth wraps at 55 where the
+    // card region is 53 — so where each one breaks, and at 80 whether the audit sentence is cut at
+    // all, is not what the floor draws.
+    for nth in 1..=4 {
+        seen.push((section, nth));
+    }
+
+    // § On a healthy or a still-loading Alerts screen — the two panes that draw no list, and the
+    // only two where the audit sentence joins the calm block instead of a banner. **It is passed by
+    // `ui::content`'s Alerts arm, not by the caller**, so only `Screen::writes` is set here and the
+    // caller's paragraphs are the whole of what each screen is handed.
+    // [`the_dead_write_path_says_so_on_a_pane_that_draws_no_list`] owns the order and the blank
+    // rows this comparison does not look at.
+    let checked = fed(section, 5, 2);
+    let mut healthy = screen(&empty, &now);
+    healthy.note = &checked;
+    healthy.writes = Writes::Unaudited(&dead);
+    against(section, 5, &app(), &healthy);
+    seen.push((section, 5));
+
+    // Still loading, with the caller's paragraphs read out of § Still loading's own uncut mockup —
+    // this one draws the last of them cut, and a fixture fed the cut sentence would compare the
+    // mark with itself. The block wraps at `ui::BLOCK` whatever the terminal is, so here the break
+    // and the mark are the page's own and are compared.
+    let started = fed("## Still loading", 0, 0);
+    let mut first_frame = screen(&loading, &now);
+    first_frame.note = &started;
+    first_frame.writes = Writes::Unaudited(&dead);
+    against(section, 6, &app(), &first_frame);
+    seen.push((section, 6));
+
+    // § Before the TUI ever starts — the ninth, and its claim is that it draws no footer: those
+    // failures print to stderr out of `main.rs` before raw mode is on, and there is no frame to put
+    // one in.
+    let section = "## Before the TUI ever starts";
+    assert!(
+        mockups(section).is_empty(),
+        "{section} grew a screen with a footer — it prints before there is a frame to draw one in"
+    );
+    seen.push((section, 0));
+
+    // **The file decides what is left**, not a number written here — and it is asked per *frame*.
+    // A `###` subsection lives inside its `##` parent, so a section this test had already ticked
+    // could grow a second and a third screen with nothing to notice: that is exactly how
+    // § *Over a pane with nothing to show yet* arrived green.
+    let path = format!("{}/screens/states.md", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path).expect("the screen file");
+    let sections: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("## "))
+        .collect();
+    assert!(sections.len() >= 9, "screens/states.md lost a section");
+    let mut frames = 0;
+    for section in sections {
+        for nth in 0..mockups(section).len() {
+            frames += 1;
+            assert!(
+                seen.contains(&(section, nth)),
+                "{section} [{nth}] draws a screen and nothing in this test visits it"
+            );
+        }
+    }
+    // **A derived list asserts it found something** (CLAUDE.md § Tests must not lie): a [`mockups`]
+    // that silently stopped parsing would make every loop above it vacuous and this whole sweep a
+    // green that proves nothing.
+    assert_eq!(
+        frames, 20,
+        "screens/states.md draws {frames} screens with a footer, not the 20 this sweep was \
+         written against — a frame was added or removed and this test has to say so"
+    );
+}
+
+/// A refusal exactly as `ops::audit_log` returns one, read out of
+/// `screens/states.md` § *The audit log could not be opened*'s own mockup.
+///
+/// **Read and not transcribed, because the transcription was wrong** (`k8s-admin`, 2026-09-12): the
+/// literal this file carried said `audit.log ($HOME)` where `ops::Source::clause` has exactly two
+/// answers — `from $XDG_STATE_HOME` and `under your home directory` — abbreviated an absolute
+/// `path.to_string_lossy()` to `~`, and ended on a full stop `ops::without` does not write.
+///
+/// **It still cannot be imported.** `ops::without`, `ops::STILL_READS` and `ops::Source` are
+/// private to that module and `ops.rs` is frozen; `audit_log` itself reads the real environment, so
+/// calling it would either write into the developer's own state directory or need an `unsafe`
+/// `set_var` that races `cargo test`'s threads. The screen file is the nearest fixture that is not
+/// this file's own words, and `tester`'s capture of both `Source` arms is what checked it.
+///
+/// **The clause is asserted rather than assumed** (re-ruled 2026-09-12): the page now draws the
+/// common refusal, `Permission denied (os error 13)` on a state directory that cannot be written,
+/// and with it the `({from})` clause `audit_log` puts between the path and the error. A mockup
+/// that dropped the clause again would hand every test here a sentence `ops` cannot return.
+fn dead_log() -> String {
+    let said = said_above(&mockups("## The audit log could not be opened")[0].pane).remove(0);
+    assert!(
+        said.starts_with("k8rs could not open its audit log at /")
+            && ["(under your home directory): ", "(from $XDG_STATE_HOME): "]
+                .iter()
+                .any(|clause| said.contains(clause)),
+        "the page's audit sentence is not a shape `ops::audit_log` returns: {said:?}"
+    );
+    said
+}
+
+/// **The ordinary screen is the only one that offers a mutating key** — the must-not-fire half of
+/// [`every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`], and every cause that
+/// takes the offer away, one at a time.
+///
+/// **Drawn and live are one fact, asserted together.** `views::App::may_mutate` is handed the same
+/// `Offer` the footer was drawn from, so a key that is not on the line cannot be pressed either —
+/// invariant 2's *unreachable, not merely unbound*, the bar `--read-only` is held to and the one
+/// `screens/states.md` § *The audit log could not be opened* asks for by name.
+#[test]
+fn the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key() {
+    let now = now();
+    let live = Pane::Ready(vec![oom()]);
+    let ordinary = screen(&live, &now);
+    let drawn = render(&app(), &ordinary);
+    println!("{}", rows(&drawn).join("\n"));
+    assert_eq!(
+        unframed(&rows(&drawn)[22]),
+        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "a pane with a card in it, the link up, writes live and every time on it trustworthy"
+    );
+    assert!(
+        app().may_mutate(offered(&app(), &ordinary)),
+        "the ordinary screen refused the key it had just drawn"
+    );
+
+    // **And the browser's ordinary screen too, which is a table with rows in it** — the one state
+    // § *An empty kind* is the counter-example to. A mutation run caught this missing
+    // (2026-09-12): with only the empty table tested, a guard that matched every table drew
+    // `/ filter` over a full list of deployments and nothing here noticed.
+    let kinds = [browsable("deployments", true)];
+    let listed = Pane::Ready(table("table-deployments"));
+    let listing = browsing(&listed, &kinds, &now);
+    let drawn = render(&opened(), &listing);
+    assert_eq!(
+        unframed(&rows(&drawn)[22]),
+        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "a browser pane with rows in it:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        opened().may_mutate(offered(&opened(), &listing)),
+        "the browser refused the key it had just drawn"
+    );
+
+    // One cause at a time, each off the ordinary screen above, so nothing here passes by accident
+    // of a second one being true.
+    let empty = Pane::Ready(Vec::new());
+    let nothing_selected = screen(&empty, &now);
+    let dead = dead_log();
+    let mut dead_log = screen(&live, &now);
+    dead_log.writes = Writes::Unaudited(&dead);
+    let mut asked = screen(&live, &now);
+    asked.writes = Writes::ReadOnly;
+    let mut skewed = screen(&live, &now);
+    skewed.clock = Some("⚠ This computer and the cluster disagree about the time by 11 minutes.");
+    let mut lost = screen(&live, &now);
+    lost.link = Link::Lost;
+    let mut expired = screen(&live, &now);
+    expired.link = Link::Expired;
+
+    for (cause, screen) in [
+        ("nothing is selected", &nothing_selected),
+        ("the audit log would not open", &dead_log),
+        ("this login may not change anything", &asked),
+        ("no time on the page can be trusted", &skewed),
+        ("the connection dropped", &lost),
+        ("the login expired", &expired),
+    ] {
+        let drawn = render(&app(), screen);
+        let footer = unframed(&rows(&drawn)[22]);
+        for withheld in ["s scale", "r restart", "s no scale", "r no restart"] {
+            assert!(!footer.contains(withheld), "{cause}: {footer:?}");
+        }
+        assert!(
+            !app().may_mutate(offered(&app(), screen)),
+            "{cause}: the key was off the line and live behind it"
+        );
+    }
+}
+
+/// **A namespace-scoped login that may act keeps both keys** — the defect `Pane::Denied` carried
+/// when it was read as *we cannot reach the cluster* (`k8s-admin`, 2026-09-12,
+/// `reports/2026-09-12-the-nine-states.md` § 3).
+///
+/// **`Denied` is two facts and only one of them is a refusal.** That type's own doc says so: the
+/// second field exists so a refusal does not clear the screen, and the namespace-scoped fallback
+/// (NOTES § D5) is the commonest thing that lands in it. A developer with a `RoleBinding` in
+/// `payments` — `patch deployments/scale`, `patch deployments`, no cluster-wide `list pods` — has
+/// `may_i` answering `Yes` for both keys and a header reading `live · admin`. So does a cluster
+/// admin who simply typed `--namespace payments`. Neither may lose the keys, and the fact that
+/// takes them away when it is true lives on [`Link`], which a `String` in a pane cannot carry.
+#[test]
+fn a_namespace_scoped_login_that_may_act_keeps_its_keys() {
+    let now = now();
+    let scoped = Pane::Denied(
+        "Showing only the payments namespace, because --namespace asked for it.".to_owned(),
+        vec![oom()],
+    );
+    let mut developer = screen(&scoped, &now);
+    developer.namespace = Some("payments");
+    let drawn = render(&app(), &developer);
+    println!("{}", rows(&drawn).join("\n"));
+    assert_eq!(
+        unframed(&rows(&drawn)[22]),
+        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "a refusal that came back with cards is a selection, not a dead link"
+    );
+    assert!(
+        app().may_mutate(offered(&app(), &developer)),
+        "a namespace-scoped login could not reach the key its own grant allows"
+    );
+    assert!(
+        holds(&drawn, "Showing only the payments namespace"),
+        "and the banner is still drawn over the list"
+    );
+
+    // **Zero rows is zero rows whichever answer holds them**: the same refusal over a kind that
+    // came back with nothing promises `⏎ open` over an empty grid unless both arms are read.
+    let kinds = [browsable("jobs", true)];
+    let refused = Pane::Denied(
+        "You can't list jobs across the whole cluster.".to_owned(),
+        crate::k8s::Table::default(),
+    );
+    let nothing = browsing(&refused, &kinds, &now);
+    let drawn = render(&opened(), &nothing);
+    assert_eq!(
+        unframed(&rows(&drawn)[22]),
+        "/ filter  ? all keys  q quit",
+        "a refusal with no rows in it still has nothing to move across:\n{}",
+        rows(&drawn).join("\n")
+    );
+}
+
+/// **`X switch cluster` survives the two expired frames that have nothing else on them** — which
+/// are the two the key was promoted for: *"so a reader does not have to hold `aws sso login` in
+/// their head while hunting the key map"* (`screens/states.md` § Your login expired).
+///
+/// **`screens/` now draws both**, in § *Over a pane with nothing to show yet*, and
+/// [`every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`] compares each against its
+/// own mockup — these two lines were this box's composition when the file had no drawing of them,
+/// and were reported as a gap rather than smuggled in. What is left here is the half a mockup
+/// cannot state: the seat the key keeps, and the link that must *not* name a key.
+#[test]
+fn an_expired_login_keeps_the_key_that_renews_it_on_every_frame() {
+    let now = now();
+    let quiet = Pane::Ready(Vec::new());
+    let loading = Pane::Loading;
+
+    // The state's own mockup, unchanged: the key sits after `⏎ open`.
+    let mut cards = screen(&quiet, &now);
+    cards.link = Link::Expired;
+    assert!(
+        unframed(&rows(&render(&app(), &cards))[22]).contains("⏎ open  X switch cluster  / filter"),
+        "the key moved out of the seat the mockup gives it"
+    );
+
+    // A link that is merely down names no key to press: disconnected is retrying on its own.
+    let mut lost = screen(&loading, &now);
+    lost.link = Link::Lost;
+    assert_eq!(
+        unframed(&rows(&render(&app(), &lost))[22]),
+        "? all keys  q quit",
+        "a dropped connection invented a key for an action k8rs cannot perform"
+    );
+}
+
+/// **`Link` has no `Default`**, because the only one it could derive is `Live` — the answer that
+/// leaves `s` and `r` live over stale cards — and a `..Default::default()` would pick it without
+/// anyone deciding to (`k8s-admin`, 2026-09-12, round two).
+///
+/// **Asked of the type, and answered by the compiler**: an inherent `const` that exists only where
+/// `T: Default` shadows the trait's `false`, so re-adding the derive flips the answer and the test
+/// binary does not build. The assertions are `const` blocks because the answer *is* a constant,
+/// which is also what `clippy::assertions_on_constants` asks for. The second is the probe's own
+/// canary — a probe that answered `false` for every type would pass the first for the wrong reason.
+#[test]
+fn a_link_has_no_default_for_a_screen_to_fall_back_on() {
+    struct Probe<T>(std::marker::PhantomData<T>);
+    trait Lacks {
+        const DEFAULTS: bool = false;
+    }
+    impl<T> Lacks for Probe<T> {}
+    impl<T: Default> Probe<T> {
+        const DEFAULTS: bool = true;
+    }
+    const {
+        assert!(
+            !Probe::<Link>::DEFAULTS,
+            "`Link` derives `Default` again, and its default is the answer that leaves writes live"
+        );
+        assert!(
+            Probe::<Refused>::DEFAULTS,
+            "the probe cannot see a `Default` where one exists, so it proves nothing about `Link`"
+        );
+    }
+}
+
+/// **A dead write path says so on the two Alerts panes that draw no list** — a healthy cluster,
+/// where Alerts is empty for the whole session, and the first frame of every run, which is
+/// `Loading` (`screens/states.md` § On a healthy or a still-loading Alerts screen).
+///
+/// **The rank is positional** (re-ruled 2026-09-12): the audit sentence sits directly under the
+/// calm headline — at the very top on Loading, which has none — and every paragraph the caller
+/// handed over follows in the caller's own order, so **whatever the caller put last is what gives
+/// way**. The rule before it asked `ui.rs` to drop *Worth a look anyway* first, which it could only
+/// find by recognising the caller's words; measured against it, the file's own paragraphs kept
+/// *Worth a look* and cut *"will not change anything"* (`k8s-admin`, 2026-09-12, round two).
+///
+/// **A caller paragraph with no room left draws nothing, not a mark on the one above it** — the
+/// banners' own *a share under two rows draws nothing at all*, which is the rank this is stated to
+/// be identical to. A block cut as one run of lines put `…` on the end of a whole sentence.
+#[test]
+fn the_dead_write_path_says_so_on_a_pane_that_draws_no_list() {
+    let now = now();
+    let dead = dead_log();
+
+    // § Nothing is broken's own paragraphs, verdict excluded: the count, then *Worth a look*.
+    let empty = Pane::Ready(Vec::new());
+    let handed = fed("## Nothing is broken", 0, 1);
+    assert!(
+        handed.len() == 2 && handed[1].starts_with("Worth a look anyway"),
+        "the fixture is the page's count and its pointer, in that order: {handed:?}"
+    );
+    let mut clean = screen(&empty, &now);
+    clean.note = &handed;
+    clean.writes = Writes::Unaudited(&dead);
+    let drawn = render(&app(), &clean);
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        body_text(&drawn).contains(&words(&dead)),
+        "the audit sentence is ranked above every caller paragraph and came out cut:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        body_text(&drawn).contains(&words(&handed[0])),
+        "the count fits after the audit sentence and was not drawn whole:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        !holds(&drawn, "Worth a look"),
+        "the caller's last paragraph is the one that gives way, and it did not:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        !holds(&drawn, "\u{2026}"),
+        "a paragraph with no room left put a mark on the whole sentence above it:\n{}",
+        rows(&drawn).join("\n")
+    );
+    let lines = rows(&drawn);
+    let at_row = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", lines.join("\n")))
+    };
+    // **One blank row at each join and no more.** The needles are each paragraph's own first and
+    // last words, not a phrase that happened to sit on a row at one width.
+    assert_eq!(
+        at_row("could not open its audit log") - at_row("nothing is broken"),
+        2,
+        "the audit sentence sits directly under the verdict:\n{}",
+        lines.join("\n")
+    );
+    assert_eq!(
+        at_row("84 pods") - at_row("cluster still works"),
+        2,
+        "and the count follows it, one blank row down:\n{}",
+        lines.join("\n")
+    );
+
+    // **One row left is not a share**: a paragraph needs the blank that separates it and a line of
+    // its own. Handed one row, the last paragraph draws nothing — not a row holding only the mark.
+    // The audit sentence is 8 lines, the one-line count and its blank are 2, and 11 is the budget
+    // under the verdict, so exactly one row is left for the pointer.
+    let short = [
+        "84 pods checked.".to_owned(),
+        "Worth a look anyway.".to_owned(),
+    ];
+    let mut tight = screen(&empty, &now);
+    tight.note = &short;
+    tight.writes = Writes::Unaudited(&dead);
+    let drawn = render(&app(), &tight);
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        holds(&drawn, "84 pods checked.") && !holds(&drawn, "Worth a look"),
+        "the fixture no longer leaves exactly one row for the last paragraph:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        !holds(&drawn, "\u{2026}"),
+        "a paragraph handed one row drew the mark and nothing else:\n{}",
+        rows(&drawn).join("\n")
+    );
+
+    // § Still loading's own paragraphs — no headline, so the sentence is at the very top, and the
+    // caller's last paragraph is cut where its share ends.
+    let loading = Pane::Loading;
+    let reading = fed("## Still loading", 0, 0);
+    let mut still = screen(&loading, &now);
+    still.note = &reading;
+    still.writes = Writes::Unaudited(&dead);
+    let drawn = render(&app(), &still);
+    println!("{}", rows(&drawn).join("\n"));
+    let lines = rows(&drawn);
+    let at_row = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", lines.join("\n")))
+    };
+    assert!(
+        body_text(&drawn).contains(&words(&dead)),
+        "the first frame of every run lost the sentence, or cut it:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        at_row("could not open its audit log") < at_row("reading the cluster… 2,140 pods")
+            && at_row("reading the cluster… 2,140 pods") < at_row("Large clusters"),
+        "the audit sentence first, then the caller's paragraphs in the caller's order:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        !body_text(&drawn).contains("it does not wait") && holds(&drawn, "\u{2026}"),
+        "the caller's last paragraph is what gives, and it gives with a mark:\n{}",
+        lines.join("\n")
+    );
+}
+
+/// **The audit sentence is drawn once, and only by the one pane that has no banner to carry it** —
+/// the Alerts arm of `ui::content` (re-ruled 2026-09-12).
+///
+/// **It was appended inside `ui::note`, which seven panes call** (`k8s-admin`, 2026-09-12, round
+/// two, probes p07 and p08): the browser's still-loading pane drew it twice — whole in the banner
+/// above its title, and again cut inside the block under it — and every detail tab and Analysis
+/// report drew it under *reading the cluster…* and dropped it the instant the tab answered,
+/// because a loaded tab stacks no banners. A sentence that is there while a tab loads and gone once
+/// it has is a flicker, not a statement.
+#[test]
+fn the_audit_sentence_is_drawn_once_and_only_where_no_banner_carries_it() {
+    let now = now();
+    let dead = dead_log();
+    let opens = "could not open its audit log";
+    let starts = |drawn: &Buffer| rows(drawn).iter().filter(|row| row.contains(opens)).count();
+
+    let kinds = [browsable("deployments", true)];
+    let loading = Pane::Loading;
+    let mut waiting = browsing(&loading, &kinds, &now);
+    waiting.writes = Writes::Unaudited(&dead);
+    let drawn = render(&opened(), &waiting);
+    println!("{}", rows(&drawn).join("\n"));
+    assert_eq!(
+        starts(&drawn),
+        1,
+        "the browser's still-loading pane has its banner and must not repeat it below:\n{}",
+        rows(&drawn).join("\n")
+    );
+
+    let alerts = Pane::Ready(vec![oom()]);
+    for tab in Tab::ALL {
+        let open = Open::new();
+        let detail = open.open();
+        let mut reading = screen(&alerts, &now);
+        reading.detail = Some(&detail);
+        reading.writes = Writes::Unaudited(&dead);
+        let drawn = render(&on(tab), &reading);
+        assert_eq!(
+            starts(&drawn),
+            0,
+            "{tab:?} drew the sentence while it loaded and will drop it once it answers:\n{}",
+            rows(&drawn).join("\n")
+        );
+    }
+
+    let reports = [("capacity", None)];
+    let loading = Pane::Loading;
+    let mut computing = screen(&loading, &now);
+    computing.reports = &reports;
+    computing.writes = Writes::Unaudited(&dead);
+    let drawn = render(&opened_report(0), &computing);
+    assert_eq!(
+        starts(&drawn),
+        0,
+        "an Analysis report still computing drew a sentence its computed pane has no seat for:\n{}",
+        rows(&drawn).join("\n")
+    );
+}
+
+/// **The list keeps three rows whatever queues above it, and a sentence past the budget is marked**
+/// (`screens/states.md` § Your clock and a scoped namespace together — the body is 16 rows, the
+/// list keeps 3, everything stacked over it shares the other 13).
+///
+/// **Two caveats at the floor used to delete the list the sidebar badge was still counting**, and
+/// the sentence had no ceiling at all: a real `$XDG_STATE_HOME` measured 1383 characters against a
+/// pane that holds about 880 at the floor (`k8s-admin`, 2026-09-12).
+#[test]
+fn a_stack_of_caveats_never_takes_the_list_below_its_own_floor() {
+    let now = now();
+    let live = Pane::Ready(vec![oom()]);
+    let dead = dead_log();
+    let mut both = screen(&live, &now);
+    both.clock = Some(
+        "⚠ This computer and the cluster disagree about the time by 11 minutes (this one is \
+         behind), so recent times are missing and older ones can read smaller than they really \
+         are.",
+    );
+    both.writes = Writes::Unaudited(&dead);
+    let drawn = render(&app(), &both);
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        holds(&drawn, "payments/web"),
+        "the card the badge is counting was drawn off the screen:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        holds(&drawn, "⚠ This computer"),
+        "the first banner is the one that keeps its words"
+    );
+    assert!(
+        body_text(&drawn).contains("reading your cluster still works"),
+        "both sentences fit the 13 rows at this width, so neither gives way:\n{}",
+        rows(&drawn).join("\n")
+    );
+
+    // A sentence far past anything a pane can hold — `ops::audit_log`'s own measured worst case
+    // rounded up — still leaves the card and still marks the cut.
+    let huge = format!(
+        "k8rs could not open its audit log at {} — {}",
+        "x".repeat(1200),
+        dead
+    );
+    assert!(
+        huge.len() > 1383,
+        "the measured worst case is the floor of this fixture"
+    );
+    let mut flooded = screen(&live, &now);
+    flooded.writes = Writes::Unaudited(&huge);
+    let drawn = render(&app(), &flooded);
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        holds(&drawn, "payments/web"),
+        "an unbounded sentence took the whole list with it:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(holds(&drawn, "\u{2026}"), "and it was cut with no mark");
+
+    // The same value reaching the calm block, which had no cut of its own at all.
+    let empty = Pane::Ready(Vec::new());
+    let mut calm = screen(&empty, &now);
+    calm.writes = Writes::Unaudited(&huge);
+    let drawn = render(&app(), &calm);
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        holds(&drawn, "○  nothing is broken"),
+        "the verdict survived"
+    );
+    assert!(
+        holds(&drawn, "\u{2026}"),
+        "and the paragraph under it was marked"
+    );
+    assert!(
+        rows(&drawn)[2..18]
+            .iter()
+            .filter(|row| !pane(row).trim_end_matches('│').trim().is_empty())
+            .count()
+            <= 13,
+        "the calm block spent more than the 13 rows the floor leaves it:\n{}",
+        rows(&drawn).join("\n")
+    );
+}
+
+/// **The audit sentence is the first banner to give way, and the other two never give way to feed
+/// it** (`screens/states.md` § Your clock and a scoped namespace together, re-ruled 2026-09-12).
+///
+/// **Every sentence is read out of the page's own uncut mockups**, and the combinations are the
+/// three the page draws under § The audit log could not be opened. What is asserted is the rank —
+/// who is whole, who is cut, who is absent — and not where a line breaks: those mockups are drawn
+/// at 70 and 80 columns with a right pad the card region does not have, so their break points are a
+/// fact about the drawing, and this renders at the 80×24 floor.
+///
+/// **Before the rank, the pane's own reason was the one cut** (`k8s-admin`, 2026-09-12, round two):
+/// *"One node check is off"* beside a namespace scope, `aws sso login` and the staleness label
+/// beside an expired login, and with all three queued the namespace banner gone with no mark.
+#[test]
+fn the_audit_sentence_gives_way_first_and_the_pane_s_own_reason_never_does() {
+    let now = now();
+    let clock = fed("## Your computer's clock is off", 0, 0).join("\n\n");
+    let scoped = fed("## You can only see some namespaces", 0, 0).join("\n\n");
+    let expired = fed("## Your login expired", 0, 0).join("\n\n");
+    let dead = dead_log();
+    let audit_opens = "k8rs could not open its audit log";
+
+    // § And when a namespace is all you can see, too — the namespace banner whole, both paragraphs,
+    // and the audit sentence started and cut with a mark.
+    let denied = Pane::Denied(scoped.clone(), vec![oom()]);
+    let mut both = screen(&denied, &now);
+    both.writes = Writes::Unaudited(&dead);
+    let drawn = render(&app(), &both);
+    println!("namespace + audit\n{}\n", rows(&drawn).join("\n"));
+    assert!(
+        body_text(&drawn).contains(&words(&scoped)),
+        "the pane's own reason gave way to the audit sentence:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        body_text(&drawn).contains(audit_opens) && holds(&drawn, "\u{2026}"),
+        "the audit sentence had rows to start in and was not drawn, or was cut with no mark:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(holds(&drawn, "payments/web"), "and the list kept its card");
+
+    // § And when the login has also expired — the login banner whole, every paragraph of it, and
+    // the audit sentence gets only what is left.
+    let timed_out = Pane::Denied(expired.clone(), vec![oom()]);
+    let mut lapsed = screen(&timed_out, &now);
+    lapsed.link = Link::Expired;
+    lapsed.writes = Writes::Unaudited(&dead);
+    let drawn = render(&app(), &lapsed);
+    println!("login expired + audit\n{}\n", rows(&drawn).join("\n"));
+    assert!(
+        body_text(&drawn).contains(&words(&expired)),
+        "the renewal command or the staleness label gave way to the audit sentence:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(holds(&drawn, "payments/web"), "and the list kept its card");
+
+    // § All three at once — the clock whole, the namespace banner started and marked where its
+    // share ends, and the audit sentence absent because nothing is left for it.
+    let mut all = screen(&denied, &now);
+    all.clock = Some(&clock);
+    all.writes = Writes::Unaudited(&dead);
+    let drawn = render(&app(), &all);
+    println!("clock + namespace + audit\n{}\n", rows(&drawn).join("\n"));
+    assert!(
+        body_text(&drawn).contains(&words(&clock)),
+        "the clock gave way to something ranked under it:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        body_text(&drawn).contains("You can't list pods across the whole cluster"),
+        "the namespace banner vanished beside the clock and the audit sentence:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        !body_text(&drawn).contains(audit_opens),
+        "the audit sentence took rows the namespace banner is ranked above it for:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(holds(&drawn, "payments/web"), "and the list kept its card");
+}
+
+/// **The card the cursor is on is drawn, whichever card that is, under any stack of banners.**
+///
+/// **Every index is fed, because index 0 is the one case that hid the defect** (`k8s-admin`,
+/// 2026-09-12, round two, probe p06): ratatui's `List` moves its offset to the *selected* item and
+/// skips an item whole when it does not fit the region, so trimming only the first card left one
+/// `↓` between the reader and an empty pane under a sidebar still counting `1 ● 1 ▲`. At the
+/// 3-row floor every card is taller than the region — the cordon card, the shortest, is four lines
+/// and its blank — so the cursor on it drew nothing at all.
+#[test]
+fn the_selected_card_is_drawn_under_a_stack_of_banners_on_every_index() {
+    let now = now();
+    let cards = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
+    let clock = fed("## Your computer's clock is off", 0, 0).join("\n\n");
+    let dead = dead_log();
+    // The real pair, and one that spends the whole 13 so the list is at its 3-row floor whatever
+    // width either sentence wraps to.
+    let flood = vec!["x".repeat(53); 20].join(" ");
+    for (what, audit) in [
+        ("clock and the audit sentence", dead.as_str()),
+        ("banners that spend all 13 rows", flood.as_str()),
+    ] {
+        let mut stacked = screen(&cards, &now);
+        stacked.clock = Some(&clock);
+        stacked.writes = Writes::Unaudited(audit);
+        for (nth, identity) in ["payments/web", "node-3"].into_iter().enumerate() {
+            let mut moved = app();
+            moved.content.select(nth, &[None, None]);
+            let drawn = render(&moved, &stacked);
+            println!(
+                "{what}, cursor on card {nth}\n{}\n",
+                rows(&drawn).join("\n")
+            );
+            assert!(
+                holds(&drawn, identity),
+                "{what}: the cursor is on card {nth} and the pane under the banners is empty:\n{}",
+                rows(&drawn).join("\n")
+            );
+        }
+    }
+}
+
+/// **The floor holds at its own boundary, and that is where the audit sentence stops being
+/// drawable** — two rows is the least a banner can say anything in, a line and the blank under it
+/// (`screens/states.md` § Your clock and a scoped namespace together: the body is 16 rows, the list
+/// keeps 3, and everything stacked over it shares the other 13).
+///
+/// **The audit sentence is the third because it is ranked last**, not because it happens to be
+/// queued there: the clock and the pane's own reason are handed their rows first and never give
+/// any back to it. **Under two rows it draws nothing at all** — no fragment, no dangling mark.
+///
+/// **One 53-column token per line, so the arithmetic under test is this test's and not the
+/// wrapper's**: the card region is 53 columns at the floor (`screens/alerts.md` § The columns) and
+/// two of these never share a row. A 4-line clock is 5 rows, a 5-line reason is 6, and 2 are left.
+#[test]
+fn the_audit_sentence_is_drawn_while_two_rows_are_left_and_absent_below_that() {
+    let now = now();
+    let filling = |lines: usize| vec!["x".repeat(53); lines].join(" ");
+    let audit = "the audit sentence";
+    let clock = filling(4);
+
+    let reason = filling(5);
+    let denied = Pane::Denied(reason.clone(), vec![oom()]);
+    let mut queued = screen(&denied, &now);
+    queued.clock = Some(&clock);
+    queued.writes = Writes::Unaudited(audit);
+    let drawn = render(&app(), &queued);
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        body_text(&drawn).contains(audit),
+        "two rows left is a line and its blank, and the sentence was dropped anyway:\n{}",
+        rows(&drawn).join("\n")
+    );
+
+    // One line more in the pane's own reason leaves one row, which cannot hold a sentence *and*
+    // the blank that separates it from the list. The reason is ranked above the audit sentence, so
+    // it is drawn whole, and the audit sentence is the one that goes — whole, with no mark.
+    let reason = filling(6);
+    let denied = Pane::Denied(reason.clone(), vec![oom()]);
+    let mut tighter = screen(&denied, &now);
+    tighter.clock = Some(&clock);
+    tighter.writes = Writes::Unaudited(audit);
+    let drawn = render(&app(), &tighter);
+    println!("{}", rows(&drawn).join("\n"));
+    assert!(
+        !body_text(&drawn).contains(audit),
+        "one row left, and a sentence was drawn into the list's own floor:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        !holds(&drawn, "\u{2026}"),
+        "a banner with no share left a dangling mark where it would have been:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert_eq!(
+        rows(&drawn)[2..18]
+            .iter()
+            .filter(|row| pane(row).trim_start().starts_with('x'))
+            .count(),
+        4 + 6,
+        "the clock and the pane's own reason are both whole, and neither gave a row to the \
+         audit sentence:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(holds(&drawn, "payments/web"), "and the floor kept its card");
+}
+
+/// **The browser keeps its title and the blank under it as well as the table's three rows** — they
+/// come out of what a caveat leaves here, where on the Alerts pane the same rows are the list's own
+/// ([`HEADING`]).
+///
+/// **Counted, not inferred**: a banner that wants twenty lines is drawn at exactly ten, which is
+/// the 16 rows less the three the table keeps, less the title and its blank, less the banner's own
+/// trailing blank.
+#[test]
+fn a_banner_over_the_browser_leaves_the_title_and_the_tables_own_floor() {
+    let now = now();
+    let kinds = [browsable("deployments", true)];
+    let listed = Pane::Ready(table("table-deployments"));
+    let filling = vec!["x".repeat(53); 20].join(" ");
+    let mut flooded = browsing(&listed, &kinds, &now);
+    flooded.writes = Writes::Unaudited(&filling);
+    let drawn = render(&opened(), &flooded);
+    println!("{}", rows(&drawn).join("\n"));
+    let banner = rows(&drawn)[2..18]
+        .iter()
+        .filter(|row| pane(row).trim_start().starts_with('x'))
+        .count();
+    assert_eq!(
+        banner,
+        10,
+        "the banner spent rows the title and the table are owed:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        holds(&drawn, "deployments"),
+        "the title survived the banner"
+    );
+    assert!(
+        holds(&drawn, "NAME"),
+        "and so did the table's own header row"
+    );
+}
+
+/// **The clock line hides while k8rs is not completing requests and the audit line does not**
+/// (`screens/states.md` § While disconnected, or while the login has expired, § This sentence does
+/// not hide with the clock's).
+///
+/// A skew is measured off a live response's `Date` header; a state directory that could not be
+/// opened is fixed for the run and goes nowhere while the connection is down.
+#[test]
+fn the_clock_line_hides_with_the_connection_and_the_audit_line_stays() {
+    let now = now();
+    let dead = dead_log();
+    let dropped = Pane::Denied(
+        "⚠ Not connected to the cluster right now.".to_owned(),
+        vec![oom()],
+    );
+    for (what, link) in [("disconnected", Link::Lost), ("expired", Link::Expired)] {
+        let mut degraded = screen(&dropped, &now);
+        degraded.link = link;
+        degraded.clock = Some("⚠ This computer and the cluster disagree about the time.");
+        degraded.writes = Writes::Unaudited(&dead);
+        let drawn = render(&app(), &degraded);
+        println!("{what}\n{}\n", rows(&drawn).join("\n"));
+        assert!(
+            !body_text(&drawn).contains("disagree about the time"),
+            "{what}: a clock reading kept past the last successful request"
+        );
+        assert!(
+            body_text(&drawn).contains("reading your cluster still works"),
+            "{what}: the audit sentence hid with it and would have to reappear from nowhere"
+        );
+        assert!(
+            body_text(&drawn).contains("⚠ Not connected"),
+            "{what}: the pane's own sentence"
+        );
+    }
+}
+
+/// **Two caveats stack, most fundamental first** — `screens/states.md` § *Your clock and a scoped
+/// namespace together*: the clock line before the namespace line, because a reader who cannot trust
+/// *any* time on the page should be told that before being told which *part* of it they can see.
+#[test]
+fn the_clock_line_is_drawn_above_the_pane_s_own_banner() {
+    let now = now();
+    let scoped = Pane::Denied(
+        "You can't list pods across the whole cluster, so k8rs is showing the namespace your \
+         kubeconfig points at: payments."
+            .to_owned(),
+        vec![oom()],
+    );
+    let mut both = screen(&scoped, &now);
+    both.clock = Some("⚠ This computer and the cluster disagree about the time by 11 minutes.");
+    let drawn = render(&app(), &both);
+    println!("{}", rows(&drawn).join("\n"));
+    let lines = rows(&drawn);
+    let at_row = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", lines.join("\n")))
+    };
+    assert!(
+        at_row("⚠ This computer") < at_row("You can't list pods"),
+        "the clock line is not above the namespace line"
+    );
+    assert!(
+        at_row("You can't list pods") < at_row("payments/web"),
+        "and both are above the list they are about"
+    );
+}
+
+/// **The column each non-blank banner row starts at, pane side** — the walk stops at the first
+/// card, which is where the banners end.
+///
+/// **It reads the drawn rows and deliberately not [`said_above`]**, which collapses every run of
+/// spaces to one: a comparison made through that helper reads identically whether the mark is spent
+/// once or redrawn on every line, which is the one thing the caller of this is testing.
+fn banner_indents(drawn: &Buffer) -> Vec<usize> {
+    rows(drawn)[2..18]
+        .iter()
+        // The frame's right border is not content, and a row of nothing but spaces ends on it —
+        // which reads as a 57-column indent to anything that counts leading spaces.
+        .map(|line| pane(line).trim_end_matches('│').to_owned())
+        .take_while(|line| {
+            let head = line.trim_start();
+            !head.starts_with('●') && !head.starts_with('▲')
+        })
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take_while(|glyph| *glyph == ' ').count())
+        .collect()
+}
+
+/// **A banner that opens with the alarm mark spends it once, and every line under the first begins
+/// at the column the text began at** (`screens/states.md` § Rules that hold across every state on
+/// this page, `tui-designer` 2026-09-12).
+///
+/// **The rule is about the paragraph, not about word wrap.** § *The connection dropped* draws three
+/// whole sentences this way and not one sentence wrapped across three lines, which is why a
+/// renderer that indented only a *continuation* would still be wrong: the mark would come back at
+/// the head of the next sentence and read as repeating once per sentence.
+///
+/// **The unmarked family is the must-not-fire half**, and it is what stops this from passing on a
+/// renderer that indents everything: § *You can only see some namespaces* opens with no mark, so
+/// there is nothing to hang under and every one of its rows sits flush at the pad.
+#[test]
+fn a_marked_banner_spends_the_mark_once_and_hangs_the_rest_under_the_text() {
+    let now = now();
+
+    let section = "## The connection dropped";
+    let dropped = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let mut lost = screen(&dropped, &now);
+    lost.link = Link::Lost;
+    let drawn = render(&app(), &lost);
+    println!("{}", rows(&drawn).join("\n"));
+
+    // The column a needle starts at on its own row, pane side and counted in characters — `⚠` is
+    // three bytes and a byte offset would land inside it.
+    let at = |needle: &str| {
+        let line = pane(&row(&drawn, needle));
+        let byte = line.find(needle).expect("the row this needle was found by");
+        line[..byte].chars().count()
+    };
+    let opening = at("⚠");
+    let head = at("Not connected");
+    assert_eq!(
+        head,
+        opening + 2,
+        "the mark and the one space after it, and nothing else, before the first word:\n{}",
+        rows(&drawn).join("\n")
+    );
+    // **The columns are asserted and the line breaks are not.** Where this sentence wraps is a
+    // fact about the width it was rendered at — the screen file draws it at the floor's 47-column
+    // pane and this renders at 80 — and a test that read the mockup's own break would be asserting
+    // the terminal size rather than the rule.
+    let hung = banner_indents(&drawn);
+    assert_eq!(
+        hung.first(),
+        Some(&2),
+        "the first line sits at the pad, mark and all:\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        hung.len() > 1 && hung[1..].iter().all(|indent| *indent == head),
+        "every line under the first hangs at the text's column, not the mark's: {hung:?}\n{}",
+        rows(&drawn).join("\n")
+    );
+
+    // § Your login expired — the half word wrap cannot produce: three paragraphs, each starting a
+    // line of its own whatever the width, and each one hanging at the same column. A renderer that
+    // indented only a *continuation* draws every one of these back under the mark.
+    let section = "## Your login expired";
+    let timed_out = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let mut expired = screen(&timed_out, &now);
+    expired.link = Link::Expired;
+    let drawn = render(&app(), &expired);
+    println!("{}", rows(&drawn).join("\n"));
+    let at = |needle: &str| {
+        let line = pane(&row(&drawn, needle));
+        let byte = line.find(needle).expect("the row this needle was found by");
+        line[..byte].chars().count()
+    };
+    let head = at("Your login expired.");
+    for sentence in [
+        "The cluster still knows",
+        "Renew it",
+        "What you see below is from",
+    ] {
+        assert_eq!(
+            at(sentence),
+            head,
+            "{sentence:?} is its own sentence and does not start under the first one's text:\n{}",
+            rows(&drawn).join("\n")
+        );
+    }
+    // **Once, and the count is the point** — a renderer that redrew the mark on every sentence
+    // would line those three up perfectly and still be wrong, because the mark would then read as
+    // repeating rather than opening the paragraph.
+    assert_eq!(
+        rows(&drawn)
+            .iter()
+            .filter(|line| line.contains('\u{26a0}'))
+            .count(),
+        1,
+        "the mark is spent once per paragraph, not once per sentence:\n{}",
+        rows(&drawn).join("\n")
+    );
+
+    // § You can only see some namespaces — no mark, so nothing is spent and nothing hangs.
+    let section = "## You can only see some namespaces";
+    let scoped = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let partial = screen(&scoped, &now);
+    let drawn = render(&app(), &partial);
+    println!("{}", rows(&drawn).join("\n"));
+    let flush = banner_indents(&drawn);
+    assert!(
+        flush.iter().all(|indent| *indent == 2),
+        "an unmarked banner has no mark to hang under and every row sits at the pad: {flush:?}\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert!(
+        flush.len() > 2,
+        "and this screen draws more than one row of it: {flush:?}"
+    );
+}
+
+/// **Analysis and an open detail tab leave no mutating key pressable behind a footer that names
+/// none** — PRIOR-ART § G2, *read-only enforced per view is a hole per view*, which k9s #3858 is:
+/// its XRay view still allowed a delete under read-only.
+#[test]
+fn a_mode_whose_footer_names_no_mutating_key_leaves_none_live() {
+    let now = now();
+    let live = Pane::Ready(vec![oom()]);
+    let held = Open::new();
+    let open = held.open();
+
+    let reporting = App {
+        view: View::Analysis(0),
+        ..App::default()
+    };
+    let analysis = screen(&live, &now);
+    let mut over = screen(&live, &now);
+    over.detail = Some(&open);
+
+    for (what, app, asked) in [
+        ("Analysis", &reporting, &analysis),
+        ("a detail tab", &app(), &over),
+    ] {
+        let offer = offered(app, asked);
+        assert!(
+            !app.may_mutate(offer),
+            "{what} left a key live that its own footer never names — {offer:?}"
+        );
+        let (keys, _) = app.footer(asked.detail.is_some(), offer, Refused::default(), "");
+        for withheld in ["s scale", "r restart"] {
+            assert!(!keys.contains(withheld), "{what}: {keys:?}");
+        }
+    }
 }
 
 // --- THE BROWSER ---
