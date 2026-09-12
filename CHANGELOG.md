@@ -78,6 +78,7 @@
 - *(ui)* Draw the keys valid right now, and the map behind ? ([319c9a9](https://github.com/murat-akpinar/k8rs/commit/319c9a9c8bb0b061658d4003e5e06a223570b7ba)) — Two committed screen files disagreed about what a footer holds before any code was written, so the round opened with the designer. The rule, in screens/widgets.md 2a: `? all keys` and `q quit` are one pair drawn last and never given way, everything else is curated to fit the 76 columns indented() leaves at the floor, and the closed sixteen-row mode list is cited from every screen file and copied into none. Four keys came off three footers and all four stay bound.
 - *(ui)* Draw the confirmation dialogs, and the uid that says it is still the same object ([1f687fc](https://github.com/murat-akpinar/k8rs/commit/1f687fcfeced231e6adc24188e0bf6148208c82c)) — Phase 11's first two boxes, as one family. ui.rs draws every modal the screens declare: the three Confirm boxes, the typed-name delete, the refusal and Already gone.
 - *(ui)* Dim the keys this login may not use, and name the grant it needs ([20f8d15](https://github.com/murat-akpinar/k8rs/commit/20f8d1539d92f835b4bc9ff1ba3b7d725720895e)) — The footer marks a refused key (`s no scale`, `r no restart`) and `?` carries the reason, because the reason does not fit the line D23 promised it to: the footer has 11 spare columns of 76 and the shortest true reason is 27. Dim itself was unavailable — the footer is already `theme::DIM`, and `DIM` and `BORDER` share ANSI 8 — so the carrier is a word.
+- *(ui)* Draw the in-flight screen, and stop promising keys a running call refuses ([2a05e79](https://github.com/murat-akpinar/k8rs/commit/2a05e79ee12cfdb23845fb1000927d0a5356670c)) — The state is the object the call is on, not a flag: the footer has to name it, and a bool beside a String is two fields that can disagree. The header appends `changing…` last of all inside `ui::header`, so no caller can put it ahead of `read-only` or the TLS warning, and `shortened` still eats the front.
 
 ### 🐛 Bug Fixes
 
@@ -228,6 +229,7 @@
 - *(docs)* Record the gate's third cause, and the session that held src/ all day ([d595599](https://github.com/murat-akpinar/k8rs/commit/d595599becc33de90963a9552f73b840ffdf6d96))
 - *(docs)* Close the alerts view box on the pane the layout box drew ([bcbb040](https://github.com/murat-akpinar/k8rs/commit/bcbb0408b7477c9feb86143d172d77c9312b64c3))
 - *(docs)* Point the dirty-tree gate at the session check ([194fe12](https://github.com/murat-akpinar/k8rs/commit/194fe12999af2917757c695aaa53cb88261531cf))
+- *(docs)* Send an agent's scratch build volume to $HOME, not the tmpfs scratchpad ([4165485](https://github.com/murat-akpinar/k8rs/commit/41654850f2ce4ed94accc0f7c6b0e94af23d8853))
 
 ### ⚡ Performance
 
