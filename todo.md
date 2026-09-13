@@ -4258,10 +4258,12 @@ state before its renderer exists is what manufactures a frozen-file violation.
 > ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
 > Done: `just check` green; the family read; the six blockers fixed and committed
 > **but not yet reviewed**; mutation shards `0/4` (220 tested, 0 missed) and `1/4`
-> (220 tested, 0 missed); docs sync. **Owed, in order**: `tester` and `k8s-admin`
-> on the six-blocker commit (steps 5–6, loop to a fix if they find one) · `just
-> mutants --shard 2/4` and `3/4` · the host run (`ssh ubuntu` had no route on
-> 2026-09-13, and nothing in the binary calls `ui.rs` yet — say so) · the phase
+> (220 tested, 0 missed); docs sync. **Shards `2/4` and `3/4` are not owed**: the
+> sweep mutates only `rules.rs` and `analysis.rs`, neither has changed since
+> 2026-08-30, and [D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)
+> owes it only at a close that touches them. **Owed, in order**: `tester` and
+> `k8s-admin` on the six-blocker commit (steps 5–6, loop to a fix if they find
+> one) · the host run (`ssh ubuntu` had no route on 2026-09-13, and nothing in the binary calls `ui.rs` yet — say so) · the phase
 > security gate · the whole-phase second pass · CHANGELOG · PR `development` →
 > `main` and merge · move this note and Phase 5's pointer to Phase 12.
 

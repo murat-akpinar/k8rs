@@ -542,7 +542,9 @@ cycle, lands it, and starts the next — no "shall I continue", no question
 could have caught a skipped gate has left, so a gate skipped now is never found.
 
 **But the PM reports at the first dispatch, not only at the push** — one line:
-the box, what had to be ruled before it, what is running now.
+the box, what had to be ruled before it, what is running now. **A phase close is
+not a box and reports the same way, at each of its dispatches** — it is the
+longest thing this process runs.
 [D98](NOTES.md#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15)
 removed the *asking*, not the *saying*. A box that has been running three hours
 is otherwise invisible until the user asks what happened to their afternoon
@@ -748,8 +750,13 @@ surviving mutant is a test that cannot fail, stated by a tool with no incentive
 **Per turn it is scoped to the diff** — **`just mutants-diff`**, never a raw
 `cargo mutants` line — because the whole file was 519 mutants at ~2s each the last
 time it was run whole (2026-08-16; the file has grown since). `just mutants` whole
-is the *phase-close* gate, and `--iterate` skips what an earlier run already
-caught. **Both go through `scripts/mutants.sh`, and that is not a convenience.**
+is the *phase-close* gate **only for a phase that changed `rules.rs`,
+`analysis.rs` or their tests** — those are the only files it mutates, so every
+other close runs `git log` over those paths, finds nothing, and cites the last
+clean sweep instead of spending hours re-proving frozen files
+([D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
+`--iterate` skips what an earlier run already caught. **Both go through
+`scripts/mutants.sh`, and that is not a convenience.**
 cargo-mutants files *any* build failure as `unviable`, so a mutant that never got
 built because the scratch volume was full reads exactly like one that cannot
 compile — and this box's `/tmp` is a 12 GiB tmpfs that has been at 94% while
