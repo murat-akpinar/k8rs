@@ -236,6 +236,7 @@
 - *(docs)* Send an agent's scratch build volume to $HOME, not the tmpfs scratchpad ([4165485](https://github.com/murat-akpinar/k8rs/commit/41654850f2ce4ed94accc0f7c6b0e94af23d8853))
 - *(docs)* Name the commit-body shape git-cliff swallows ([7cac406](https://github.com/murat-akpinar/k8rs/commit/7cac406c6aa18de78defdb4b1420571580e1679b))
 - *(docs)* Rule the phase 11 close — six false screens first, and the freeze moves to its consumer ([4b96f08](https://github.com/murat-akpinar/k8rs/commit/4b96f086705fa7fc0526a7932f8d12875909797a)) — The family read of the whole phase found six screens that draw something false, each reproduced through the real renderer, and surface no caller can supply without editing a file this close was about to freeze. The six are fixed before the close. ui.rs and views.rs now freeze at Phase 12's close, by D246's own rule one layer up, and the missing surface is boxed there (NOTES D266).
+- *(docs)* Run the phase-close mutation sweep only when the files it mutates changed ([ba2b1a4](https://github.com/murat-akpinar/k8rs/commit/ba2b1a45559a38555ba44d11a57aab92cd0b7d3f)) — `just mutants` mutates only rules.rs and analysis.rs, and D210 already owes the whole sweep only at a close that touches them. CLAUDE.md still called it the gate of every close, so the Phase 11 close spent about two hours on shards over files unchanged since 2026-08-30, beside agents that were building. The sentence now carries D210's condition, and Phase 11's note stops owing shards 2/4 and 3/4.
 
 ### ⚡ Performance
 
