@@ -286,6 +286,7 @@ its line moving with it.
 - [D262](#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12) — the in-flight screen: the state that had to name its object, the cut that gave way at the wrong end, and the screen that answers what may I press promising four keys it refuses
 - [D263](#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12) — the nine states: a refusal that was also a scope, a stack that cut the one banner with nothing else to say, and a test named for a body it never compared
 - [D264](#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13) — the picker round: a failure box with a second vocabulary, a current row that could not be retried, and a cursor on a context nobody chose
+- [D265](#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13) — the read-only mark: the header joins the permission word itself, and Help swaps for either cause
 
 ## Why it exists — where the gap is
 
@@ -23254,3 +23255,73 @@ tested, 180 caught, 0 missed. This is
 item 11's shape. **The family took three reads and seven rounds, and each read found a real defect
 on a real input.** The first found the second vocabulary. The second found the flag given as
 advice to a reader already inside the TUI. The third found a next step that could not be followed.
+
+### D265 — the read-only mark: the header joins the permission word itself, and Help swaps for either cause (2026-09-13)
+
+Phase 11's `--read-only` box. Its premise was half stale at brief time: `ui::Screen` already
+carried `writes` ([D263](#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)
+ruling 2), but only the startup picker's header read it, and Help read nothing.
+
+**1. The header derives `admin` / `read-only` from `Screen::writes` in every state, and
+`Screen::context` stops carrying it.** A caller-joined word is a second carrier of the fact the
+footer and `may_mutate` already read, and it can say `admin` over dead keys. The caller's string
+ends at the connection state.
+
+**2. The TLS warning moves with it, as `Screen::insecure: bool`.** `screens/widgets.md` § 1a puts
+the warning after the permission word, so a header-appended word in front of a caller-joined
+warning is the wrong order. The wording is the picker badge's, from one place.
+
+**3. Whether Help's keys go reads `Writes::live`, not the cause.** `--read-only` and an audit log
+that would not open both take `s`, `r` and `ctrl-d` off Help (`screens/help.md` § Under a
+dead-writes run): the header says `read-only` for both, and a Help advertising them under a dead
+audit log is the same lie. *Why* is ruling 5's.
+
+**Out of this box:** nothing constructs `Writes::ReadOnly` from the command line yet (Phase 12's
+flags box), and the connection-state word still rides in the caller's string beside `Screen::link`.
+
+**The review rounds** (`tester`, `k8s-admin`, 2026-09-13) found what rulings 4–8 settle, and
+`ui.rs` freezes when this box lands, so they are this box and not a later one:
+
+**4. Help pauses *Changing things* for every run-level reason `offered` withholds the keys for.**
+The link (`Lost`, `Expired`) and the clock kill `s`/`r` exactly as dead writes do, and Help still
+promised all three keys under them — the box's own defect by another cause, and
+[D262](#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12)'s
+for `changing`. Same mechanism as D262's heading rewrite, one reason drawn, in this order: dead
+writes (ruling 5's heading), a call in flight, the link, the clock. **A reason that does not lift
+on its own says what lifts it**, and names only a step that works. A renewed login needs `X`
+(`screens/states.md` § Your login expired) — which reconnects only if Phase 12 opens the picker
+with `views::Connection::Dropped` under `Link::Expired`, since `⏎` on a `Live` current row just
+closes it (`views::Picker::chosen`). The clock skew is read once at connect (`k8s::Session`) and
+the clock clause is shown only while the link is live, so `X` then `⏎` never re-reads it: its
+clause says *quit and start k8rs again*, and assigns no fault — k8rs measures a gap, not whose
+clock is wrong. The wording is `screens/help.md`'s.
+
+**5. Help's line says why; the header's word says only whether.** Ruling 3 holds for *whether*
+the block goes. But under `Unaudited` with a crowded body the audit banner gives way first
+(D263 item 5) and the header's `read-only` was the only carrier left, so an operator who never
+typed `--read-only` read *read-only* three times and *audit log* nowhere. **The heading stays and
+says the state (`off for this whole run`); one row under it says why and what brings changes back**,
+one fixed sentence per cause, neither interpolating the audit sentence the banner owns. The first
+draft dropped the heading, and neither sentence then said that nothing could be changed.
+
+**6. The permission word is in every header state.** `screens/widgets.md` § 1a's table is the
+rule and the `connecting…`, `disconnected` and `login expired` mockups that drop it are wrong:
+`read-only` during a disconnect is when a reader is about to press something. `admin` while
+connecting says only what the startup picker's `choose a cluster · admin` already says.
+
+**7. An empty `Screen::context` joins nothing**, rather than a dangling ` · `.
+
+**8. `Screen::insecure` has no writer yet.** Phase 12 sets it on every connect from the `current`
+row of `k8s::contexts(&kubeconfig, context)` — a plain function, callable whether or not the
+picker opened, and first-wins over clusters the way kube's loader is. **Not from the built
+`kube::Config`**, which the first draft of this ruling named: `Client::try_from` consumes it,
+`Session` keeps no TLS field and `k8s.rs` is frozen (`k8s-admin`, round two, correcting its own
+round-one premise). And `Screen::writes` survives `App::switched`. Both are written onto *The
+cluster picker is wired*.
+
+**9. Round four gets no further read, and that is a ruling** — D264 ruling 33's shape. It carried
+round three's two findings and nothing else: the clock clause's *quit and start k8rs again*, and
+`tester`'s two-zone assertion, each seen red first. Three reads, each finding a real defect on a
+real frame: Help promising keys the footer withheld, a Phase 12 source that could not be reached,
+and a next step that did not work. The gate over the tree that lands: `just check` green,
+`just mutants-diff` 17 mutants, 15 caught, 2 unviable on a missing `Default` bound.

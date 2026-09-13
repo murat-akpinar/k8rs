@@ -2563,6 +2563,25 @@ recorded reversal and a later box rather than a dev round
   and neither the sidebar's fill nor the browser's is asserted either. Found by
   `tester`, 2026-09-13. The screens name the fill; nothing holds it.
 
+- **`screens/states.md` draws `⚠ your clock is behind` in the header's right
+  zone, after `admin`/`read-only`** (every mockup under § Your computer's clock
+  is off and the two combined cases, ~l.648 and ~l.1072). `widgets.md` § 1a's
+  zone table has no clock segment and the product draws the clock as a
+  banner. Since [D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)
+  the header joins `admin`/`read-only` itself, so a caller that put the clock
+  text into `Screen::context` would land it *before* `read-only`. Found by
+  `dev-ui`, 2026-09-13; pre-existing.
+
+- **`screens/alerts.md` l.37 still says the header's right zone "is never
+  truncated"**, stale since [D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)
+  made it shorten from its front. Found by `k8s-admin`, 2026-09-13.
+
+- **Several header mockups leave out the connection-state word** that
+  `widgets.md` § 1a puts before `admin`/`read-only`: `screens/states.md`
+  ~l.648, 1143, 1240, 1378 and `screens/analysis.md` ~l.262
+  (`ns: payments · read-only`, no `live`). Found by `tester`, 2026-09-13;
+  pre-existing.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

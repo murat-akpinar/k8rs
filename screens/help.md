@@ -57,15 +57,95 @@ Rules:
   right now, the same place every other screen puts it.
 - Grouped by **what you are doing**, not by keycode order, and the jargon is
   in brackets — a newcomer reads the sentence, and learns the term for free.
-- Only keys that exist in this build appear. Under `--read-only` the
-  *Changing things* block is meant to be replaced by one line —
-  *"read-only mode — nothing can be changed from here"* — owed, not landed:
-  neither `App` nor `Screen` carries the flag yet, so today's build still
-  shows `s`, `r` and `ctrl-d` under `--read-only`
-  ([D259 ruling 5](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)).
+- Only keys that exist in this build appear. **Once writes are dead for this
+  run — `--read-only`, or an audit log that would not open, the same one
+  signal either way — the *Changing things* heading is rewritten to say so,
+  its `s` row carries the cause's own sentence, and `r`/`ctrl-d` go blank**
+  ([D259 ruling 5](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10),
+  [D263 ruling 2](../NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12),
+  [D265 ruling 5](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+  Drawn whole at [§ Under a dead-writes
+  run](#under-a-dead-writes-run).
 - v0.2+ operations join this screen as they land (cordon, drain, rollout undo,
   then exec and port-forward, then edit) — see
   [NOTES § Operations](../NOTES.md#operations--the-full-admin-surface).
+
+## Under a dead-writes run
+
+Two different causes land here — `--read-only`, or `ops::audit_log` failing
+to open — and the header reads `read-only` for both
+([D265 ruling 3](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+**The *Changing things* heading stays, and says the state; the row under it
+says why and what brings it back** — one fixed sentence per cause, neither
+interpolating the audit banner's own sentence
+([D265 ruling 5](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+Nothing else about the screen changes — the same sixteen-row body, the same
+command log strip, the same `?`/`q` footer this file draws everywhere else.
+
+```
+ nodes 3/3                            k8rs       ctx: prod-eu · live · read-only
+┌ Keys ────────────────────────────────────────────────────────────────────────┐
+│  Moving around                                                               │
+│    ↑ ↓ / j k    move            ⏎     open the selected thing                │
+│    tab          next panel      esc   back / close                           │
+│    X            switch cluster                                               │
+│    [ ]          detail tabs     / n   filter · namespace                     │
+│                                                                              │
+│  Looking at things (always available)                                        │
+│    l  logs, with the log from before a crash                                 │
+│       in the log tab:  f follow · c container · ⇧p previous                  │
+│    d  describe — the object and what happened to it                          │
+│    y  view as YAML                                                           │
+│                                                                              │
+│  Changing things (off for this whole run)                                    │
+│    k8rs was started with --read-only — quit and start it again without it    │
+│                                                                              │
+│                                                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                                        │
+│ $ kubectl get daemonsets -A --watch                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ? or esc to close                                                     q quit │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+`Writes::Unaudited` draws the same frame, over the same two rows:
+
+```
+  Changing things (off for this whole run)
+    k8rs could not open its audit log — fix that, then start k8rs again
+```
+
+- **Drawn at the real 80-column floor, not this file's usual 70-column
+  page** — the same move [§ When a key is refused](#when-a-key-is-refused)
+  already makes. `read-only` is four columns longer than `admin`, and
+  `ui::header`'s own centring — not this page's own hand-drawn one — shows
+  what that costs: at 70 columns `k8rs` centres at column 33 regardless of
+  the right zone, so `admin`'s six columns of gap before it narrows to two
+  for `read-only`. Two blank columns is not a collision, but it is not
+  room either, so this mockup draws the floor instead of dropping the
+  centred name.
+- **The heading is rewritten, not removed — anchored on `  Changing
+  things`, the same leading text [`key_map`] already finds it by.** Its
+  `s` row carries the cause's own sentence, at the same four-column indent
+  every mutating row uses; `r` and `ctrl-d` go blank. No row is added or
+  removed: the block keeps the four rows it always had.
+- **Neither row is marked refused.** Invariant 2's *unreachable, not
+  merely unbound* is about **mutation**, not `ops.rs` as a whole — `may_i`
+  writes nothing and touches no audit log, so neither `--read-only`
+  ([D230 ruling 3](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05))
+  nor `Unaudited` refuses it — the absence here is structural, not a
+  verdict a probe gave.
+- **The row names the cause and the way back; the path and the error are
+  the banner's, when it has room to draw them** — the audit sentence is
+  the first to give way under
+  [D263 ruling 5](../NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)'s
+  rank, so a queued clock or namespace banner can leave it undrawn even
+  once Help closes, and this row must hold true either way.
+- **`s`, `r` and `ctrl-d` appear nowhere as mutating keys under either
+  cause** — the row that was `s` is prose, `r` and `ctrl-d` are blank, and
+  none of the three gains a refused clause: see the last bullet of
+  [§ When a key is refused](#when-a-key-is-refused).
 
 ## While the call is running
 
@@ -157,6 +237,81 @@ already do, so a reader who presses `?` to find out why `s` went quiet now
 reads the answer in the one place every other key's reason already lives on
 this screen, rather than a second sentence squeezed into a footer that has
 never carried one.
+
+## While the link is down, the login has expired, or the clock is off
+
+Three more run-level reasons `offered` withholds `s` and `r` for
+(`views::Offer::Move`) — `Screen::link` off `Live`, either way, and a clock
+this page cannot trust — and Help drew none of them: the ordinary *Changing
+things* block, live keys and all, over a run where none of the three could
+actually be pressed
+([D265 ruling 4](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+
+**Same mechanism as [§ While the call is
+running](#while-the-call-is-running)'s own — the heading rewritten, its
+three rows unchanged beneath it, one reason drawn — not restated here**
+([D262](../NOTES.md#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12)).
+**The `X` row is not rewritten for any of the three** — nothing about a
+lost link, an expired login or the clocks disagreeing stops a cluster
+switch, so only *Changing things* changes:
+
+```
+  Changing things (paused while disconnected, retrying)
+```
+
+```
+  Changing things (paused — renew your login, then press X)
+```
+
+```
+  Changing things (paused — the clocks disagree; quit and start k8rs again)
+```
+
+- **Order, when more than one applies: dead writes first, then a call in
+  flight, then the link, then the clock** ([D265 ruling
+  4](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+  Dead writes never coincide with a call in flight — no call can start to
+  be *in flight* once writes are dead — but they can coincide with the
+  link or the clock, and outrank both there:
+  [states.md § And when the login has also
+  expired](states.md#and-when-the-login-has-also-expired) draws exactly
+  this, a dead audit log under an expired login, and Help's heading still
+  reads the dead-writes state. A call in flight *can* coincide with a lost
+  link or an expired login — the watch can drop, or a token can expire,
+  while a `PATCH` is still on the wire — and there its clause wins,
+  because it is the one of the four that also pauses `X` ([§ While the
+  call is running](#while-the-call-is-running)). `Link::Lost` and
+  `Link::Expired` are two values of the one field `Screen::link`, never
+  both true at once, so there is nothing to rank between them. The clock
+  ranks last because `ui::clock` reads `None` whenever the link is not
+  `Live`, so a stale reading never gets to compete with a link reason at
+  all.
+- **The words are the header's and the banners' own, not reinvented
+  here.** `disconnected, retrying` is [states.md § The connection
+  dropped](states.md#the-connection-dropped)'s own header pointer;
+  "renew your login" and "press X" are [states.md § Your login
+  expired](states.md#your-login-expired)'s own words — *"Renew it, then
+  press X and pick this cluster again"*; "the clocks disagree" matches
+  [states.md § Your computer's clock is
+  off](states.md#your-computers-clock-is-off)'s own refusal to name which
+  clock is wrong. **The fix named is not `X`.** The skew is read once at
+  connect, so nothing on screen re-reads it on its own — but `X` does not
+  reconnect either: measured, `X` then `⏎` on the picker's own live
+  current row only closes the picker
+  (`views::Picker::chosen` → `Chosen::Close`), so a reader who pressed it
+  hoping to re-check the clock would see nothing happen
+  ([D265 ruling
+  4](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+  `quit and start k8rs again` is [D264 ruling
+  23](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)'s
+  own phrasing for a reader already inside the TUI, and today it is the
+  only thing that actually re-reads the clock.
+- **A permission-refused clause never lands on top of one of these three**,
+  the same reconciliation [§ While the call is
+  running](#while-the-call-is-running) already states for itself: whichever
+  reason's heading is drawn is what a reader presses against, and
+  [§ When a key is refused](#when-a-key-is-refused)'s own per-key clauses
+  return the moment none of the four reasons above it holds.
 
 ## When a key is refused
 
@@ -272,12 +427,16 @@ lines.
   `--subresource=scale`, never the slash. The clause keeps the Role's
   spelling because that is what the reader's next action needs, not because
   it is safe to run as typed.
-- **`--read-only` is meant to win outright, so the two states are never meant
-  to land on screen together — a design rule, not yet a built one**
-  ([D259 ruling 5](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)). Once the flag reaches `App`/`Screen`, the *Changing things* block
-  is replaced by its own one line before any row in it can gain a refused
-  clause — there will be no row left for one to land on, whatever a
-  permission probe would have answered. Until that swap exists, a
-  `--read-only` session can still show this section's worst case, which is
-  the same gap the rule above already names, not a second one for this
-  section to carry.
+- **Dead writes win outright, so this section's clauses are never drawn
+  under them.** Once writes are unreachable for the run — `--read-only`, or
+  an audit log that would not open — the *Changing things* heading is
+  rewritten to name it and the `s` row becomes the cause's own sentence;
+  neither starts with the anchor text a refused clause looks for, and
+  `r`/`ctrl-d` are blank, so there is no row left for one to land on,
+  whatever a permission probe would have answered
+  ([D259 ruling 5](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10),
+  [D263 ruling 2](../NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)).
+  [§ While the call is running](#while-the-call-is-running)'s own rewritten
+  heading has the same nothing to rewrite, under the same run — one gap,
+  not two, and neither section says it twice. Drawn whole at [§ Under a
+  dead-writes run](#under-a-dead-writes-run).

@@ -119,7 +119,8 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
     Screen {
         depth: Depth::TrueColor,
         vitals: "nodes 3/3",
-        context: "ctx: prod-eu · live · admin",
+        context: "ctx: prod-eu · live",
+        insecure: false,
         alerts,
         browser: &UNOPENED,
         namespace: None,
@@ -320,7 +321,8 @@ fn a_line_inside_the_frame_never_reaches_the_border() {
 
 /// **`k8rs` is drawn only with two blank columns each side, and the boundary is where the
 /// mutants live.** At 80 columns the centred name starts at 38, so a left zone of 35 keeps it and
-/// one of 36 loses it; on the other side a context of 36 keeps it and one of 37 loses it. The
+/// one of 36 loses it; on the other side a context zone of 36 keeps it and one of 37 loses it —
+/// the whole zone, `admin` included, which is the header's to join and not the caller's. The
 /// name is the only zone that gives way — never the context.
 #[test]
 fn the_name_needs_two_blank_columns_on_each_side() {
@@ -341,26 +343,27 @@ fn the_name_needs_two_blank_columns_on_each_side() {
     tight.vitals = &thirty_six;
     assert!(!header(&tight).contains("k8rs"), "a 36-column one does not");
 
-    let last = format!("ctx: {}", "c".repeat(31));
+    let last = format!("ctx: {}", "c".repeat(23));
     let mut roomy = screen(&alerts, &now);
     roomy.context = &last;
-    assert_eq!(width(&last), 36);
+    assert_eq!(width(&format!("{last} · admin")), 36);
     assert!(
         header(&roomy).contains("k8rs"),
         "a 36-column context still leaves two blanks"
     );
 
-    let over = format!("ctx: {}", "c".repeat(32));
+    let over = format!("ctx: {}", "c".repeat(24));
     let mut tight = screen(&alerts, &now);
     tight.context = &over;
-    assert_eq!(width(&over), 37);
+    let zone = format!("{over} · admin");
+    assert_eq!(width(&zone), 37);
     let drawn = header(&tight);
     assert!(
         !drawn.contains("k8rs"),
         "and a 37-column one does not: {drawn:?}"
     );
     assert!(
-        drawn.ends_with(&over),
+        drawn.ends_with(&zone),
         "the context is never the zone that gives way: {drawn:?}"
     );
 }
@@ -386,8 +389,9 @@ fn the_name_is_dropped_when_the_row_fills_up() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let mut wide = screen(&alerts, &now);
-    wide.context =
-        "ctx: a-very-long-context-name-indeed · ns: payments · read-only · ⚠ TLS not verified";
+    wide.context = "ctx: a-very-long-context-name-indeed · ns: payments";
+    wide.writes = Writes::ReadOnly;
+    wide.insecure = true;
     let drawn = render(&app(), &wide);
     let header = &rows(&drawn)[0];
 
@@ -414,10 +418,13 @@ fn the_context_elides_its_name_and_never_its_tail() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let arn = "ctx: arn:aws:eks:eu-west-1:123456789012:cluster/production-eu \
-               · ns: payments · live · read-only · ⚠ TLS not verified";
+               · ns: payments · live";
+    let zone = format!("{arn} · read-only · ⚠ TLS not verified");
     let mut screen = screen(&alerts, &now);
     screen.context = arn;
-    assert_eq!(width(arn), 116, "wider than the row, by half again");
+    screen.writes = Writes::ReadOnly;
+    screen.insecure = true;
+    assert_eq!(width(&zone), 116, "wider than the row, by half again");
 
     let drawn = render(&app(), &screen);
     let header = rows(&drawn)[0].clone();
@@ -444,8 +451,8 @@ fn the_context_elides_its_name_and_never_its_tail() {
     // **And the zone fits the row at every width, not just this one** — the property [`fits`]
     // owes at the other end of a string, and the reason the marker needs no special case of its
     // own: a row with no room for `…` keeps nothing.
-    for columns in 0..=width(arn) {
-        let zone = shortened(arn, columns);
+    for columns in 0..=width(&zone) {
+        let zone = shortened(&zone, columns);
         assert!(
             width(&zone) <= columns,
             "{columns} columns asked for, {} drawn: {zone:?}",
@@ -527,7 +534,8 @@ fn the_header_says_a_change_is_running_and_says_it_last_of_all() {
     // **Last of all means after the TLS warning too**, which is the segment a caller joining this
     // in itself would most easily have put it in front of.
     let mut guarded = screen(&alerts, &now);
-    guarded.context = "ctx: prod-eu · read-only · ⚠ TLS not verified";
+    guarded.writes = Writes::ReadOnly;
+    guarded.insecure = true;
     let drawn = header(&changing(None, "node-3"), &guarded);
     assert!(
         drawn.ends_with("read-only · ⚠ TLS not verified · changing…"),
@@ -544,9 +552,11 @@ fn a_change_in_flight_survives_the_cut_the_clusters_own_name_does_not() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let arn = "ctx: arn:aws:eks:eu-west-1:123456789012:cluster/production-eu \
-               · ns: payments · live · read-only · ⚠ TLS not verified";
+               · ns: payments · live";
     let mut screen = screen(&alerts, &now);
     screen.context = arn;
+    screen.writes = Writes::ReadOnly;
+    screen.insecure = true;
 
     let drawn = rows(&render(&changing(Some("payments"), "web"), &screen))[0].clone();
     println!("{drawn}");
@@ -565,6 +575,229 @@ fn a_change_in_flight_survives_the_cut_the_clusters_own_name_does_not() {
     );
 }
 
+/// **`admin` or `read-only` is the header's own word, joined after the caller's segments in every
+/// state and not only the startup picker's** (`screens/widgets.md` § 1a, NOTES § D265 ruling 1).
+/// It is [`Screen::writes`]' answer, and **the same `read-only` for both causes that kill
+/// writes** — the header says what is true now, not why (`screens/help.md` § Under a dead-writes
+/// run draws it).
+///
+/// **Each frame is also asserted not to hold the other word**, so a header that drew both, or one
+/// of them whatever the run, fails here and not only a header that drew neither.
+///
+/// **And the word stays while a key is withheld for another reason** — a lost link, an expired
+/// login, a skewed clock (NOTES § D265 ruling 6): `read-only` during a disconnect is when a reader
+/// is about to press something. A header that dropped the word whenever the link was not live, or
+/// whenever [`withheld`] held, went through every test until this loop (`tester`, R12 and R13).
+#[test]
+fn the_header_says_what_this_run_may_do_after_the_callers_own_segments() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let mut seen = 0;
+    for (link, clock) in [
+        (Link::Live, None),
+        (Link::Lost, None),
+        (Link::Expired, None),
+        (Link::Live, Some(SKEWED)),
+    ] {
+        for (writes, word, other) in [
+            (Writes::Live, "admin", "read-only"),
+            (Writes::ReadOnly, "read-only", "admin"),
+            (
+                Writes::Unaudited("the audit log could not be opened"),
+                "read-only",
+                "admin",
+            ),
+        ] {
+            let mut screen = screen(&alerts, &now);
+            screen.writes = writes;
+            screen.link = link;
+            screen.clock = clock;
+            let drawn = rows(&render(&app(), &screen))[0].clone();
+            let what = format!("{writes:?} · {link:?} · clock {clock:?}");
+            assert!(
+                drawn.ends_with(&format!("ctx: prod-eu · live · {word}")),
+                "{what}: {drawn:?}"
+            );
+            assert!(!drawn.contains(other), "{what}: {drawn:?}");
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 12, "a combination stopped being drawn");
+}
+
+/// **The tail keeps `screens/widgets.md` § 1a's order in all twelve combinations** — the
+/// permission word, then the TLS warning, then `changing…`, each one there exactly when its own
+/// fact holds (NOTES § D265 ruling 2). The expected zone is built in that table's order rather
+/// than read off a frame, so a warning joined in front of the word, or a mark in front of the
+/// warning, fails.
+#[test]
+fn the_tail_keeps_the_zone_tables_order_whichever_of_its_facts_hold() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let mut seen = 0;
+    for (writes, word) in [
+        (Writes::Live, "admin"),
+        (Writes::ReadOnly, "read-only"),
+        (
+            Writes::Unaudited("the audit log could not be opened"),
+            "read-only",
+        ),
+    ] {
+        for insecure in [false, true] {
+            for running in [false, true] {
+                let mut screen = screen(&alerts, &now);
+                screen.writes = writes;
+                screen.insecure = insecure;
+                let app = if running {
+                    changing(Some("payments"), "web")
+                } else {
+                    app()
+                };
+                let mut zone = format!("ctx: prod-eu · live · {word}");
+                if insecure {
+                    zone.push_str(" · ⚠ TLS not verified");
+                }
+                if running {
+                    zone.push_str(" · changing…");
+                }
+                let drawn = rows(&render(&app, &screen))[0].trim_end().to_owned();
+                let what = format!("{writes:?} · insecure {insecure} · running {running}");
+                assert!(drawn.ends_with(&zone), "{what}: {drawn:?}");
+                assert_eq!(
+                    drawn.contains("TLS not verified"),
+                    insecure,
+                    "{what}: {drawn:?}"
+                );
+                assert_eq!(drawn.contains("changing…"), running, "{what}: {drawn:?}");
+                seen += 1;
+            }
+        }
+    }
+    assert_eq!(seen, 12, "a combination stopped being drawn");
+}
+
+/// **An empty [`Screen::context`] joins nothing** — no leading ` · ` in front of the permission
+/// word, whatever follows it (NOTES § D265 ruling 7) — and **the startup picker's zone, which never
+/// reads the caller's string, is untouched by one**.
+#[test]
+fn an_empty_context_joins_nothing_in_front_of_the_tail() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    for (writes, insecure, running, zone) in [
+        (Writes::Live, false, false, "admin"),
+        (
+            Writes::ReadOnly,
+            true,
+            true,
+            "read-only · ⚠ TLS not verified · changing…",
+        ),
+    ] {
+        let mut screen = screen(&alerts, &now);
+        screen.context = "";
+        screen.writes = writes;
+        screen.insecure = insecure;
+        let app = if running {
+            changing(Some("payments"), "web")
+        } else {
+            app()
+        };
+        let drawn = rows(&render(&app, &screen))[0].trim_end().to_owned();
+        assert!(
+            drawn.ends_with(&format!("  {zone}")),
+            "{writes:?}: {drawn:?}"
+        );
+        assert!(!drawn.contains("· ·"), "{writes:?}: {drawn:?}");
+    }
+
+    let four = contexts_of(FOUR);
+    let mut screen = pick_over(&alerts, &now, &[], &four);
+    screen.context = "";
+    let drawn = rows(&render(&picking(&four, views::Connection::Never), &screen))[0].clone();
+    assert!(
+        drawn.trim_end().ends_with("  choose a cluster · admin"),
+        "{drawn:?}"
+    );
+}
+
+/// **The header of every link state `screens/states.md` draws is that page's own** — `connecting…`,
+/// `⚠ disconnected, retrying` and `⚠ login expired`, each followed by the permission word the page
+/// draws after it (NOTES § D265 ruling 6), and `read-only` in its place under `--read-only`. Each
+/// frame is drawn in the page's own link state, so a header that drops the word while the link is
+/// down fails here.
+///
+/// **What is compared is the two zones that carry facts, exactly**: the vitals, and the right zone.
+/// The caller hands over the page's right zone less its last word, and its vitals. **Nothing is
+/// asserted about the centred name**: the page is drawn 70 columns wide and a frame is never drawn
+/// below 80, so the two widths cannot say the same thing about it.
+#[test]
+fn the_header_of_every_link_state_is_the_pages_own() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let zones = |row: &str| {
+        let vitals = row
+            .trim_start()
+            .split("  ")
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let right = row
+            .trim_end()
+            .rsplit("  ")
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        (vitals, right)
+    };
+    let mut found = Vec::new();
+    for (section, link) in [
+        ("## Still loading", Link::Live),
+        ("## The connection dropped", Link::Lost),
+        ("## Your login expired", Link::Expired),
+    ] {
+        let headers: Vec<String> = fenced("states.md", section)
+            .into_iter()
+            .filter_map(|block| block.first().filter(|row| row.contains("ctx: ")).cloned())
+            .collect();
+        found.push(headers.len());
+        for page in headers {
+            assert_eq!(
+                page.split("  ")
+                    .filter(|zone| !zone.trim().is_empty())
+                    .count(),
+                2,
+                "{section}: {page:?} is not two zones"
+            );
+            let (vitals, zone) = zones(&page);
+            let head = zone
+                .strip_suffix(" · admin")
+                .unwrap_or_else(|| panic!("{section}: {zone:?} does not end on the word"));
+            for (writes, word) in [(Writes::Live, "admin"), (Writes::ReadOnly, "read-only")] {
+                let mut screen = screen(&alerts, &now);
+                screen.vitals = &vitals;
+                screen.context = head;
+                screen.writes = writes;
+                screen.link = link;
+                let drawn = rows(&render(&app(), &screen))[0].clone();
+                println!("{section} · {writes:?}\n{drawn}");
+                assert_eq!(
+                    zones(&drawn),
+                    (vitals.clone(), format!("{head} · {word}")),
+                    "{section} · {writes:?}: {drawn:?}"
+                );
+                assert!(
+                    drawn.starts_with(&format!(" {vitals}")),
+                    "{section} · {writes:?} — the vitals lost their pad: {drawn:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        found,
+        [1, 1, 3],
+        "a link state stopped drawing its header, or grew one"
+    );
+}
+
 /// **A vital gives way whole.** `screens/widgets.md` § 1a: *a vital that cannot be read is blank,
 /// never guessed* — and half of one is a guess with no marker on it. `nodes 3/3 (40s ago)` clipped
 /// to `nodes 3/3 (` reads as a complete count of three ready nodes out of three.
@@ -575,16 +808,19 @@ fn the_vitals_give_way_whole_and_never_half_a_number() {
     let stale = "nodes 3/3 (40s ago)";
     let mut screen = screen(&alerts, &now);
     screen.vitals = stale;
-    screen.context = "ctx: prod-eu · ns: payments · live · read-only · ⚠ TLS not verified";
-    assert_eq!(
-        width(screen.context),
-        67,
-        "which leaves 11 columns of left zone"
-    );
+    screen.context = "ctx: prod-eu · ns: payments · live";
+    screen.writes = Writes::ReadOnly;
+    screen.insecure = true;
+    let zone = "ctx: prod-eu · ns: payments · live · read-only · ⚠ TLS not verified";
+    assert_eq!(width(zone), 67, "which leaves 11 columns of left zone");
     assert_eq!(width(stale), 19, "and the vitals want 19");
 
     let drawn = render(&app(), &screen);
     let header = rows(&drawn)[0].clone();
+    assert!(
+        header.ends_with(zone),
+        "the zone this test measured: {header:?}"
+    );
     assert!(!header.contains("nodes"), "no half a vital: {header:?}");
 
     screen.vitals = "nodes 3/3";
@@ -6388,15 +6624,17 @@ fn a_key_map_with_nothing_refused_is_the_mockup_untouched() {
         ("could not tell", Some(&could_not_tell)),
     ] {
         let refused = Refused::of("deployments", [answer; 2], [answer], [answer]);
-        assert_eq!(key_map(HELP, refused, false), HELP, "{what}");
+        assert_eq!(key_map(HELP, refused, false, None), HELP, "{what}");
         assert_eq!(
-            key_map(HELP, refused, false).lines().collect::<Vec<_>>(),
+            key_map(HELP, refused, false, None)
+                .lines()
+                .collect::<Vec<_>>(),
             mockup(),
             "{what} — and the mockup is the fixture, not HELP"
         );
     }
     assert_eq!(
-        key_map(HELP, Refused::default(), false),
+        key_map(HELP, Refused::default(), false, None),
         HELP,
         "nothing selected"
     );
@@ -6418,7 +6656,7 @@ fn all_three_refused_is_the_block_the_screen_file_draws() {
     );
     let expected: Vec<String> = base[..12].iter().chain(&clause).cloned().collect();
     assert_eq!(
-        key_map(HELP, refusing(true, true, true, "deployments"), false)
+        key_map(HELP, refusing(true, true, true, "deployments"), false, None)
             .lines()
             .map(str::to_owned)
             .collect::<Vec<String>>(),
@@ -6443,10 +6681,15 @@ fn each_refused_row_answers_only_for_its_own_key() {
                     }
                 }
                 assert_eq!(
-                    key_map(HELP, refusing(scale, restart, delete, "deployments"), false)
-                        .lines()
-                        .map(str::to_owned)
-                        .collect::<Vec<String>>(),
+                    key_map(
+                        HELP,
+                        refusing(scale, restart, delete, "deployments"),
+                        false,
+                        None
+                    )
+                    .lines()
+                    .map(str::to_owned)
+                    .collect::<Vec<String>>(),
                     expected,
                     "s {scale} · r {restart} · ctrl-d {delete}"
                 );
@@ -6473,7 +6716,12 @@ fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
         for scale in [false, true] {
             for restart in [false, true] {
                 for delete in [false, true] {
-                    let drawn = key_map(HELP, refusing(scale, restart, delete, resource), false);
+                    let drawn = key_map(
+                        HELP,
+                        refusing(scale, restart, delete, resource),
+                        false,
+                        None,
+                    );
                     let lines: Vec<&str> = drawn.lines().collect();
                     assert_eq!(
                         lines.len(),
@@ -6500,7 +6748,7 @@ fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
     // `s` can be pointed at — which is the point of feeding them here rather than to [`KINDS`]:
     // what stops a row overflowing is the closed set in the driver, not the arithmetic.
     let widest = |resource| {
-        key_map(HELP, refusing(true, true, true, resource), false)
+        key_map(HELP, refusing(true, true, true, resource), false, None)
             .lines()
             .map(width)
             .max()
@@ -6566,7 +6814,7 @@ fn every_clause_names_the_plural_its_own_operation_would_send() {
                 resource.plural, plural,
                 "{operation} {kind} — the driver's plural is not the one ops would send"
             );
-            let drawn = key_map(HELP, refusing(true, true, true, plural), false);
+            let drawn = key_map(HELP, refusing(true, true, true, plural), false, None);
             let drawn = drawn
                 .lines()
                 .find(|line| line.starts_with(row))
@@ -6584,29 +6832,413 @@ fn every_clause_names_the_plural_its_own_operation_would_send() {
     );
 }
 
-/// **A key map that no longer draws the mutating keys loses nothing to a refusal** — the rows are
-/// found by their own key, never by counting from the end (`tester`, 2026-09-12).
-///
-/// **This is the `--read-only` swap simulated, not built**: `screens/help.md` says that swap is
-/// owed and not landed, and building it is its own box. What this box owes is that landing it
-/// cannot silently eat three rows of a neighbouring block, which is what the arithmetic version
-/// did — and it did it without a panic and without failing a test, which is why the guard is here
-/// and not in the box that makes the change.
+/// **Every rewrite lands on the row it is for, found by that row's own text, wherever the block
+/// sits and whatever follows it** (`tester`, 2026-09-12 and 2026-09-13). The input is [`HELP`] with
+/// *Changing things* moved to the top and a trailing blank row added: a swap anchored by index
+/// writes into *Moving around*, and a `str::lines` split drops the trailing row — each was proven
+/// red on a copy. Both halves are fed, a dead-writes swap and all three permission clauses, and
+/// both expected blocks are read off `screens/help.md`.
 #[test]
-fn a_key_map_over_a_help_that_lost_those_keys_rewrites_nothing() {
-    let read_only = "  Looking at things (always available)
-    l  logs, with the log from before a crash
-    d  describe — the object and what happened to it
-    y  view as YAML
+fn a_key_map_finds_its_rows_by_their_own_text_wherever_the_block_sits() {
+    let rows: Vec<&str> = HELP.split('\n').collect();
+    let at = rows
+        .iter()
+        .position(|row| row.starts_with("  Changing things"))
+        .expect("HELP's Changing things heading");
+    let mut moved: Vec<&str> = rows[at..at + 4].to_vec();
+    moved.extend(&rows[..at]);
+    moved.extend(&rows[at + 4..]);
+    moved.push("");
+    let input = moved.join("\n");
+    let rest: Vec<String> = moved[4..].iter().map(|row| (*row).to_owned()).collect();
 
-  read-only mode — nothing can be changed from here";
-    for (kind, plural) in KINDS {
-        assert_eq!(
-            key_map(read_only, refusing(true, true, true, plural), false),
-            read_only,
-            "{kind} — a refusal rewrote a row that is not its key's"
-        );
+    let off = dead_body(Writes::ReadOnly);
+    let heading = off
+        .iter()
+        .position(|row| row.starts_with("  Changing things"))
+        .expect("the page's own heading");
+    let why = Writes::ReadOnly.why().expect("a dead cause has a sentence");
+    let swapped = key_map(
+        &input,
+        refusing(true, true, true, "deployments"),
+        false,
+        Some(Held::Off(why)),
+    );
+    let expected: Vec<String> = off[heading..heading + 4]
+        .iter()
+        .chain(&rest)
+        .cloned()
+        .collect();
+    assert_eq!(
+        swapped.split('\n').collect::<Vec<_>>(),
+        expected,
+        "the dead-writes swap"
+    );
+
+    let refused = key_map(
+        &input,
+        refusing(true, true, true, "deployments"),
+        false,
+        None,
+    );
+    let expected: Vec<String> = mockup_refused().into_iter().chain(rest).collect();
+    assert_eq!(
+        refused.split('\n').collect::<Vec<_>>(),
+        expected,
+        "the three permission clauses"
+    );
+    assert_eq!(
+        refused.split('\n').next_back(),
+        Some(""),
+        "the trailing blank row went"
+    );
+}
+
+/// **`screens/help.md` § *Under a dead-writes run*, in its own order**: **0** the whole
+/// `--read-only` frame, all 24 rows at the real 80-column floor (that section's first bullet), so
+/// they compare with a rendered frame as they stand · **1** the two rows `Writes::Unaudited`
+/// draws in their place.
+fn mockup_dead() -> Vec<Vec<String>> {
+    let blocks = fenced("help.md", "## Under a dead-writes run");
+    assert_eq!(
+        blocks.iter().map(Vec::len).collect::<Vec<_>>(),
+        [usize::from(MIN_HEIGHT), 2],
+        "screens/help.md § Under a dead-writes run no longer draws one frame and two rows"
+    );
+    blocks
+}
+
+/// The sixteen body rows of a frame, borders and trailing pad off — the shape [`key_map`] answers
+/// in, whether the frame was rendered or read off a page.
+fn body_of(frame: &[String]) -> Vec<String> {
+    frame[2..18]
+        .iter()
+        .map(|row| {
+            row.trim_start_matches('│')
+                .trim_end_matches('│')
+                .trim_end()
+                .to_owned()
+        })
+        .collect()
+}
+
+/// **The body `?` draws under one dead cause, read off the page** — the `--read-only` frame, with
+/// the heading and the row under it taken from the second block for `Writes::Unaudited`. Found by
+/// the heading's own text, never by a row number.
+fn dead_body(writes: Writes) -> Vec<String> {
+    let page = mockup_dead();
+    let mut body = body_of(&page[0]);
+    if let Writes::Unaudited(_) = writes {
+        let at = body
+            .iter()
+            .position(|row| row.starts_with("  Changing things"))
+            .expect("the page's own heading");
+        assert_eq!(body[at], page[1][0], "the two causes draw one heading");
+        body.splice(at..at + 2, page[1].iter().cloned());
     }
+    body
+}
+
+/// **Under either dead cause `?` is that section's frame, row for row** (`screens/help.md` § Under
+/// a dead-writes run, NOTES § D265 rulings 3 and 5): the body, the rules, the command log strip and
+/// the footer byte for byte, and the header word for word — the page draws `k8rs` one column left
+/// of centre and its right zone two short of the edge, [`against_page_header`]'s reason one screen
+/// along. **The two causes differ in one row and only that one**, and the audit sentence
+/// [`Writes::Unaudited`] carries is on neither.
+///
+/// **Under `Live` the same `?` is the main mockup's body**, so a swap that ignored the cause —
+/// drawing it always, or never — fails one of the two halves.
+#[test]
+fn help_under_dead_writes_is_the_frame_the_screen_file_draws() {
+    let page = mockup_dead();
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = [
+        "$ kubectl get statefulsets -A --watch".to_owned(),
+        "$ kubectl get daemonsets -A --watch".to_owned(),
+    ];
+    let helping = App {
+        modal: Some(views::Modal::Help),
+        ..App::default()
+    };
+    let spoken = |row: &str| row.split_whitespace().collect::<Vec<_>>().join(" ");
+    let audit = "k8rs could not open its audit log at /home/you/.local/state/k8rs/audit.log";
+
+    let mut bodies = Vec::new();
+    for writes in [Writes::ReadOnly, Writes::Unaudited(audit)] {
+        let mut screen = screen(&alerts, &now);
+        screen.log = &log;
+        screen.writes = writes;
+        let drawn = rows(&render(&helping, &screen));
+        println!("--- ? under {writes:?} ---\n{}\n", drawn.join("\n"));
+        assert_eq!(
+            spoken(&drawn[0]),
+            spoken(&page[0][0]),
+            "{writes:?} — the header"
+        );
+        for nth in [1, 18, 19, 20, 21, 22, 23] {
+            assert_eq!(drawn[nth], page[0][nth], "{writes:?} — frame row {nth}");
+        }
+        assert_eq!(body_of(&drawn), dead_body(writes), "{writes:?} — the body");
+        assert!(
+            !drawn.iter().any(|row| row.contains("/home/you")),
+            "{writes:?} — the banner's own sentence reached Help"
+        );
+        bodies.push(body_of(&drawn));
+    }
+    assert_eq!(
+        bodies[0]
+            .iter()
+            .zip(&bodies[1])
+            .filter(|(read_only, unaudited)| read_only != unaudited)
+            .count(),
+        1,
+        "the two causes differ in more than their one row"
+    );
+
+    let mut screen = screen(&alerts, &now);
+    screen.log = &log;
+    assert_eq!(
+        body_of(&rows(&render(&helping, &screen))),
+        mockup(),
+        "Live — the main mockup's body"
+    );
+}
+
+/// **Dead writes win outright: no refusal and no call in flight puts `s`, `r` or `ctrl-d` back on
+/// the body** (`screens/help.md` § When a key is refused, its last bullet, and § Under a
+/// dead-writes run, its last) — for all eight refusals, with and without a call running, under both
+/// causes.
+///
+/// **The whole body is compared row by row** (`tester`, 2026-09-13): the first draft only looked
+/// for the absence of words, and a `help` that passed `changing && writes.live()` — so the `X` row
+/// stopped pausing under dead writes — went straight through it. **The `X` row pauses while a call
+/// runs**: switching cluster is not a write, and dead writes say nothing about it.
+#[test]
+fn dead_writes_draw_no_mutating_key_whatever_is_refused_or_running() {
+    let paused = mockup_paused();
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let mut seen = 0;
+    for writes in [
+        Writes::ReadOnly,
+        Writes::Unaudited("the audit log could not be opened"),
+    ] {
+        for running in [false, true] {
+            let expected: Vec<String> = dead_body(writes)
+                .into_iter()
+                .map(|row| {
+                    if running && row.starts_with("    X ") {
+                        paused[0][0].clone()
+                    } else {
+                        row
+                    }
+                })
+                .collect();
+            for scale in [false, true] {
+                for restart in [false, true] {
+                    for delete in [false, true] {
+                        let mut screen = screen(&alerts, &now);
+                        screen.writes = writes;
+                        screen.refused = refusing(scale, restart, delete, "deployments");
+                        let mut app = if running {
+                            changing(Some("payments"), "web")
+                        } else {
+                            app()
+                        };
+                        app.modal = Some(views::Modal::Help);
+                        let frame = rows(&render(&app, &screen));
+                        assert_eq!(
+                            body_of(&frame),
+                            expected,
+                            "{writes:?} · running {running} · s {scale} · r {restart} · ctrl-d \
+                             {delete}"
+                        );
+                        seen += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(seen, 32, "a combination stopped being drawn");
+}
+
+/// The three fenced blocks of `screens/help.md` § *While the link is down, the login has expired,
+/// or the clock is off*, in its own order: **0** the lost link · **1** the expired login · **2**
+/// the clock.
+fn mockup_held() -> Vec<String> {
+    let blocks = fenced(
+        "help.md",
+        "## While the link is down, the login has expired, or the clock is off",
+    );
+    assert_eq!(
+        blocks.iter().map(Vec::len).collect::<Vec<_>>(),
+        [1, 1, 1],
+        "that section no longer draws three headings"
+    );
+    blocks.into_iter().flatten().collect()
+}
+
+/// The sentence a clock out of step puts above the pane — any sentence, since what Help reads is
+/// that one is drawn and not what it says.
+const SKEWED: &str = "⚠ This computer and the cluster disagree about the time.";
+
+/// **Help pauses *Changing things* for the link and the clock, and for nothing else on the body**
+/// (`screens/help.md` § While the link is down, the login has expired, or the clock is off, NOTES
+/// § D265 ruling 4): the heading rewritten, its three rows and the `X` row as the main mockup
+/// draws them, and **no permission clause under any of the three**, for all eight refusals.
+#[test]
+fn help_pauses_changing_things_while_the_link_or_the_clock_withholds_it() {
+    let held = mockup_held();
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let helping = App {
+        modal: Some(views::Modal::Help),
+        ..App::default()
+    };
+    let mut seen = 0;
+    for (what, link, clock, heading) in [
+        ("lost", Link::Lost, None, &held[0]),
+        ("expired", Link::Expired, None, &held[1]),
+        ("clock", Link::Live, Some(SKEWED), &held[2]),
+    ] {
+        let expected: Vec<String> = mockup()
+            .into_iter()
+            .map(|row| {
+                if row.starts_with("  Changing things") {
+                    heading.clone()
+                } else {
+                    row
+                }
+            })
+            .collect();
+        for scale in [false, true] {
+            for restart in [false, true] {
+                for delete in [false, true] {
+                    let mut screen = screen(&alerts, &now);
+                    screen.link = link;
+                    screen.clock = clock;
+                    screen.refused = refusing(scale, restart, delete, "deployments");
+                    let frame = rows(&render(&helping, &screen));
+                    if !scale && !restart && !delete {
+                        println!("--- ? {what} ---\n{}\n", frame.join("\n"));
+                    }
+                    assert_eq!(
+                        body_of(&frame),
+                        expected,
+                        "{what} · s {scale} · r {restart} · ctrl-d {delete}"
+                    );
+                    seen += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(seen, 24, "a combination stopped being drawn");
+}
+
+/// **One reason is drawn, and it is the highest-ranked one that holds** — dead writes, then a call
+/// in flight, then the link, then the clock (NOTES § D265 ruling 4, `screens/help.md` § While the
+/// link is down…, its first bullet). Each case adds every lower reason underneath the one expected
+/// to win, so a rank swapped anywhere draws the wrong heading. Every heading is read off the page.
+#[test]
+fn help_draws_the_highest_ranked_reason_and_only_that_one() {
+    let held = mockup_held();
+    let off = dead_body(Writes::ReadOnly);
+    let running = &mockup_paused()[1][0];
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let heading = |frame: &[String]| {
+        body_of(frame)
+            .into_iter()
+            .filter(|row| row.starts_with("  Changing things"))
+            .collect::<Vec<_>>()
+    };
+    let off_heading = off
+        .iter()
+        .find(|row| row.starts_with("  Changing things"))
+        .expect("the page's own heading");
+
+    for (what, writes, busy, link, expected) in [
+        (
+            "dead writes",
+            Writes::ReadOnly,
+            true,
+            Link::Lost,
+            off_heading,
+        ),
+        ("a call in flight", Writes::Live, true, Link::Lost, running),
+        ("the lost link", Writes::Live, false, Link::Lost, &held[0]),
+        (
+            "the expired login",
+            Writes::Live,
+            false,
+            Link::Expired,
+            &held[1],
+        ),
+        ("the clock", Writes::Live, false, Link::Live, &held[2]),
+    ] {
+        let mut screen = screen(&alerts, &now);
+        screen.writes = writes;
+        screen.link = link;
+        screen.clock = Some(SKEWED);
+        let mut app = if busy {
+            changing(Some("payments"), "web")
+        } else {
+            app()
+        };
+        app.modal = Some(views::Modal::Help);
+        let frame = rows(&render(&app, &screen));
+        assert_eq!(heading(&frame), std::slice::from_ref(expected), "{what}");
+    }
+}
+
+/// **Help's heading and [`offered`] cannot disagree** — over every combination of the three
+/// run-level facts, on an Alerts screen with a card to act on and nothing running, `s` and `r` are
+/// offered exactly when *Changing things* carries no clause (NOTES § D265 ruling 4). Asserted off
+/// the drawn row and not off [`withheld`], which both of them read.
+#[test]
+fn help_says_changing_things_is_open_exactly_when_the_footer_offers_it() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let plain = mockup()
+        .into_iter()
+        .find(|row| row.starts_with("  Changing things"))
+        .expect("the main mockup's heading");
+    let helping = App {
+        modal: Some(views::Modal::Help),
+        ..App::default()
+    };
+    let mut seen = (0, 0);
+    for writes in [
+        Writes::Live,
+        Writes::ReadOnly,
+        Writes::Unaudited("the audit log could not be opened"),
+    ] {
+        for link in [Link::Live, Link::Lost, Link::Expired] {
+            for clock in [None, Some(SKEWED)] {
+                let mut screen = screen(&alerts, &now);
+                screen.writes = writes;
+                screen.link = link;
+                screen.clock = clock;
+                let open = body_of(&rows(&render(&helping, &screen))).contains(&plain);
+                let act = offered(&app(), &screen) == Offer::Act;
+                assert_eq!(
+                    open, act,
+                    "{writes:?} · {link:?} · clock {clock:?} — Help and the footer disagree"
+                );
+                if act {
+                    seen.0 += 1;
+                } else {
+                    seen.1 += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(
+        seen,
+        (1, 17),
+        "one combination of eighteen leaves the keys live"
+    );
 }
 
 /// **The refused rows reach the real frame**, not just the string that feeds it — the same body
@@ -7007,7 +7639,7 @@ fn help_pauses_the_four_keys_a_running_call_refuses() {
         "the two rows the screen file rewrites did not both land: {expected:?}"
     );
 
-    let drawn: Vec<String> = key_map(HELP, Refused::default(), true)
+    let drawn: Vec<String> = key_map(HELP, Refused::default(), true, None)
         .lines()
         .map(str::to_owned)
         .collect();
@@ -7019,7 +7651,7 @@ fn help_pauses_the_four_keys_a_running_call_refuses() {
         "screens/help.md § While the call is running"
     );
     assert_eq!(
-        key_map(HELP, Refused::default(), false),
+        key_map(HELP, Refused::default(), false, None),
         HELP,
         "nothing running and the map is the mockup untouched"
     );
@@ -7032,11 +7664,16 @@ fn help_pauses_the_four_keys_a_running_call_refuses() {
 /// `no` (a permission this login lacks) never lands beside `paused` (a wait).
 #[test]
 fn a_call_in_flight_draws_no_permission_clause_on_any_row() {
-    let expected = key_map(HELP, Refused::default(), true);
+    let expected = key_map(HELP, Refused::default(), true, None);
     for scale in [false, true] {
         for restart in [false, true] {
             for delete in [false, true] {
-                let drawn = key_map(HELP, refusing(scale, restart, delete, "deployments"), true);
+                let drawn = key_map(
+                    HELP,
+                    refusing(scale, restart, delete, "deployments"),
+                    true,
+                    None,
+                );
                 assert_eq!(drawn, expected, "s {scale} · r {restart} · ctrl-d {delete}");
                 assert!(
                     !drawn.contains("(scale — ")
@@ -8728,6 +9365,9 @@ fn a_picker_is_drawn_over_an_empty_body_and_only_a_startup_one_over_no_header() 
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let mut screen = pick_over(&alerts, &now, &[], &four);
+    // **No context has been read, so no TLS warning either** — a flag the caller left set is not
+    // drawn after `choose a cluster` (`ui::header`'s doc, NOTES § D265 ruling 2).
+    screen.insecure = true;
     for writes in [
         Writes::ReadOnly,
         Writes::Unaudited("the audit log could not be opened"),
@@ -9664,8 +10304,12 @@ fn failure_box(modal: views::Modal) -> (Vec<String>, Vec<String>) {
     failed_under(modal, &page_header(), "")
 }
 
-/// **A failure box at the floor under `header` and `vitals`**, the caller's two strings — so a
-/// test can hand vitals over and watch the startup frame drop them.
+/// **A failure box at the floor under `header` and `vitals`** — so a test can hand vitals over and
+/// watch the startup frame drop them.
+///
+/// **`header` is the zone as a page draws it, `admin` and all, and the caller hands over only
+/// what comes before that word**: [`header`] joins it on (NOTES § D265 ruling 1), so a page's zone
+/// handed over whole would draw it twice.
 fn failed_under(modal: views::Modal, header: &str, vitals: &str) -> (Vec<String>, Vec<String>) {
     let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
     let now = now();
@@ -9674,7 +10318,9 @@ fn failed_under(modal: views::Modal, header: &str, vitals: &str) -> (Vec<String>
         views::GET_CONTEXTS.to_owned(),
     ];
     let mut screen = pick_over(&alerts, &now, &log, &[]);
-    screen.context = header;
+    screen.context = header
+        .strip_suffix(" · admin")
+        .unwrap_or_else(|| panic!("{header:?} does not end on the word a live run's header joins"));
     screen.vitals = vitals;
     let app = App {
         modal: Some(modal),

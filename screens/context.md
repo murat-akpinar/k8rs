@@ -478,7 +478,7 @@ different one written for it
    survives the switch** — prod findings under a staging header is precisely
    the stale-drawn-as-live failure [states.md](states.md) forbids.
 2. The command log is cleared and reopened with the new context's first line.
-3. The header reads `ctx: staging · connecting…` and the body shows the
+3. The header reads `ctx: staging · connecting… · admin` and the body shows the
    loading screen that already exists in [states.md](states.md). No new state,
    no spinner ([widgets.md § 6](widgets.md#6-when-a-frame-is-drawn)).
 4. Discovery, the capability probe and the namespace-scope fallback
@@ -728,7 +728,7 @@ any dialog, with none left to spend
   rule [§ Opening at startup](#opening-at-startup) already states. Two
   presses, never a dead end, never a third key nobody was told about.
 - The header still names the attempted context (`ctx: staging · ⚠ not
-  allowed`) even though nothing ever connected — the picker committed to
+  allowed · admin`) even though nothing ever connected — the picker committed to
   trying it, and hiding that after the fact would be the exact
   stale-header failure this whole screen exists to prevent.
 - **The picker `esc` reopens is the same `startup: true` picker that opened

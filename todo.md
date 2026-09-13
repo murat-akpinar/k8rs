@@ -4529,12 +4529,14 @@ string and key was settled in the design phase, so this phase is drawing.
       [screens/context.md](screens/context.md)) — landed 2026-09-13 with the
       switcher ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)); *whether* it opens is Phase 12's *One place decides
       which context is used*
-- [ ] `--read-only` visibly marked in the header — **and the help screen's
-      *Changing things* block replaced by one line**, which is
-      [screens/help.md](screens/help.md)'s own rule and is not built: neither
-      `views::App` nor `ui::Screen` carries the flag, so `?` today advertises
-      `s`, `r` and `ctrl-d` to a reader who may not use them ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10) ruling 5).
-      One flag, two readers — plumb it once
+- [x] `--read-only` visibly marked in the header — **and the help screen's
+      *Changing things* block** off for the run, saying why ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10) ruling 5).
+      Landed 2026-09-13 ([D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)):
+      the header joins `admin`/`read-only` and the TLS warning itself, and `?`
+      reads the same run-level reason the footer does. **What it does not
+      close, ruled rather than missed**: nothing constructs `Writes::ReadOnly`
+      from the command line or sets `Screen::insecure` — Phase 12's flags box
+      and *The cluster picker is wired*
 
 **🔒 Security gate:** render a fixture containing ANSI escapes, a right-to-left
 override and a 10k-character single-line name — the screen must survive
@@ -4607,7 +4609,14 @@ Goal: one binary, live and safe.
       **And decide how an `exec` login program meets the terminal**: kube runs
       it at connect *and* on its own near expiry, inheriting stdin and stderr
       (27 runs in a 12 s session, measured), so a handover around connect alone
-      does not reach it — `interactive_mode: Never`, or a handover that does
+      does not reach it — `interactive_mode: Never`, or a handover that does.
+      **Every connect sets `Screen::insecure` from the `current` row of
+      `k8s::contexts(&kubeconfig, context)`**, picker or not, **and
+      `Screen::writes` survives `App::switched`**, so `--read-only` outlives `X`,
+      **and under `Link::Expired` the picker opens with `Connection::Dropped`**,
+      or *renew your login, then press X* closes the picker instead of
+      reconnecting
+      ([D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13) rulings 4 and 8).
 - [ ] **Every string a dialog draws is proven stripped, and this is the wiring
       that makes it provable** — invariant 9. Phase 11 drew the boxes and
       nothing outside a test constructs one, so `tester` could prove the strip

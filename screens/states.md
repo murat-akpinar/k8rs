@@ -155,7 +155,7 @@ to put in a sentence:
 ## Still loading
 
 ```
- nodes …                        k8rs      ctx: prod-eu · connecting…
+ nodes …                            ctx: prod-eu · connecting… · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS            │                                               │
 │  RESOURCES         │        reading the cluster… 2,140 pods        │
@@ -206,7 +206,7 @@ The header is the honest one. Stale data drawn as if it were live is
 forbidden.
 
 ```
- nodes 3/3 (40s ago)          ctx: prod-eu · ⚠ disconnected, retrying
+ nodes 3/3 (40s ago)   ctx: prod-eu · ⚠ disconnected, retrying · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│                                               │
 │  RESOURCES         │  ⚠ Not connected to the cluster right now.    │
@@ -247,7 +247,7 @@ the kubeconfig mints a short-lived token from a credential plugin, and it runs
 out mid-session ([NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program)).
 
 ```
- nodes 3/3 (2 min ago)                 ctx: prod-eu · ⚠ login expired
+ nodes 3/3 (2 min ago)          ctx: prod-eu · ⚠ login expired · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│                                               │
 │  RESOURCES         │  ⚠ Your login expired.                        │
@@ -328,7 +328,7 @@ token's death reaches the screen through the header, already true on every
 degraded page, and the footer, which is:
 
 ```
- nodes …                        k8rs      ctx: prod-eu · ⚠ login expired
+ nodes …                        ctx: prod-eu · ⚠ login expired · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS            │                                               │
 │  RESOURCES         │        reading the cluster… 2,140 pods        │
@@ -353,7 +353,7 @@ degraded page, and the footer, which is:
 ```
 
 ```
- nodes 3/3                      k8rs     ctx: prod-eu · ⚠ login expired
+ nodes 3/3                      ctx: prod-eu · ⚠ login expired · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │  ALERTS     3 ● 7 ▲│  jobs                                         │
 │  RESOURCES         │                                               │
@@ -706,9 +706,11 @@ case.** When it does not, one of them has to give, and *which* one is a
 **rank, not a draw order**: **the audit sentence is always the first to give
 way among whatever is queued, because it is the one fact on this page with a
 second carrier.** Once writes are dead, the footer already withholds `s`
-and `r`, and the header carries `read-only` (once the mark it needs is
-wired — [§ The header reads `read-only`](#the-audit-log-could-not-be-opened)) —
-two other places already say *this login may not change anything*, so the
+and `r`, and the header carries `read-only` for either cause alike — the
+*The header reads `read-only`* bullet inside [§ The audit log could not be
+opened](#the-audit-log-could-not-be-opened) is where that is argued, not a
+section of its own — two other places already say *this login may not
+change anything*, so the
 audit banner's own
 text can afford to be the one that shrinks first: what it alone still owns
 is *why*, not *whether*. The clock pointer and the pane's own reason (which
@@ -1033,17 +1035,17 @@ draws for the first time.
 - **The header reads `read-only`, the same word a deliberate `--read-only`
   run already shows, and that reuse is deliberate, not a placeholder.** Both
   causes put k8rs in the identical place — no mutation is reachable — and
-  the header's job is to say what is true right now, not why. What *is* this
-  box's finding: the mechanism that turns "writes are dead" into that one
-  word in the header is not built yet for either cause
-  ([D259 ruling 5](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)) —
-  and whichever box builds it should read one signal true for both causes,
-  not two — `--read-only`'s own header mark is the very next box, and this
-  is its first reader. Nothing stops that box from adding a *second* word
-  once the header mark exists, if an operator review later finds one
+  the header's job is to say what is true right now, not why. **The
+  mechanism is built**: the header derives `admin`/`read-only` from
+  `Screen::writes` in every state, one signal for both causes, never two
+  ([D265](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)
+  rulings 1 and 3). **What is not yet true is the command line's own end of
+  it**: nothing constructs `Writes::ReadOnly` from `--read-only` — that
+  waits on Phase 12's flags box. Nothing stops a future box adding a
+  *second* word beside `read-only`, if an operator review later finds one
   genuinely wanted (a full disk is worth fixing; `--read-only` was asked
-  for) — but that is a reason to widen a mechanism that does not exist yet,
-  not a reason to invent a second header segment here, ahead of the box that
+  for) — but that is a reason to widen a mechanism that already exists, not
+  a reason to invent a second header segment here, ahead of the box that
   owns § 1a's own zone table.
 - **`s scale` and `r restart` are withheld, never marked `no`, for the same
   reason `--read-only` withholds them and not the reason a `may_i_in` refusal
@@ -1187,7 +1189,7 @@ which sentence gives way, only how much of the losing one survives.
 ### And when the login has also expired
 
 ```
- nodes 3/3 (2 min ago)                 ctx: prod-eu · ⚠ login expired
+ nodes 3/3 (2 min ago)      ctx: prod-eu · ⚠ login expired · read-only
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│                                               │
 │  RESOURCES         │  ⚠ Your login expired.                        │
@@ -1226,8 +1228,8 @@ trailing blank — which leaves the audit sentence exactly 2 rows: one line,
 cut, *"k8rs could not open its audit log at…"*, under the ANALYSIS row where
 `certificates` sits above it. A reader at 80 columns sees that one line; the
 absence above is what the identical screen looks like narrower, and this
-page draws the narrower one. Either way, the header's `read-only` (once
-wired) and the footer's withheld `s`/`r` are still there — an operator who
+page draws the narrower one. Either way, the header's `read-only` and the
+footer's withheld `s`/`r` are still there — an operator who
 cannot renew their login this second is not owed the audit log's specific
 complaint in the same breath as the one they have to act on right now, and
 at 80 they get one line of it rather than none.
@@ -1624,7 +1626,8 @@ produce is a promise the screen cannot keep
   takes more than 13 of it.** The list or the calm block beneath keeps the
   rest. Which one gives way is a **rank**, not simply whichever is drawn
   last: the audit sentence is always first to give, because it is the one
-  fact with a second carrier (the footer, and — once wired — the header);
+  fact with a second carrier (the footer, and the header, which reads
+  `read-only` for it too);
   clock and the pane's own reason (which namespace, what fixes a dead
   login) have none, so between those two the draw order and the rank agree.
   Whatever is last in the rank is wrapped as far as its own remaining budget

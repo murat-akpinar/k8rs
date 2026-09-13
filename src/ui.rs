@@ -284,23 +284,23 @@ const HELP: &str = "  Moving around
 /// **[`HELP`]'s sixteen rows, with a *why not* clause on each key this login has been told it may
 /// not use** (`screens/help.md` § *When a key is refused*, NOTES § D23).
 ///
-/// **Each clause is anchored on the row it is for, by that row's own key, and never by counting**
-/// (`tester`, 2026-09-12). The first draft rewrote the last three rows of [`HELP`] by arithmetic —
-/// correct for today's [`HELP`] and wrong the moment another box changes it. Simulated: the owed
-/// `--read-only` swap replaces the three key rows with one line, and the arithmetic version then
-/// ate `y view as YAML`, the blank line and the read-only sentence, and drew the three mutating
-/// keys that swap exists to remove — no panic, no failing test. A row that is not `s`, `r` or
-/// `ctrl-d` is now never written, and a [`HELP`] that has dropped a key simply has no row for its
-/// clause to land on.
+/// **Each clause is anchored on the row it is for, by that row's own text, and never by counting**
+/// (`tester`, 2026-09-12 and 2026-09-13). The first draft rewrote the last three rows of [`HELP`]
+/// by arithmetic — correct for today's [`HELP`] and wrong the moment another box changes it: fed a
+/// body that had lost those keys it ate `y view as YAML`, the blank line and a read-only sentence,
+/// and drew the three mutating keys back — no panic, no failing test. A row that is not the one a
+/// clause is for is now never written, and a body with no such row simply has nowhere to land it.
+/// **The rows are split on `\n` and not `str::lines`**, which drops a trailing blank row and with
+/// it the body's sixteenth.
 ///
-/// **`help` is a parameter for that reason too**: what this does to a key map that no longer draws
-/// those keys is the thing to be able to test, and a `const` read from inside cannot be fed one.
-/// The one product caller passes [`HELP`].
+/// **`help` is a parameter for that reason too**: what this does to a key map shaped differently
+/// is the thing to be able to test, and a `const` read from inside cannot be fed one. The one
+/// product caller passes [`HELP`].
 ///
 /// No other row and no other block changes, and the body stays sixteen rows, so
-/// `screens/widgets.md` § 1's budget is untouched. Nothing is refused ⇒ the join is [`HELP`] back,
-/// character for character, which is what the *fail open* half of NOTES § D229 ruling 4 looks like
-/// from the screen's side.
+/// `screens/widgets.md` § 1's budget is untouched. Nothing is refused and nothing is held ⇒ the
+/// join is [`HELP`] back, character for character, which is what the *fail open* half of NOTES
+/// § D229 ruling 4 looks like from the screen's side.
 ///
 /// **The clause extends the jargon parenthesis for `s` and `r` and opens a new one for `ctrl-d`**,
 /// and both `s`'s and `r`'s `(` move left to the 40th character where [`HELP`] has them at the
@@ -317,82 +317,115 @@ const HELP: &str = "  Moving around
 /// closed set** (NOTES § D246) — never a plural discovery handed back, which is what would put a
 /// row past the ceiling as well as past invariant 9.
 ///
-/// **`changing` rewrites two other rows, and while it is set the three permission clauses do not
-/// draw at all** (`screens/help.md` § *While the call is running*). This screen exists to answer
-/// *what may I press*, and it promised `X switch cluster`, `s`, `r` and `ctrl-d` as live while
-/// `App::may_switch_cluster` and `App::may_mutate` were both false — the reader presses one, gets
-/// nothing, and no line anywhere says why (`tester` and `k8s-admin`, both independently,
-/// 2026-09-12; PRIOR-ART § G1's *refuses for no visible reason*).
+/// **A reason that holds for the whole block rewrites the heading, and while one does the three
+/// permission clauses do not draw at all** (`screens/help.md` § *While the call is running*,
+/// § *While the link is down…*, § *Under a dead-writes run*; NOTES § D262, § D265 rulings 4 and 5).
+/// This screen exists to answer *what may I press*, and it promised `s`, `r` and `ctrl-d` as live
+/// while `App::may_mutate` was false — the reader presses one, gets nothing, and no line anywhere
+/// says why (PRIOR-ART § G1's *refuses for no visible reason*). **One reason is drawn, in this
+/// order**: `held` when it is [`Held::Off`], then `changing`, then `held` when it is
+/// [`Held::Paused`]. Off also puts the cause's own sentence in the `s` row and blanks `r` and
+/// `ctrl-d`; the other two leave the three rows alone.
 ///
-/// **The heading governs `s`, `r` and `ctrl-d` at once and each row is left alone, where a
-/// permission rewrites the rows and leaves the heading.** That is not a layout preference: a call
-/// in flight refuses all three uniformly and a missing permission never does — one key can be
-/// refused while the other two are not — so the wait is one fact with one home and a permission is
-/// three. It is also why the two never draw on the same row: while a call is in flight those three
-/// rows are inactionable for the wait's reason alone, whatever a probe would otherwise say, and
-/// § *When a key is refused*'s per-key clauses take over again the moment the call returns.
+/// **The heading governs `s`, `r` and `ctrl-d` at once, where a permission rewrites the rows and
+/// leaves the heading.** That is not a layout preference: every one of these reasons refuses all
+/// three uniformly and a missing permission never does — one key can be refused while the other
+/// two are not — so a reason is one fact with one home and a permission is three.
+///
+/// **`changing` also rewrites the `X` row, whatever else holds**, because a call in flight is the
+/// one reason that refuses a cluster switch too (`crate::views::App::may_switch_cluster`); dead
+/// writes, the link and the clock say nothing about `X`.
 ///
 /// **`paused`, not `no`** — `no` is this product's word for a permission this login lacks
-/// (invariant 14, `screens/help.md`), and a call finishing is a wait. **Neither clause names the
-/// object, and neither needs to**: *a change is running* is true whichever one it is, and the
-/// object is one `?` away — dismissing Help puts the in-flight footer, which does name it, back
-/// on screen. An earlier wording pointed at the command log strip beneath instead, and that was
-/// dropped because the strip cannot be relied on to still hold the pending line after two
-/// navigations (`tui-designer`, 2026-09-12).
-fn key_map(help: &str, refused: Refused, changing: bool) -> String {
+/// (invariant 14, `screens/help.md`), and every one of these is a wait or a state of the run.
+/// **No clause names the object** a call is running on: *a change is running* is true whichever
+/// one it is, and dismissing Help puts the in-flight footer, which does name it, back on screen
+/// (`tui-designer`, 2026-09-12).
+fn key_map(help: &str, refused: Refused, changing: bool, held: Option<Held>) -> String {
     let resource = refused.resource();
-    let clauses = if changing {
-        vec![
-            (
-                "    X ",
-                Some(
-                    "    X            switch cluster (paused while a change is running)".to_owned(),
-                ),
-            ),
-            (
-                "  Changing things",
-                Some("  Changing things (paused while a change is running)".to_owned()),
-            ),
-        ]
-    } else {
-        vec![
-            (
-                "    s ",
-                refused.scale().then(|| {
-                    format!(
-                        "    s       run more or fewer copies   (scale — {} {resource}/scale)",
-                        Refused::SCALE_VERBS.join("+")
-                    )
-                }),
-            ),
-            (
-                "    r ",
-                refused.restart().then(|| {
-                    format!(
-                        "    r       restart, at its own pace   (rollout restart — {} {resource})",
-                        Refused::RESTART_VERBS.join("+")
-                    )
-                }),
-            ),
-            (
-                "    ctrl-d ",
-                refused.delete().then(|| {
-                    format!(
-                        "    ctrl-d  delete — you type the name to confirm ({} {resource})",
-                        Refused::DELETE_VERBS.join("+")
-                    )
-                }),
-            ),
-        ]
+    let heading = match (held, changing) {
+        (Some(Held::Off(_)), _) => Some(OFF),
+        (_, true) => Some(RUNNING),
+        (Some(Held::Paused(why)), false) => Some(why),
+        (None, false) => None,
     };
-    let mut rows: Vec<&str> = help.lines().collect();
+    let mut clauses: Vec<(&str, String)> = Vec::new();
+    if changing {
+        clauses.push((
+            "    X ",
+            format!("    X            switch cluster ({RUNNING})"),
+        ));
+    }
+    if let Some(why) = heading {
+        clauses.push((CHANGING_HEADING, format!("{CHANGING_HEADING} ({why})")));
+    }
+    if let Some(Held::Off(why)) = held {
+        clauses.push((SCALE_ROW, format!("    {why}")));
+        clauses.push((RESTART_ROW, String::new()));
+        clauses.push((DELETE_ROW, String::new()));
+    } else if heading.is_none() {
+        if refused.scale() {
+            clauses.push((
+                SCALE_ROW,
+                format!(
+                    "    s       run more or fewer copies   (scale — {} {resource}/scale)",
+                    Refused::SCALE_VERBS.join("+")
+                ),
+            ));
+        }
+        if refused.restart() {
+            clauses.push((
+                RESTART_ROW,
+                format!(
+                    "    r       restart, at its own pace   (rollout restart — {} {resource})",
+                    Refused::RESTART_VERBS.join("+")
+                ),
+            ));
+        }
+        if refused.delete() {
+            clauses.push((
+                DELETE_ROW,
+                format!(
+                    "    ctrl-d  delete — you type the name to confirm ({} {resource})",
+                    Refused::DELETE_VERBS.join("+")
+                ),
+            ));
+        }
+    }
+    let mut rows: Vec<&str> = help.split('\n').collect();
     for (key, clause) in &clauses {
-        let Some(clause) = clause else { continue };
         if let Some(row) = rows.iter_mut().find(|row| row.starts_with(key)) {
             *row = clause;
         }
     }
     rows.join("\n")
+}
+
+/// **The row anchors [`key_map`] finds**, spelled once so no two rewrites can come to disagree
+/// about which row is which. `X`'s is written where it is used, because only one rewrite reads it.
+const CHANGING_HEADING: &str = "  Changing things";
+const SCALE_ROW: &str = "    s ";
+const RESTART_ROW: &str = "    r ";
+const DELETE_ROW: &str = "    ctrl-d ";
+
+/// The heading's clause while writes are dead for the run (`screens/help.md` § Under a dead-writes
+/// run).
+const OFF: &str = "off for this whole run";
+
+/// The clause a call in flight puts on the heading and on `X` (`screens/help.md` § While the call
+/// is running).
+const RUNNING: &str = "paused while a change is running";
+
+/// **Why the *Changing things* block cannot be used as a whole, for the run** — [`withheld`]'s
+/// answer, which [`key_map`] words and [`offered`] withholds `s` and `r` for (NOTES § D265 rulings
+/// 4 and 5). A call in flight is not one of these: it is `crate::views::App::changing`'s fact, and
+/// [`key_map`] ranks it between the two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Held {
+    /// **Writes are dead for the whole run**, carrying [`Writes::why`]'s sentence for the `s` row.
+    Off(&'static str),
+    /// **No write can start for now** — the link or the clock — carrying the heading's clause.
+    Paused(&'static str),
 }
 
 // --- THE NUMBERS THE MOCKUPS ARE DRAWN TO END ---
@@ -421,19 +454,24 @@ pub struct Screen<'a> {
     /// nodes. **A vital that cannot be read is blank, never guessed** (`screens/widgets.md`
     /// § 1a), which is a rule about what the caller puts here.
     pub vitals: &'a str,
-    /// The header's right zone, already joined — `ctx: prod-eu · live · admin`, and on a longer
-    /// row `ctx: prod-eu · ns: payments · live · read-only · ⚠ TLS not verified`.
+    /// The header's right zone **up to the connection state**, already joined — `ctx: prod-eu ·
+    /// live`, and on a longer row `ctx: prod-eu · ns: payments · live`.
     ///
     /// **Laid out first, and the last zone to give way**: `prod-eu` and `prod-eu-2` differ by one
     /// character. Where the whole row is not enough for it, what gives way is the **front** of
-    /// this string — see [`shortened`], which is where the reason that end and not the other is
+    /// the zone — see [`shortened`], which is where the reason that end and not the other is
     /// written down. So the caller's order inside it is not cosmetic: **the cluster's name goes
-    /// first and what the reader is allowed to do goes last.**
+    /// first.**
     ///
-    /// **`changing…` is the one segment the caller does not join in**, and [`header`] appends it
-    /// after this string for exactly the reason above: it is `screens/widgets.md` § 1a's last
-    /// segment of all, and a caller holding the join could put it anywhere.
+    /// **What the reader may do here is not in it, and [`header`] joins it on** (NOTES § D265
+    /// rulings 1 and 2): `admin` or `read-only` off [`Screen::writes`], `⚠ TLS not verified` off
+    /// [`Screen::insecure`], then `changing…` — `screens/widgets.md` § 1a's last three segments, in
+    /// its order. A caller holding that join could say `admin` over dead keys.
     pub context: &'a str,
+    /// **The connected context's kubeconfig sets `insecure-skip-tls-verify`**, which [`header`]
+    /// draws as the zone's TLS warning. Its writer is Phase 12, from the `current` row of
+    /// `k8s::contexts(&kubeconfig, context)` (NOTES § D265 ruling 8).
+    pub insecure: bool,
     /// The Alerts list, in the three answers a pane has (`crate::views::Pane`) — and a refusal
     /// carries whatever did come back with it, which is what the banner is drawn *over*.
     pub alerts: &'a Pane<Vec<Card>>,
@@ -561,17 +599,18 @@ pub struct Screen<'a> {
 /// (`screens/states.md` § The audit log could not be opened, NOTES § D21, § D231).
 ///
 /// **One value, and the footer, the header's own `read-only` mark and `?`'s *Changing things* block
-/// all read it** (PM ruling, 2026-09-12). D21 — *k8rs says so and continues in read-only mode; it
-/// does not exit* — has never been true of any binary: a headless run has no *continue* to continue
-/// into. A TUI can start, draw, and leave the write keys dead, and this is the value that makes
-/// them dead: [`offered`] turns it into a `crate::views::Offer` that is not `Act`, which
-/// `crate::views::App::may_mutate` then refuses. **Unreachable, not a banner over live keys** —
-/// invariant 2's own bar.
+/// all read it** (PM ruling, 2026-09-12; NOTES § D265). D21 — *k8rs says so and continues in
+/// read-only mode; it does not exit* — has never been true of any binary: a headless run has no
+/// *continue* to continue into. A TUI can start, draw, and leave the write keys dead, and this is
+/// the value that makes them dead: [`offered`] turns it into a `crate::views::Offer` that is not
+/// `Act`, which `crate::views::App::may_mutate` then refuses. **Unreachable, not a banner over live
+/// keys** — invariant 2's own bar.
 ///
 /// **`--read-only` is the second cause and belongs here as a second variant, not as a second
 /// signal.** `screens/states.md` requires *one signal true for both causes* — the header draws the
-/// same `read-only` word either way, because its job is to say what is true now and not why — so
-/// every reader asks [`Writes::live`] and has nothing to change when that box lands.
+/// same `read-only` word either way, because its job is to say what is true now and not why. The
+/// header asks [`Writes::permission`]; the footer and `?` ask [`withheld`], which reads
+/// [`Writes::why`] — and the one place the two causes differ on screen is that sentence.
 ///
 /// **Not a `bool` beside a `String`**: the sentence belongs to the one cause that has one, and two
 /// fields are two facts that can disagree. It is `ops::audit_log`'s own returned sentence, cleaned
@@ -592,9 +631,9 @@ pub enum Writes<'a> {
     /// every mutating key from the commonest non-admin shape there is, which is the defect [`Link`]
     /// was introduced to close.
     ///
-    /// **It carries no sentence because it needs none**: the header says it, and the box that owns
-    /// § 1a's zone table wires that word off [`Writes::live`]. Nothing constructs this in product
-    /// code until then, which is why it is drawn nowhere and drops no banner.
+    /// **It carries no sentence and drops no banner**: [`header`] says `read-only`, and [`help`]'s
+    /// *Changing things* row says the flag was asked for ([`Writes::why`], NOTES § D265). Nothing
+    /// in product code constructs it yet — the command line reaches it at Phase 12's flags box.
     ReadOnly,
     /// **[`crate::ops::audit_log`] could not open the log**, carrying the sentence it returned.
     Unaudited(&'a str),
@@ -605,6 +644,32 @@ impl<'a> Writes<'a> {
     /// anywhere.
     fn live(self) -> bool {
         matches!(self, Writes::Live)
+    }
+
+    /// **`admin` or `read-only` — the header's word for [`Writes::live`]'s answer**, one word for
+    /// both dead causes (`screens/widgets.md` § 1a, NOTES § D265 ruling 1).
+    fn permission(self) -> &'static str {
+        if self.live() {
+            "admin"
+        } else {
+            mark(theme::READ_ONLY)
+        }
+    }
+
+    /// **Help's row under *Changing things (off for this whole run)*: why, and what brings changes
+    /// back** — one fixed sentence per cause, and never the audit sentence [`Writes::said`]
+    /// carries, which is the banner's (`screens/help.md` § Under a dead-writes run, NOTES § D265
+    /// ruling 5). `None` while writes are live.
+    fn why(self) -> Option<&'static str> {
+        match self {
+            Writes::Live => None,
+            Writes::ReadOnly => {
+                Some("k8rs was started with --read-only — quit and start it again without it")
+            }
+            Writes::Unaudited(_) => {
+                Some("k8rs could not open its audit log — fix that, then start k8rs again")
+            }
+        }
     }
 
     /// The banner's own sentence, or nothing to draw.
@@ -774,6 +839,13 @@ fn mark(signal: Signal) -> &'static str {
 /// leaves the gutter the width every plain row reserves.
 fn glyph(signal: Signal) -> String {
     format!("{:<width$}", mark(signal), width = GUTTER)
+}
+
+/// **`⚠ TLS not verified`, spelled once** — the picker's badge on a context's row ([`context`]) and
+/// the header's segment for the connected one ([`header`]) are one warning, and neither keeps a
+/// copy of it (NOTES § D265 ruling 2).
+fn unverified() -> String {
+    format!("{} TLS not verified", mark(theme::ALARM))
 }
 
 /// **The cards a screen may read, which is two of the three answers and not three.**
@@ -983,9 +1055,9 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 /// answering* is [`Screen::link`] and nothing else — **never [`Pane::Denied`]**, which is also the
 /// namespace-scoped fallback, and reading it as *we cannot reach the cluster* took both mutating
 /// keys from a developer whose `RoleBinding` allows them. *Can a write happen in this run* is
-/// [`Screen::writes`]. *Can the times on the page be trusted* is [`clock`]. Any one of the last
-/// three answering no gives `Move`, with no key marked `no`: that mark is reserved for
-/// `crate::views::Refused`.
+/// [`Screen::writes`]. *Can the times on the page be trusted* is [`clock`]. The last three are
+/// [`withheld`]'s, and any one of them answering no gives `Move`, with no key marked `no`: that
+/// mark is reserved for `crate::views::Refused`.
 ///
 /// **`switch` is set wherever the login has expired, whatever the pane is drawing** — an expired
 /// login over a still-loading pane is `Nothing { switch: true }` and over an empty kind
@@ -1033,17 +1105,37 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
             Pane::Ready(_) | Pane::Denied(..) => true,
         },
     };
-    // **Four reasons, one line, and none of them a `Refused` mark**: nothing selected · the link
-    // is not answering · no time on the page can be trusted · writes are off for this run.
-    //
-    // **The clock is read through [`clock`] and not off the field**, so a reading suppressed for
-    // being stale cannot withhold a key it is not on screen to justify. The two agree today
-    // — a link that is not `Live` already answers `Move` on the line above — and asking the one
-    // function is what keeps them agreeing when one of them next changes.
-    if rows && screen.link == Link::Live && screen.writes.live() && clock(screen).is_none() {
+    // **Four reasons, one line, and none of them a `Refused` mark**: nothing selected, and the
+    // three run-level ones [`withheld`] answers — which [`help`] reads too, so the footer and `?`
+    // cannot disagree about whether `s` and `r` can be pressed.
+    if rows && withheld(screen).is_none() {
         Offer::Act
     } else {
         Offer::Move { switch }
+    }
+}
+
+/// **The run-level reason no write can start, whatever is selected** — dead writes, then the link,
+/// then the clock ([`Held`], NOTES § D265 ruling 4).
+///
+/// **One function with two readers, so they cannot disagree**: [`offered`] withholds `s` and `r`
+/// whenever it answers, and [`help`] words *Changing things* from the same answer. Before it, Help
+/// read only whether writes were dead, and promised all three keys under a lost link, an expired
+/// login and a skewed clock (`k8s-admin`,
+/// `reports/2026-09-13-read-only-mark-operator-read.md` § 1).
+///
+/// **The clock is read through [`clock`] and not off the field**, so a reading suppressed for being
+/// stale cannot withhold a key it is not on screen to justify — and it is why the clock never
+/// competes with the link: [`clock`] answers `None` whenever the link is not `Live`.
+fn withheld(screen: &Screen) -> Option<Held> {
+    if let Some(why) = screen.writes.why() {
+        return Some(Held::Off(why));
+    }
+    match screen.link {
+        Link::Lost => Some(Held::Paused("paused while disconnected, retrying")),
+        Link::Expired => Some(Held::Paused("paused — renew your login, then press X")),
+        Link::Live => clock(screen)
+            .map(|_| Held::Paused("paused — the clocks disagree; quit and start k8rs again")),
     }
 }
 
@@ -1052,6 +1144,9 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
 ///
 /// **[`key_map`] and not [`HELP`], because up to three of those rows answer for what this login
 /// may do** — the only part of this screen that is not fixed text.
+///
+/// **[`withheld`] is what turns *Changing things* off or pauses it** — the answer [`offered`] reads
+/// for the footer, so `?` never promises a key the footer withholds (NOTES § D265 rulings 3–5).
 ///
 /// **`Clear` first, then a borderless `Paragraph`, and there is no third call.** ratatui does not
 /// clear for you, so without it the sidebar and the pane show through; and the block that would
@@ -1070,7 +1165,7 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
 fn help(frame: &mut Frame, area: Rect, changing: bool, screen: &Screen) {
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(key_map(HELP, screen.refused, changing)).style(
+        Paragraph::new(key_map(HELP, screen.refused, changing, withheld(screen))).style(
             screen
                 .fg(theme::TEXT)
                 .bg(ink(theme::BACKGROUND, screen.depth)),
@@ -1140,39 +1235,47 @@ fn indented(area: Rect) -> Rect {
 /// to `nodes 3/3 (` reads as a complete count of three ready nodes: *a vital that cannot be read
 /// is blank, never guessed*. What the context does instead is [`shortened`].
 ///
-/// **`changing…` is appended here and not by the caller, which is what fixes its place in the
-/// order** (`screens/widgets.md` § 1a, `theme::CHANGING`). The zone is one string joined by
-/// ` · `, and this segment is last of all — after `admin`/`read-only` and after any TLS warning,
-/// never ahead of them. A caller that joined it into [`Screen::context`] itself could put it
-/// anywhere in that string; a caller that cannot reach the join cannot. It is
-/// [`crate::views::App::changing`]'s fact rather than the store's, which is the other reason it
-/// is not a field on [`Screen`].
+/// **The zone's last three segments are joined here and not by the caller, which is what fixes
+/// their place in the order** (`screens/widgets.md` § 1a, NOTES § D265 rulings 1 and 2). The zone
+/// is one string joined by ` · `: [`Screen::context`] up to the connection state, then
+/// [`Writes::permission`] — in every state, so the header cannot say `admin` over dead keys — then
+/// [`unverified`] where [`Screen::insecure`] holds, then `changing…` last of all. A caller that
+/// joined any of them itself could put it anywhere in that string; a caller that cannot reach the
+/// join cannot. `changing…` is [`crate::views::App::changing`]'s fact rather than the store's,
+/// which is the other reason it is not a field on [`Screen`].
 ///
-/// **Being last is also why [`shortened`] needs no case for it**: that cut eats the *front* of
-/// the zone, so the cluster's name erodes and the tail — `read-only`, the TLS warning and this
-/// mark — never does.
+/// **Being the tail is also why [`shortened`] needs no case for them**: that cut eats the *front*
+/// of the zone, so the cluster's name erodes and `read-only`, the TLS warning and `changing…`
+/// never do.
 ///
 /// **The startup picker is the one state whose zone is not the caller's** (`screens/context.md`
 /// § Opening at startup, `screens/widgets.md` § 1a): no context has been chosen, so the zone reads
 /// `choose a cluster` and the one fact already known before any connection — whether writes are
-/// on for this run, [`Writes::live`]'s answer — and the vitals are blank because nothing has been
-/// read. The failure that picker can lead to names the context it tried, which is the caller's
-/// ordinary zone again.
+/// on for this run — and neither a TLS warning nor the vitals, because no context has been read.
+/// The failure that picker can lead to names the context it tried, which is the caller's ordinary
+/// zone again.
 fn header(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let dim = screen.fg(theme::DIM);
     let picking = matches!(&app.modal, Some(views::Modal::ContextPick(picker)) if picker.startup());
-    let whole: Cow<str> = if picking {
-        let may = if screen.writes.live() {
-            "admin"
-        } else {
-            mark(theme::READ_ONLY)
-        };
-        Cow::Owned(format!("choose a cluster · {may}"))
-    } else if app.changing.is_some() {
-        Cow::Owned(format!("{} · {}", screen.context, mark(theme::CHANGING)))
+    let tls = unverified();
+    let segments: Vec<&str> = if picking {
+        vec!["choose a cluster", screen.writes.permission()]
     } else {
-        Cow::Borrowed(screen.context)
+        [
+            Some(screen.context),
+            Some(screen.writes.permission()),
+            screen.insecure.then_some(tls.as_str()),
+            app.changing.is_some().then_some(mark(theme::CHANGING)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     };
+    let whole = segments
+        .into_iter()
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
     let context = shortened(&whole, usize::from(area.width));
     let [left, zone] = Layout::horizontal([
         Constraint::Min(0),
@@ -1931,7 +2034,7 @@ fn context<'a>(row: &Choice, selected: bool, slot: usize, screen: &Screen) -> Li
     } else if row.server == Address::Undefined {
         format!("{} cluster undefined", mark(theme::ALARM))
     } else if row.insecure {
-        format!("{} TLS not verified", mark(theme::ALARM))
+        unverified()
     } else if row.current {
         "(current)".to_owned()
     } else {
