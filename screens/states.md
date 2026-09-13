@@ -314,6 +314,92 @@ out mid-session ([NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kub
   `aws sso login` in their head while hunting the key map for how to act on
   it.
 
+### Alerts had already found nothing, and then the link went
+
+**`○ nothing is broken` is a claim about the cluster right now, and k8rs
+cannot make that claim once it cannot see the cluster.** A pane that finished
+loading with zero findings and *then* lost the connection or the login used
+to keep drawing the calm headline regardless — the one banner this page
+exists to require never went up, because the code path for *zero findings*
+never asked what the link was doing
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+This is not [Over a pane with nothing to show
+yet](#over-a-pane-with-nothing-to-show-yet), below — that section is about a
+pane that has never finished its first read; this one already had, and found
+nothing wrong, before the link dropped.
+
+The fix is the same ⚠ banner [The connection
+dropped](#the-connection-dropped) and [Your login expired](#your-login-expired)
+already draw over a **stale but non-empty** list, with its own closing line
+for the case where the list underneath it is not stale — it is empty,
+confirmed, before the link went:
+
+```
+ nodes 3/3 (40s ago)   ctx: prod-eu · ⚠ disconnected, retrying · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │                                               │
+│  RESOURCES         │  ⚠ Not connected to the cluster right now.    │
+│   workloads        │                                               │
+│   network          │    Nothing was broken 40 seconds ago, the     │
+│   storage          │    last time k8rs could check. Retrying…      │
+│   config           │                                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│                                               │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch   (reconnecting)                     │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+```
+ nodes 3/3 (2 min ago)          ctx: prod-eu · ⚠ login expired · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │                                               │
+│  RESOURCES         │  ⚠ Your login expired.                        │
+│   workloads        │                                               │
+│   network          │    The cluster still knows who you are, but   │
+│   storage          │    the login token your kubeconfig creates    │
+│   config           │    has timed out.                             │
+│   cluster          │                                               │
+│  ANALYSIS          │    Renew it, then press X and pick this       │
+│   capacity      1 ▲│    cluster again:                             │
+│   certificates  30d│                                               │
+│   drain safety     │    aws sso login                              │
+│   posture          │                                               │
+│   restarts         │    Nothing was broken 2 min ago, the last     │
+│   waste            │    time k8rs could check.                     │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch   → login expired                    │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  X switch cluster  / filter  ? all keys  q quit    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The closing line replaces "What you see below is from N ago"** with the
+  sentence that is true when there is nothing below: not *what is stale*, but
+  *what was last confirmed*. Both say the same fact — the age of the last
+  successful read — in the words the pane underneath actually has room for.
+- **`s scale` and `r restart` stay withheld, for the same reason the stale-list
+  version withholds them**: a write nobody can currently be asked about is
+  not a write refused, absent rather than `no`, whether the list under the
+  banner has one stale card or none.
+- **Reachable from either direction.** Alerts opens calm and then the link
+  drops — the ordinary case, since a healthy cluster's Alerts pane is empty
+  for most of a session (§ *On a healthy or a still-loading Alerts screen*,
+  below) — or the link is already down when the first `Ready` with zero
+  findings comes back (a watch that lists nothing, then nothing changes).
+  Both draw the same two mockups above; nothing here depends on which order
+  they happened in.
+
 ### Over a pane with nothing to show yet
 
 Reachable, and drawn rather than left for a caller to guess at: the token can

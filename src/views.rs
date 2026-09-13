@@ -1632,6 +1632,24 @@ pub fn yaml_line(resource: &str, id: &ObjectId) -> String {
 /// which edits the kubeconfig k8rs never writes (NOTES § D16 ruling 2).
 pub const GET_CONTEXTS: &str = "$ kubectl config get-contexts";
 
+/// **A strip line split into the command and what [`Log`] wrote after it** — [`OUTCOME_GAP`] and
+/// [`RUNNING`], or the gap and `→ ` an outcome — and `""` after a line nothing was written after.
+///
+/// **It is here because this type spells that suffix and nothing else may**: the strip reserves the
+/// second half before it cuts the first, and a copy of the gap and the two marks in `ui.rs` is the
+/// second spelling that goes stale (`screens/dialogs.md` § The command log's own line, NOTES §
+/// D266). **The last outcome arrow is the one it splits at**, so what it hands back as the tail is
+/// the shortest there is, which [`SAID`] bounds.
+pub fn outcome_of(line: &str) -> (&str, &str) {
+    let running = format!("{OUTCOME_GAP}{RUNNING}");
+    let at = if line.ends_with(&running) {
+        Some(line.len() - running.len())
+    } else {
+        line.rfind(&format!("{OUTCOME_GAP}→ "))
+    };
+    at.map_or((line, ""), |at| line.split_at(at))
+}
+
 // **The logs tab's line is not built here, and its absence is the ruling rather than an
 // omission.** [`crate::k8s::LogRequest::kubectl`] already spells it, in the file that sends the
 // request and off the same fields `LogRequest::params` is built from — so the line cannot describe
@@ -2731,6 +2749,15 @@ pub fn sanitize(text: &str) -> String {
     text.chars().filter(|c| !unprintable(*c)).collect()
 }
 
+/// **A `409`'s two clauses — [`because`]'s, and the refused box's own** (`screens/dialogs.md` § The
+/// cluster said no, state 0). That box already says *Nothing was changed.* as its outcome, so it
+/// joins these two without the middle clause this file's sentence carries; one spelling of each, so
+/// the two surfaces cannot come to describe a conflict differently (NOTES § D266).
+pub const MOVED: &str = "something else changed this object while k8rs was working on it";
+
+/// The second of [`MOVED`]'s pair.
+pub const REREAD: &str = "reading it again shows what it looks like now";
+
 /// **One plain clause: why a call did not work** — the caller supplies the subject, this
 /// supplies the reason (invariant 14, `PRIOR-ART § C1`).
 ///
@@ -2928,11 +2955,7 @@ pub fn because(fault: Fault, asked: &str, renewal: Option<&str>, said: Option<&s
         // is about the object having moved between the read and the write (NOTES § D213). It is
         // the only fault whose fix is *k8rs reads it again*, so the sentence says what the reader
         // will see happen rather than sending them anywhere.
-        Fault::Conflict => {
-            "something else changed this object while k8rs was working on it — nothing was \
-             changed, and reading it again shows what it looks like now"
-                .to_string()
-        }
+        Fault::Conflict => format!("{MOVED} — nothing was changed, and {REREAD}"),
         Fault::Unanswered => format!("nothing usable came back when k8rs tried to {asked}"),
         // **The one arm with no cause in it, and that is the arm** (`k8s::Fault::Unfinished`).
         // Nothing came back and nothing said why, so every sentence that would explain it is a

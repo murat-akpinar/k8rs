@@ -175,8 +175,34 @@ budget is stated here in terminal columns and nowhere in a drawing.
 
 The age is laid out first, at the width the ladder gives it
 ([widgets.md § 1b](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen)),
-right-aligned so its last column is the card region's. The name gets the rest,
-minus a two-column gap, and clips there.
+right-aligned so its last column is the card region's. The name gets the
+rest, minus a two-column gap, and — where it does not fit —
+[the identity cut](widgets.md#7-text-that-came-from-the-api) gives way there,
+never a silent clip.
+
+**A silent clip used to be what "gives way" meant here, and it made two
+different objects draw one card.** `team-alpha-payments-platform/checkout-worker-service-canary`
+and its `-stable` sibling both clipped to
+`team-alpha-payments-platform/checkout-wo`, and `openshift-cluster-node-tuning-operator/tuned`
+and `…/node-tuning-operator` in the same namespace both clipped to
+`openshift-cluster-node-tuning-operator`, dropping the `/` and the whole
+object name with it
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+The name now front-cuts the same way every other identity on this product
+does — namespace first, `/` and name kept whole wherever the room allows —
+marked with a leading `…`:
+
+```
+● …platform/checkout-worker-service-canary  4 min ago
+● …platform/checkout-worker-service-stable  4 min ago
+● …ft-cluster-node-tuning-operator/tuned  2 hours ago
+● …-tuning-operator/node-tuning-operator  2 hours ago
+```
+
+Measured at the 80×24 floor: 40 columns of room after a `4 min ago` age, 38
+after `2 hours ago` — the two Deployments above now differ on the card as
+well as in the cluster, and `tuned` and `node-tuning-operator` no longer
+share one line with no `/` on it.
 
 | The card's age | Age columns | Columns left for the name |
 |---|---|---|

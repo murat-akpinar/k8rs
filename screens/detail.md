@@ -51,6 +51,39 @@ container picker are what a reader reaches for on nearly every open log pane;
 `⇧p` only matters once a container has actually crashed, and a text search is
 the same `/` every other pane already carries silently.
 
+## The heading, when the name does not fit
+
+The heading is one `Paragraph` holding `namespace/name` in full — and until
+this round, nothing cut it: ratatui clipped it at the pane edge with no mark
+at all, the one silent truncation [widgets.md § 7](widgets.md#7-text-that-came-from-the-api)
+exists to forbid
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+It now runs through [the identity cut](widgets.md#7-text-that-came-from-the-api)
+first, the same rule every other object identity on this product now shares.
+Room is the content pane, less its own two-column pad each side — **53**
+columns at 80×24, the same figure `alerts.md`'s card region and
+`analysis.md`'s report region both measure against.
+
+Two pods from the same Deployment's two rollouts, differing only in their own
+generated suffix, at 53 columns of room:
+
+```
+…form/checkout-worker-service-canary-7d9f4bc86d-x2k9p
+…form/checkout-worker-service-stable-7d9f4bc86d-x2k9p
+```
+
+and two Deployments sharing a long OpenShift namespace:
+
+```
+…ter-node-tuning-operator/tuned-metrics-reader-canary
+…ter-node-tuning-operator/tuned-metrics-reader-stable
+```
+
+Before this round both pairs drew the identical heading —
+`team-alpha-payments-platform/checkout-worker-service-` and
+`openshift-cluster-node-tuning-operator/tuned-metrics-` — naming neither pod
+by the one thing that told them apart.
+
 ## The logs tab
 
 ### The buffer: 2 MB retained, 5,000 lines, 4,096 bytes per line
@@ -1391,7 +1424,7 @@ so is every value under `metadata.annotations`, by the same rule:
 │                    │  password: <hidden — 16 bytes>                          │
 │                    │  tls.crt: <hidden — 1,172 bytes>                        │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│ $ kubectl get secret db-credentials -n payments -o yaml…                     │
+│ $ kubectl get secret db-credentials -n payments -o yaml...                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ [ ] tabs  v reveal  esc back  ? all keys  q quit                             │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -1407,10 +1440,14 @@ than stopping mid-flag, the rule [the evidence line already
 follows](widgets.md#7-text-that-came-from-the-api): a flag with its last
 character sheared off would still look like a flag, and `--show-managed-fiel`
 is not one a reader would notice was wrong. Dropping the whole flag instead
-leaves `…` right after `yaml` — and if a reader deletes just the `…`, what is
-left is a real command: the one `kubectl get -o yaml` already runs by
-default, without `managedFields`. A wider terminal never needs this cut; 80×24
-is the floor, and the content pane only grows from here.
+leaves `...` right after `yaml` — the strip's own three-period mark, never
+the single `…` glyph, because on this one strip `…` already means something
+else, the running mark ([widgets.md § 7, back-cut
+3](widgets.md#7-text-that-came-from-the-api)) — and if a reader deletes just
+the `...`, what is left is a real command: the one `kubectl get -o yaml`
+already runs by default, without `managedFields`. A wider terminal never
+needs this cut; 80×24 is the floor, and the content pane only grows from
+here.
 
 **Why an annotation on a Secret gets treated as a copy of the Secret rather
 than as metadata about it.** `kubectl apply -f secret.yaml` — the ordinary
@@ -1484,7 +1521,7 @@ container picker already is.
 │   └────────────────────────────────────────────────────────────┘   │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get secret db-credentials -n payments -o yaml…           │
+│ $ kubectl get secret db-credentials -n payments -o yaml...         │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc close                                                          │
 └────────────────────────────────────────────────────────────────────┘
@@ -1533,7 +1570,7 @@ container picker already is.
 │                    │                                                         │
 │                    │                                                         │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│ $ kubectl get secret pending-secret -n payments -o yaml…                     │
+│ $ kubectl get secret pending-secret -n payments -o yaml...                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ [ ] tabs  esc back  ? all keys  q quit                                       │
 └──────────────────────────────────────────────────────────────────────────────┘

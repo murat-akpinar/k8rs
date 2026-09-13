@@ -85,6 +85,60 @@ does not touch the title bar:
 `payments/web` there is namespace/name (rule 1), a different sentence
 answering a different question, and it was never the one that disagreed.
 
+### When the object's own name does not fit
+
+`payments/web` is short enough that the title and the `$` line never have to
+give way. A real cluster's names are not always that short, and two
+Deployments that differ only in their own tail — a canary and a stable
+rollout of the same service — used to draw byte-identical boxes: the old rule
+cut the combined `namespace/name` from its tail, which is exactly where the
+two differ
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+Both the title and the `$` line now use [the identity cut](widgets.md#7-text-that-came-from-the-api),
+front-cutting the namespace and keeping the object's own name in full — the
+one thing this whole box exists to confirm.
+
+`team-alpha-payments-platform/checkout-worker-service-canary` and its
+`-stable` sibling, measured at the 80×24 floor:
+
+```
+Scale …-payments-platform/checkout-worker-service-canary
+Scale …-payments-platform/checkout-worker-service-stable
+
+Restart …a-payments-platform/checkout-worker-service-canary
+Restart …a-payments-platform/checkout-worker-service-stable
+```
+
+**The `$` line follows the same rule, and it is the one place a command may
+not simply drop the object it names.** `kubectl scale deployment/…` with
+nothing after it is not a shorter version of the command above it — it is a
+different, incomplete one, and a reader who copies it gets a kubectl error
+telling them nothing about their Deployment. The `$` line's own cut therefore
+gives way in this order: the trailing flags first (`--replicas=3`, `-n
+<namespace>`), one whole flag at a time, exactly as the command log strip's
+own flags do ([§ The command log's own line, while a call is running or just
+after](#the-command-logs-own-line-while-a-call-is-running-or-just-after),
+below); then, only if the bare
+`kubectl <verb> <kind>/<name>` still does not fit, the **name** itself —
+never the `kind/` in front of it — gives way the same front-cut way as the
+title:
+
+```
+$ kubectl scale deployment/…eckout-worker-service-canary
+$ kubectl scale deployment/…eckout-worker-service-stable
+
+$ kubectl rollout restart deployment/…worker-service-canary
+$ kubectl rollout restart deployment/…worker-service-stable
+```
+
+Both boxes above are at their own real column budget — [`CONFIRM_BOX`] for
+scale, the wider [`CROWDED_BOX`] for restart (§ *Printed instead of drawn*,
+below, on why restart's box is the crowded one) — with nothing left over: the
+flags are gone and the name itself has already given up its own front to fit.
+That is the honest floor of what this line can say at 80×24 for a name this
+long, and it is still a line a reader can tell two Deployments apart by,
+which the box it replaces was not.
+
 ### Printed instead of drawn — scale on the headless surface
 
 The box above draws the consequence as two lines, but there is exactly one
@@ -471,6 +525,12 @@ equivalent to what k8rs sent (D225 ruling 5, measured against a real
 `kubectl` rather than recalled off its docs; if that measurement ever
 disagrees, the line follows it and this sentence is what was wrong).
 
+**The title and the `$` line give way exactly as § Scale's do** — [the
+identity cut](widgets.md#7-text-that-came-from-the-api) on the title, flags
+before the object's own `kind/name` on the `$` line (§ *When the object's own
+name does not fit*, above) — at whatever room this box's own, tighter width
+leaves them; the mechanism does not change per operation, only the numbers.
+
 **This box narrows to 61 columns of interior for the same reason § Restart's
 did** — the general rule is [widgets.md § 5](widgets.md#5-the-modal-layer)'s,
 not derived separately here. The two sentences and the typed-name field
@@ -749,9 +809,107 @@ all
 ruling 1) — so a delete refusal can only ever be the second or third state
 below, never the first.
 
-**1. Not sent — the dry-run was rejected.** `scale` and `restart` only: the
-check ran, the cluster said no to it, and the real change never left k8rs.
-This is the box below, unchanged:
+**This box used to draw one sentence for every reason a check could fail —
+"The cluster refused this" — and that sentence is only true of some of
+them.** `ops::Record::check` already tells the audit log which of three
+things happened to a check that did not pass: it never left this machine, it
+left and k8rs never heard back, or it reached the cluster and the cluster
+said no. The box drew none of that — every fault under *not sent* read as a
+cluster refusal, including a kubeconfig k8rs could not even build a
+connection from
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+State 1 below is now three states, split the same way the audit log already
+is, plus one that cuts across all of them: a `409 Conflict` is never a
+refusal at all, whether it is the check or the real call that meets it.
+
+**0. The object moved underneath — a `409 Conflict`.** Not a rejection: the
+object k8rs read is not the object that is there now, so there is nothing
+left to say no to. This state pre-empts every other one below — the check's
+own three-way split, and state 2's "the cluster answered with a refusal" —
+whenever the fault is a `409`, because the sentence is the same regardless of
+whether it was the check or the real call that hit it:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│      ┌ The object changed first ────────────────────────────┐      │
+│      │                                                      │      │
+│      │  Nothing was changed.                                │      │
+│      │                                                      │      │
+│      │  Something else changed this object while k8rs was   │      │
+│      │  working on it — reading it again shows what it      │      │
+│      │  looks like now.                                     │      │
+│      │                                                      │      │
+│      │                    [ esc dismiss ]                   │      │
+│      │                                                      │      │
+│      └──────────────────────────────────────────────────────┘      │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl scale deployment/web --replicas=9 -n payments  → rejected│
+├────────────────────────────────────────────────────────────────────┤
+│ esc dismiss  ⏎ open                                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+The sentence is built from the same two named clauses
+[`views::because`](../src/views.rs)'s own `Fault::Conflict` arm uses —
+[`views::MOVED`](../src/views.rs) and [`views::REREAD`](../src/views.rs) —
+joined without the middle "nothing was changed, and" clause `because`
+carries between them, because this box already says *Nothing was changed.*
+as its own outcome line above; one spelling of each clause, so the two
+surfaces cannot come to describe a conflict differently
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+It is the same re-read offer that function already gives a reader watching a
+namespace's own scope narrow out from under them. `esc dismiss` and
+re-selecting the object is today's whole way to act on the offer; there is
+no `⏎` re-read built into this box, because none of today's three
+operations need one to stay correct (§ *The object went away while the
+dialog was open* explains why a scale or a restart never needs a live
+re-read).
+
+**1. Not sent — the check could not confirm it.** `scale` and `restart`
+only, and never a `409` (state 0, above). The audit log already knows which
+of three things happened; this box now says the one that is true, not one
+fixed sentence for all of them:
+
+**1a. The check never left this machine** — a kubeconfig, context, TLS entry
+or login problem stopped it before anything reached the network:
+
+```
+      ┌ This could not be checked ───────────────────────────┐
+      │                                                      │
+      │  Nothing was changed.                                │
+      │                                                      │
+      │  The check that runs before the real change never    │
+      │  left this machine — k8rs could not build a          │
+      │  connection from this kubeconfig.                    │
+      │                                                      │
+      │                   [ esc dismiss ]                    │
+      └──────────────────────────────────────────────────────┘
+```
+
+**1b. The check never got an answer** — a dead socket or a connection that
+went quiet before it heard back, and k8rs does not know whether the cluster
+ever saw it. **Nothing was changed either way**: the real call is only ever
+sent once its own check has passed, and this check did not:
+
+```
+      ┌ The check never got an answer ───────────────────────┐
+      │                                                      │
+      │  Nothing was changed.                                │
+      │                                                      │
+      │  k8rs does not know whether the check that runs      │
+      │  before the real change reached the cluster.         │
+      │                                                      │
+      │                   [ esc dismiss ]                    │
+      └──────────────────────────────────────────────────────┘
+```
+
+**1c. The check reached the cluster, and the cluster said no.** This is the
+one case the old single sentence was already right about — the box below is
+unchanged, and it is the only one of the four that can carry the cluster's
+own quoted words:
 
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
@@ -780,6 +938,17 @@ This is the box below, unchanged:
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+**No two blank rows stack when there is nothing to quote — 1a and 1b above
+draw the corrected spacing.** The box used to open a blank row for the
+quoted-text block whether or not there was one to draw, and *then* a second
+blank row to open the explanation underneath — measured, on every one of
+these boxes, since none of the eight faults that can reach state 1 carries a
+quoted server message. One blank row separates the outcome sentence from the
+explanation that follows it, whether or not a quote sits between them; 1c,
+which does carry a quote, is unchanged because it never had the bug — the
+quote itself filled the row the second blank was colliding with everywhere
+else.
+
 **2. Sent, and the cluster answered with a refusal.** All three operations
 reach this — `scale` and `restart` when a passing dry-run is followed by a
 real call the cluster still turns down (a role that allows `create` but not
@@ -792,24 +961,29 @@ ran:
 - Title **"The cluster refused this"**. "Nothing was changed." "This was the
   real change, not a check."
 
+A `409` here draws state 0 instead, not this — the sentence does not change
+depending on whether it was the check or the real call that met the
+conflict.
+
 **3. Sent, and nothing came back.** A dead socket, a timeout, a crash
 mid-response: the one call that mattered is already on the wire, and k8rs has
 no way to know whether the cluster acted on it before the connection dropped.
 This is invariant 2's own named state — *"k8rs does not know whether the
 change was made"* — and this box is the one place that sentence gets drawn.
 **For `scale` and `restart`, the same dead socket during the check instead
-reads as state 1**, because in that case the real call truly never left k8rs;
-it is only once their own check has already passed — or for `delete`, at any
-time — that a dead socket lands here instead (invariant 2's own contrast: "a
-dead socket on a delete… ends in *k8rs does not know whether the change was
-made* where scale would have said never sent").
+reads as state 1b**, because in that case the real call truly never left
+k8rs; it is only once their own check has already passed — or for `delete`,
+at any time — that a dead socket lands here instead (invariant 2's own
+contrast: "a dead socket on a delete… ends in *k8rs does not know whether the
+change was made* where scale would have said never sent").
 
 - Title **"The cluster never answered"** — not *"The change did not go
   through,"* which reads as a completed failure and claims the one thing
   this state cannot know. "k8rs does not know whether the change was made."
   "This was the real change, not a check."
 
-`delete` reaches only 2 and 3 — never 1, having no check to be rejected at.
+`delete` reaches only 0, 2 and 3 — never state 1, having no check to be
+rejected at.
 
 **The heading over the cluster's quoted text needed the same honesty.** "The
 cluster's own words:" promised prose; a `fieldValidation=Strict` rejection
@@ -817,7 +991,7 @@ instead hands back the whole object k8rs sent, as JSON, in the same field
 ([NOTES § D217](../NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)),
 and "words" is not true of that. The heading now reads **"What the cluster
 sent back:"** — true whether the field holds a sentence a person wrote or an
-object echoed back at k8rs — in all three states above, unconditionally, and
+object echoed back at k8rs — in every state above that can carry one, and
 still drawn only when there is something to quote, exactly as before.
 
 ## The object went away while the dialog was open
@@ -875,6 +1049,19 @@ object it opened on, and that something no longer answers to the `uid` it
 opened with. The sentence in its place is the pod's own hedge, the exact
 words § Delete already gives a pod or a replicaset — reused rather than
 reworded, because it is the same unverified fact both times.
+
+**The identity line uses [the identity cut](widgets.md#7-text-that-came-from-the-api)
+when `payments/web-7d9f4` does not fit, not a tail-cut into the name.** A
+tail-cut lands inside the name at whichever column the budget runs out, the
+same defect the title carries (§ *When the object's own name does not fit*,
+above) — `team-alpha-payments-platform/checkout-worker-service-canary` and
+its `-stable` sibling drew this box byte-identical, too. Measured at the
+80×24 floor, room 50:
+
+```
+    …-payments-platform/checkout-worker-service-canary
+    …-payments-platform/checkout-worker-service-stable
+```
 
 **A deployment, a statefulset, a daemonset and a node get no hedge, because
 nothing recreates one of these on its own.** This is the state the box above
@@ -980,33 +1167,36 @@ name that has to carry a `/`. `room` is 76 columns less the fixed prefix
 **The rule now has a second clause, on top of the one [the browser's own line
 under the table](resources.md#when-it-does-not-fit-the-name-gives-way--and-now-it-says-so)
 already states — and it is a hard rule, not a wider budget that merely makes
-the two bugs above less likely:**
+the two bugs above less likely.** It used to have a third, and that third one
+is gone: this footer's own cut *was* the namespace giving way from its front
+only when the namespace alone was too long for `room`, and cutting into the
+name's own tail otherwise (`payments/checkout-worker-service…`) — which is
+what let `checkout-worker-service-canary` and its `-stable` sibling draw the
+same footer, since the two differ only past the point that cut landed
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+**This footer now follows [the identity cut](widgets.md#7-text-that-came-from-the-api)**
+— the one rule every surface on this page that draws an object's own
+`namespace/name` shares — which always gives the **namespace** first,
+whether or not it alone was already too long, and cuts the **name** only
+where even `…/<name>` cannot fit:
 
 1. The name fits in `room` → it draws whole. No mark. (All three names above
-   now fit whole in 33 columns of room — 32, 30 and 29 characters — and no
+   fit whole in 33 columns of room — 32, 30 and 29 characters — and no
    longer collide or lose their slash, because there is nothing left to cut.)
-2. It does not fit, and cutting to `room − 1` characters would still keep the
-   object's own `/` (that is, the `/` sits at or before column `room − 2`) →
-   cut there and glue one `…` to the last character kept, exactly as the
-   browser's own line does. **The visible string still contains a `/`
-   whenever the full name does**, because the cut never had to touch it.
-3. It does not fit, and a plain `room − 1` cut would land *before* the `/`
-   (the namespace alone is longer than the room left for it) → the
-   **namespace** gives way, not the name. It is cut from its own **front**,
-   behind one leading `…`, and the object's own name is kept in full —
-   `…<tail of the namespace>/<name>`. Only when the name alone is too long
-   even for that — past `room − 2` columns, the two left over once the
-   leading `…` and the `/` are paid for — is the name cut too, at its own
-   tail, with its own `…`, and the namespace gives up the rest of itself
-   rather than a part of it: `…/<name, cut at its tail>…`. **The visible
-   string still contains a `/` whenever the full name does, in both
-   branches** — and unlike the case this replaces, it also still contains
-   the object's own name, whole far more often than not, because a
-   namespace losing its front is what a reader loses first, not the one
-   thing every later command needs to type.
+2. It does not fit → the **namespace** gives way, cut from its own front,
+   behind one leading `…`, however much of it the room after the mark, the
+   `/` and the name in full still leaves — `…<tail of the namespace>/<name>`.
+   The `/` and the name are never touched here, whether or not the namespace
+   alone would have fit at `room − 1`: two names sharing a namespace and
+   differing only in their own tail — the case above — now draw two
+   different footers, because the name is never where this cut spends its
+   room.
+3. Even `…/<name>` does not fit — the name alone, plus the mark and the `/`,
+   is wider than `room` — only then does the name also give way, front-cut
+   the same way: `…/…<tail of the name>`.
 4. Nothing here changes for a bare, cluster-scoped name (a node) — no `/`
-   exists to protect, so case 2's plain cut is exactly what a bare name
-   already got.
+   exists to protect, so case 2's plain front-cut is exactly what a bare
+   name already got.
 
 **Why the namespace gives way from its front and not its tail — the same
 question [the header's own cut](widgets.md#1a-the-header-row) already
@@ -1017,43 +1207,96 @@ cluster read alike. A namespace fails the identical way: `team-a-prod` and
 `team-a-staging`, `payments-and-billing` and `payments-and-shipping` share
 their front and differ in their tail, so a cut that kept the front and
 dropped the tail is the one direction guaranteed to erase the one thing that
-told two namespaces apart. Case 3's namespace is therefore cut the header's
-way, front first, not case 2's way — two cuts in one product disagreeing
-about which end of a *namespace* identifies it is the same shape of defect
-[CLAUDE.md's own rule](../CLAUDE.md) names as the most expensive kind this
-repo has: two things reading one fact and answering it differently.
+told two namespaces apart. The namespace is therefore always cut the header's
+way, front first — never the tail-cut this footer used to fall back to
+whenever the namespace alone happened to already fit.
 
 No word-boundary walk-back in any case — a name is one token (or two joined
 by one `/`), the same reasoning the browser's own cut already gives — and
-this is still [widgets.md § 7](widgets.md#7-text-that-came-from-the-api)'s
-fourth truncation, not a new one. Case 2, the ordinary cut, unchanged in kind
-from before this round:
+this is [the identity cut](widgets.md#7-text-that-came-from-the-api), not a
+truncation of its own. Case 2, the namespace giving way and the name kept in
+full:
 
 ```
-↑↓ move  ⏎ open  ? keys  ·  changing payments/checkout-worker-service… first
+↑↓ move  ⏎ open  ? keys  ·  changing …m/checkout-worker-service-canary first
 ```
 
-76 columns, exactly the floor — `payments/checkout-worker-service-account-token-projector`
-cut to 32 characters plus the mark, up from 22 before this round. Case 3, a
-namespace real distributions ship and this page had no example for until now:
+`team-alpha-payments-platform/checkout-worker-service-canary`, 33 columns of
+room exactly, and its `-stable` sibling cuts to
+`…m/checkout-worker-service-stable` — the two now differ on this line, which
+they did not before this round. Case 3, a name too long for the room even
+with the namespace gone entirely — `payments/checkout-worker-service-account-token-projector`,
+namespace 8 characters, name 47:
+
+```
+↑↓ move  ⏎ open  ? keys  ·  changing …/…ervice-account-token-projector first
+```
+
+Even bare, `/<name>` is 48 columns against a 33-column room, so the name
+itself gives way too, front-cut the same way — `…/…ervice-account-token-projector`,
+33 columns exactly. `openshift-cluster-node-tuning-operator/tuned` stays
+case 2 under the new rule as it was under the old one — the namespace alone
+(38) already made it the case that gives the namespace up first, and nothing
+about that case changed:
 
 ```
 ↑↓ move  ⏎ open  ? keys  ·  changing …uster-node-tuning-operator/tuned first
 ```
 
-`openshift-cluster-node-tuning-operator/tuned` — a real OpenShift namespace,
-38 characters, and a real object in it, `tuned` (5 characters). The
-namespace alone is 38, more than the 31 a plain `room − 1` cut can still keep
-before the `/`, so case 3 applies: `room − 2 − len(name)` = `33 − 2 − 5` = 26
-characters of the namespace's own tail are kept, behind a leading `…`, ahead
-of the `/` and the name in full — `…uster-node-tuning-operator/tuned`, 33
-columns exactly. Every object in this namespace used to draw the same line,
-byte-identical, under the case this replaces; now `tuned`, a Deployment and
-anything else in it each draw their own name in full, and only the shared
-namespace prefix is what the cut agrees to lose. `↑↓ move` and
+33 columns exactly, `tuned` kept whole. Every object in this namespace draws
+its own name in full, whatever it is, and only the shared namespace prefix is
+what the cut agrees to lose. `↑↓ move` and
 `⏎ open` do not give way in any of these cases: they are what "navigation
 stays free" means on screen, and dropping them to buy the name more room
 would hide the one thing this state promises still works.
+
+### The command log's own line, while a call is running or just after
+
+The `…` on the log line above is [`views::RUNNING`](../src/views.rs) — the
+busy mark, replaced by the outcome the instant one arrives, never removed
+before then (invariant 4). **It used to be the same glyph the strip's own cut
+mark uses, and the cut used to give way at the wrong end of the line — behind
+the running mark instead of in front of it**
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+A command too long for the strip's 76-column budget (§1) was cut at a word
+boundary the ordinary way (`screens/widgets.md` § 7), but the running mark
+and its three-column gap were counted *after* that cut instead of reserved
+first — so a long command lost the mark and the outcome that would have
+followed it, and a short one that only barely overflowed lost the object it
+was about, with nothing left standing after `$ kubectl rollout restart…` to
+say which Deployment.
+
+**The running mark and the outcome word are never what gives way — they are
+reserved first, and the command is cut to what is left.** The command's own
+cut now carries a mark of its own, `...` (three literal periods, three
+columns — [widgets.md § 7](widgets.md#7-text-that-came-from-the-api)), so a
+command still running and a command that was cut for space no longer draw
+the same trailing character. And the cut protects the same thing the
+confirm dialog's own `$` line now does (§ *When the object's own name does
+not fit*, above): trailing flags give way first, one whole flag at a time; a
+flag's own **value** gives way at a character boundary rather than being
+dropped whole where part of it would still fit; the command's own `kind/name`
+word is never touched.
+
+`$ kubectl rollout restart deployment/payments-api -n payments-production-eu`,
+75 columns, still running, at the strip's real 76-column floor:
+
+```
+$ kubectl rollout restart deployment/payments-api -n payments-product...   …
+```
+
+The `-n` flag's own value gives way at a character boundary — `payments-product`
+of its 22 — rather than the whole flag being dropped, which is what the old
+cut did (`-n…`, naming no namespace at all). `kubectl rollout restart
+deployment/payments-api` — the command's own `kind/name` word — is never
+touched, and the running mark still stands three columns clear of it,
+unambiguous. The same command once it is answered — `→ rejected` is nine
+columns wider than the running mark it replaces, so the command re-cuts to
+what is left, keeping less of the namespace than it did while running:
+
+```
+$ kubectl rollout restart deployment/payments-api -n payment...   → rejected
+```
 
 ### Detail tabs and Analysis keep their own footer, not this line
 

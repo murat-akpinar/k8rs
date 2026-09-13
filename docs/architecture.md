@@ -307,8 +307,8 @@ analysis.rs  → frozen after the reports step        (pure, like rules)
 k8s.rs       → frozen after the read paths are complete (watch, discovery, logs)
 ops.rs       → frozen after the operations step, proven headlessly against kind
 theme.rs     → frozen after the theme step (incl. COLORTERM fallback)
-views.rs     → frozen after the view-state step
-ui.rs        → the screens
+views.rs     → frozen with ui.rs, after the wiring step (its only consumer)
+ui.rs        → the screens, frozen after the wiring step
 main.rs      → top of the pyramid; the only file still being wired at the end
 ```
 

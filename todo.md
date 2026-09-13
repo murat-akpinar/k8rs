@@ -4253,6 +4253,18 @@ state before its renderer exists is what manufactures a frozen-file violation.
 
 ## Phase 11 — The console
 
+> **Every box below is checked and the phase is NOT closed — do not start Phase 12.**
+> Its close ritual stopped half-way on 2026-09-13 for a `/clear`
+> ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+> Done: `just check` green; the family read; the six blockers fixed and committed
+> **but not yet reviewed**; mutation shards `0/4` (220 tested, 0 missed) and `1/4`
+> (220 tested, 0 missed); docs sync. **Owed, in order**: `tester` and `k8s-admin`
+> on the six-blocker commit (steps 5–6, loop to a fix if they find one) · `just
+> mutants --shard 2/4` and `3/4` · the host run (`ssh ubuntu` had no route on
+> 2026-09-13, and nothing in the binary calls `ui.rs` yet — say so) · the phase
+> security gate · the whole-phase second pass · CHANGELOG · PR `development` →
+> `main` and merge · move this note and Phase 5's pointer to Phase 12.
+
 > **Phase 5's release box is still unchecked, and it is still not next** — it
 > needs the maintainer's crates.io credential and a `README.md` that belongs to
 > Phase 13

@@ -1949,10 +1949,12 @@ recorded reversal and a later box rather than a dev round
   surface has an equivalent.** Measured 2026-08-31 on the fixture cluster: one
   kubeconfig with the CA dropped and the flag set produced output **byte-identical**
   to the verified run — `k8rs: watching — server v1.36.1 · 62 kinds …`, same 41
-  pods, same 4 nodes — and `grep -rn "\.insecure\b" src/*.rs` outside the tests
-  returns nothing. The flag is carried on a context-picker row
-  ([D174](NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28))
-  that Phase 11 has not drawn. **The security gate's row is *honoured and
+  pods, same 4 nodes. The flag is carried on a context-picker row
+  ([D174](NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28));
+  since Phase 11 `ui.rs` draws it on that row and in the header
+  ([D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)),
+  and the binary reaches neither until Phase 12. What stays open here is the
+  headless half. **The security gate's row is *honoured and
   surfaced*, and it is the one no script can check** — so it has been passing by
   hand on a half that does not exist. The answer is a screen decision before a
   Rust one (what `--once`, `--describe` and `--yaml` say about a connection whose

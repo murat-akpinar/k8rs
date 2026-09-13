@@ -682,52 +682,154 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   characters; `String::truncate` slices bytes and panics in the middle of a
   multi-byte name. Handing the full `Span` to the widget is both shorter and
   correct.
-- **Eight places truncate on purpose, and they are the exceptions that prove
-  the rule above.** Four cut from the **back**, marked, and the full text is
-  one `⏎` away — which is what makes cutting them legitimate at all: the
-  Alerts card's evidence line, capped at three wrapped lines with `…` at the
-  cut
-  ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall));
-  the Resources browser's one-line summary under the table, whose name
-  gives way to the sentence around it and is marked the same way
-  ([resources.md § The line under the table](resources.md#the-line-under-the-table));
-  the command log strip, when even its real 76-column budget at the
-  80×24 floor — pane width minus the outer border minus the one-column
-  margin `indented()` reserves on each side (§1) — cannot hold the whole
-  teaching line; and the footer's own in-flight reason, the one footer that
-  carries a string this product did not choose — the selected object's own
-  name, cut the same way the browser's row name is, on the same 76-column
-  budget (§2a, [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running)).
-  What § 7 forbids is a *silent* cut and a *byte* cut. None of
-  these four is: all are marked with a character the reader can see, and all
-  step by whole characters. The evidence line and the command log both walk
-  back to a whole word before they cut, because both are made of more than
-  one token and a word with its last character sheared off would still look
-  like a real one — `--show-managed-fiel` is not a flag a reader would notice
-  was wrong. Walking back drops the whole word instead, so the mark lands
-  after the word before it, never glued to a maimed one
+- **Eleven cuts are deliberate, and this list is closed — a truncation found
+  anywhere else on a screen is a bug, not a twelfth entry**
+  ([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+  Five cut from the **back**; six cut from the **front**, and one of those six
+  is one rule reused at six call sites rather than six separate rules — **the
+  identity cut**, defined once below because it is the one most screens on
+  this page now share.
+
+  **Back-cuts.** The full text is one `⏎` away in three of the five, which is
+  what makes cutting them legitimate — the reader loses nothing, only a
+  keypress:
+
+  1. The Alerts card's evidence line, capped at three wrapped lines with `…`
+     at the cut
+     ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall)).
+  2. The Resources browser's one-line summary under the table, whose name
+     gives way to the sentence around it and is marked the same way
+     ([resources.md § The line under the table](resources.md#the-line-under-the-table)).
+  3. **The command log strip's own command text** — its real 76-column
+     budget at the 80×24 floor (pane width minus the outer border minus the
+     one-column margin `indented()` reserves on each side, §1) cannot always
+     hold the whole teaching line. It walks back to a whole word first
+     (below), and what it may never do is walk back far enough to drop the
+     command's own `kind/name` word, or the running mark / outcome word that
+     may follow it — see the strip's own rule, next bullet but one.
+  4. **A `Confirm` dialog's `$` line** — the same 76-column-style budget, much
+     narrower inside a nested box, and the same rule as the strip: trailing
+     flags give way before the object's own `kind/name` word does.
+  5. **An Analysis row's own detail text**, when what `analysis.rs` built for
+     it is taller than the pane — [analysis.md § A row taller than the
+     pane](analysis.md#a-row-taller-than-the-pane-and-the-cut-that-keeps-the-cursors-row-on-screen).
+
+  All five are marked with a character the reader can see and step by whole
+  characters, never a byte. 1, 2 and 5 walk back to a whole word before they
+  cut, because each is made of more than one token and a word with its last
+  character sheared off would still look like a real one —
+  `--show-managed-fiel` is not a flag a reader would notice was wrong
   ([detail.md's yaml tab](detail.md#the-yaml-tab) draws the case: the whole
   flag gives way, `…` lands right after `yaml`, and deleting just the `…`
   leaves a real command — the one `kubectl get -o yaml` already runs by
-  default). The browser's line and the footer's in-flight name do not walk
-  back — a name is one token, so there is no word boundary to find, and
-  cutting mid-token is what the mark is for there.
+  default). 3 and 4 walk back the same way for a **flag**, and differ from
+  the other three in one respect only: the object's own `kind/name` token —
+  the one thing on the line that says *which* object this command runs
+  against — is never a whole-word drop candidate. Where even the flag's own
+  **value** would otherwise be dropped whole though part of it would still
+  fit — a `-n <namespace>` whose namespace is the last thing standing between
+  the command and the budget — the cut lands inside that value instead, at a
+  character boundary, keeping as much of it as the room allows, behind the
+  mark: dropping a value few readers would misread for a different one costs
+  less than dropping it whole. **3 carries a second, distinct mark of its
+  own**, `...` (three literal periods, three columns), never the single `…`
+  glyph — because on this one strip `…` already means something else, the
+  running mark ([`views::RUNNING`](../src/views.rs)) and the same character
+  the outcome arrow replaces it with. The two used to be the same glyph, so a
+  cut command and a command still running could draw the identical trailing
+  character with nothing to tell them apart; they no longer can, on this
+  strip only. Every other cut on this page keeps `…`.
 
-  **Four more cut from the front, and recoverability is not why — a
-  distinguishing tail is**, the header's own reasoning
+  **Front-cuts.** None of these six promises the full text is one `⏎` away —
+  what justifies the cut instead is the header's own reasoning
   ([§ 1a](#1a-the-header-row), [NOTES § D249](../NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)):
-  the cluster picker's own name slot, where a fleet of contexts named after
-  one cloud provider's naming convention share a long prefix and differ only
-  near the end; the same row's own server-line label, in front of the
-  address it introduces; the one-context sentence's own name, when there is
-  only one row to say so about; and the failure box's two names — the
-  context that did not connect and the one `X` would take the reader back to
-  ([NOTES § D264 ruling 5](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13),
-  `context.md` §§ The picker, The tag column, When the new cluster does not
-  work). None of these four promises the full name is one `⏎` away —
-  connecting is what `⏎` does here, not revealing a name — so what justifies
-  the cut is instead that what a name shares with its neighbours sits at the
-  front, and the front is the part it can afford to lose.
+  what two of these strings share with their neighbours sits at the front, so
+  the front is the part each can afford to lose.
+
+  6. The cluster picker's own name slot, where a fleet of contexts named
+     after one cloud provider's naming convention share a long prefix and
+     differ only near the end.
+  7. The same row's own server-line label, in front of the address it
+     introduces.
+  8. The one-context sentence's own name, when there is only one row to say
+     so about.
+  9. The failure box's two names — the context that did not connect and the
+     one `X` would take the reader back to
+     ([NOTES § D264 ruling 5](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13),
+     `context.md` §§ The picker, The tag column, When the new cluster does not
+     work).
+  10. **The sidebar's own kind row**, for a discovery plural too long for its
+      column — `persistentvolumeclaims`, `validatingadmissionpolicybindings`.
+      Every row in the `List` reserves `List::highlight_symbol`'s own two
+      columns whether or not it is the selected one (ratatui-widgets 0.3.2,
+      `list/rendering.rs`, measured), so a kind row's own 15 columns are 20
+      (the sidebar, fixed, §1) less 2 (the gutter) less 3 (a kind row's own
+      indent, §2). Front-cut, one `…`,
+      character boundary — a discovery plural is one token, so there is no
+      word to walk back to: `persistentvolumeclaims` → `…ntvolumeclaims`,
+      `validatingadmissionpolicybindings` → `…policybindings`. **§ 1's own
+      reason for a fixed-width sidebar — "the labels are fixed-length
+      strings" — is true of the product's own words (`ALERTS`, `workloads`,
+      …) and was never true of a discovery plural**, the one sidebar label
+      whose length the cluster chooses; this is its cut.
+  11. **The identity cut** — one rule, six call sites, because a screen this
+      product draws is a `namespace/name` or a bare cluster-scoped `name`
+      (README rule 5) far more often than it is a browser row or a picker
+      slot, and every one of the six needed the same fix at once
+      ([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)):
+      a `Confirm` dialog's own title
+      ([dialogs.md §§ Scale, Restart, Delete](dialogs.md)); the same dialog's
+      `$` line, where the object's own `kind/name` token has to give way to
+      fit and does so this way rather than being dropped (back-cut 4, above);
+      the *Already gone* body
+      ([dialogs.md § The object went away while the dialog was
+      open](dialogs.md#the-object-went-away-while-the-dialog-was-open)); the
+      in-flight footer's own reason
+      ([dialogs.md § While the call is
+      running](dialogs.md#while-the-call-is-running) — **this replaces that
+      section's old back-cut of the name**, which is D266's own reversal of
+      that page's earlier rule 2); the Alerts card's identity row
+      ([alerts.md § The age, and what it costs the
+      name](alerts.md#the-age-and-what-it-costs-the-name)); and the detail
+      tabs' own heading ([detail.md § The heading, when the name does not
+      fit](detail.md#the-heading-when-the-name-does-not-fit)).
+
+      **Why an identity front-cuts when nothing else on a card or a dialog
+      does: two objects that share almost their whole name differ at its
+      end**, not its front — `checkout-worker-service-canary` and
+      `…-stable`, `payments/checkout-worker-service-canary-7d9f4bc86d-x2k9p`
+      and its `-stable` sibling, `openshift-cluster-node-tuning-operator`'s
+      `tuned` and its `node-tuning-operator`. A tail-cut of the combined
+      string — this page's own rule until this round — lands inside the
+      *name*, at whichever point the budget runs out, and the two names
+      above collide there: both cut to `checkout-worker-servi…` at 80×24,
+      naming two different Deployments with one identical dialog. **The
+      rule, so a reviewer can check any width against it rather than a
+      drawing:**
+
+      1. `namespace/name` fits in `room` → drawn whole, no mark.
+      2. It does not → the **namespace** gives way first, cut from its own
+         front behind a leading `…`, however much of it the room after the
+         mark, the `/` and the name in full still leaves. The `/` and the
+         name are never touched here. Where nothing at all of the namespace
+         fits, the visible string is `…/<name>` — the mark stands for the
+         whole namespace, and the `/` still says there is one.
+      3. Even `…/<name>` does not fit — the name alone, plus the mark and
+         the `/`, is wider than `room` — only then does the **name** also
+         give way, cut the same way, from its own front:
+         `…/…<tail of the name>`. Reached at the in-flight footer's own
+         33-column room by a name long enough on its own —
+         `payments/checkout-worker-service-account-token-projector`
+         ([dialogs.md § While the call is
+         running](dialogs.md#while-the-call-is-running)) — and written down
+         for every other surface regardless, because the rule has to hold at
+         any width, not only the ones a mockup happens to draw.
+      4. A bare, cluster-scoped name (a node) — case 2's plain front-cut,
+         with no `/` to protect.
+
+      No word-boundary walk-back in any case, the same reasoning the
+      browser's own row-name cut already gives: a name is one token (or two
+      joined by one `/`), so there is no word to find.
 
   Everything else on a card, every other string in the browser, and every
   command log line that fits is drawn whole and clips at the pane edge like

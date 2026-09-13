@@ -132,9 +132,15 @@ const MARKER: &str = "▸ ";
 const NAME: &str = "k8rs";
 
 /// **The only thing k8rs shortens on purpose, and it is always visible where it happened**
-/// (`screens/widgets.md` § 7). One character, two callers — the evidence line and the header —
-/// so the mark a reader learns is one mark.
+/// (`screens/widgets.md` § 7). One character on every cut, so the mark a reader learns is one mark
+/// — but for the command log strip's, which is [`STRIP_CUT`] and says why.
 const CUT: &str = "…";
+
+/// **The command log strip's own cut mark, and the one exception to [`CUT`]** — three periods,
+/// because on that strip `…` is already `crate::views::Log`'s running mark, and a command cut for
+/// space drew the same trailing character as one still on the wire (`screens/widgets.md` § 7,
+/// back-cut 3; NOTES § D266).
+const STRIP_CUT: &str = "...";
 
 /// **The three widths a nested dialog box picks from, and the only choice a dialog makes about
 /// its own shape** (`screens/widgets.md` § 5, read off every box in `screens/dialogs.md`). The
@@ -991,7 +997,7 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
 /// this places them, so a mode's footer is spelled once, in the file that already knows which
 /// keys a mode has. **One string reaching it is not a literal**, and it is the only cut this
 /// function makes: the in-flight footer's object name (`screens/dialogs.md` § *While the call is
-/// running*, `screens/widgets.md` § 7's fourth deliberate truncation). Every other footer is
+/// running*, `screens/widgets.md` § 7's identity cut). Every other footer is
 /// *curated to fit* — the curation happens in the words, not in a truncation here.
 ///
 /// **`room` is measured off this line's own fixed parts and never restated as a number** (PM
@@ -1006,10 +1012,8 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
 /// said, so the pair needs no guard of its own.
 ///
 /// **[`name_cut`] and not [`command_cut`]**: a name is one token — or two joined by one `/` —
-/// so there is no word boundary to walk back to (`screens/widgets.md` § 7 — the browser's row
-/// name is cut the same way and for the same reason). What [`name_cut`] adds over [`clipped`] is
-/// the `/`, the one character here whose loss changes what the object *is*, and the namespace's
-/// **front** rather than its tail as the thing that gives way once it has to.
+/// so there is no word boundary to walk back to, and it is the one cut every surface naming an
+/// object shares (NOTES § D266): the `/` kept, and the fronts given up where two names are alike.
 ///
 /// **The right zone is laid out first and takes exactly its own width**, the same shape
 /// [`header`] uses for the context: an empty one is a zero-width `Rect` that draws nothing, so
@@ -1028,12 +1032,11 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let keys = match &app.changing {
         Some(object) => {
             let room = usize::from(row.width).saturating_sub(width(&line));
-            let whole = name(object.namespace.as_deref(), &object.name);
             app.footer(
                 screen.detail.is_some(),
                 offer,
                 screen.refused,
-                &name_cut(&whole, room),
+                &name_cut(object.namespace.as_deref(), &object.name, room),
                 screen.contexts,
             )
             .0
@@ -1322,20 +1325,7 @@ fn shortened(text: &str, columns: usize) -> String {
     if width(text) <= columns {
         return text.to_owned();
     }
-    // **Each candidate is measured whole, marker included** — the same rule [`fits`] is written
-    // to. Adding `width(CUT)` to the tail's own width is the sum this file has already been
-    // caught by once, and a zone one column wider than its `Rect` is clipped at the tail again,
-    // which is the whole defect. It is also why the marker gets no guard of its own: a row too
-    // narrow for even `…` keeps nothing, which is what an empty start already says.
-    let mut kept = String::new();
-    for (at, _) in text.char_indices().rev() {
-        let candidate = format!("{CUT}{}", &text[at..]);
-        if width(&candidate) > columns {
-            break;
-        }
-        kept = candidate;
-    }
-    kept
+    front(text, columns, CUT)
 }
 
 /// The command log — **the last two lines, unwrapped, and cut behind a [`CUT`] where one does not
@@ -1351,20 +1341,25 @@ fn shortened(text: &str, columns: usize) -> String {
 /// changed when the outcome landed (`k8s-admin`, 2026-09-07,
 /// `reports/2026-09-07-command-log-panel.md`).
 ///
-/// **The cut walks back to a whole word, which is the third of `screens/widgets.md` § 7's three
-/// deliberate truncations** (that section, rewritten 2026-09-07, and `screens/detail.md` § The
-/// yaml tab, which draws the one line in the whole directory that does not fit even at the true
-/// floor). A flag with its last character sheared off still looks like a flag —
-/// `--show-managed-fiel` is not one a reader would notice was wrong — so the whole token gives
-/// way and the mark lands where the reader can see it.
+/// **The cut is [`command_cut`], `screens/widgets.md` § 7's back-cut 3**, behind [`STRIP_CUT`]: a
+/// flag with its last character sheared off still looks like a flag — `--show-managed-fiel` is
+/// not one a reader would notice was wrong — so a flag gives way whole, and the mark lands where
+/// the reader can see it.
+///
+/// **What [`views::Log`] wrote after the command is reserved before the command is cut, and never
+/// cut itself** (`screens/dialogs.md` § The command log's own line, NOTES § D266): measured after
+/// the cut instead, a running restart and a rejected one drew the same row, and a command that fit
+/// lost its namespace to an outcome word.
 fn strip(frame: &mut Frame, area: Rect, screen: &Screen) {
     let row = indented(area);
     let last = screen.log.len().saturating_sub(usize::from(LOG_LINES));
     let lines: Vec<Line> = screen.log[last..]
         .iter()
         .map(|line| {
+            let (command, outcome) = views::outcome_of(line);
+            let room = usize::from(row.width).saturating_sub(width(outcome));
             Line::styled(
-                command_cut(line, usize::from(row.width)),
+                format!("{}{outcome}", command_cut(command, room, STRIP_CUT)),
                 screen.fg(theme::INFO),
             )
         })
@@ -1423,8 +1418,9 @@ fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, scr
 ///
 /// **The title is cut here rather than by ratatui.** `Block` clips a title at its own border with
 /// nothing to show for it, and a 512-byte object name is a name the API server accepts
-/// (`k8s::IDENTIFIER`); a name is one token, so it is [`clipped`]'s cut and not [`command_cut`]'s
-/// (`screens/widgets.md` § 7). The room is the box's width less the space each side of the title.
+/// (`k8s::IDENTIFIER`). A `Confirm`'s title arrives already cut by [`name_cut`] to this same room
+/// (NOTES § D266); this clip is the floor under every title, marked. The room is the box's width
+/// less the space each side of the title.
 fn boxed(
     frame: &mut Frame,
     body: Rect,
@@ -1692,7 +1688,7 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
     lines.push(Line::styled(
         format!(
             "{MODAL_MARGIN}$ {}",
-            command_cut(&dialog.kubectl, columns.saturating_sub(2))
+            command_cut(&dialog.kubectl, columns.saturating_sub(2), CUT)
         ),
         screen.fg(theme::INFO),
     ));
@@ -1709,11 +1705,16 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
 
     // **`payments/web` and never `deployment/web`** — the title bar answers *which object*, and
     // the kind is already spelled on the `$` line below it (`screens/dialogs.md` rule 1, its own
-    // § Scale paragraph). A node has no namespace and gets the bare `node-3`.
+    // § Scale paragraph). A node has no namespace and gets the bare `node-3`. The room is
+    // [`boxed`]'s own, less the verb and its space ([`name_cut`]).
+    let verb = format!("{} ", capitalised(dialog.verb));
     let title = format!(
-        "{} {}",
-        capitalised(dialog.verb),
-        name(dialog.object.namespace.as_deref(), &dialog.object.name)
+        "{verb}{}",
+        name_cut(
+            dialog.object.namespace.as_deref(),
+            &dialog.object.name,
+            usize::from(width).saturating_sub(2 + self::width(&verb)),
+        )
     );
     boxed(frame, body, width, &title, lines, screen);
 }
@@ -1745,21 +1746,48 @@ fn refused(
     let text = screen.fg(theme::TEXT);
     let dim = screen.fg(theme::DIM);
 
-    // **Did the server answer at all?** It is the question both sentences below turn on
-    // ([`answered`]).
-    let (title, outcome, because) = if !sent {
-        (
+    // **`sent` and the fault together pick one of six states**, and the check's own three are the
+    // three `ops::Record::check` writes to the audit log for the same fault — it never left this
+    // machine, k8rs never heard back, or the cluster said no — so the box and the audit line cannot
+    // tell one attempt two ways (`screens/dialogs.md` § The cluster said no, NOTES § D266). A `409`
+    // is none of them: nothing was refused, the object moved, and the sentence is
+    // [`views::because`]'s own two clauses whichever call met it. After the real call, **did the
+    // server answer at all** ([`answered`]) decides the other two. Only a state the cluster can
+    // have answered in words carries a quote.
+    let moved = format!("{} — {}.", capitalised(views::MOVED), views::REREAD);
+    let (title, outcome, because, quotes) = match (fault, sent) {
+        (Fault::Conflict, _) => (
+            "The object changed first",
+            "Nothing was changed.",
+            moved.as_str(),
+            false,
+        ),
+        (Fault::Kubeconfig | Fault::NoContext | Fault::BadEntry | Fault::NoCredential, false) => (
+            "This could not be checked",
+            "Nothing was changed.",
+            "The check that runs before the real change never left this machine — k8rs could not \
+             build a connection from this kubeconfig.",
+            false,
+        ),
+        (Fault::Unanswered | Fault::Unfinished, false) => (
+            "The check never got an answer",
+            "Nothing was changed.",
+            "k8rs does not know whether the check that runs before the real change reached the \
+             cluster.",
+            false,
+        ),
+        (Fault::Refused | Fault::Rejected | Fault::Expired | Fault::Gone, false) => (
             "The cluster refused this",
             "Nothing was changed.",
             "This is the check that runs before the real change — it stopped this one.",
-        )
-    } else if answered(*fault) {
-        (
+            true,
+        ),
+        (fault, true) if answered(*fault) => (
             "The cluster refused this",
             "Nothing was changed.",
             "This was the real change, not a check.",
-        )
-    } else {
+            true,
+        ),
         // **Invariant 2 names this state in these words.** A dead socket on a `delete` — which
         // sends no check at all (NOTES § D225 ruling 1) — ends with the request on the wire and
         // no answer, and *"Nothing was changed."* over it is a claim k8rs cannot make.
@@ -1768,34 +1796,39 @@ fn refused(
         // said no, state 3): *the change did not go through* is the idiom for a completed failure —
         // *my payment didn't go through* — so it contradicts the line the same box draws under it.
         // That no answer arrived is the whole of what is known, and the title says that and stops.
-        (
+        (_, true) => (
             "The cluster never answered",
             "k8rs does not know whether the change was made.",
             "This was the real change, not a check.",
-        )
+            true,
+        ),
     };
 
     let mut lines = vec![Line::raw("")];
     lines.extend(margined(outcome, columns, text));
     lines.push(Line::raw(""));
-    let tail: Vec<Line> = std::iter::once(Line::raw(""))
-        .chain(margined(because, columns, text))
+    let tail: Vec<Line> = margined(because, columns, text)
+        .into_iter()
         .chain([Line::raw(""), dismiss(screen)])
         .collect();
 
-    if let Some(said) = said.filter(|said| !said.is_empty()) {
+    if let Some(said) = said.filter(|said| quotes && !said.is_empty()) {
         // **The heading stopped promising prose** (invariant 14, `screens/dialogs.md` § The
         // cluster said no): a `fieldValidation=Strict` rejection hands back the object that was
         // sent (NOTES § D217), so *the cluster's own words* delivered JSON. *Sent back* is true of
-        // either, in all three states.
+        // either, in every state that carries a quote.
         let heading = margined("What the cluster sent back:", columns, text);
-        let left = MODAL_ROWS.saturating_sub(lines.len() + heading.len() + tail.len());
+        // The quote's own blank row under it is the `1`.
+        let left = MODAL_ROWS.saturating_sub(lines.len() + heading.len() + 1 + tail.len());
         let quoted = cut(said, columns.saturating_sub(2), left);
-        // **The heading goes with the quote and never stands over an empty space.** It is the
-        // same sentence a `None` here would tell: the cluster sent something back, or it did not.
+        // **The heading goes with the quote and never stands over an empty space**, and so does
+        // the blank that closes it: one blank row between the outcome and the explanation whether
+        // or not a quote sits there, where two used to stack (`screens/dialogs.md` § The cluster
+        // said no, *No two blank rows stack*).
         if !quoted.is_empty() {
             lines.extend(heading);
             lines.extend(indent(quoted, "    ", dim));
+            lines.push(Line::raw(""));
         }
     }
     lines.extend(tail);
@@ -1842,8 +1875,9 @@ fn gone(frame: &mut Frame, body: Rect, object: &views::Object, recreated: bool, 
         Line::styled(
             format!(
                 "    {}",
-                clipped(
-                    &name(object.namespace.as_deref(), &object.name),
+                name_cut(
+                    object.namespace.as_deref(),
+                    &object.name,
                     columns.saturating_sub(2),
                 )
             ),
@@ -2334,11 +2368,19 @@ fn sidebar(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
                     None => (1, "", theme::TEXT, Vec::new()),
                 },
             };
+            // **A kind's plural is the one label here the cluster chose**, so it is the one that
+            // gives way — from its front, where `persistentvolumes` and `persistentvolumeclaims`
+            // are alike (`screens/widgets.md` § 7, cut 10; NOTES § D266). A kind row carries no
+            // badge, so its room is the column less its indent.
+            let label = match item {
+                NavItem::Kind(_) => Cow::Owned(shortened(label, inside.saturating_sub(indent))),
+                _ => Cow::Borrowed(label),
+            };
             let mut spans = vec![Span::styled(
                 format!("{blank:indent$}{label}", blank = ""),
                 screen.fg(style),
             )];
-            let pad = inside.saturating_sub(indent + width(label) + spanned(&badge));
+            let pad = inside.saturating_sub(indent + width(&label) + spanned(&badge));
             spans.push(Span::raw(" ".repeat(pad)));
             spans.extend(badge);
             ListItem::new(Line::from(spans))
@@ -2451,7 +2493,13 @@ fn content(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
                 let rest = caveats(frame, area, screen, Some(said), FLOOR);
                 alerts(frame, rest, app, screen, cards);
             }
-            Pane::Ready(cards) if cards.is_empty() => {
+            // **`○  nothing is broken` is a claim about the cluster now, so it needs the link**
+            // (`screens/states.md` § Alerts had already found nothing, and then the link went,
+            // NOTES § D266) — structural for [`clock`]'s reason. With the link down an empty list
+            // falls through to the arm below and draws what it has, which is no card and no claim;
+            // the sentence that page draws is the caller's, over `Pane::Denied`, as it is for a
+            // stale list.
+            Pane::Ready(cards) if cards.is_empty() && screen.link == Link::Live => {
                 note(frame, area, screen, true, screen.writes.said());
             }
             Pane::Ready(cards) => {
@@ -2843,15 +2891,17 @@ fn identity<'a>(card: &Card, screen: &Screen, region: usize) -> Line<'a> {
         body.saturating_sub(measured + GAP)
     };
 
-    let name = name(card.owner.namespace.as_deref(), &card.owner.name);
+    let named = name(card.owner.namespace.as_deref(), &card.owner.name);
     let whole = match card.count() {
-        Some(count) => format!("{name}  ·  {count}"),
-        None => name.clone(),
+        Some(count) => format!("{named}  ·  {count}"),
+        None => named,
     };
+    // **A name that does not fit gives way by [`name_cut`], never a silent clip** — the clip drew
+    // two Deployments one card and dropped the `/` with the name (NOTES § D266).
     let left = if width(&whole) <= room {
         whole
     } else {
-        fits(&name, room).to_owned()
+        name_cut(card.owner.namespace.as_deref(), &card.owner.name, room)
     };
 
     let mut spans = vec![
@@ -3292,6 +3342,7 @@ fn analysis(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, report: &
     );
     let body = padded(body);
     let region = usize::from(body.width);
+    let height = usize::from(body.height);
     let items: Vec<ListItem> = report
         .rows
         .iter()
@@ -3300,7 +3351,7 @@ fn analysis(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, report: &
             let above = nth
                 .checked_sub(1)
                 .and_then(|before| report.rows.get(before));
-            ListItem::new(Text::from(drawn(row, above, screen, region)))
+            ListItem::new(Text::from(drawn(row, above, screen, region, height)))
         })
         .collect();
     let picks = views::selectable(&report.rows, views::answers);
@@ -3330,18 +3381,28 @@ fn analysis(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, report: &
 /// unbanded row.
 ///
 /// **A row wraps and never clips** (rule 4). This is the one place the page differs from an Alerts
-/// card, where an age is right-aligned and the name clips: there are two zones there and one here.
+/// card, where an age is right-aligned and the name gives way: there are two zones there and one
+/// here.
 ///
 /// **The blank lines are the block structure and nothing else.** A [`ReportRow::Prose`] or a
 /// [`ReportRow::NotComputed`] is separated from the answers above it by one blank line — never at
 /// the top of the body, and never after a `NotComputed`, which already closed with one. Answers
 /// pack, so a list of nodes reads as a list. `above` is the row before this one, which is all that
 /// is needed to know which of those it is.
+///
+/// **An answer is never taller than `height`, the rows the pane has** (`screens/analysis.md` § A
+/// row taller than the pane, NOTES § D266): ratatui skips a `List` item that does not fit, so a
+/// drain row of four problem paragraphs blanked the whole body on the committed captures. The
+/// identity and the action are never cut; the paragraphs between them are [`marked`] to what they
+/// leave — [`cut`]'s own rule, over lines wrapped a paragraph at a time. Where the identity and the
+/// action alone outgrow the pane the row is cut down to it, [`alerts`]' rule, so the cursor's row
+/// is on screen whatever it holds.
 fn drawn<'a>(
     row: &ReportRow,
     above: Option<&ReportRow>,
     screen: &Screen,
     region: usize,
+    height: usize,
 ) -> Vec<Line<'a>> {
     let ink = screen.fg(theme::TEXT);
     let dim = screen.fg(theme::DIM);
@@ -3387,13 +3448,16 @@ fn drawn<'a>(
             // paragraphs are what Capacity's flagged node draws (the measurement, then what the
             // numbers mean) and what a drain row folds a second reason into, and both are drawn
             // solid (`screens/analysis.md` §§ Capacity, A node that would throw away files).
-            for paragraph in detail {
-                lines.extend(indent(wrapped(paragraph, under), "    ", ink));
-            }
+            let detail: Vec<String> = detail
+                .iter()
+                .flat_map(|paragraph| wrapped(paragraph, under))
+                .collect();
             // **The action is never cut and its continuation sits under the text after the
             // arrow**, the same as a card's — `views.rs` draws the `→ `, so the value starts at
             // the word (`crate::analysis::Row::Answer::action`).
             let mut action = wrapped(action, after).into_iter();
+            let room = height.saturating_sub(lines.len() + action.len());
+            lines.extend(indent(marked(detail, under, room), "    ", ink));
             if let Some(first) = action.next() {
                 lines.push(Line::from(vec![
                     Span::styled("    → ", screen.fg(theme::ACCENT)),
@@ -3401,6 +3465,7 @@ fn drawn<'a>(
                 ]));
                 lines.extend(indent(action.collect(), "      ", ink));
             }
+            lines.truncate(height.max(1));
         }
         // **No gutter and no band**: a line the cursor cannot reach cannot be acted on, so it
         // starts at the region's own left edge and is dim, like every other line on this screen
@@ -3462,12 +3527,20 @@ fn detail(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Deta
         Constraint::Min(0),
     ])
     .areas(area);
+    // **Cut by [`name_cut`] and not clipped by the `Paragraph`**, which drew two pods of one
+    // rollout as one heading with no mark (`screens/detail.md` § The heading, when the name does
+    // not fit).
+    let head = padded(head);
     frame.render_widget(
         Paragraph::new(Line::styled(
-            name(open.object.namespace.as_deref(), &open.object.name),
+            name_cut(
+                open.object.namespace.as_deref(),
+                &open.object.name,
+                usize::from(head.width),
+            ),
             screen.fg(theme::TEXT),
         )),
-        padded(head),
+        head,
     );
     tabs(frame, row, under, app, screen);
     match app.tab {
@@ -4044,116 +4117,154 @@ fn fits(text: &str, columns: usize) -> &str {
 /// head's width afterwards — [`shortened`]'s comment is about the same sum, and it is the one
 /// this file has already been caught by once.
 fn clipped(text: &str, columns: usize) -> Cow<'_, str> {
+    tailed(text, columns, CUT)
+}
+
+/// [`clipped`] behind any mark — [`command_cut`]'s floor, which is the one caller whose mark is
+/// not always [`CUT`] ([`STRIP_CUT`]).
+fn tailed<'a>(text: &'a str, columns: usize, mark: &str) -> Cow<'a, str> {
     match fits(text, columns) {
         whole if whole == text => Cow::Borrowed(whole),
-        _ if columns < width(CUT) => Cow::Borrowed(""),
-        _ => Cow::Owned(format!("{}{CUT}", fits(text, columns - width(CUT)))),
+        _ if columns < width(mark) => Cow::Borrowed(""),
+        _ => Cow::Owned(format!("{}{mark}", fits(text, columns - width(mark)))),
     }
 }
 
-/// [`clipped`], **walked back to a whole word first** — [`strip`]'s rule, and the one thing that
-/// separates it from [`clipped`]'s own (`screens/widgets.md` § 7 names three deliberate
-/// truncations; this is the third, the browser's row is [`clipped`] and the evidence line is
-/// [`cut`]).
+/// **`mark` and the longest tail of `text` that fits `columns` with it** — [`shortened`]'s cut
+/// from the front, always marked, and nothing at all where not one character fits beside the mark.
 ///
-/// A command is several tokens and the browser's row is one name, which is the whole of why they
-/// differ: there is a word boundary to find here and none there, so a name cuts mid-token behind
-/// the mark and a command gives up the token whole. **`--show-managed-fiel` is the case that
-/// decides it** — a flag one character short still reads as a flag, where
-/// `-o yaml…` visibly is not the end of the line (`screens/detail.md` § The yaml tab).
+/// **Each candidate is measured whole, marker included** — the same rule [`fits`] is written to.
+/// Adding the mark's width to the tail's own is the sum this file has already been caught by once,
+/// and a zone one column wider than its `Rect` is clipped at the tail again, which is the whole
+/// defect. It is also why the marker gets no guard of its own: a row too narrow for even the mark
+/// keeps nothing, which is what an empty start already says.
+fn front(text: &str, columns: usize, mark: &str) -> String {
+    let mut kept = String::new();
+    for (at, _) in text.char_indices().rev() {
+        let candidate = format!("{mark}{}", &text[at..]);
+        if width(&candidate) > columns {
+            break;
+        }
+        kept = candidate;
+    }
+    kept
+}
+
+/// **A `kubectl` line at the width it has — `screens/widgets.md` § 7's back-cuts 3 and 4**, the
+/// command log strip's own command and a `Confirm`'s `$` line, one rule and the mark the only thing
+/// that differs ([`STRIP_CUT`] on the strip, [`CUT`] in a box).
 ///
-/// **The character break is still the floor**, through [`clipped`]: a single token wider than the
-/// row has no space to walk back to, and dropping it whole would draw an empty strip where a
-/// marked prefix is what the reader needs.
-fn command_cut(line: &str, columns: usize) -> Cow<'_, str> {
+/// **The object is what the line is about, so it is the one thing that never gives way whole**
+/// (NOTES § D266). The head runs through the `kind/name` word, or through every word before the
+/// first flag where there is none — `kubectl scale deployment/web`, `$ kubectl events --for
+/// pod/web`, `$ kubectl get pod web-7d9f4` — and what gives way is what comes after it, from the
+/// end, one whole word at a time: a flag one character short still reads as a flag
+/// (`--show-managed-fiel`), so a flag goes whole. **A flag's own value is the one word cut inside**
+/// (`-n payments-product...`), because dropping it whole leaves `-n` naming no namespace at all
+/// (`screens/dialogs.md` § The command log's own line) — and so a flag that takes a value is never
+/// where the line ends on its own. A value glued on with `=` is part of its flag's word.
+///
+/// **Where even the head and its mark do not fit, the object's name gives way from its front**,
+/// behind the mark and never its `kind/` (`screens/dialogs.md` § When the object's own name does
+/// not fit), with nothing after it: `kubectl scale deployment/…eckout-worker-service-canary`. The
+/// character clip is the floor under that, for a head whose fixed words alone are wider than the
+/// row — never reached at the 80×24 floor, and a cut wider than its row is worse than one that
+/// shows less.
+fn command_cut<'a>(line: &'a str, columns: usize, mark: &str) -> Cow<'a, str> {
     if width(line) <= columns {
         return Cow::Borrowed(line);
     }
-    let room = columns.saturating_sub(width(CUT));
-    match fits(line, room).rfind(' ') {
-        Some(at) => Cow::Owned(format!("{}{CUT}", line[..at].trim_end())),
-        None => clipped(line, columns),
+    let room = columns.saturating_sub(width(mark));
+    let mut words = Vec::new();
+    let mut at = 0;
+    for word in line.split(' ') {
+        words.push((at, word));
+        at += word.len() + 1;
+    }
+    let flag = |word: &str| word.starts_with('-');
+    // A flag whose value is the next word rather than glued on with `=`.
+    let valued = |word: &str| flag(word) && !word.contains('=');
+    // The head runs through the `kind/name` word wherever it sits — `kubectl events` names its
+    // object as `--for`'s value — and otherwise through the words before the first flag.
+    let head = words
+        .iter()
+        .position(|(_, word)| !flag(word) && word.contains('/'))
+        .map(|nth| nth + 1)
+        .or_else(|| words.iter().position(|(_, word)| flag(word)))
+        .unwrap_or(words.len());
+    let head_end = words[..head].last().map_or(0, |(at, word)| at + word.len());
+    let mut kept = None;
+    if width(&line[..head_end]) <= room {
+        kept = Some(head_end);
+        for (nth, &(at, word)) in words.iter().enumerate().skip(head) {
+            let end = at + word.len();
+            let takes = valued(word) && words.get(nth + 1).is_some_and(|(_, next)| !flag(next));
+            if width(&line[..end]) <= room {
+                if !takes {
+                    kept = Some(end);
+                }
+                continue;
+            }
+            // `nth` is past the head's first word whenever `word` is not a flag, so `nth - 1` is.
+            if !flag(word) && valued(words[nth - 1].1) {
+                let inside = fits(&line[..end], room).len();
+                if inside > at {
+                    kept = Some(inside);
+                }
+            }
+            break;
+        }
+    }
+    if let Some(at) = kept {
+        return Cow::Owned(format!("{}{mark}", line[..at].trim_end()));
+    }
+    let object = line[..head_end].rfind([' ', '/']).map_or(0, |at| at + 1);
+    let (fixed, name) = line[..head_end].split_at(object);
+    match columns
+        .checked_sub(width(fixed))
+        .map(|left| front(name, left, mark))
+    {
+        Some(name) if !name.is_empty() => Cow::Owned(format!("{fixed}{name}")),
+        _ => tailed(line, columns, mark),
     }
 }
 
-/// [`clipped`], **keeping the `/` that says the object is namespaced** — the in-flight footer's
-/// own cut, and the one place in the product where losing a character changes what an object *is*
-/// rather than only how much of it can be read (`screens/dialogs.md` § *While the call is
-/// running*, its numbered rules 1–4).
+/// **The identity cut — `screens/widgets.md` § 7's eleventh deliberate cut, one rule at six call
+/// sites** (NOTES § D266): a `Confirm`'s title, the *Already gone* body, the in-flight footer, the
+/// Alerts card's identity row and the detail heading. [`command_cut`] reaches the same end for the
+/// `$` line's own `kind/name` word.
 ///
-/// **Rule 1 and rule 2 are [`clipped`]'s** — a name that fits draws whole, and one that does not
-/// but whose `/` survives an ordinary clip gets exactly that clip.
-/// `team-alpha-payments-platform/web`
-/// drew as `team-alpha-payments-pl…` at the budget this line had before 2026-09-12 — **no slash
-/// anywhere in it**, and a bare name means cluster-scoped everywhere else in this product
-/// (`screens/README.md` § the five rules), so a reader watching that footer would have learnt that
-/// a namespaced Deployment is a Node. Rule 4 is the same clip again: a bare name has no `/` to
-/// protect.
+/// **Two objects that share almost their whole name differ at its end**, so the end is what stays:
+/// `…m/checkout-worker-service-canary` and `…m/checkout-worker-service-stable`, where a tail-cut
+/// drew both as `checkout-worker-servi…`. In that section's order: whole where it fits; else the
+/// **namespace** gives way from its front behind one `…` — [`shortened`]'s cut, so the header and
+/// this cannot disagree about which end of a name identifies it — with the `/` and the name whole;
+/// `…/<name>` where none of the namespace fits; and only where even that is too wide does the
+/// **name** give way from its front too, `…/…<tail>`. A bare cluster-scoped name is the plain
+/// front-cut, with no `/` to keep.
 ///
-/// **Rule 3 is the whole of why this is not [`clipped`], and it gives way from the namespace's
-/// *front*** — one leading `…`, the `/` and the object's own name kept in full:
-/// `…uster-node-tuning-operator/tuned`. **The first draft cut the namespace's tail instead and it
-/// was wrong for a reason this file had already written down at the other end of the same screen**
-/// (`k8s-admin`, 2026-09-12): [`shortened`] cuts the header's context from its front *because
-/// `prod-eu` and `prod-eu-2` differ in their last character*, and a namespace fails identically —
-/// `team-a-prod` and `team-a-staging` share a front and differ in a tail. Cutting the tail made
-/// `openshift-cluster-node-tuning-operator`, 38 characters and a namespace a real distribution
-/// ships, draw one byte-identical line for **every object in it**: the blue/green collision this
-/// same box had just fixed, back again and total instead of partial.
-///
-/// **So the namespace is cut by [`shortened`] and not by a second front-cut written here.** Two
-/// cuts in one product disagreeing about which end of a name identifies it is the defect class
-/// CLAUDE.md names as the costliest, and the budget handed over is this line's own arithmetic:
-/// `columns` less the `/` less the name.
-///
-/// **The name is cut only when it alone will not fit** — past `columns − 2`, the two left once the
-/// leading `…` and the `/` are paid for — and then the namespace gives up the *whole* of itself
-/// behind that same mark rather than a part of it: `…/checkout-worker-service-accou…`. Giving up a
-/// namespace that fits, to buy a name room it did not need, is what rule 2 already refuses; this
-/// branch is reached only when there is nothing else left to give.
-///
-/// **The visible string contains a `/` whenever `whole` does, in every branch** — that is the hard
-/// clause, not a consequence of the budget being generous.
-///
-/// **`columns` below the two `…/` itself takes falls back to [`clipped`]**, for that function's
-/// own reason: a cut wider than the row it is drawn in is worse than one that shows less. The
-/// product's own room here is 33 columns at the 80×24 floor, so that floor is a guard rather than
-/// a state anything draws.
-fn name_cut(whole: &str, columns: usize) -> Cow<'_, str> {
-    let plain = clipped(whole, columns);
-    let Some((namespace, name)) = whole.split_once('/') else {
-        return plain;
-    };
-    if plain.contains('/') || columns <= width(CUT) {
-        return plain;
+/// **`columns` too narrow for `…/` itself draws the plain front-cut of the whole**, because a cut
+/// wider than the row it is drawn in is worse than one that shows less — a guard on a helper, not
+/// a state any of the six draws at the 80×24 floor.
+fn name_cut(namespace: Option<&str>, object: &str, columns: usize) -> String {
+    let whole = name(namespace, object);
+    if width(&whole) <= columns {
+        return whole;
     }
-    // What is left once the `/` is paid for. Both branches spend it whole, so neither can draw
-    // wider than `columns` — which is the property the sweep in `ui_tests.rs` asserts rather than
-    // this comment.
-    //
-    // **The namespace is cut first and the branch is chosen on what came back**, because
-    // [`shortened`] keeps *nothing* rather than a bare mark when a budget is too narrow for the
-    // mark plus one character — its own documented answer, and the right one for a header zone.
-    // Here an empty one would draw `/web`, which is the row a `Some("")` namespace draws and which
-    // `screens/README.md` § the five rules calls a misreading. A namespace that cannot be
-    // represented at all *is* the second branch's case, so it takes it; this is one cut asked a
-    // question, not two cuts disagreeing.
-    //
-    // **So the boundary is `checked_sub` and [`shortened`]'s own empty answer, and not a column
-    // count written here** — the first draft also subtracted `width(CUT)` from this condition, and
-    // a mutation run flipped that `-` to a `/` with no test able to tell (2026-09-12). It was
-    // right: with `CUT` one column wide the term changed nothing the filter below did not already
-    // decide, so it was arithmetic defending a boundary it did not own. `None` here is the one
-    // case it really was guarding — a name that will not fit even with the namespace gone.
-    let room = columns - 1;
-    let kept = room
-        .checked_sub(width(name))
-        .map(|budget| shortened(namespace, budget))
-        .filter(|kept| !kept.is_empty());
-    Cow::Owned(match kept {
-        Some(kept) => format!("{kept}/{name}"),
-        None => format!("{CUT}/{}", clipped(name, room - width(CUT))),
-    })
+    let Some(namespace) = namespace else {
+        return shortened(object, columns);
+    };
+    let kept = columns
+        .checked_sub(width(object) + 1)
+        .map(|room| shortened(namespace, room))
+        .unwrap_or_default();
+    if !kept.is_empty() {
+        return format!("{kept}/{object}");
+    }
+    match columns.checked_sub(width(CUT) + 1) {
+        Some(room) => format!("{CUT}/{}", shortened(object, room)),
+        None => shortened(&whole, columns),
+    }
 }
 
 /// **Word wrap, with a character break for a token wider than the line.**

@@ -378,12 +378,14 @@ resource.
   `insecure-skip-tls-verify` is still **honoured**. **It is not yet shown
   anywhere, and this line claimed it was until 2026-08-31.** Measured: one
   kubeconfig with the CA dropped and the flag set produces output byte-identical
-  to the verified run, and `grep -rn "\.insecure\b" src/*.rs` outside the tests
-  returns nothing — the flag is carried on a context-picker row
+  to the verified run, and outside the tests only `src/ui.rs` reads the flag — the
+  flag is carried on a context-picker row
   ([D174](../NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) ·
   [D175](../NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28))
-  that Phase 11 has not drawn yet, and the headless surfaces have no equivalent
-  at all. The gate item stays *honoured **and** surfaced*; what changed is that
+  that Phase 11 draws as a badge, and since
+  [D265](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)
+  the header draws it too — but nothing in the binary calls `ui.rs` until Phase
+  12's wiring, and the headless surfaces have no equivalent at all. The gate item stays *honoured **and** surfaced*; what changed is that
   this file now says which half is built. Boxed in
   [backlog.md](../backlog.md), because the answer is a screen decision before it
   is a Rust one.

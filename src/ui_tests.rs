@@ -749,10 +749,10 @@ fn the_header_of_every_link_state_is_the_pages_own() {
         (vitals, right)
     };
     let mut found = Vec::new();
-    for (section, link) in [
-        ("## Still loading", Link::Live),
-        ("## The connection dropped", Link::Lost),
-        ("## Your login expired", Link::Expired),
+    for section in [
+        "## Still loading",
+        "## The connection dropped",
+        "## Your login expired",
     ] {
         let headers: Vec<String> = fenced("states.md", section)
             .into_iter()
@@ -767,6 +767,13 @@ fn the_header_of_every_link_state_is_the_pages_own() {
                 2,
                 "{section}: {page:?} is not two zones"
             );
+            // **The link is the header's own word**, because § *Your login expired* carries a
+            // dropped-connection frame of its own since NOTES § D266.
+            let link = match &page {
+                page if page.contains("disconnected") => Link::Lost,
+                page if page.contains("login expired") => Link::Expired,
+                _ => Link::Live,
+            };
             let (vitals, zone) = zones(&page);
             let head = zone
                 .strip_suffix(" · admin")
@@ -793,7 +800,7 @@ fn the_header_of_every_link_state_is_the_pages_own() {
     }
     assert_eq!(
         found,
-        [1, 1, 3],
+        [1, 1, 5],
         "a link state stopped drawing its header, or grew one"
     );
 }
@@ -911,22 +918,32 @@ fn a_command_wider_than_the_strip_is_cut_where_the_reader_can_see_it() {
     let line = row(&drawn, "kubectl get pod");
     println!("{line}");
 
-    assert!(line.contains(CUT), "the cut is not marked: {line:?}");
+    assert!(line.contains(STRIP_CUT), "the cut is not marked: {line:?}");
     assert!(
         !line.contains("-n payments-prod0"),
         "the drawn line is a whole, different, working command: {line:?}"
     );
+    // **The value gives way inside itself and `-n` is never left naming nothing** — the strip's
+    // own rule (`screens/dialogs.md` § The command log's own line): 73 columns before the mark,
+    // 62 of them the head and `-n `, so 11 of the namespace.
     assert!(
-        line.contains("$ kubectl get pod checkout-api-canary-7d9f4bc86d-x2k9pqrst -n\u{2026}"),
-        "the head is kept and the token that did not fit gave way whole: {line:?}"
+        line.contains(
+            "$ kubectl get pod checkout-api-canary-7d9f4bc86d-x2k9pqrst -n payments-pr... "
+        ),
+        "the head is kept and the value that did not fit gave way inside itself: {line:?}"
     );
 }
 
-/// **The one line in `screens/` that does not fit even at the true 76-column floor**, drawn byte
-/// for byte as `screens/detail.md` § A Secret's values, hidden behind an explicit reveal draws it:
-/// the flag gives way whole, the mark lands right after `yaml`, and what is left of it is
-/// **deliberately** a real command — the `kubectl get -o yaml` a reader already gets by default —
-/// which is the trade that section makes and states.
+/// **The one line in `screens/` that does not fit even at the true 76-column floor**, drawn as
+/// `screens/detail.md` § A Secret's values, hidden behind an explicit reveal draws it: the flag
+/// gives way whole, the mark lands right after `yaml`, and what is left of it is **deliberately** a
+/// real command — the `kubectl get -o yaml` a reader already gets by default — which is the trade
+/// that section makes and states.
+///
+/// **The mark is [`STRIP_CUT`], and `screens/detail.md` still draws `…` there** — the page this
+/// line is transcribed from predates `screens/widgets.md` § 7's back-cut 3, which gives the strip
+/// its own three-period mark because `…` on this strip is the running mark (NOTES § D266). The two
+/// pages disagree; this follows § 7 and the running mark, and the drawing is `tui-designer`'s.
 #[test]
 fn the_yaml_tabs_secret_line_is_cut_exactly_where_the_mockup_draws_it() {
     let alerts = Pane::Ready(vec![oom()]);
@@ -947,7 +964,7 @@ fn the_yaml_tabs_secret_line_is_cut_exactly_where_the_mockup_draws_it() {
     let line = row(&drawn, "kubectl get secret");
     println!("{line}");
     assert!(
-        line.contains("$ kubectl get secret db-credentials -n payments -o yaml\u{2026}"),
+        line.contains("$ kubectl get secret db-credentials -n payments -o yaml... "),
         "{line:?}"
     );
     assert!(
@@ -988,40 +1005,50 @@ fn one_column_draws_the_mark_alone_and_zero_draws_nothing() {
     assert_eq!(clipped("kubectl", 0), "");
 }
 
-/// **The same narrow end for [`name_cut`], and it is a column tighter** — the `…/` it glues on is
-/// two columns where [`clipped`]'s mark is one, so its guard is `>`, not `>=`, and below two
-/// columns there is no room to say *namespaced* at all and the ordinary clip is what draws.
+/// **The identity cut, every width from whole to nothing** (`screens/widgets.md` § 7, cut 11;
+/// NOTES § D266) — its four cases read straight off that section, at the one budget where each
+/// begins: whole at 12; the namespace giving way from its front while the `/` and `web` stay
+/// whole, down to `…/web` at 5; the name giving way from its front too at 4; and below the two
+/// columns `…/` itself takes, the plain front-cut of the whole, which is room for nothing.
 ///
-/// **Found by a mutation run, exactly as its sibling above was** (2026-09-12): `>=` survived every
-/// test in this file and underflowed a column budget one column in. The product's own room here is
-/// 33 at the 80×24 floor, so this is a guard on a helper rather than a state anything draws — and
-/// a guard whose boundary has never been drawn is not one.
-///
-/// **Both of rule 3's branches are walked here**, because the boundary between them is arithmetic
-/// on the same budget: at 13 columns `web` still fits and it is the namespace's front that goes,
-/// at 3 there is room for neither and the name is cut too.
+/// **This used to walk the tail-cut the section replaced** — `payments/…` at 10, `…/w…` at 4 —
+/// and a name cut at its tail is where a canary and its stable sibling become one object.
 ///
 /// **Nothing ever comes back wider than it was asked for**, which is the property the whole
-/// function exists to keep and the one another branch could silently break.
+/// function exists to keep and the one another branch could silently break — and the bare name and
+/// the two degenerate joins are swept beside it.
 #[test]
 fn the_slash_is_kept_only_while_there_are_two_columns_to_keep_it_in() {
-    assert_eq!(name_cut("payments/web", 12), "payments/web");
-    assert_eq!(name_cut("payments/web", 10), "payments/\u{2026}");
-    assert_eq!(name_cut("payments/web", 9), "\u{2026}ents/web");
-    assert_eq!(name_cut("payments/web", 6), "\u{2026}s/web");
-    assert_eq!(name_cut("payments/web", 5), "\u{2026}/web");
-    assert_eq!(name_cut("payments/web", 4), "\u{2026}/w\u{2026}");
-    assert_eq!(name_cut("payments/web", 3), "\u{2026}/\u{2026}");
-    assert_eq!(name_cut("payments/web", 2), "\u{2026}/");
-    assert_eq!(name_cut("payments/web", 1), "\u{2026}");
-    assert_eq!(name_cut("payments/web", 0), "");
+    let web = |columns| name_cut(Some("payments"), "web", columns);
+    assert_eq!(web(13), "payments/web");
+    assert_eq!(web(12), "payments/web");
+    assert_eq!(web(11), "\u{2026}yments/web");
+    assert_eq!(web(10), "\u{2026}ments/web");
+    assert_eq!(web(6), "\u{2026}s/web");
+    assert_eq!(web(5), "\u{2026}/web");
+    assert_eq!(web(4), "\u{2026}/\u{2026}b");
+    assert_eq!(web(3), "\u{2026}/");
+    assert_eq!(web(2), "\u{2026}/");
+    assert_eq!(web(1), "");
+    assert_eq!(web(0), "");
+    assert_eq!(name_cut(None, "node-3", 5), "\u{2026}de-3");
     for columns in 0..=13 {
-        for name in ["payments/web", "node-3", "/web", "payments/"] {
-            let drawn = name_cut(name, columns);
+        for (namespace, name) in [
+            (Some("payments"), "web"),
+            (None, "node-3"),
+            (Some(""), "web"),
+            (Some("payments"), ""),
+        ] {
+            let drawn = name_cut(namespace, name, columns);
             assert!(
                 width(&drawn) <= columns,
-                "{name:?} at {columns} drew {drawn:?}, {} columns",
+                "{namespace:?}/{name:?} at {columns} drew {drawn:?}, {} columns",
                 width(&drawn)
+            );
+            assert_eq!(
+                drawn.contains('/'),
+                namespace.is_some() && columns >= 2,
+                "{namespace:?}/{name:?} at {columns}: {drawn:?}"
             );
         }
     }
@@ -1255,7 +1282,7 @@ fn a_long_name_clips_and_the_age_is_never_touched() {
     card.owner.name = long.to_owned();
     let alerts = Pane::Ready(vec![card]);
     let drawn = render(&app(), &screen(&alerts, &now));
-    let line = row(&drawn, "ip-10-0-134");
+    let line = row(&drawn, "compute.internal");
 
     assert!(
         line.ends_with("4 min ago  │"),
@@ -1264,6 +1291,12 @@ fn a_long_name_clips_and_the_age_is_never_touched() {
     assert!(
         !line.contains(long),
         "and the 42-column name did not fit beside it: {line:?}"
+    );
+    // **From its front, marked** — the identity cut (`screens/alerts.md` § The age, and what it
+    // costs the name), where a node pool's names differ.
+    assert!(
+        line.contains("\u{2026}10-0-134-201.eu-west-1.compute.internal  4 min ago"),
+        "{line:?}"
     );
 
     let mut card = cordon(None);
@@ -1914,7 +1947,8 @@ fn against(section: &str, nth: usize, app: &App, screen: &Screen) {
 /// frame after the first in a section it had already ticked was therefore invisible to it: when
 /// `screens/states.md` grew § *Over a pane with nothing to show yet* under § *Your login expired*,
 /// two new screens arrived and the sweep stayed green (`dev-ui`, 2026-09-12). Twenty frames carry
-/// a footer today, and each one is either drawn here or named below with the test that owns it.
+/// a footer today — twenty-two since § *Alerts had already found nothing, and then the link went*
+/// (NOTES § D266) — and each one is either drawn here or named below with the test that owns it.
 #[test]
 fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     let now = now();
@@ -1969,6 +2003,20 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     against(section, 0, &app(), &expired);
     seen.push((section, 0));
 
+    // § Alerts had already found nothing, and then the link went — the two banners above over an
+    // empty list, each with the closing line that is true when nothing is under it. **The sentence
+    // is the caller's over `Pane::Denied`, as it is over a stale list**; what is this file's is
+    // that no `○  nothing is broken` is drawn under either, which
+    // [`an_empty_alerts_list_says_nothing_is_broken_only_while_the_link_is_live`] asserts of a
+    // `Pane::Ready` too (NOTES § D266).
+    for (nth, link) in [(1, Link::Lost), (2, Link::Expired)] {
+        let went = Pane::Denied(fed(section, nth, 0).join("\n\n"), Vec::new());
+        let mut empty_and_gone = screen(&went, &now);
+        empty_and_gone.link = link;
+        against(section, nth, &app(), &empty_and_gone);
+        seen.push((section, nth));
+    }
+
     // § Over a pane with nothing to show yet — the same expired login over the two panes that have
     // no card to relabel as stale. **`X` is promoted wherever the link is `Link::Expired`, whatever
     // the pane under it is drawing**, which is what separates it from `s` and `r`: it never acted
@@ -1976,19 +2024,19 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // keeps its own shape — Still loading still drops the cursor keys, the empty kind still keeps
     // `/ filter`. **Each frame is fed its own mockup and not the one it resembles**, so an edit to
     // either drawing arrives here rather than being masked by the section it was copied from.
-    let waited = fed(section, 1, 0);
+    let waited = fed(section, 3, 0);
     let mut waiting = screen(&loading, &now);
     waiting.note = &waited;
     waiting.link = Link::Expired;
-    against(section, 1, &app(), &waiting);
-    seen.push((section, 1));
+    against(section, 3, &app(), &waiting);
+    seen.push((section, 3));
 
-    let named = said_above(&mockups(section)[2].pane);
+    let named = said_above(&mockups(section)[4].pane);
     let open_kind = [browsable(&named[0], true)];
     let mut bare = browsing(&none, &open_kind, &now);
     bare.link = Link::Expired;
-    against(section, 2, &opened(), &bare);
-    seen.push((section, 2));
+    against(section, 4, &opened(), &bare);
+    seen.push((section, 4));
 
     // § Your computer's clock is off — a banner over a *live* list: the header still reads
     // `live · admin`, so this is neither the connection's reason nor a permission's, and the keys
@@ -2126,8 +2174,8 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // that silently stopped parsing would make every loop above it vacuous and this whole sweep a
     // green that proves nothing.
     assert_eq!(
-        frames, 20,
-        "screens/states.md draws {frames} screens with a footer, not the 20 this sweep was \
+        frames, 22,
+        "screens/states.md draws {frames} screens with a footer, not the 22 this sweep was \
          written against — a frame was added or removed and this test has to say so"
     );
 }
@@ -6551,15 +6599,18 @@ fn fenced(file: &str, section: &str) -> Vec<Vec<String>> {
     blocks
 }
 
-/// The three fenced blocks of `screens/dialogs.md` § *While the call is running*, in its own
-/// order: **0** the three labelled rows the state draws · **1** the ordinary cut · **2** the cut
-/// that keeps the `/` an ordinary one would have eaten.
+/// The six fenced blocks of `screens/dialogs.md` § *While the call is running*, in its own
+/// order: **0** the three labelled rows the state draws · **1** the namespace giving way for a
+/// name kept whole · **2** the name giving way too · **3** a namespace too long on its own · and,
+/// under § *The command log's own line*, **4** a running command cut in front of its mark and
+/// **5** the same command answered.
 fn mockup_in_flight() -> Vec<Vec<String>> {
     let blocks = fenced("dialogs.md", "## While the call is running");
     assert_eq!(
         blocks.iter().map(Vec::len).collect::<Vec<_>>(),
-        [3, 1, 1],
-        "screens/dialogs.md § While the call is running no longer draws one state and two cuts"
+        [3, 1, 1, 1, 1, 1],
+        "screens/dialogs.md § While the call is running no longer draws one state, three cuts \
+         and two log rows"
     );
     blocks
 }
@@ -7328,17 +7379,17 @@ fn the_frame_carries_no_title_when_help_is_closed() {
 }
 
 /// **The one footer carrying a string this product did not choose the length of**
-/// (`screens/dialogs.md` § *While the call is running*, `screens/widgets.md` § 7's fourth
-/// deliberate truncation).
+/// (`screens/dialogs.md` § *While the call is running*, `screens/widgets.md` § 7's identity cut).
 ///
-/// **All three cases are read out of that file, not written here** (`tester`, 2026-09-12, and
-/// [`mockup_dialog`]'s own reason one screen along): the short name that draws whole, the
-/// ordinary cut, and rule 3's — the namespace giving way from its front so the object's own name
-/// survives whole. They agreed with this file's own literals byte for byte on the morning they
-/// were written, which is exactly what makes a literal drift rather than fail, and rule 3's line
-/// changed under them two days later.
+/// **All four cases are read out of that file, not written here** (`tester`, 2026-09-12, and
+/// [`mockup_dialog`]'s own reason one screen along): the short name that draws whole; the
+/// namespace giving way from its front for a canary whose own name is kept whole; the name giving
+/// way from its front too, once even `…/<name>` does not fit; and a namespace too long on its own.
+/// They agreed with this file's own literals byte for byte on the morning they were written, which
+/// is exactly what makes a literal drift rather than fail, and the page's cut changed under them
+/// twice (NOTES § D266 is the second).
 ///
-/// **Rule 3's fixture is `openshift-cluster-node-tuning-operator`**, 38 characters and a namespace
+/// **The last fixture is `openshift-cluster-node-tuning-operator`**, 38 characters and a namespace
 /// a real distribution ships. Under the tail-cut this replaces, *every object in it* drew one
 /// byte-identical line; the `/` clause held and the name was gone. That second assertion is
 /// [`every_object_in_one_long_namespace_still_draws_its_own_name`], because this test would pass
@@ -7366,10 +7417,15 @@ fn the_in_flight_footer_cuts_the_name_and_nothing_else() {
     for (nth, namespace, name) in [
         (
             1,
+            "team-alpha-payments-platform",
+            "checkout-worker-service-canary",
+        ),
+        (
+            2,
             "payments",
             "checkout-worker-service-account-token-projector",
         ),
-        (2, "openshift-cluster-node-tuning-operator", "tuned"),
+        (3, "openshift-cluster-node-tuning-operator", "tuned"),
     ] {
         let drawn = footer_of(&render(&changing(Some(namespace), name), &screen));
         println!("{drawn}");
@@ -7398,13 +7454,12 @@ fn the_in_flight_footer_cuts_the_name_and_nothing_else() {
 /// walks case 1 into case 2 into case 3 and out the other side. The bare name is swept beside it:
 /// it has no `/` to protect and must not grow one.
 ///
-/// **Which end of the namespace gives way is swept with it, and that is rule 3's reversal**
-/// (`k8s-admin`, 2026-09-12). Stated as the invariant rather than by re-deriving the branches
-/// here: the namespace on screen is **either whole — rule 2, where the `/` survived a plain clip
-/// and nothing of it was cut — or behind a leading `…`**. An unmarked *prefix* of a namespace is
-/// the one thing no rule may draw, and it is exactly what the first draft of rule 3 drew.
-/// Behind that mark the object's own name is whole, unless the namespace has already given up the
-/// whole of itself and there is still nothing left to give.
+/// **Which end of the namespace gives way is swept with it** (`k8s-admin`, 2026-09-12; the identity
+/// cut, NOTES § D266). Stated as the invariant rather than by re-deriving the branches here: the
+/// namespace on screen is **either whole, where the whole line fit, or behind a leading `…`**. An
+/// unmarked *prefix* of a namespace is the one thing no case may draw. Behind that mark the
+/// object's own name is whole, unless the namespace has already given up the whole of itself and
+/// there is still nothing left to give.
 #[test]
 fn the_cut_never_takes_the_slash_that_says_the_object_is_namespaced() {
     let alerts = Pane::Ready(vec![oom()]);
@@ -7457,10 +7512,10 @@ fn the_cut_never_takes_the_slash_that_says_the_object_is_namespaced() {
 /// namespace's front is what a reader can afford to lose; the object's name is what every later
 /// command needs typed.
 ///
-/// **The last branch is stated rather than claimed distinct**: once the name alone passes
-/// `room − 2` there is nothing left to give, and two names sharing a 30-character head genuinely
-/// do draw alike — what rule 3 promises there is only that the head kept is the **name's** and
-/// not the namespace's, which is the half that decides whether the line names an object at all.
+/// **The last branch gives the name's front too** (`screens/dialogs.md` § *While the call is
+/// running*, case 3, NOTES § D266): once the name alone passes `room − 2` there is nothing left to
+/// give, and what is kept is the name's **tail** — where two names from one rollout differ — behind
+/// `…/…`, never its head, which is where they are alike.
 #[test]
 fn every_object_in_one_long_namespace_still_draws_its_own_name() {
     let alerts = Pane::Ready(vec![oom()]);
@@ -7491,13 +7546,18 @@ fn every_object_in_one_long_namespace_still_draws_its_own_name() {
         seen.push(line);
     }
 
-    // **Past `room − 2` the namespace goes whole and the name is cut at its own tail**, so what is
-    // on screen is still the object's head and not a namespace every object shares.
+    // **Past `room − 2` the namespace goes whole and the name gives way from its own front**, so
+    // what is on screen is the object's tail and not a namespace every object shares.
     let long = drawn("cluster-node-tuning-operator-metrics-reader-binding");
+    let other = drawn("cluster-node-tuning-operator-metrics-reader-bindinx");
     println!("{long}");
     assert!(
-        long.contains("changing …/cluster-node-tuning-operator-m… first"),
-        "the namespace kept a front the name needed: {long:?}"
+        long.contains("changing …/…perator-metrics-reader-binding first"),
+        "the name kept a head instead of its tail: {long:?}"
+    );
+    assert_ne!(
+        long, other,
+        "two names differing in their last character drew one line"
     );
     assert_eq!(width(&long), 76);
 }
@@ -8045,7 +8105,7 @@ fn nested(rows: &[String]) -> Vec<String> {
 /// along). A test that compares the drawn box with a constant this file also wrote compares the
 /// implementation with itself; the screen file is the specification, so it is what the assertion
 /// reads. The blocks are in the file's own order: 0 scale · 1 restart · 2 restart paused ·
-/// 3 delete pod · 4 delete node · 5 refused · 6 gone · 7 drain.
+/// 3 delete pod · 4 delete node · 5 the object changed first · 6 refused · 7 gone · 8 drain.
 fn mockup_dialog(nth: usize) -> Vec<String> {
     let path = format!("{}/screens/dialogs.md", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path)
@@ -8067,8 +8127,8 @@ fn mockup_dialog(nth: usize) -> Vec<String> {
     }
     assert_eq!(
         blocks.len(),
-        8,
-        "screens/dialogs.md no longer draws eight screens"
+        9,
+        "screens/dialogs.md no longer draws nine screens"
     );
     nested(&blocks[nth])
 }
@@ -8184,13 +8244,21 @@ fn every_dialog_says_the_words_the_screen_file_says() {
         (
             5,
             views::Modal::Refused {
+                sent: true,
+                fault: crate::k8s::Fault::Conflict,
+                said: None,
+            },
+        ),
+        (
+            6,
+            views::Modal::Refused {
                 sent: false,
                 fault: crate::k8s::Fault::Rejected,
                 said: Some(DENIED.to_owned()),
             },
         ),
         (
-            6,
+            7,
             views::Modal::Gone {
                 object: deleting().object,
                 recreated: true,
@@ -10834,4 +10902,697 @@ fn every_picker_on_the_screen_it_belongs_to() {
         Fault::NoCredential,
         Some("aws"),
     );
+}
+
+// --- WHAT NOTES § D266'S SIX BLOCKERS DRAW ---
+
+/// **Every row of `file`'s `section` fences that holds `needle`**, in the file's order — the one
+/// line of an excerpt a surface is compared against, read off the page rather than typed here.
+fn excerpt(file: &str, section: &str, needle: &str) -> Vec<String> {
+    fenced(file, section)
+        .into_iter()
+        .flatten()
+        .filter(|line| line.contains(needle))
+        .collect()
+}
+
+/// A drawn or a mockup row as its words — so spacing the page draws at another width is not what
+/// is compared.
+fn spaced(line: &str) -> Vec<String> {
+    line.trim()
+        .trim_matches('│')
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// **A canary and its stable sibling are two objects on every surface that names one**
+/// (`screens/widgets.md` § 7, the identity cut; NOTES § D266). Each surface is drawn at the 80×24
+/// floor for both names and compared with the row its own screen file draws for it — so the two
+/// frames differing is the file's claim and not only this test's — and a name that fits is drawn
+/// whole with no mark.
+///
+/// **Six call sites, eight rows**: a `Confirm`'s title and `$` line for scale and restart, the
+/// *Already gone* body, the in-flight footer, the Alerts card and the detail heading.
+#[test]
+fn a_canary_and_its_stable_sibling_are_two_objects_on_every_surface_that_names_one() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let plain = screen(&alerts, &now);
+    let namespace = "team-alpha-payments-platform";
+    let object = |name: &str| {
+        views::Object::new(
+            "deployment",
+            Some(namespace.to_owned()),
+            name.to_owned(),
+            Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
+        )
+    };
+    let title = |box_: &[String]| {
+        box_[0]
+            .trim_start_matches('┌')
+            .trim_end_matches('┐')
+            .trim_end_matches('─')
+            .trim()
+            .to_owned()
+    };
+    let holding = |box_: &[String], needle: &str| {
+        box_.iter()
+            .find(|row| row.contains(needle))
+            .map(|row| row.trim_matches('│').trim().to_owned())
+            .unwrap_or_else(|| panic!("no {needle:?} row in\n{}", box_.join("\n")))
+    };
+
+    let titles = excerpt("dialogs.md", "## Scale — confirm with dry-run", " …");
+    let commands = excerpt(
+        "dialogs.md",
+        "## Scale — confirm with dry-run",
+        "deployment/…",
+    );
+    let gone = excerpt(
+        "dialogs.md",
+        "## The object went away while the dialog was open",
+        "…-payments-platform/",
+    );
+    let footer = excerpt("dialogs.md", "## While the call is running", "changing …m/");
+    assert_eq!(
+        (titles.len(), commands.len(), gone.len(), footer.len()),
+        (4, 4, 2, 1),
+        "screens/dialogs.md stopped drawing the canary and the stable pair"
+    );
+
+    for (nth, name) in [
+        "checkout-worker-service-canary",
+        "checkout-worker-service-stable",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let scale = box_of(views::Modal::Confirm(views::Dialog {
+            object: object(name),
+            kubectl: format!("kubectl scale deployment/{name} --replicas=3 -n {namespace}"),
+            ..scaling()
+        }));
+        let restart = box_of(views::Modal::Confirm(views::Dialog {
+            object: object(name),
+            kubectl: format!("kubectl rollout restart deployment/{name} -n {namespace}"),
+            ..restarting()
+        }));
+        assert_eq!(title(&scale), titles[nth], "the scale title");
+        assert_eq!(title(&restart), titles[2 + nth], "the restart title");
+        assert_eq!(
+            holding(&scale, "$ kubectl"),
+            commands[nth],
+            "the scale $ line"
+        );
+        assert_eq!(
+            holding(&restart, "$ kubectl"),
+            commands[2 + nth],
+            "the restart $ line"
+        );
+        let went = box_of(views::Modal::Gone {
+            object: object(name),
+            recreated: false,
+        });
+        assert_eq!(
+            holding(&went, "checkout-worker"),
+            gone[nth].trim(),
+            "the Already gone body"
+        );
+        // The page draws the canary's footer and says in words that the stable one differs only
+        // in its own tail.
+        assert_eq!(
+            footer_of(&render(&changing(Some(namespace), name), &plain)),
+            footer[0].replace("checkout-worker-service-canary", name),
+            "the in-flight footer"
+        );
+    }
+
+    // The card, at both ages the page measures, and the second pair it draws: one namespace too
+    // long for the row and two objects in it.
+    let cards = excerpt("alerts.md", "## How wide a card is, and how tall", "● …");
+    assert_eq!(
+        cards.len(),
+        4,
+        "screens/alerts.md stopped drawing its four identity rows"
+    );
+    for (nth, (space, name, stamp)) in [
+        (namespace, "checkout-worker-service-canary", at(0)),
+        (namespace, "checkout-worker-service-stable", at(0)),
+        (
+            "openshift-cluster-node-tuning-operator",
+            "tuned",
+            at(240 - 7200),
+        ),
+        (
+            "openshift-cluster-node-tuning-operator",
+            "node-tuning-operator",
+            at(240 - 7200),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut card = oom();
+        card.owner = id(ObjectKind::Deployment, Some(space), name);
+        card.findings[0].timestamp = Some(stamp);
+        let listed = Pane::Ready(vec![card]);
+        let drawn = render(&app(), &screen(&listed, &now));
+        assert_eq!(
+            spaced(&pane(&row(&drawn, " ago"))),
+            spaced(&cards[nth]),
+            "the Alerts card, row {nth}"
+        );
+    }
+
+    let headings = excerpt(
+        "detail.md",
+        "## The heading, when the name does not fit",
+        "…",
+    );
+    assert_eq!(
+        headings.len(),
+        4,
+        "screens/detail.md stopped drawing its two pairs"
+    );
+    for (nth, (space, name)) in [
+        (namespace, "checkout-worker-service-canary-7d9f4bc86d-x2k9p"),
+        (namespace, "checkout-worker-service-stable-7d9f4bc86d-x2k9p"),
+        (
+            "openshift-cluster-node-tuning-operator",
+            "tuned-metrics-reader-canary",
+        ),
+        (
+            "openshift-cluster-node-tuning-operator",
+            "tuned-metrics-reader-stable",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut open = Open::new();
+        open.object = id(ObjectKind::Pod, Some(space), name);
+        let drawn = rows(&detailed(&on(Tab::Events), &open.open()));
+        assert_eq!(
+            pane(&drawn[2]).trim_matches('│').trim(),
+            headings[nth],
+            "the detail heading, row {nth}"
+        );
+    }
+
+    // **A name that fits is not touched on any of them** — the must-not-fire half.
+    let short = box_of(views::Modal::Confirm(scaling()));
+    let went = box_of(views::Modal::Gone {
+        object: scaling().object,
+        recreated: false,
+    });
+    let flight = footer_of(&render(&changing(Some("payments"), "web"), &plain));
+    let card = row(&render(&app(), &plain), " ago");
+    let mut open = Open::new();
+    open.object = id(ObjectKind::Pod, Some("payments"), "web-7d9f4");
+    let heading = rows(&detailed(&on(Tab::Events), &open.open()))[2].clone();
+    for (surface, drawn, whole) in [
+        ("title", title(&short), "Scale payments/web"),
+        (
+            "$ line",
+            holding(&short, "$ kubectl"),
+            "$ kubectl scale deployment/web --replicas=3 -n payments",
+        ),
+        ("gone", holding(&went, "payments/web"), "payments/web"),
+        ("footer", flight, "changing payments/web first"),
+        ("card", card, "● payments/web  ·  3 of 5 pods"),
+        ("heading", heading, "payments/web-7d9f4"),
+    ] {
+        assert!(drawn.contains(whole), "{surface}: {drawn:?}");
+        assert!(
+            !drawn.contains(CUT),
+            "{surface} was cut though it fit: {drawn:?}"
+        );
+    }
+}
+
+/// **A discovery plural too long for its row gives way from its front, marked** — and the two
+/// pairs every real cluster serves are two rows again (`screens/widgets.md` § 7, cut 10; NOTES
+/// § D266). A plural that fits is drawn whole.
+#[test]
+fn a_kind_too_long_for_the_sidebar_gives_way_from_its_front_and_two_kinds_stay_two() {
+    let now = now();
+    let kind = |group: &str, plural: &str| Browsable {
+        group: group.to_owned(),
+        version: "v1".to_owned(),
+        kind: "K".to_owned(),
+        plural: plural.to_owned(),
+        namespaced: false,
+        verbs: vec!["list".to_owned()],
+    };
+    let kinds = [
+        kind("", "persistentvolumes"),
+        kind("", "persistentvolumeclaims"),
+        kind("storage.k8s.io", "storageclasses"),
+        kind(
+            "admissionregistration.k8s.io",
+            "validatingadmissionpolicies",
+        ),
+        kind(
+            "admissionregistration.k8s.io",
+            "validatingadmissionpolicybindings",
+        ),
+    ];
+    let alerts = Pane::Ready(vec![oom()]);
+    let mut listed = screen(&alerts, &now);
+    listed.kinds = &kinds;
+    let sidebar = |group: Group| {
+        let mut open = app();
+        open.expanded = Some(group);
+        rows(&render(&open, &listed))
+            .iter()
+            .map(|line| {
+                line.chars()
+                    .skip(1)
+                    .take(usize::from(SIDEBAR))
+                    .collect::<String>()
+            })
+            .filter(|cell| cell.starts_with("     ") && !cell.trim().is_empty())
+            .map(|cell| cell.trim().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let storage = sidebar(Group::Storage);
+    let cluster = sidebar(Group::Cluster);
+    println!("{storage:?}\n{cluster:?}");
+    assert_eq!(
+        storage,
+        [
+            "\u{2026}sistentvolumes",
+            "\u{2026}ntvolumeclaims",
+            "storageclasses"
+        ],
+        "the storage group's three rows"
+    );
+    assert_eq!(
+        cluster,
+        ["\u{2026}issionpolicies", "\u{2026}policybindings"],
+        "the cluster group's two rows"
+    );
+}
+
+/// **A call still running and the same call answered are two rows, and the command gives way
+/// before either mark does** — `screens/dialogs.md` § The command log's own line, both of its rows
+/// byte for byte (NOTES § D266). And a command that fits beside its outcome keeps its namespace.
+#[test]
+fn a_running_call_and_its_answer_are_two_rows_and_the_command_gives_way_first() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let strip = |lines: &[String]| {
+        let mut logged = screen(&alerts, &now);
+        logged.log = lines;
+        unframed(&row(&render(&app(), &logged), "$ kubectl"))
+    };
+    let page = excerpt(
+        "dialogs.md",
+        "## While the call is running",
+        "$ kubectl rollout restart deployment/payments-api",
+    );
+    assert_eq!(
+        page.len(),
+        2,
+        "the page stopped drawing its running and answered rows"
+    );
+
+    for (command, running, answered) in [
+        (
+            "$ kubectl rollout restart deployment/payments-api -n payments-production-eu",
+            page[0].clone(),
+            page[1].clone(),
+        ),
+        (
+            "$ kubectl scale deployment/web --replicas=3 -n payments",
+            "$ kubectl scale deployment/web --replicas=3 -n payments   \u{2026}".to_owned(),
+            "$ kubectl scale deployment/web --replicas=3 -n payments   → rejected".to_owned(),
+        ),
+    ] {
+        let mut feed = views::Log::default();
+        feed.sent(command.to_owned());
+        let before = strip(feed.lines());
+        feed.outcome("rejected");
+        let after = strip(feed.lines());
+        println!("{before}\n{after}");
+        assert_eq!(before, running, "{command}: while it runs");
+        assert_eq!(after, answered, "{command}: once it is answered");
+        assert_ne!(
+            before, after,
+            "{command}: a running call and a rejected one drew one row"
+        );
+    }
+}
+
+/// **`○  nothing is broken` needs the link** (`screens/states.md` § Alerts had already found
+/// nothing, and then the link went; NOTES § D266). The same empty list, the same paragraphs,
+/// three links: the headline on the live one and on no other.
+#[test]
+fn an_empty_alerts_list_says_nothing_is_broken_only_while_the_link_is_live() {
+    let now = now();
+    let empty = Pane::Ready(Vec::new());
+    let counted = ["84 pods and 3 nodes checked, none of them is in trouble right now.".to_owned()];
+    for (link, calm) in [
+        (Link::Live, true),
+        (Link::Lost, false),
+        (Link::Expired, false),
+    ] {
+        let mut quiet = screen(&empty, &now);
+        quiet.note = &counted;
+        quiet.link = link;
+        let drawn = render(&app(), &quiet);
+        assert_eq!(
+            holds(&drawn, "nothing is broken"),
+            calm,
+            "{link:?}:\n{}",
+            rows(&drawn).join("\n")
+        );
+    }
+}
+
+/// **Each way a check can fail draws the box its audit line names, and a `409` draws its own**
+/// (`screens/dialogs.md` § The cluster said no, states 0 and 1a–1c; NOTES § D266).
+///
+/// **The three classes are `ops::Record::check`'s**, transcribed because that function is private
+/// to a frozen file: the four that never left this machine, the two k8rs never heard back about,
+/// and the four the cluster answered. Inside a class every fault draws one box; across classes no
+/// two boxes are alike; and a `409` draws one box whether it was the check or the real call that
+/// met it, with no quote even where the cluster sent words. No box stacks two blank rows.
+#[test]
+fn each_way_a_check_can_fail_draws_its_own_box_and_a_conflict_draws_another() {
+    let said = Some("the object has been modified; please apply your changes".to_owned());
+    let classes: [(&str, &[Fault], &str); 3] = [
+        (
+            "the check never left this machine",
+            &[
+                Fault::Kubeconfig,
+                Fault::NoContext,
+                Fault::BadEntry,
+                Fault::NoCredential,
+            ],
+            "This could not be checked",
+        ),
+        (
+            "k8rs does not know whether the check reached the cluster",
+            &[Fault::Unanswered, Fault::Unfinished],
+            "The check never got an answer",
+        ),
+        (
+            "the check was sent and did not pass",
+            &[Fault::Refused, Fault::Rejected, Fault::Expired, Fault::Gone],
+            "The cluster refused this",
+        ),
+    ];
+    let refused = |sent: bool, fault: Fault, said: Option<String>| {
+        box_of(views::Modal::Refused { sent, fault, said })
+    };
+    let mut boxes: Vec<Vec<String>> = Vec::new();
+    for (audit, faults, title) in classes {
+        let first = refused(false, faults[0], None);
+        println!("{audit}\n{}", first.join("\n"));
+        assert!(first[0].contains(title), "{audit}: {:?}", first[0]);
+        for fault in faults {
+            assert_eq!(refused(false, *fault, None), first, "{audit}: {fault:?}");
+        }
+        boxes.push(first);
+    }
+    let conflict = refused(false, Fault::Conflict, said.clone());
+    println!("409\n{}", conflict.join("\n"));
+    assert!(
+        conflict[0].contains("The object changed first"),
+        "{:?}",
+        conflict[0]
+    );
+    assert_eq!(
+        refused(true, Fault::Conflict, said),
+        conflict,
+        "a 409 is one box both ways"
+    );
+    assert!(
+        !spoken_box(&conflict).contains("apply your changes"),
+        "a 409 quoted the cluster"
+    );
+    boxes.push(conflict);
+
+    for (nth, box_) in boxes.iter().enumerate() {
+        assert!(
+            !boxes[..nth].contains(box_),
+            "box {nth} is another state's box:\n{}",
+            box_.join("\n")
+        );
+        let blank = |row: &String| row.trim_matches('│').trim().is_empty();
+        assert!(
+            !box_
+                .windows(2)
+                .any(|pair| blank(&pair[0]) && blank(&pair[1])),
+            "box {nth} stacks two blank rows:\n{}",
+            box_.join("\n")
+        );
+    }
+
+    // **1a and 1b say what the page says.** Their excerpts carry no frame, so the words are
+    // compared and not the borders (the page draws them at another width).
+    for (fault, heading) in [
+        (Fault::Kubeconfig, "This could not be checked"),
+        (Fault::Unanswered, "The check never got an answer"),
+    ] {
+        let block = fenced("dialogs.md", "## The cluster said no")
+            .into_iter()
+            .find(|block| block.first().is_some_and(|top| top.contains(heading)))
+            .unwrap_or_else(|| panic!("the page lost the {heading:?} box"));
+        let page: Vec<String> = block[1..block.len() - 1]
+            .iter()
+            .map(|row| row.trim().to_owned())
+            .collect();
+        let drawn = refused(false, fault, None);
+        assert_eq!(
+            spoken_box(&drawn[1..drawn.len() - 1]),
+            spoken_box(&page),
+            "{heading}"
+        );
+    }
+}
+
+/// **An answer taller than the pane is cut to it and drawn, wherever the cursor is**
+/// (`screens/analysis.md` § A row taller than the pane; NOTES § D266). The committed captures'
+/// own drain pane holds one — `k8rs-worker3`, four problem paragraphs — and with the cursor on it
+/// the body was blank.
+#[test]
+fn a_drain_row_taller_than_the_pane_is_cut_to_it_and_the_cursors_row_is_always_drawn() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let reports = reported();
+    let listed = entries(&reports);
+    let (nth, (_, drain)) = reports
+        .iter()
+        .enumerate()
+        .find(|(_, (label, _))| *label == "drain safety")
+        .expect("drain safety is one of the seven");
+    let mut quiet = screen(&alerts, &now);
+    quiet.reports = &listed;
+    let picks = views::selectable(&drain.rows, views::answers);
+    let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+    let mut cut = 0;
+    for (at, &pick) in picks.iter().enumerate() {
+        let ReportRow::Answer { text, action, .. } = &drain.rows[pick] else {
+            panic!("the cursor landed on a row that is not an answer");
+        };
+        let mut open = opened_report(nth);
+        open.content.select(at, &anchors);
+        let drawn = render(&open, &quiet);
+        let body: Vec<String> = rows(&drawn)[4..18].iter().map(|line| pane(line)).collect();
+        println!("answer {at}\n{}", body.join("\n"));
+        assert!(
+            holds(&drawn, text),
+            "answer {at}: {text:?} is not on screen"
+        );
+        let first = action
+            .split_whitespace()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            first.is_empty() || holds(&drawn, &first),
+            "answer {at}: the action went"
+        );
+        // Marked exactly where the answer on the cursor is the tall one, and nowhere else.
+        let marked = body.iter().any(|line| line.contains(CUT));
+        assert_eq!(marked, text.contains("worker3"), "answer {at}: {text:?}");
+        cut += usize::from(marked);
+    }
+    assert!(
+        picks.len() >= 3,
+        "the corpus stopped drawing its drain answers"
+    );
+    assert_eq!(
+        cut, 1,
+        "the tall answer was not the one cut, or was not marked"
+    );
+}
+
+/// **[`command_cut`] shape by shape** — the four the strip and the `$` line are handed, each at the
+/// budget where its rule decides (`screens/widgets.md` § 7, back-cuts 3 and 4; NOTES § D266).
+#[test]
+fn a_command_gives_way_from_its_last_flag_and_never_from_its_object() {
+    let scale = "kubectl scale deployment/web --replicas=3 -n payments";
+    // Whole, borrowed.
+    assert_eq!(command_cut(scale, 53, CUT), scale);
+    // The value gives way inside itself, keeping what fits.
+    assert_eq!(
+        command_cut(scale, 50, CUT),
+        "kubectl scale deployment/web --replicas=3 -n paym\u{2026}"
+    );
+    // One character of it still beats dropping it — and `-n` with none of it is never the end.
+    assert_eq!(
+        command_cut(scale, 47, CUT),
+        "kubectl scale deployment/web --replicas=3 -n p\u{2026}"
+    );
+    assert_eq!(
+        command_cut(scale, 46, CUT),
+        "kubectl scale deployment/web --replicas=3\u{2026}"
+    );
+    // A flag with its value glued on goes whole.
+    assert_eq!(
+        command_cut(scale, 41, CUT),
+        "kubectl scale deployment/web\u{2026}"
+    );
+    // The head with its mark is the last whole-word answer; one column less, the name's front.
+    assert_eq!(
+        command_cut(scale, 29, CUT),
+        "kubectl scale deployment/web\u{2026}"
+    );
+    assert_eq!(
+        command_cut(scale, 28, CUT),
+        "kubectl scale deployment/\u{2026}eb"
+    );
+    assert_eq!(
+        command_cut(scale, 26, CUT),
+        "kubectl scale deployment/\u{2026}"
+    );
+    // Fixed words wider than the row: the plain character clip, still marked, never wider.
+    assert_eq!(
+        command_cut(scale, 25, CUT),
+        "kubectl scale deployment\u{2026}"
+    );
+    assert_eq!(command_cut(scale, 0, CUT), "");
+
+    // A flag with no value keeps the value before it whole, and the strip's own mark is spent.
+    let yaml = "$ kubectl get secret db -n payments -o yaml --show-managed-fields";
+    assert_eq!(
+        command_cut(yaml, 60, STRIP_CUT),
+        "$ kubectl get secret db -n payments -o yaml..."
+    );
+    // Flags before the object's name are kubectl's too. A value glued on with `=` is its own
+    // whole word, so the bare word after it is no value and goes whole; a separate value followed
+    // by one ends the line whole.
+    let since = "kubectl logs --since=1h web";
+    assert_eq!(
+        command_cut(since, 26, CUT),
+        "kubectl logs --since=1h\u{2026}"
+    );
+    let scoped = "kubectl logs -n payments web";
+    assert_eq!(
+        command_cut(scoped, 27, CUT),
+        "kubectl logs -n payments\u{2026}"
+    );
+    // The object named as a flag's value is still the object.
+    let events = "$ kubectl events --for pod/checkout-worker-service-canary -n payments";
+    assert_eq!(
+        command_cut(events, 40, STRIP_CUT),
+        "$ kubectl events --for pod/...ice-canary"
+    );
+    for columns in 0..=80 {
+        for line in [scale, yaml, events, since, scoped] {
+            for mark in [CUT, STRIP_CUT] {
+                let drawn = command_cut(line, columns, mark);
+                assert!(
+                    width(&drawn) <= columns,
+                    "{line:?} at {columns} drew {drawn:?}"
+                );
+            }
+        }
+    }
+}
+
+/// **A tall answer is cut to the pane with a mark, a short one is not touched, and an answer
+/// whose own identity and action outgrow the pane is still drawn** — `screens/analysis.md` § A row
+/// taller than the pane, over rows no corpus holds yet (NOTES § D266). The last is no wording
+/// `analysis.rs` builds: its detail gives up everything for the mark, and the row is cut down to
+/// the pane rather than skipped.
+#[test]
+fn an_answer_is_never_taller_than_the_pane_and_a_short_one_is_drawn_whole() {
+    let now = now();
+    let alerts = Pane::Ready(Vec::new());
+    let answer = |name: &str, paragraphs: usize, action: String| ReportRow::Answer {
+        severity: Some(Severity::Critical),
+        text: format!("{name} would never finish draining"),
+        detail: (0..paragraphs)
+            .map(|nth| {
+                format!(
+                    "paragraph {nth} says why this node cannot drain, in a sentence long enough \
+                     to wrap onto a second line of the pane"
+                )
+            })
+            .collect(),
+        action,
+        jump: None,
+    };
+    let fix = || "check this node first".to_owned();
+    for (label, rows_, cursor, marked) in [
+        (
+            "tall, cursor on it",
+            vec![answer("node-2", 7, fix()), answer("node-1", 0, fix())],
+            0,
+            true,
+        ),
+        (
+            "tall below a short one, cursor on it",
+            vec![answer("node-1", 0, fix()), answer("node-2", 7, fix())],
+            1,
+            true,
+        ),
+        (
+            "short, cursor on it",
+            vec![answer("node-2", 2, fix()), answer("node-1", 0, fix())],
+            0,
+            false,
+        ),
+        (
+            "an action taller than the pane",
+            vec![answer("node-2", 1, "move every pod off it ".repeat(40))],
+            0,
+            true,
+        ),
+    ] {
+        let report = Report {
+            title: "Which nodes can be drained right now".to_owned(),
+            badge: None,
+            rows: rows_,
+        };
+        let reports = [("drain safety", Some(&report))];
+        let mut quiet = screen(&alerts, &now);
+        quiet.reports = &reports;
+        let mut open = app();
+        open.view = View::Analysis(0);
+        let picks = views::selectable(&report.rows, views::answers);
+        let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+        open.content.select(cursor, &anchors);
+        let drawn = render(&open, &quiet);
+        let body: Vec<String> = rows(&drawn)[4..18].iter().map(|line| pane(line)).collect();
+        println!("{label}\n{}", body.join("\n"));
+        let ReportRow::Answer { text, .. } = &report.rows[picks[cursor]] else {
+            panic!("{label}: not an answer");
+        };
+        assert!(
+            holds(&drawn, text),
+            "{label}: the cursor's answer is not on screen"
+        );
+        assert!(holds(&drawn, "→ "), "{label}: the action went");
+        assert_eq!(
+            body.iter().any(|line| line.contains(CUT)),
+            marked,
+            "{label}: the mark"
+        );
+    }
 }

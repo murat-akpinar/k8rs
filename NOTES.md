@@ -23366,3 +23366,20 @@ on the way in, and a right-to-left override survives into cells on `List`, `Tabl
 surfaces (`tester`, measured). **The `ops.rs` sentences box cannot be done as written** — the
 copy is in `ui.rs` and the original is private to a file frozen since Phase 7 — so its box is
 rewritten to a ruling Phase 12 makes first.
+
+**4. What building the six settled that the pages did not** (`dev-ui`, 2026-09-13):
+- **An empty `Ready` Alerts list under `Lost` or `Expired` draws no sentence of its own** — not
+  the caller's `note` (a *right now* claim) and not *reading the cluster…*. The banner is the
+  caller's, handed over as `Pane::Denied(sentence, [])`.
+- **A command line's head runs through its object word**: the first non-flag word holding `/`, or
+  every word before the first flag. A flag followed by a bare word takes it as its value, and a
+  `=`-glued value is part of its flag's word. Trailing flags give way whole; a value is cut inside
+  itself.
+- **The strip's cut mark is `...`; the `$` line keeps `…`**, and a front-cut name on the `$` line
+  draws no trailing mark.
+- **The `409` box never quotes the cluster**, and it spells the conflict once through
+  `views::MOVED` / `views::REREAD`, which `views::because` now builds from.
+- **An Analysis answer whose identity and action alone outgrow the pane is truncated to the pane**,
+  cutting the action silently. No wording `analysis.rs` builds reaches it.
+- **The refused box's audit-class grouping in its test is transcribed**, because `ops::Record::check`
+  is private to a file frozen since Phase 7.
