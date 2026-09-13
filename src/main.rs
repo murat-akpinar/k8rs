@@ -64,6 +64,34 @@ use rules::{
     analyze,
 };
 use std::collections::BTreeMap;
+// **The words for a failed call, the strip, and the flag its next step names are `views.rs`'s**,
+// and this file's copies are gone (NOTES § D264 rulings 1 and 14): the picker's failure box and
+// this driver print one vocabulary. What stays here is how this file's call sites use them.
+//
+// **`sanitize` goes on a value as it enters a message, never on the finished message** — a line
+// break is unprintable, so a strip over the assembled message ate [`USAGE`]'s own line breaks.
+// It is a no-op on anything `k8s::text` produced
+// (`sanitize_cannot_act_on_anything_the_ingest_strip_left`) and the only strip two live sources
+// meet: a `.json` on disk, whose snapshot never meets `k8s.rs`, and argv on every path
+// (`a_crafted_path_comes_back_out_of_the_error_with_nothing_unprintable_left`,
+// `a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error`,
+// `a_namespace_flag_with_nothing_usable_after_it_is_refused`). **It is never applied to a
+// document**: `k8s::clean` keeps `\n`, `\t` and `\r` (NOTES § D198) and this removes all three, so
+// `--yaml` writes `k8s::Document::yaml` to stdout with nothing in between.
+//
+// **Every site on the cluster path that has a fault in hand routes through `because`.**
+// [`too_slow`] is outside it by construction: it reports two measurements about a LIST that has
+// not failed, so no fault is in scope. The claim is *the cluster path* and not *this driver*,
+// because [`stdout_failure`] and [`runtime_failure`] hold an io error and print the standard
+// library's reason through `sanitize` instead.
+//
+// **The import is load-bearing beyond this file**: `k8s_tests.rs` calls `crate::sanitize` and
+// `k8s.rs` links `crate::because`, and both resolve through it.
+//
+// **`--namespace` is the real flag and not scaffolding**, unlike [`CONTEXT`]: the scope it sets
+// is read by rules and reports written for it (N2 and N5 switch off under one, three panes draw a
+// different title), so what it does outlives this driver even though the parsing here does not.
+use views::{NAMESPACE, because, sanitize};
 
 /// **stdout is the findings, stderr is everything else** (`screens/once.md` § stdout and
 /// stderr are split on purpose), and the two exit codes are `0` and `2` — never `1`, which is
@@ -380,65 +408,6 @@ fn wall_clock() -> Result<Time, String> {
             sanitize(&e.to_string())
         )
     })
-}
-
-/// **Strip the characters that have no printed form out of a string that came from outside
-/// this file** — the guard invariant 9 owes every printer, and this is the first one
-/// (`screens/widgets.md` § 7).
-///
-/// `println!` has no ratatui between it and the terminal, so an escape sequence in a pod name
-/// arrives as an escape sequence and rewrites the user's screen.
-///
-/// **What counts as such a character is [`k8s::unprintable`]'s answer and is not restated
-/// here** (NOTES § D154, CLAUDE.md § Single point of change). This file carried its own
-/// narrower spelling until 2026-08-22, and the day the ingest guard widened and this one did
-/// not, `k8rs some-pod.json` printed a row that reads *prodcd* for a pod named
-/// `prod\u{202e}dc` — the hole is this path's alone, because it builds its snapshot off
-/// `rules.rs`'s `From` impls and never meets [`k8s::Store`]. **A second spelling is what the
-/// fix refuses**: the two files are modules of one crate, so this one calls the predicate.
-///
-/// **Removed, not replaced.** "Stripped" is the word in both invariant 9 and § 7, and a
-/// substituted space is a character the API did not send — a second lie in the record
-/// invariant 4 says may not lie. **Nothing is truncated here either**: the multi-byte path is
-/// where `String::truncate` panics, and § 7 forbids it outright.
-///
-/// **Where it is applied is the whole rule, and it is mechanical: on a value as it enters a
-/// message, never on the finished message.** Every fragment that came from outside passes
-/// through it at the `format!` that interpolates it — a [`Finding`]'s fields, a path off argv,
-/// an error string from `serde_json`, the standard library or `jiff`. Every literal in this
-/// file is ours and stays whole, which is what the other half buys: a line break is
-/// unprintable by the predicate above, so a strip over the assembled message ate [`USAGE`]'s
-/// own line breaks and printed three sentences as one. A `\n` *from the cluster* still dies
-/// here, and must — it would forge a second card. Phase 5's ingest strip supersedes this by
-/// applying the same rule one layer earlier, cleaning the text as it arrives.
-///
-/// **It is a no-op on anything `k8s::text` produced, and it is the only strip several live inputs
-/// ever meet.** Two claims, both measured, and neither of them is *the live path does not need
-/// this* — a first draft of this paragraph said that and it was false
-/// (`k8s-admin`, 2026-08-31).
-///
-/// **No-op on ingested text**: [`k8s::text`] removes or substitutes for every character
-/// [`k8s::unprintable`] answers for, so a value that came off the API holds nothing left for a
-/// second pass to find — 18 717 strings of every committed capture through both, 0 changed
-/// (`k8s_tests.rs`'s `sanitize_cannot_act_on_anything_the_ingest_strip_left`). That is the box's
-/// question answered: one string, one transformation.
-///
-/// **And the only strip for two live sources, which is why it stays.** A `.json` on disk builds
-/// its snapshot straight off `rules.rs`'s `From` impls and never meets `k8s.rs`. **And argv never
-/// meets it either, on any path** — a flag, a path or a namespace the reader typed is not an API
-/// object, so a `--namespace` carrying an `ESC` reaches [`shown`] and a mistyped flag reaches
-/// [`mistyped`] with this as the one thing between them and the terminal
-/// (`a_crafted_path_comes_back_out_of_the_error_with_nothing_unprintable_left`,
-/// `a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error`,
-/// `a_namespace_flag_with_nothing_usable_after_it_is_refused`). Deleting this prints a bidi
-/// override to a terminal on a live cluster run, not only on the fixture path.
-///
-/// **Which is also why it may not be applied to a document.** `k8s::clean` deliberately keeps
-/// `\n`, `\t` and `\r` (NOTES § D198) and this removes all three, so it is the one place
-/// `sanitize` *would* be a second transformation — the reason `--yaml` writes what
-/// `k8s::Document::yaml` returned straight to stdout with nothing in between.
-fn sanitize(text: &str) -> String {
-    text.chars().filter(|c| !k8s::unprintable(*c)).collect()
 }
 
 // --- WHAT WAS READ START ---
@@ -1663,14 +1632,6 @@ const READ_ONLY: &str = "--read-only";
 /// current context is the test cluster.
 const CONTEXT: &str = "--context";
 
-/// **Which namespace `--live` scopes the watches to**, when the run names one (NOTES § D5).
-///
-/// **Unlike [`CONTEXT`] this is the real flag and not scaffolding.** The scope it sets is read by
-/// rules and reports that were written for it — N2 and N5 switch themselves off under one, and
-/// three of the seven panes draw a different title — so what it does outlives this driver even
-/// though the parsing here does not.
-const NAMESPACE: &str = "--namespace";
-
 /// **`kubectl`'s own short spelling of [`NAMESPACE`]**, because the muscle memory is the point:
 /// somebody who types `kubectl get pods -n payments` all day types `-n` here too.
 ///
@@ -2509,231 +2470,6 @@ fn live_report(
     Some(report)
 }
 
-/// **One plain clause: why a call did not work** — the caller supplies the subject, this
-/// supplies the reason (invariant 14, `PRIOR-ART § C1`).
-///
-/// **A generic sentence may never stand in for an error we were handed**, which is the whole of
-/// this function's reason to exist. k9s tells these apart internally and still shows
-/// `Ruroh? 'v1/pods' command not found` when a credential expires; every site on the cluster path
-/// that has a fault in hand — the connection, the version, the discovery answer, each watch —
-/// routes through here.
-///
-/// **That sentence used to end *so there is nowhere on it for a fallback to grow*, and one had
-/// grown** (`k8s-admin`, `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 5). [`ONCE`]'s
-/// deadline is a site on the cluster path, and it reported an endpoint with nothing listening as
-/// a **slow** cluster from `k8s::Store::still_listing` alone, while `k8s::Store::troubles` held
-/// `k8s::Fault::Unanswered` on all five watches. The claim is repaired by the code and not by the
-/// wording: that arm asks [`pods_unread`] first, which routes through here. What is left outside
-/// is [`too_slow`], and it is outside by construction rather than by omission — it reports two
-/// measurements about a LIST that has not failed, so there is no fault in scope for it to
-/// interpolate.
-///
-/// **The claim is *the cluster path* and not *this driver*, because two typed errors live outside
-/// it** and are named where they are: an io error from a failed stdout write ([`stdout_failure`])
-/// and one from a runtime that would not start ([`main`]). Both print the standard library's own
-/// reason through [`sanitize`]. The first draft of this line said *every site in this driver* and
-/// the runtime arm was throwing its error away with a `_` (`tester`, 2026-08-27) — an overclaim
-/// and a defect in one sentence, which is the second box read literally.
-///
-/// **`asked` is what k8rs was trying to do, already spelled the way it should read.** Only the
-/// caller knows, so `` `get /apis` ``, `` `list` and `watch` pods `` and *reach this cluster*
-/// arrive as display text carrying their own backticks. That is what makes a refusal name the
-/// missing verb and resource, which the security gate requires — and what lets the one refusal
-/// that has neither, a `nonResourceURL` on `/apis`, name a **path** instead: its measured
-/// `Status` carries an empty `details`, so a sentence built from `details.group`/`details.kind`
-/// would be empty (NOTES § D160).
-///
-/// **`renewal` is [`k8s::Session::renewal`]** — the program the reader's *own kubeconfig* names,
-/// already stripped and bounded by `k8s.rs`'s ingest guard. It is never the cluster's text and
-/// never the login program's output, which is a credential
-/// (`docs/security.md` § Token hygiene).
-///
-/// **Nothing here formats the error we were handed**: [`k8s::Fault`] carries no string at all, and
-/// `said` is one named field selected by [`k8s::said`] — never a `Display`, which walks down to an
-/// `exec` plugin's stdout (`docs/security.md` § Token hygiene).
-///
-/// **`said` is the server's own sentence about this call, already stripped and bounded by
-/// `k8s.rs`'s ingest guard**, and `None` where the server sent none or where nothing was ever sent
-/// to a server. **Exactly one arm reads it and the rest ignore it on purpose**
-/// ([`k8s::Fault::Rejected`]): for every other fault this file's own sentence is the better one
-/// and was written to be — a `403`'s message names a user and a verb where *the role this
-/// kubeconfig uses needs to …* names the fix, and a `404`'s repeats a name the reader just typed.
-/// The rejected call is the one where k8rs has nothing of its own to say.
-fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>, said: Option<&str>) -> String {
-    // The program named, or not named, without changing the sentence around it.
-    let named = renewal.map_or(String::new(), |program| format!(" (`{program}`)"));
-    match fault {
-        // **Three sentences where there was one constant over all fifteen of
-        // `KubeconfigError`'s variants**
-        // (`k8s-admin`, 2026-08-27). *"…or names no such context"* was printed for a
-        // `client-certificate` path that had moved and for a cluster entry with no `server:`,
-        // and in both the file read fine and the context was there — a generic string standing
-        // in for a typed error, which is this box's whole subject, through a door it had not
-        // been looked at through.
-        k8s::Fault::Kubeconfig => {
-            "the kubeconfig itself could not be read — it is missing, unreadable, or not valid \
-             YAML"
-                .to_string()
-        }
-        k8s::Fault::NoContext => {
-            "this kubeconfig has no such context — check the `current-context` line in the \
-             file, and any `--context` on the command line"
-                .to_string()
-        }
-        // **It does not say *which* entry, and that is the honest limit of a `Fault`.** The
-        // variant names the class and the words are the caller's; naming the field would mean
-        // carrying kubeconfig text on the type, which is the property that keeps every other
-        // sentence in this file free of anything a cluster wrote.
-        k8s::Fault::BadEntry => {
-            "this kubeconfig loaded, and something it points at did not — a certificate file it \
-             names, a `server:` line, or a cluster one of its contexts refers to"
-                .to_string()
-        }
-        k8s::Fault::NoCredential => format!(
-            "the program this kubeconfig logs in with{named} gave k8rs nothing to sign in with"
-        ),
-        // **The one place a renewal is worth naming** (NOTES § D19): a login minted by a helper
-        // ran out mid-session, and what the reader needs is which system to sign in to again —
-        // not a cloud guessed from the server URL.
-        //
-        // **It promises nothing about restarting, and that is measured** (`tester`, 2026-08-27).
-        // kube re-runs the `exec` plugin as its cached credential falls out of its own window —
-        // 25 plugin executions against 22 requests over a ten-second run — so for the ordinary
-        // exec kubeconfig the watch recovers on its own the moment the login is repaired, and
-        // *restart k8rs* would be D19's own failure wearing the other face: a true problem
-        // answered with the wrong errand.
-        //
-        // **One shape reaches this arm where *renew it there* is true but incomplete**, and it is
-        // narrower than *a plugin that fails mid-session* — that one has been produced since, and
-        // it lands in [`k8s::Fault::NoCredential`] rather than here (NOTES § D167). What is left
-        // is a plugin whose credential carries **no `expirationTimestamp` from the start**:
-        // `Auth::try_from` matches `(Some(token), None) => Ok(Self::Bearer(token))`
-        // (`auth/mod.rs:364-367`), so it is a static header with no `RefreshableToken` behind it.
-        // Nothing ever re-runs the plugin, no `AuthError` is ever raised, and the server simply
-        // answers `401` — so renewing the login where it comes from is necessary and not
-        // sufficient, because k8rs also has to be restarted to pick the new token up.
-        //
-        // **The sentence stays as it is**: it is true of both, and the shape that needs the extra
-        // half is the PM's to box rather than this arm's to guess at.
-        k8s::Fault::Expired => match renewal {
-            Some(program) => format!(
-                "this cluster no longer accepts this login — it comes from `{program}`, so \
-                 renew it there"
-            ),
-            None => "this cluster no longer accepts this login — this kubeconfig needs a new one"
-                .to_string(),
-        },
-        // **It names what the role needs, not what the kubeconfig is not allowed to do**
-        // (`k8s-admin`, 2026-08-27). A watch is two verbs and [`k8s::Trouble`] cannot say which
-        // of them was refused — measured through a forwarder that passed `list` and answered
-        // only `?watch=true` with a real `403`: the LIST **succeeded**, forty pods printed, and
-        // the line beside them said *not allowed to `list` and `watch` pods*. A `Role` granting
-        // `list` and omitting `watch` is an ordinary hand-written Role, and the operator adds a
-        // verb that was never missing.
-        //
-        // **Collapsing `InitialListFailed` and `WatchStartFailed` into one [`k8s::Fault`] is
-        // right** — that is what one classifier means — so the fix is the frame: *the role needs
-        // both of these* is true whichever was refused, where *is not allowed to* is a claim
-        // about current state this code cannot make. The security gate asks a refusal to name
-        // the missing verb and resource; this names the verbs and the resource without
-        // pretending to know which one is absent.
-        //
-        // **`needs to {asked}` and not `needs {asked}`**, so one verb phrase serves this arm and
-        // the two below it: the grid test reddened on *needs reach this cluster* the moment the
-        // frame changed, which is what twelve literals are for.
-        k8s::Fault::Refused => format!("the role this kubeconfig uses needs to {asked}"),
-        // **`when k8rs tries to …` and not `there is nothing to …`** (`tester`, 2026-08-27).
-        // The old frame wanted a noun where every caller supplies a verb phrase, so it read
-        // *there is nothing to `list` and `watch` pods* — and it was only ever fed the one
-        // framing where that passes, `` `get /apis` `` (NOTES § D29, in a function whose own doc
-        // is about framings). This frame takes all four.
-        k8s::Fault::Gone => {
-            format!("this server says there is no such thing when k8rs tries to {asked}")
-        }
-        // **The server's own words where it wrote any, because for this fault they are the
-        // diagnosis** (`k8s::said`). Measured on a live kind cluster, `--logs` against the pod
-        // `--once` had just carded CRITICAL: the API server answered *container "app" in pod
-        // "broken-config" is waiting to start: CreateContainerConfigError* — the same root cause
-        // the card names — and k8rs replaced it with the self-accusation below
-        // (`k8s-admin`, 2026-09-03). `k8s::Fault::Rejected` was this defect's first pass and
-        // fixed only the category; this is the message.
-        //
-        // **Quoted verbatim rather than re-explained, which is NOTES § D37's rule and not an
-        // exemption from invariant 14.** Rules 3, 4 and 10 already put the runtime's own message
-        // on the card word for word, and the card for this very pod carries the plain-language
-        // reading beside the kubelet's own line: *Container needs a ConfigMap or Secret that does
-        // not exist (CreateContainerConfigError)* over *configmap "…" not found*. The jargon word
-        // is kept **and** explained, on the surface built to explain it.
-        //
-        // **[`views::WAITING_REASONS`] is reachable from here and is still not reused, which is
-        // the question this box had to answer.** (It stood in this file until the detail tabs
-        // needed the same words and it moved down, NOTES § D254; the argument below did not move
-        // with it, because it is about this call site and not about where the table lives.)
-        // Reaching it is not the obstacle — the obstacle is that its phrases are a paraphrase of
-        // the cards, not the cards' words, and for one of the two states a live cluster produced
-        // they and the server disagree outright: the API server writes
-        // *trying and failing to pull image* where that table writes
-        // *cannot get its image* (`default/broken-image`, 2026-09-03). Printing both in one
-        // sentence is two spellings of one condition, which is the defect this repo has paid most
-        // for; keying off the message's trailing word to pick one would be scraping free text the
-        // API server never promised the shape of. **And this function has no container in scope
-        // anyway** — eleven callers, one of which is a log request — so the reason would have to
-        // travel from a pod read that happened a round trip earlier and may already be stale.
-        //
-        // **So the choice is the cluster's sentence or none, and the cluster's says what is
-        // wrong.** What is *not* closed by that is the reader who runs only `--logs` and never
-        // sees the card; `screens/detail.md` has no state for a refused log request at all, and
-        // that is the screen's gap to fill rather than this line's to guess at.
-        //
-        // **`and said:` attributes it.** The words after it are the server's and the reader has
-        // to be able to tell; nothing else in this function quotes anybody.
-        k8s::Fault::Rejected => match said {
-            Some(said) => format!(
-                "this cluster would not accept the request k8rs made to {asked}, and said: {said}"
-            ),
-            // **The honest fallback, and it stays as it was.** With no message there is nothing
-            // to go on but the code, and a `400` is a request this side built — so *the reader
-            // has nothing to fix here* remains the only thing that can be said.
-            //
-            // **No shape produced so far enters it, and that is a measurement and not a
-            // guarantee.** Both `400`s a live four-node kind cluster answered for `--logs`
-            // carried a message (`default/broken-config`, `default/broken-image`, 2026-09-03),
-            // and a `400` whose body is not a `Status` at all loses its code inside kube and
-            // lands in `k8s::Fault::Unanswered` instead (`k8s::answer`). What is *not* claimed is
-            // that no server ever sends a `Status` with an empty `message`: the field is
-            // `#[serde(default)]`, nothing was measured that does it, and the arm is here for
-            // exactly that.
-            None => format!(
-                "this cluster would not accept the request k8rs made to {asked} — that is a \
-                 fault in k8rs, and nothing is wrong with the cluster or with this login"
-            ),
-        },
-        // **The one arm that names no verb, because a `409` is not about what was asked** — it
-        // is about the object having moved between the read and the write (NOTES § D213). It is
-        // the only fault whose fix is *k8rs reads it again*, so the sentence says what the reader
-        // will see happen rather than sending them anywhere.
-        k8s::Fault::Conflict => {
-            "something else changed this object while k8rs was working on it — nothing was \
-             changed, and reading it again shows what it looks like now"
-                .to_string()
-        }
-        k8s::Fault::Unanswered => format!("nothing usable came back when k8rs tried to {asked}"),
-        // **The one arm with no cause in it, and that is the arm** (`k8s::Fault::Unfinished`).
-        // Nothing came back and nothing said why, so every sentence that would explain it is a
-        // guess: NOTES § D148's missing keepalive makes a socket that died mid-LIST look exactly
-        // like a server that went quiet, and NOTES § D150 refuses to call a LIST that is still
-        // moving *hung*. An earlier draft said *nothing is wrong with this login: it is the
-        // cluster, or the network in between, that has gone quiet* and was both — a cause the
-        // taxonomy cannot see and a verdict D150 forbids (`k8s-admin`, 2026-09-03).
-        //
-        // **What a reader gets instead is the two numbers**, and they are [`unreadable`]'s, not
-        // this function's: `k8s::Trouble::outstanding` travels beside the fault for exactly that.
-        k8s::Fault::Unfinished => {
-            format!("the request k8rs made to {asked} had not been answered")
-        }
-    }
-}
-
 /// **The word a reader scans for a watched kind, and the plural a `Role` spells** — they differ
 /// for three of the five, which is why one match hands back both rather than two matches
 /// drifting.
@@ -2846,7 +2582,7 @@ fn unreadable(
             let why = match fault {
                 Some(fault) => because(
                     fault,
-                    &format!("`list` and `watch` {resource}"),
+                    &views::watching(resource),
                     renewal,
                     trouble.said().as_deref(),
                 ),
@@ -3605,12 +3341,7 @@ async fn live(
                 // kubeconfig parsed and no client could be built from it* and says **not** a
                 // cluster that is down: nothing here has sent a request yet. No request, no
                 // answer, nothing said.
-                because(
-                    problem.fault(),
-                    "reach this cluster",
-                    problem.renewal(),
-                    None
-                )
+                because(problem.fault(), views::REACH, problem.renewal(), None)
             ));
         }
     };
@@ -4072,10 +3803,8 @@ fn out_of_time(
 /// the RBAC half was invisible while this was pods-only and would have printed *did not show k8rs
 /// its daemonsets* beside [`unreadable`]'s *DaemonSets* the moment it generalised.
 ///
-/// **Only two faults have a next step, and inventing one for the rest is the fallback this
-/// driver refuses** ([`because`]). A refusal is answered with the role to ask for, nothing
-/// answering is answered with the address to check; an expired login already carries its own
-/// action inside [`because`], and a stream that ended without saying why has no honest one.
+/// **The scope clause and the next step are [`views::scope`]'s and [`views::next_step`]'s**, the
+/// words the picker's failure box draws too (NOTES § D264 ruling 1).
 ///
 /// **`listed` is what makes this a failure rather than a blip** (`k8s::Trouble::listed`): a watch
 /// that listed once and then broke has stale pods, which is a report with a line above it. At the
@@ -4097,7 +3826,7 @@ fn pods_unread(
     let why = match fault {
         Some(fault) => because(
             fault,
-            &format!("`list` and `watch` {resource}"),
+            &views::watching(resource),
             renewal,
             unread.said().as_deref(),
         ),
@@ -4105,40 +3834,8 @@ fn pods_unread(
         // clause, because it is the same fact and there is only one honest way to say it.
         None => "nothing was ever said about why".to_string(),
     };
-    // **Where k8rs looked, in the reader's words** (`k8s::Coverage::namespace`) — the fact that
-    // decides whether a `Role` or a `ClusterRole` is what they go and ask for.
-    let scope = match coverage.namespace() {
-        None => "across the whole cluster".to_string(),
-        Some(namespace) => format!("in the namespace {}", sanitize(namespace)),
-    };
-    let next = match fault {
-        Some(k8s::Fault::Refused) => Some(match coverage {
-            k8s::Coverage::Cluster => format!(
-                "Ask whoever runs this cluster for a role that may read {resource} in every \
-                 namespace — `k8rs-readonly` in the k8rs docs is that role — or run k8rs in one \
-                 namespace you can read: {NAMESPACE} <name>"
-            ),
-            // **The one arm where the namespace was not the reader's choice**, so the door the
-            // arm below has already spent is the door this one has to open
-            // (`k8s::Coverage::Blind`).
-            k8s::Coverage::Blind(namespace) => format!(
-                "This kubeconfig names no namespace, so k8rs had to guess {} and was refused \
-                 there too. Say which namespace you work in: {NAMESPACE} <name>",
-                sanitize(namespace)
-            ),
-            k8s::Coverage::Asked(namespace) | k8s::Coverage::Refused(namespace) => format!(
-                "Ask whoever runs this cluster for a role that may read {resource} in {} — the \
-                 same rules as `k8rs-readonly` in the k8rs docs, granted in one namespace \
-                 instead of all of them",
-                sanitize(namespace)
-            ),
-        }),
-        Some(k8s::Fault::Unanswered) => Some(
-            "Check the server address this kubeconfig names, and that this machine can reach it"
-                .to_string(),
-        ),
-        _ => None,
-    };
+    let scope = views::scope(coverage);
+    let next = fault.and_then(|fault| views::next_step(fault, coverage, resource, false));
     Some(format!(
         "k8rs: this cluster did not show k8rs its {kind}, and every finding starts there, so \
          there is nothing to report\n\n  \
@@ -4942,12 +4639,7 @@ async fn opened(
             // `None` for [`live`]'s reason at the same sentence, and it is
             // [`k8s::NotConnected`]'s own: no request has been sent when this fires, so no
             // server has said anything to quote.
-            because(
-                problem.fault(),
-                "reach this cluster",
-                problem.renewal(),
-                None
-            )
+            because(problem.fault(), views::REACH, problem.renewal(), None)
         )
     })
 }
@@ -7108,12 +6800,7 @@ fn current_server(kubeconfig: &kube::config::Kubeconfig) -> String {
 fn no_cluster(problem: &k8s::NotConnected) -> String {
     format!(
         "k8rs: nothing was changed — {}",
-        because(
-            problem.fault(),
-            "reach this cluster",
-            problem.renewal(),
-            None
-        )
+        because(problem.fault(), views::REACH, problem.renewal(), None)
     )
 }
 

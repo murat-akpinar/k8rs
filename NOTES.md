@@ -285,6 +285,7 @@ its line moving with it.
 - [D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12) — the refused-keys round: a permission that is two questions and was counted as one, a reason that did not fit the line it was promised to, and a row rewritten by arithmetic another box would have moved
 - [D262](#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12) — the in-flight screen: the state that had to name its object, the cut that gave way at the wrong end, and the screen that answers what may I press promising four keys it refuses
 - [D263](#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12) — the nine states: a refusal that was also a scope, a stack that cut the one banner with nothing else to say, and a test named for a body it never compared
+- [D264](#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13) — the picker round: a failure box with a second vocabulary, a current row that could not be retried, and a cursor on a context nobody chose
 
 ## Why it exists — where the gap is
 
@@ -22920,3 +22921,336 @@ against a 53-wide banner, *12 of 13* that was 13 — and those were corrected in
 which the tests read. Two dispatches in this box died on an account rate limit and were
 re-sent from a clean tree; `k8s-admin`'s agent definition grants no `Write`, so the PM
 transcribed both of its reports (`backlog.md`).
+
+### D264 — the picker round: a failure box with a second vocabulary, a current row that could not be retried, and a cursor on a context nobody chose (2026-09-13)
+
+The first draft of the two picker boxes (`screens/context.md`) went green with 107 of 111
+mutants caught. Its tests still could not see the defects below. `tester` found a `$ kubectl
+config use-context` line that stayed green and a `Fault::Unfinished` drawn with
+`Unanswered`'s sentence. `k8s-admin` found the rest by drawing real enterprise inputs into the
+buffer. The rulings, in the order the fix round applies them:
+
+**1. A connection that failed is described in the words the driver already uses, not in a
+second set.** The failure box used ten sentences of its own, and they were wrong in both
+directions. It sent a namespace-scoped developer to ask for access to `default`, because
+`Coverage::namespace()` merges `Refused` and `Blind`, whose next steps are opposite
+(`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1). It said *not allowed to list
+pods* where a watch is two verbs (`main.rs` `because`'s own measured note). It said *did not
+answer … when k8rs asked it for pods* about a client that was never built (a `proxy-url` kube
+will not speak). And it never named the login program on an expired EKS login.
+
+The box's reason and next step are therefore `main.rs`'s `because` and `pods_unread`'s scope
+clause and per-`Coverage` next step, **moved down into `views.rs` whole**. This is
+[D254](#d254--the-events-tab-is-settled-before-it-is-drawn-describes-grammar-reused-whole-a-heading-that-only-comes-back-to-withdraw-a-promise-and-the-check-that-could-not-see-the-defect-it-was-written-after-2026-09-06)'s
+move, and this is the last turn `views.rs` can take it. `main.rs` calls the moved functions,
+and no `main_tests.rs` expectation changes. **That is necessary evidence and not proof** (`k8s-admin`, round two): `main_tests.rs` pins substrings, and at HEAD it pinned no `NoCredential`, `Expired`, `Conflict` or `Kubeconfig` sentence. The byte-identity was shown by comparing the code and the six literals mechanically.
+`Modal::Unconnected` carries what those functions read:
+- the `k8s::Coverage`;
+- the renewal program;
+- whether a request went out. A `NotConnected` sent nothing and is asked as *reach this
+  cluster*, `live`'s own framing.
+
+The page draws the `403` case and cites the producer for the rest. `dev-ui` writes `views.rs`
+and `ui.rs`; `dev-core` deletes `main.rs`'s copies
+([D34](#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
+
+**2. A key that does nothing is not offered**
+([D260](#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)
+item 8). `⏎` does nothing in three places: on a shadowed row, with no row selected, and when
+the filter hides every row. In all three the button draws dim, the footer drops `⏎`, and the
+server-line slot says why.
+
+**3. No row is selected when no row is both current and landable.** `kubectl config
+delete-context` leaves `current-context` naming a deleted entry. Measured with that dangling
+name and with an unset one, the picker opened on row 0 and `⏎` answered `Connect("prod-eu")`.
+One keypress then connects to a context nobody named. `↑`/`↓` select the first or last
+landable row. The duplicate row's sentence does not claim that the earlier entry opens when
+that entry is itself undefined.
+
+**4. Whether any context has connected in this run decides the variant, not who opened the
+picker.** `⏎` on `(current)` closes the picker only when that context is the live one;
+otherwise it connects. After a failed switch the header stays on the chosen context
+([D16](#d16--the-context-switcher) ruling 3), so `X` marks that context `(current)`. Measured,
+`⏎` there answered `Close`, which meant every *switch again* way out on the failure box could
+not be followed. The same rule covers the moment between the startup `⏎` and the first
+answer. In that window a picker that assumed a live cluster would offer `esc cancel` back to
+none.
+
+**5. A context name gives way from its front.** Three contexts named the way `aws eks
+update-kubeconfig` names them drew identical rows at 80×24, because EKS and GKE names differ
+at the tail. The row, the server-line label, the failure box and the one-context sentence now
+cut the name the way the header does
+([D249](#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)),
+behind a visible `…`. This replaces the page's *clips at the cell boundary, no `…`* for the
+name slot. The tag slot keeps its tail clip, because a written tag is read from its front.
+
+**6. Hidden rows are marked.** Six contexts at 80×24 showed three rows with no mark, so at
+startup the reader had no way to know the other three existed. The mark is a scrollbar, the
+convention `screens/widgets.md` § 2 already had on paper. The picker is the first code to draw
+one.
+
+**7. `/` matches what the row draws**: the name as drawn, `(unnamed)` included, and the tag
+as drawn, `~` included. It never matches the server or the badge. This is `Filters::matches`'
+own contract, *whatever the row shows the reader*. When the filter hides every row, the slot
+says so and names the filter. Drawing the filter text in every other pane is a separate,
+product-wide gap and goes to `backlog.md`.
+
+**8. `Chosen::Connect` carries the row, not the key.** The key is the file's unstripped
+spelling. The caller connects with `key` and draws `name`. Phase 12's strip box gains three
+fields: `Unconnected`'s context name, `Before::Connected`, and every `--context` line.
+
+**9. The picker clears the body behind it, and its height grows with the terminal.** At
+80×24, single letters of the app showed in the picker's 3-column margins, while the page draws
+that body empty. A taller terminal shows more contexts, which is what an operator wants, so the
+height is not capped at `MODAL_ROWS`. The page says so, and the tests measure it at two
+heights.
+
+**10. The `context switched` audit line is struck from the page.** `ops.rs` is frozen after
+Phase 7, and its one line writer is private (`write_line`). A writer in `main.rs` would be a
+second spelling of the audit format outside the one audited file. Every attempt line already
+carries `context … · server …`, which answers *which credentials were in use* on the line that
+needs it. A switch writes nothing ([D16](#d16--the-context-switcher) ruling 1).
+
+**11. The one-context sentence says *your kubeconfig*.** `~/.kube/config` is false whenever
+`KUBECONFIG` names other paths.
+
+**12. Two findings are refused.**
+- *Wrap the server line at a `.`*: this would be a second wrap function for one line, and the
+  name cut in 5 is what answers *which cluster*.
+- *`kubectl config get-contexts` fails on a file with a duplicate name*: that line is what the
+  picker read, and kubectl refusing that file is the same fact the shadowed row exists to tell
+  the reader.
+
+**13. The phase split is unchanged**
+([D262](#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12)
+ruling 8 ·
+[D263](#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)
+ruling 10). The switcher box closes with its wiring named in a Phase 12 box, which owns:
+- calling `connect()` again;
+- dropping the `Session` and any open detail stream (`Screen::detail` is not `App`'s, so
+  `App::switched` cannot);
+- `App::switched`;
+- building `Unconnected`;
+- the liveness fact ruling 4 reads;
+- `--context <name>` on every later command line.
+
+**The fix round raised five more questions, and they are ruled here rather than in a new
+entry.**
+
+**14. The flag and the strip have one spelling each, and both live in `views.rs`.** `because`'s
+next step names `--namespace`, and `ui.rs` cannot reach `main.rs`. So `views::NAMESPACE` and
+`views::sanitize` are the only copies, and `main.rs` imports both. CLAUDE.md's flag count greps
+`src/main.rs src/views.rs` from now on. Otherwise the fifteen-flag fact would go stale a fourth
+way.
+
+**15. `Connection::Dropped` carries the context that was last live.** A switch that fails
+after the run has connected once answers `Before::Connected(that name)`, not
+`Before::Picking`. Otherwise the box says *"Nothing has connected yet"* to a reader who was on
+`prod-eu` a minute ago. Its way out, *X takes you back*, can be followed: `X` opens the picker,
+and `prod-eu` is on it.
+
+**16. A picker with no landable row offers no key that moves.** When every row is undefined,
+or the filter shows only undefined rows, the slot does not say *pick one with ↑ or ↓*. The
+footer drops `↑↓ move` as well as `⏎`, by ruling 2's reason.
+
+**17. The failure box's title follows what reached the cluster, not which path the fault came
+through.** `Kubeconfig`, `NoContext`, `BadEntry` and `NoCredential` never put a request in front
+of a cluster. They are therefore *could not be opened* even when they arrive on a watch
+(`NoCredential` mid-session,
+[D167](#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)),
+never *did not answer*.
+
+**Round three raised three more, and they close the page against the code.**
+
+**18. A list with no row showing counts as having no landable row.** This covers two cases: a
+filter that hides every row, and a `X` pressed after the kubeconfig was emptied. Ruling 16
+applies to both, so the footer offers neither `↑↓ move` nor `⏎`. The empty kubeconfig gets its
+own slot sentence from the page, never *pick one with ↑ or ↓*.
+
+**19. The page follows the code in five places where the code was right.**
+- In `## The tag column` block `[3]`, the server line and the kubeconfig sentence sit at the
+  picker's 2-column indent.
+- That block is drawn 24 rows tall, the floor it claims to be drawn at.
+- `[ esc dismiss ]` puts its spare column on the left, as `dialogs.md`'s two boxes of the same
+  width already do.
+- The one-context example uses a name long enough that 80×24 actually cuts it.
+- The mid-session failure box is drawn over the app, like every other dialog. Ruling 9 cleared
+  the body behind the picker only, so the page says the body behind this box is not drawn.
+
+**20. What the move lost between two files goes back beside the functions it describes.**
+`dev-core` kept the call-site reasoning in `main.rs`, and `dev-ui` restored the function docs in
+`views.rs`. Three passages were in neither place:
+- *a `\n` from the cluster would forge a second card*;
+- `sanitize`'s no-op measurement over every committed capture, pinned by `k8s_tests.rs`'s
+  `sanitize_cannot_act_on_anything_the_ingest_strip_left`;
+- `because`'s *the cluster path and not this driver* history.
+
+All three describe the functions, so they belong in `views.rs`.
+
+**21. Ruling 19 means the page draws the bytes the code draws, not a better layout.** The third
+page pass went the other way twice, and the build went red on it.
+
+`## The tag column` `[3]` added a blank fourth row inside the box and said the box reserves one.
+The code sizes the list to the rows it shows (`shown.len().clamp(1, most)`), so that box is 14
+rows, and the spare row sits in the body under it.
+
+The one-context example gave its name a front cut that fit one line. The code cuts the name only
+when the name alone is wider than the line; otherwise the sentence wraps. Measured at 80×24, the
+page's own name draws on two rows:
+`arn:aws:eks:eu-west-1:111122223333:cluster/payments-prod is the only` over
+`cluster in your kubeconfig.`
+
+The page states that rule and draws that output. The code's test pins the cut with a name wider
+than the line, which is derived from the rule rather than from the page.
+
+**The second family read found no blocker. Four of its should-fixes are in files that freeze
+at this phase's close, so they are ruled now or never.**
+
+**22. Two next steps join the two that exist, and they are true rather than invented.**
+`next_step` has said *only two faults have a next step, and inventing one for the rest is the
+fallback `because` refuses*. That still holds, and it does not cover these two, because each one
+names an action whose outcome was measured:
+- **`Gone` on a pod list means the address is wrong.** `/api/v1/pods` exists on every API server,
+  and kube rebuilds an HTML `404` into a `Status` that keeps the code. A `python3 -m http.server`
+  standing in for the cluster measured exactly that. The next step is *Check the server address
+  this kubeconfig names — what answered there is not a Kubernetes API server*.
+- **`NoCredential` means only the login program knows why.** kube hands an `exec` plugin the
+  terminal's stderr, so that diagnosis is on a screen and never reaches k8rs (measured with a
+  plugin that writes to stderr). The next step is *Run that program yourself in a terminal to see
+  what it says*. `because` has just named the program, so *that program* refers to something the
+  reader has already been told.
+
+The failure box draws `next_step` whenever it answers, whether or not a request went out.
+`--once` gets the same lines through `pods_unread`, because it calls the same function.
+
+**23. The next step that names a flag says to restart k8rs when k8rs is already running.**
+`next_step` takes whether k8rs is running. When it is, the two arms that end in `--namespace
+<name>` read as follows:
+- `Cluster`: *… — or quit and start k8rs again in one namespace you can read: --namespace <name>*;
+- `Blind`: *… and was refused there too. Quit and start k8rs again in the namespace you work in:
+  --namespace <name>*.
+
+`--once` passes *not running*, and its bytes do not move. Without this, a reader in the TUI sees
+a flag where `n` sits one key away and filters only what is drawn. **No `--context` is added to
+that sentence**: a 56-character EKS name would push the flag itself out of the box, and the
+startup picker that opens next shows every context by name.
+
+**24. Ruling 5's premise was wrong, and the cut stays anyway.** It said *EKS and GKE names
+differ at the tail*. GKE names are `gke_<project>_<location>_<cluster>`, so two projects that both
+run the default `autopilot-cluster-1` look the same after a front cut. OpenShift's
+`<namespace>/<server>/<user>` differs at either end. At 80×24, no single cut tells every naming
+scheme apart. A common-prefix elision would be a second cutting rule, for three screens. The
+front cut stays because it separates EKS, the commonest enterprise shape. **What still answers
+*which cluster* is the server line under the selected row, which is unique per cluster, and the
+written tag, which is the fix the page already teaches.** The limit is recorded here rather than
+coded around.
+
+**25. A name longer than the ingest bound cannot be told apart, and that is accepted.**
+`k8s::contexts` cuts a context name at `IDENTIFIER` (512 bytes) from its tail, behind a visible
+marker. After that, the front cut keeps only the marker. `k8s.rs` froze at Phase 6, and real EKS
+and GKE names are a tenth of the bound. The test feeds such a name through `k8s::contexts`, as
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) requires, and asserts
+what holds: the box stays closed and the way out is drawn. It does not claim the tail is visible.
+
+**26. No offset is *stored* between frames, and the picker's is derived inside one.**
+`screens/widgets.md` § 4 says *we do not compute offsets by hand*. Its reason is the offset that
+drifts because it was kept between frames. The picker draws its list as lines inside the same
+`Paragraph` as its slot and buttons, and derives `first` from the selection every frame. That
+value is the same one a fresh `ListState` of that height gives, as `tester` measured at 1 through
+300 rows. The page and § 4 say so.
+
+**27. A typed filter changes what `esc` does, so the footer says so.** While `/` holds text,
+`esc` clears it first, and the footer reads `esc clear filter` instead of `esc cancel` or `esc
+quit`. This follows
+[D260](#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)
+item 8 again. Drawing the typed text itself is product-wide, and that entry is already in
+`backlog.md`.
+
+**28. Three findings are accepted as limits.**
+- A namespace of 20 or more characters loses the tail of the next step at startup. The cut is
+  marked, and the request itself survives.
+- `NoContext`'s *check the `current-context` line* is false only when the file changes under an
+  open picker.
+- `Unanswered` for a client that was never built reads *nothing usable came back*. That is the
+  sentence `--once` already prints, and the class is in `backlog.md`.
+
+**29. Phase 12's wiring box owns three things this box cannot.**
+- It hands the terminal back around every connect, through the same function the Ctrl-Z box
+  writes. An `exec` login program otherwise prints over the alternate screen, and reads keystrokes
+  that crossterm also reads (PRIOR-ART § B2).
+- It appends `$ kubectl config get-contexts` when the picker opens.
+- It strips the three fields ruling 8 names.
+
+**30. The call that passes *not running* is one expression in `main.rs`, and `dev-ui` writes it.**
+Ruling 23 changes `next_step`'s signature, and `pods_unread` is its only caller in `main.rs`.
+Sending `dev-core` to add one argument would leave the tree failing to compile between two
+dispatches. The owner of the signature adds `false` at that one call, and touches nothing else in
+the file. The exception covers that expression only, and it is written down so that nobody reads
+it as a precedent
+([D34](#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
+
+Ruling 27 also covers the filter-only case of `## Unhappy states` `[7]`. While `/` holds text,
+that footer reads `esc clear filter` even though the excerpt draws the whole-file case.
+
+**31. Three questions from round five.**
+- **Ruling 22's *whether or not a request went out* covers the faults whose next step is about
+  this machine, which today means `NoCredential`.** An `Unanswered` whose client was never built
+  keeps no next step, as ruling 28 accepted. *Check the server address* would send the reader
+  after an address when the failure was a certificate or a proxy on their own machine. The code
+  and the page already draw it that way.
+- **The button and the footer name `esc` with one word.** While `/` holds text, the box's button
+  reads `[ esc clear filter ]` as well. Otherwise one key would be spelled two ways in one frame,
+  the defect
+  [D260](#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)
+  already closed once for `⏎`.
+- **The header word over a `Gone` or `NoCredential` failure is not this box's to choose.** The
+  header draws `Screen::link`, which Phase 12 sets
+  ([D263](#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)
+  ruling 10), and every word it can draw is already a state in `screens/states.md`.
+
+**32. The third family read reversed half of ruling 22 and corrected a sentence in each of rulings 22
+and 24** (`reports/2026-09-13-picker-round-three-operator-read.md`).
+- **`NoCredential` has no next step again.** *Run that program yourself* had three problems.
+  - It is false where there is no program. A `tokenFile` that does not exist and an
+    `auth-provider: azure` both land in `NoCredential` with no `exec.command` to name, measured.
+  - It cannot be followed where there is one. The name is `command` without the entry's `args` or
+    `env`. A bare `aws` prints its usage, and `aws eks get-token` without the kubeconfig's
+    `AWS_PROFILE` gives a different error from the one k8rs hit, measured with a stand-in.
+  - It invites the line `k8s.rs`'s `renewal` refused to show: a successful run prints a live token
+    to the terminal.
+
+  The diagnosis is the program's own stderr, and getting it back to the reader is Phase 12's
+  terminal handover, not a sentence. So `next_step` answers for `Refused`, `Unanswered` and `Gone`
+  only. The failure box draws it only where a request reached a server, which ruling 31 had
+  already narrowed to this one exception.
+- **`Gone`'s next step now reads *Check the server address this kubeconfig names — as written, it
+  does not lead to a Kubernetes API server*.** *What answered there is not a Kubernetes API server*
+  was false for a real API server behind a wrong path prefix, because kube keeps the prefix on every
+  request. The new sentence is true in both cases, and the advice did not change.
+- **Ruling 22's *`--once` gets the same lines through `pods_unread`* holds only when the pods watch
+  carries the fault.** A connect that fails in the login program reaches `--once` through `live`'s
+  `Err` arm, which prints no next step. Since the reversal above, that is also the box's answer.
+- **Ruling 24's remedy is a written tag or a wider terminal, not the server line.** On GKE that line
+  is a bare IP and on EKS a hash hostname, so it is unique without telling an operator which cluster
+  it is. Two GKE autopilot defaults first differ at 85 columns.
+- **Two costs are accepted.** First, ruling 23 leaves out `--context`, so restarting with
+  `--namespace` opens the picker on the kubeconfig's `(current)` row rather than the context that was
+  tried. Second, in the `Blind` box the flag and its placeholder can wrap onto two rows.
+- **kube re-runs an `exec` login program on its own when the credential is near expiry**, and that
+  run inherits the terminal as well. Measured: 27 plugin runs over a 12 s `--live` session, each
+  reading keystrokes piped to k8rs. A handover *around connect* therefore cannot cover it. Phase 12
+  chooses between `interactive_mode: Never` on the `Kubeconfig` passed to `connect_with` (which
+  gives up interactive login) and a way to hand the terminal over at kube's refresh. Its wiring box
+  names this choice; it is not ruled here.
+
+**33. Round seven gets no fourth read, and that is a ruling.** It implemented the third read's own
+findings and nothing else:
+- the reversal and the rewording in ruling 32, with the `Gone` and `NoCredential` frames pasted;
+- `tester`'s N2 anchor and N1 `--once` pin, each as `tester` wrote it and each seen red first.
+
+The gate ran over the tree that lands: `just check` and a mutation run over the whole diff, 185
+tested, 180 caught, 0 missed. This is
+[D263](#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)
+item 11's shape. **The family took three reads and seven rounds, and each read found a real defect
+on a real input.** The first found the second vocabulary. The second found the flag given as
+advice to a reader already inside the TUI. The third found a next step that could not be followed.

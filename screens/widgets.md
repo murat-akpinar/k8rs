@@ -470,7 +470,8 @@ the file that owns it, cited here rather than copied:
 | Disconnected · login expired · clock skew · namespace-scoped · nothing-is-broken · the audit log could not be opened | ordinary, mutations withheld, anchor always present | [states.md](states.md), each state's own mockup |
 | While a call is running, over Alerts or Resources | not a modal — see the rule above | [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
 | Confirm · Restart · Delete (typed name) · The cluster said no · Already gone · Drain | modal — closed local set, no anchor | [dialogs.md](dialogs.md) |
-| The cluster picker, at `X` and at startup | modal — closed local set, no anchor; `esc` itself reads `quit` at startup | [context.md](context.md) |
+| The cluster picker, at `X` and at startup | modal — closed local set, no anchor; `esc` itself reads `quit` at startup, or `clear filter` on either variant while `/` holds text, in place of `cancel` or `quit` ([NOTES § D264 ruling 27](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)); **`⏎` itself drops from the line — not merely dimmed like a refused `s`/`r` — on a shadowed row and with no row selected**, because there `⏎` is not refused, it is inert; **a list with no row showing counts as having no landable row, the same as one with every row undefined: `↑↓ move` drops from the line too**, leaving `/ filter  esc cancel` alone for a kubeconfig with no contexts left in it at all, or `/ filter  esc clear filter` where the cause is a filter that hides every row instead, `esc`'s word still following the same rule — there is nowhere for either moving key to go ([NOTES § D264 rulings 16, 18 and 27](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13), `context.md` §§ The picker, No row is both current and landable, The filter hides every row, The kubeconfig has no contexts at all) | [context.md](context.md) |
+| A picked context that did not connect (`Unconnected`) | modal — closed local set, no anchor; `esc dismiss` mid-session, `esc back to the list` at startup — the same two words `Before::leave` returns, never a third spelling for the button and the footer | [context.md § When the new cluster does not work](context.md#when-the-new-cluster-does-not-work) |
 | The container picker | modal — closed local set, no anchor | [detail.md § Choosing a container, and when there is nothing to choose](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose) |
 | The secret-reveal modal | modal — closed local set (`esc close`) | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
 | The help modal (`?`) | its own fixed footer — the one modal keeping `q quit`, never `? all keys` — except while a call is running underneath it, when `q quit` itself drops and two of its sixteen body rows carry a `paused` clause instead | [help.md](help.md) |
@@ -501,8 +502,15 @@ Phase 11's dialog boxes to spend or not
 
 ## 4. Scrolling
 
-- Lists and tables scroll through `ListState` / `TableState`. We do not
-  compute offsets by hand; ratatui already keeps the selection in view.
+- Lists and tables scroll through `ListState` / `TableState`, which is what
+  keeps an offset from going stale: nothing here stores one between frames,
+  so a selection that moves can never leave it pointing at the wrong window.
+  **The cluster picker draws its rows as `Paragraph` lines, not a `List`, and
+  still obeys this** — it derives its own offset fresh from the selection
+  every frame rather than keeping one anywhere, the same value a fresh
+  `ListState` of that height would give, measured at 1 through 300 rows
+  ([NOTES § D264 ruling 26](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13),
+  [`context.md` § More contexts than fit](context.md#more-contexts-than-fit)).
 - Free text (logs, yaml, describe) keeps its own `u16` offset because
   `Paragraph` has no selection to follow.
 - **The scrollbar reports the buffer, not the history.** The log buffer is
@@ -527,6 +535,9 @@ enum Modal {
     Gone,             // "Already gone" (dialogs.md § The object went away)
     ContainerPick,    // pick a container before opening logs (detail.md)
     ContextPick,      // the cluster picker, at startup and on `X` (context.md)
+    Unconnected,      // a picked context that did not connect — carries
+                      // `Before`, which says what `esc` goes back to
+                      // (context.md § When the new cluster does not work)
 }
 ```
 
@@ -553,6 +564,13 @@ variants, not one overloaded one. **Neither `ContainerPick` nor `ContextPick`
 changed** — both are real, both are pickers over a list rather than a
 confirmation, and neither is this box's to touch; they are named here only so
 this list stays complete.
+**`Unconnected` is new, and it is the same terminal shape as `Refused` and
+`Gone`, not a third one** — it never arms and offers only `esc`, with the
+one difference that its `esc` reads two different words depending on what it
+carries: `Before::Connected` dismisses back to a running app, `Before::Picking`
+reopens the picker it came from
+([NOTES § D264](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13),
+`context.md` § When the new cluster does not work).
 
 - **One modal at a time — the enum makes stacking unrepresentable.** No modal
   stack, no z-index. A dialog that could open over a dialog is how a
@@ -593,7 +611,7 @@ this list stays complete.
   |---|---|---|
   | 58 | the default for a `Confirm` box with a `$ kubectl …` line — used whenever the content fits ([dialogs.md § Scale](dialogs.md#scale--confirm-with-dry-run)) | 4 / 4 |
   | 61 | 58 does not fit — a longer consequence sentence, or the typed-name field ([§ Restart](dialogs.md#restart--confirm-with-dry-run), [§ Delete](dialogs.md#delete--the-name-has-to-be-typed-and-nothing-is-checked-first)) | 3 / 2 — 5 columns split as evenly as an odd number allows |
-  | 54 | `Refused` or `Gone` — no `$ kubectl …` line and no typed-name field inside the box, so there is consistently less to fit ([§ The cluster said no](dialogs.md#the-cluster-said-no), [§ The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open), [§ Drain](dialogs.md#drain-which-takes-minutes)) | 6 / 6 |
+  | 54 | `Refused`, `Gone` or `Unconnected` — no `$ kubectl …` line and no typed-name field inside the box, so there is consistently less to fit ([§ The cluster said no](dialogs.md#the-cluster-said-no), [§ The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open), [§ Drain](dialogs.md#drain-which-takes-minutes), [context.md § When the new cluster does not work](context.md#when-the-new-cluster-does-not-work)) | 6 / 6 |
 
   **58 fits with room to spare either side. 61 is as wide as any dialog on
   this page needs, and it is close to the real ceiling** — the smaller
@@ -664,9 +682,11 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   characters; `String::truncate` slices bytes and panics in the middle of a
   multi-byte name. Handing the full `Span` to the widget is both shorter and
   correct.
-- **Four places truncate on purpose, and they are the exceptions that prove
-  the rule above:** the Alerts card's evidence line, capped at three wrapped
-  lines with `…` at the cut
+- **Eight places truncate on purpose, and they are the exceptions that prove
+  the rule above.** Four cut from the **back**, marked, and the full text is
+  one `⏎` away — which is what makes cutting them legitimate at all: the
+  Alerts card's evidence line, capped at three wrapped lines with `…` at the
+  cut
   ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall));
   the Resources browser's one-line summary under the table, whose name
   gives way to the sentence around it and is marked the same way
@@ -691,11 +711,27 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   leaves a real command — the one `kubectl get -o yaml` already runs by
   default). The browser's line and the footer's in-flight name do not walk
   back — a name is one token, so there is no word boundary to find, and
-  cutting mid-token is what the mark is for there. The full text is one `⏎`
-  away in all four cases ([detail.md](detail.md)) — which is what makes
-  cutting any of them legitimate at all. Everything else on a card, every
-  other string in the browser, and every command log line that fits is drawn
-  whole and clips at the pane edge like any other string, if it clips at all.
+  cutting mid-token is what the mark is for there.
+
+  **Four more cut from the front, and recoverability is not why — a
+  distinguishing tail is**, the header's own reasoning
+  ([§ 1a](#1a-the-header-row), [NOTES § D249](../NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)):
+  the cluster picker's own name slot, where a fleet of contexts named after
+  one cloud provider's naming convention share a long prefix and differ only
+  near the end; the same row's own server-line label, in front of the
+  address it introduces; the one-context sentence's own name, when there is
+  only one row to say so about; and the failure box's two names — the
+  context that did not connect and the one `X` would take the reader back to
+  ([NOTES § D264 ruling 5](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13),
+  `context.md` §§ The picker, The tag column, When the new cluster does not
+  work). None of these four promises the full name is one `⏎` away —
+  connecting is what `⏎` does here, not revealing a name — so what justifies
+  the cut is instead that what a name shares with its neighbours sits at the
+  front, and the front is the part it can afford to lose.
+
+  Everything else on a card, every other string in the browser, and every
+  command log line that fits is drawn whole and clips at the pane edge like
+  any other string, if it clips at all.
 - Long values are bounded *before* they are stored, not at draw time — a 50 MB
   annotation must never become a `Text`.
 

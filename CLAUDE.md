@@ -225,7 +225,10 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     six when it had fourteen (fixed 2026-08-31), fourteen when it had fifteen
     (fixed 2026-09-05 — `--subresource`, and it was `dev-core` who counted it, not
     this file). **Counted, not recalled:**
-    `grep -oE '^const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs`. Two groups, and
+    `grep -oE '^(pub )?const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs src/views.rs`
+    — `views.rs` since `--namespace` moved there with the wording that names it
+    ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+    ruling 14). Two groups, and
     the split is the point:
     **released** — `--read-only` `--context` `--namespace` `--once` `--analysis`
     (the last put there by

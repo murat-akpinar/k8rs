@@ -24,9 +24,12 @@
 //! [`crate::k8s::text`] itself ([`SAID`]).
 //!
 //! **It was one method until 2026-09-07 and this paragraph said so** — the second was found by
-//! reading who the obvious caller of `outcome` would be (`k8s-admin`, 2026-09-07). That is the
-//! whole of invariant 9 inside this file: two calls, two methods, both naming `k8s.rs`'s own
-//! guard rather than a second list.
+//! reading who the obvious caller of `outcome` would be (`k8s-admin`, 2026-09-07). **A third came
+//! down with the driver's sentences** (NOTES § D264 ruling 1): a namespace typed on the command
+//! line reaches [`scope`] and [`next_step`] inside a [`Coverage`] and never met `k8s::text`, and
+//! [`sanitize`] is the driver's own strip over it, moved with them. That is the whole of invariant
+//! 9 inside this file: three calls, three functions, every one naming `k8s.rs`'s own predicate
+//! rather than a second list.
 //!
 //! **Nothing here sorts a rendered string back into values** (NOTES § D245,
 //! `screens/analysis.md` § 3, PRIOR-ART § F1). The browser keeps the order the server sent; the
@@ -45,7 +48,7 @@
 )]
 
 use crate::analysis::Row as ReportRow;
-use crate::k8s::{Browsable, Fault, IDENTIFIER, text, unprintable};
+use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, IDENTIFIER, Tag, text, unprintable};
 use crate::ops::Verdict;
 use crate::rules::{
     ContainerSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot, Severity,
@@ -489,12 +492,18 @@ impl Filters {
     pub fn matches(&self, namespace: Option<&str>, fields: &[&str]) -> bool {
         let namespace_ok = self.namespace.is_empty()
             || namespace.is_some_and(|value| contains_ignoring_case(value, self.namespace.text()));
-        let text_ok = self.text.is_empty()
-            || fields
-                .iter()
-                .any(|field| contains_ignoring_case(field, self.text.text()));
-        namespace_ok && text_ok
+        namespace_ok && holds(&self.text, fields)
     }
+}
+
+/// **`/` over whatever a row shows the reader** — [`Filters::matches`]' text half, and the cluster
+/// picker's whole filter ([`Picker::shown`]), so the two panes cannot come to disagree about what
+/// a typed filter matches (NOTES § D264 ruling 7).
+fn holds(filter: &Input, fields: &[&str]) -> bool {
+    filter.is_empty()
+        || fields
+            .iter()
+            .any(|field| contains_ignoring_case(field, filter.text()))
 }
 
 /// Substring, ASCII case folded. **Two allocations per call, and [`Filters::matches`] calls it once
@@ -779,6 +788,291 @@ pub enum Modal {
         /// to back one.
         recreated: bool,
     },
+    /// **The cluster picker — on `X`, and by itself at startup** (`screens/context.md`,
+    /// NOTES § D16, § D116). One list and one key map both ways; [`Picker::startup`] is the whole
+    /// of the difference, and it is read off what has connected rather than off who opened it
+    /// (NOTES § D264 ruling 4).
+    ContextPick(Picker),
+    /// **A picked context that did not connect** (`screens/context.md` § When the new cluster does
+    /// not work). **It never falls back** (NOTES § D16 ruling 3): the reader asked for this context
+    /// and is told why not, on the context they asked for.
+    ///
+    /// **It carries what the driver's own sentences read, and no sentence** (NOTES § D264
+    /// ruling 1): the reason is [`because`]'s, the scope [`scope`]'s and the next step
+    /// [`next_step`]'s, the same three a `--once` run that could not read pods prints.
+    Unconnected {
+        /// The picked context's name as drawn — [`Choice::name`], `None` being [`UNNAMED`].
+        to: Option<String>,
+        /// What was behind the attempt: what `esc` goes back to, and what the way out names.
+        before: Before,
+        /// **Whether a request went out** — `false` for a `k8s::NotConnected`, whose client was
+        /// never built, and `true` for a pods watch that never listed. It decides the title and
+        /// what k8rs is said to have asked for: *reach this cluster*, the driver's framing for a
+        /// connection that sent nothing, against `list` and `watch` pods. **Four faults are the
+        /// first framing whatever this says** — `Kubeconfig`, `NoContext`, `BadEntry` and
+        /// `NoCredential` never reach a cluster, even on a watch (NOTES § D264 ruling 17).
+        sent: bool,
+        /// **What went wrong, as `k8s.rs` classified it** — `NotConnected::fault`, or the pods
+        /// watch's own `Trouble::fault`.
+        fault: Fault,
+        /// **The cluster's own words about the failure**, where it sent any — `Trouble::said`,
+        /// already stripped and bounded (invariant 9). Only [`Fault::Rejected`]'s sentence reads
+        /// it, and it is still cut at draw time: `k8s::FREE_TEXT` allows 4096 bytes.
+        said: Option<String>,
+        /// **Where the watches asked** — the whole [`Coverage`], never its collapsed
+        /// `namespace()`, because a namespace the reader named and one k8rs had to guess take
+        /// opposite next steps (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1).
+        coverage: Coverage,
+        /// **The program this kubeconfig logs in with** — `NotConnected::renewal` or
+        /// `Session::renewal`, already stripped and bounded.
+        renewal: Option<String>,
+    },
+}
+
+/// **`(unnamed)` — a context whose name strips to nothing**, drawn in the picker's name slot and in
+/// the header's `ctx:` alike, so the two cannot disagree about whether a context is in use
+/// (`screens/context.md` § A context whose name strips to nothing, NOTES § D202). `pub` because the
+/// header is joined by the caller.
+pub const UNNAMED: &str = "(unnamed)";
+
+/// **A row's name as the picker draws it** — [`UNNAMED`] for one that stripped to nothing — and so
+/// also what `/` matches (NOTES § D264 ruling 7).
+pub fn drawn_name(row: &Choice) -> &str {
+    row.name.as_deref().unwrap_or(UNNAMED)
+}
+
+/// **A row's tag as the picker draws it**: a written one as written, a derived one behind the `~`
+/// that marks it a guess (`screens/context.md` § Two kinds of tag), and so also what `/` matches.
+pub fn drawn_tag(tag: &Tag) -> Cow<'_, str> {
+    match tag {
+        Tag::Written(tag) => Cow::Borrowed(tag),
+        Tag::Derived(tag) => Cow::Owned(format!("~{tag}")),
+        Tag::Blank => Cow::Borrowed(""),
+    }
+}
+
+/// **What was behind a context that did not connect** — the one difference between the two boxes
+/// `screens/context.md` § When the new cluster does not work draws.
+///
+/// **[`Picker::chosen`] hands one back with the row**, read off the picker's own [`Connection`], so
+/// a caller that builds the failure box from it names a cluster as fine only when one really was
+/// live in this run (NOTES § D264 rulings 4 and 15).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Before {
+    /// **A context has connected in this run** — the one live when `⏎` was pressed or, after a
+    /// switch that already failed, the last one that was: its name as drawn (`None` is
+    /// [`UNNAMED`]). Nothing of it is kept ([`App::switched`]); the name is what *"X takes you
+    /// back"* is about, and `X` does, because that context is on the picker it opens.
+    Connected(Option<String>),
+    /// **Nothing has connected in this run** — the picker `esc` reopens, on the row that was tried,
+    /// over the same list it was handed. **The caller keeps this value across [`App::switched`]**,
+    /// which clears the modal it came out of.
+    Picking(Picker),
+}
+
+impl Before {
+    /// **The word after `esc`, on the button and on the footer both**, so the two cannot spell one
+    /// key two ways ([`Dialog::confirm`]'s reason).
+    pub fn leave(&self) -> &'static str {
+        match self {
+            Before::Connected(_) => "dismiss",
+            Before::Picking(_) => "back to the list",
+        }
+    }
+}
+
+/// **What is connected while the picker is open** — the two facts NOTES § D264 ruling 4 reads, in
+/// the three combinations they can hold. *Nothing live, but something connected earlier* is a real
+/// state, and *live, but nothing ever connected* is not one, so this is not two `bool`s.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Connection {
+    /// **Nothing has connected in this run** — before the first `⏎`, between it and its answer,
+    /// and after every failure since. The startup picker: `⏎ connect`, `esc quit`.
+    Never,
+    /// **A context connected earlier in this run and none is live now** — a switch failed, or has
+    /// not answered yet. **It carries the context that was last live**, its name as drawn, so a
+    /// second and third failed switch in a row still name it (NOTES § D264 ruling 15).
+    Dropped(Option<String>),
+    /// **The `(current)` row is the live context** — its name as drawn. The rows must then be
+    /// `k8s::contexts` asked for that context, so its row is the one marked current.
+    Live(Option<String>),
+}
+
+/// **The picker's own state: which row, what `/` typed, and what is connected behind it**
+/// (`screens/context.md` § The picker).
+///
+/// **The list is not in here**, for [`App`]'s own reason: it is [`crate::k8s::contexts`]' answer
+/// over the kubeconfig — every string already stripped and bounded there — read once when the
+/// picker opens and handed unchanged to every method below and to `ui::Screen::contexts` until it
+/// closes. That one read is what keeps a row's place meaning the same row.
+///
+/// **The row is its place in that list and never its name**: a shadowed row shares its name with
+/// the entry above it (NOTES § D174), which is also why this is not a [`Cursor`], whose anchor is a
+/// string.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Picker {
+    connection: Connection,
+    at: Option<usize>,
+    /// `/` — narrows the list to rows whose drawn name or drawn tag holds it.
+    pub filter: Input,
+}
+
+/// **What `⏎` means on the row the picker is on** (`screens/context.md`).
+pub enum Chosen<'a> {
+    /// `(current)`, while it is live — *yes, stay on this cluster*, and the picker's job is done.
+    Close,
+    /// **Nothing happens and the picker stays open** — a shadowed row, whose sentence is already
+    /// on screen, or no row selected at all (NOTES § D264 ruling 2).
+    Stay,
+    /// **Connect to this row** (NOTES § D264 ruling 8): the caller connects with [`Choice::key`],
+    /// the file's own spelling, and draws [`Choice::name`].
+    Connect {
+        /// The row `⏎` was pressed on.
+        row: &'a Choice,
+        /// What the failure box, if it comes to one, goes back to.
+        before: Before,
+    },
+}
+
+impl Picker {
+    /// **Opened on `(current)`, and on no row when `(current)` cannot be landed on** — or is not in
+    /// the file at all — so `⏎` with no other keypress connects only where the silent default
+    /// would have, and never to whatever happens to be first (NOTES § D116, § D264 ruling 3).
+    pub fn new(rows: &[Choice], connection: Connection) -> Self {
+        Self {
+            connection,
+            at: rows.iter().position(|row| row.current && landable(row)),
+            filter: Input::default(),
+        }
+    }
+
+    /// **Nothing has connected in this run**, so `⏎` connects, `esc` quits, and nothing is behind
+    /// the picker (`screens/context.md` § Opening at startup).
+    pub fn startup(&self) -> bool {
+        self.connection == Connection::Never
+    }
+
+    /// The rows `/` leaves, in file order — the ones the cursor skips included, because they are
+    /// still drawn.
+    pub fn shown(&self, rows: &[Choice]) -> Vec<usize> {
+        (0..rows.len())
+            .filter(|&at| {
+                let row = &rows[at];
+                holds(&self.filter, &[drawn_name(row), &drawn_tag(&row.tag)])
+            })
+            .collect()
+    }
+
+    /// **The row the keys act on**, or `None` — none was ever selected, or none the filter shows
+    /// can be landed on. A selection the filter hid gives way to the first shown row it may land
+    /// on, derived rather than re-anchored, so a filter keystroke needs no second call.
+    pub fn selected(&self, rows: &[Choice]) -> Option<usize> {
+        self.within(&self.landing(rows))
+    }
+
+    /// `↑` — the last row it may land on when nothing is selected. Clamps at the top, as
+    /// [`Cursor`] does.
+    pub fn up(&mut self, rows: &[Choice]) {
+        let landing = self.landing(rows);
+        self.at = match self.within(&landing) {
+            Some(from) => Some(
+                landing
+                    .iter()
+                    .copied()
+                    .rfind(|&at| at < from)
+                    .unwrap_or(from),
+            ),
+            None => landing.last().copied().or(self.at),
+        };
+    }
+
+    /// `↓` — the first row it may land on when nothing is selected. Clamps at the bottom.
+    pub fn down(&mut self, rows: &[Choice]) {
+        let landing = self.landing(rows);
+        self.at = match self.within(&landing) {
+            Some(from) => Some(
+                landing
+                    .iter()
+                    .copied()
+                    .find(|&at| at > from)
+                    .unwrap_or(from),
+            ),
+            None => landing.first().copied().or(self.at),
+        };
+    }
+
+    /// `⏎`.
+    pub fn chosen<'a>(&self, rows: &'a [Choice]) -> Chosen<'a> {
+        let Some(row) = self
+            .selected(rows)
+            .map(|at| &rows[at])
+            .filter(|row| !row.shadowed)
+        else {
+            return Chosen::Stay;
+        };
+        let before = match &self.connection {
+            Connection::Live(_) if row.current => return Chosen::Close,
+            Connection::Live(name) | Connection::Dropped(name) => Before::Connected(name.clone()),
+            Connection::Never => Before::Picking(self.clone()),
+        };
+        Chosen::Connect { row, before }
+    }
+
+    /// **`⏎` would do nothing** — the button draws dim and the footer does not offer it
+    /// (NOTES § D264 ruling 2). [`Picker::chosen`]'s own answer, so the three cannot disagree.
+    pub fn inert(&self, rows: &[Choice]) -> bool {
+        matches!(self.chosen(rows), Chosen::Stay)
+    }
+
+    /// **No row the list shows can be landed on** — every one names a cluster the file does not
+    /// define, `/` left only such rows, or the list shows no row at all: a filter that hides every
+    /// row, or a kubeconfig with no contexts left in it — so neither `↑`/`↓` nor `⏎` has anywhere
+    /// to go, and neither is offered (NOTES § D264 rulings 16 and 18).
+    pub fn nowhere(&self, rows: &[Choice]) -> bool {
+        self.landing(rows).is_empty()
+    }
+
+    /// **The word after `⏎` and the word after `esc`** — `connect`/`quit` at startup,
+    /// `switch`/`cancel` on `X` — for the buttons and the footer both, so one key is never spelled
+    /// two ways in one frame. **While `/` holds text `esc` clears it first** ([`App::escape`]), so
+    /// its word is `clear filter` on either picker (NOTES § D264 rulings 27 and 31).
+    pub fn verbs(&self) -> (&'static str, &'static str) {
+        let (go, leave) = if self.startup() {
+            ("connect", "quit")
+        } else {
+            ("switch", "cancel")
+        };
+        if self.filter.is_empty() {
+            (go, leave)
+        } else {
+            (go, "clear filter")
+        }
+    }
+
+    /// The shown rows the cursor may land on, in file order.
+    fn landing(&self, rows: &[Choice]) -> Vec<usize> {
+        let mut shown = self.shown(rows);
+        shown.retain(|&at| landable(&rows[at]));
+        shown
+    }
+
+    /// [`Picker::selected`] over a landing list already read.
+    fn within(&self, landing: &[usize]) -> Option<usize> {
+        let at = self.at?;
+        if landing.contains(&at) {
+            Some(at)
+        } else {
+            landing.first().copied()
+        }
+    }
+}
+
+/// **Whether the cursor may land on a row** — every row but one whose cluster the file does not
+/// define, which has nowhere for `⏎` to go (§ A context whose cluster the file does not define). A
+/// shadowed row is landed on whatever its entry says, because the sentence it shows when selected
+/// is the one thing that row is for (§ A context defined twice).
+pub fn landable(row: &Choice) -> bool {
+    row.shadowed || row.server != Address::Undefined
 }
 
 /// **Which object a modal is about, in the four facts a screen and a safety check need**
@@ -1333,6 +1627,11 @@ pub fn yaml_line(resource: &str, id: &ObjectId) -> String {
     )
 }
 
+/// **`$ kubectl config get-contexts`** — the line the picker puts on the strip when it opens,
+/// either way (`screens/context.md` § Opening at startup). **Never `kubectl config use-context`**,
+/// which edits the kubeconfig k8rs never writes (NOTES § D16 ruling 2).
+pub const GET_CONTEXTS: &str = "$ kubectl config get-contexts";
+
 // **The logs tab's line is not built here, and its absence is the ruling rather than an
 // omission.** [`crate::k8s::LogRequest::kubectl`] already spells it, in the file that sends the
 // request and off the same fields `LogRequest::params` is built from — so the line cannot describe
@@ -1361,8 +1660,8 @@ pub enum View {
     /// nothing else** (NOTES § D246). Discovery is read once at connect (`k8s.rs`, the
     /// re-discovery comment — no box schedules a re-read), so within one connection the list
     /// cannot move under this number. A **cluster switch** is the startup path run again
-    /// (NOTES § D16 ruling 4), which rebuilds discovery and therefore this whole value; resetting
-    /// it there is Phase 11's wiring and is in `backlog.md`, not a second field here.
+    /// (NOTES § D16 ruling 4), which rebuilds discovery and therefore this whole value — and
+    /// [`App::switched`] is what puts the view back on Alerts, not a second field here.
     Resources(usize),
     /// One analysis report, by its index.
     Analysis(usize),
@@ -1687,6 +1986,39 @@ impl App {
         self.modal.is_none() && self.changing.is_none()
     }
 
+    /// **A switch was made, and nothing the reader did on the old cluster survives it in [`App`] or
+    /// in the command log** (`screens/context.md` § What happens on `⏎`, steps 2 and 5; NOTES § D16
+    /// ruling 3). The view is Alerts again — the old sidebar's indices mean nothing on the new
+    /// cluster — every cursor, filter, tab and scroll is gone, and the command log starts empty for
+    /// the new context's first line.
+    ///
+    /// **It is not the whole of a switch.** The session and any open detail stream are the
+    /// caller's — `ui::Screen::detail` is not a field here — and Phase 12's wiring drops them
+    /// beside this call (NOTES § D264 ruling 13).
+    ///
+    /// Called on `⏎`, before the connection answers: a switch that then fails stays on the context
+    /// that was chosen, and so does this.
+    pub fn switched(&mut self, log: &mut Log) {
+        *self = App::default();
+        *log = Log::default();
+    }
+
+    /// **Nothing has connected behind what is open** — the startup picker, or the failure it led to
+    /// (`screens/context.md` § Opening at startup: *behind the modal, genuinely nothing*). The
+    /// frame then draws no sidebar, no pane and no vitals.
+    pub fn connecting_first(&self) -> bool {
+        match &self.modal {
+            Some(
+                Modal::ContextPick(picker)
+                | Modal::Unconnected {
+                    before: Before::Picking(picker),
+                    ..
+                },
+            ) => picker.startup(),
+            _ => false,
+        }
+    }
+
     /// **A second mutation is refused while one is running** (`screens/dialogs.md` § *While the
     /// call is running*). Navigation stays free; this is only about opening another dialog.
     ///
@@ -1789,12 +2121,17 @@ impl App {
     /// footer these states can reach still spells every state of itself at compile time. Analysis
     /// and the detail tabs draw their own closed lines above this, which is `screens/widgets.md`
     /// § 2a's closed mode list; the `Offer` they are handed still decides `App::may_mutate`.
+    ///
+    /// **`contexts` is the picker's list, handed in for `detail`'s reason** — which rows it holds
+    /// is the caller's, and whether `⏎` does anything on the picker depends on them
+    /// ([`Picker::inert`]). Empty everywhere else, and read by that one arm.
     pub fn footer(
         &self,
         detail: bool,
         offer: Offer,
         refused: Refused,
         changing: &str,
+        contexts: &[Choice],
     ) -> (Cow<'static, str>, &'static str) {
         // **`Help` is the one modal that keeps `q quit` — except over a call in flight, when the
         // key it names is refused** (`screens/help.md` § *While the call is running*,
@@ -1837,6 +2174,28 @@ impl App {
             // away).
             Some(Modal::Refused { .. }) => return (Cow::Borrowed("esc dismiss  ⏎ open"), ""),
             Some(Modal::Gone { .. }) => return (Cow::Borrowed("esc dismiss"), ""),
+            // **The picker's closed set, both ways** (`screens/widgets.md` § 2a's mode list,
+            // `screens/context.md`): `esc` reads `quit` at startup, where there is no cluster
+            // behind it to cancel back onto, and `⏎` is dropped — not dimmed — where it would do
+            // nothing (NOTES § D264 ruling 2) — and `↑↓` with it where no row can be landed on at
+            // all, a list that shows none included (rulings 16 and 18). `esc`'s word is the box
+            // button's own, `clear filter` while `/` holds text ([`Picker::verbs`], ruling 31).
+            Some(Modal::ContextPick(picker)) => {
+                let (go, leave) = picker.verbs();
+                let keys = if picker.nowhere(contexts) {
+                    format!("/ filter  esc {leave}")
+                } else if picker.inert(contexts) {
+                    format!("↑↓ move  / filter  esc {leave}")
+                } else {
+                    format!("↑↓ move  / filter  ⏎ {go}  esc {leave}")
+                };
+                return (Cow::Owned(keys), "");
+            }
+            // **`esc` alone, and `X` is not on it** — `X` cannot fire under a modal (NOTES § D16
+            // ruling 1), so the body's *"X takes you back"* is read after dismissing.
+            Some(Modal::Unconnected { before, .. }) => {
+                return (Cow::Owned(format!("esc {}", before.leave())), "");
+            }
             None => {}
         }
         // **Exhaustive on both enums on purpose**: a fifth tab or a fourth view is a compile
@@ -1920,15 +2279,34 @@ impl App {
     /// out goes narrow to wide, which is what *one level* means for two filters that nest. Scoped
     /// to `n payments` and narrowed with `/web`, one `esc` used to jump all the way back to every
     /// namespace in the cluster: one press undoing two.
-    pub fn escape(&mut self) {
-        if self.modal.take().is_some() {
-            return;
+    ///
+    /// **The picker is the one modal with a level inside it, and the one place `esc` can end the
+    /// run** (`screens/context.md`). A typed `/` is the inner level and goes first — the same
+    /// narrow-to-wide rule as the two filters, and at startup the difference between clearing a
+    /// typo and quitting. With nothing typed, `esc` on the startup picker **quits**: nothing is
+    /// connected to go back to, so the answer is `true` and the modal is left as it was for the
+    /// loop to exit over. `esc` on the startup failure reopens the picker it came from — two
+    /// presses, never a dead end.
+    #[must_use = "`true` is the startup picker's `esc`, which ends the run"]
+    pub fn escape(&mut self) -> bool {
+        match self.modal.take() {
+            Some(Modal::ContextPick(mut picker)) if !picker.filter.is_empty() => {
+                picker.filter.clear();
+                self.modal = Some(Modal::ContextPick(picker));
+            }
+            Some(Modal::ContextPick(picker)) if picker.startup() => {
+                self.modal = Some(Modal::ContextPick(picker));
+                return true;
+            }
+            Some(Modal::Unconnected {
+                before: Before::Picking(picker),
+                ..
+            }) => self.modal = Some(Modal::ContextPick(picker)),
+            Some(_) => {}
+            None if self.filters.text.is_empty() => self.filters.namespace.clear(),
+            None => self.filters.text.clear(),
         }
-        if self.filters.text.is_empty() {
-            self.filters.namespace.clear();
-        } else {
-            self.filters.text.clear();
-        }
+        false
     }
 
     /// **`⏎` on the sidebar** — a group opens or closes, anything else becomes the view.
@@ -2281,6 +2659,379 @@ pub fn no_previous_run(container: &str, restarts: i32, previous: bool) -> Option
 }
 
 // --- THE WORDING A DETAIL TAB DRAWS END ---
+
+// --- WHY A CALL DID NOT WORK START ---
+//
+// **The words for a failed call, moved down out of the driver whole** (NOTES § D264 ruling 1,
+// the move NOTES § D254 made for the detail tabs). `main.rs`'s `--once` and `--live` and the
+// picker's failure box are consumers of one vocabulary, and a second set of sentences for the same
+// eleven faults sent a namespace-scoped developer to ask for `default` — so the box draws these,
+// byte for byte what the driver prints.
+//
+// **Wording only**, as the region above it: how the sentences are laid out — `What happened:` on
+// stderr, one flowing paragraph in a 54-column box — is each surface's.
+
+/// **`--namespace`, the flag a next step below tells the reader to type** — the driver's own
+/// spelling, moved with the sentences that name it.
+pub const NAMESPACE: &str = "--namespace";
+
+/// **What a connection that sent nothing was trying to do** — a `k8s::NotConnected`, whose client
+/// was never built, framed for [`because`] (NOTES § D264 ruling 1).
+pub const REACH: &str = "reach this cluster";
+
+/// **What a watch asks for, in the words a `Role` spells** — `` `list` and `watch` pods `` — framed
+/// for [`because`]. `resource` is the API's own plural.
+pub fn watching(resource: &str) -> String {
+    format!("`list` and `watch` {resource}")
+}
+
+/// **Strip the characters that have no printed form out of a string that came from outside
+/// this file** — the guard invariant 9 owes every printer, and this is the first one
+/// (`screens/widgets.md` § 7).
+///
+/// `println!` has no ratatui between it and the terminal, so an escape sequence in a pod name
+/// arrives as an escape sequence and rewrites the user's screen.
+///
+/// **What counts as such a character is [`k8s::unprintable`](crate::k8s::unprintable)'s answer and
+/// is not restated here** (NOTES § D154, CLAUDE.md § Single point of change). `main.rs` carried its
+/// own narrower spelling until 2026-08-22, and the day the ingest guard widened and this one did
+/// not, `k8rs some-pod.json` printed a row that reads *prodcd* for a pod named
+/// `prod\u{202e}dc` — the hole is this path's alone, because it builds its snapshot off
+/// `rules.rs`'s `From` impls and never meets [`k8s::Store`](crate::k8s::Store). **A second
+/// spelling is what the fix refuses**: the two files are modules of one crate, so this one calls
+/// the predicate.
+///
+/// **Removed, not replaced.** "Stripped" is the word in both invariant 9 and § 7, and a
+/// substituted space is a character the API did not send — a second lie in the record
+/// invariant 4 says may not lie. **Nothing is truncated here either**: the multi-byte path is
+/// where `String::truncate` panics, and § 7 forbids it outright.
+///
+/// **Where it is applied is the whole rule, and it is mechanical: on a value as it enters a
+/// message, never on the finished message.** A `\n` *from the cluster* still dies here, and
+/// must — it would forge a second card. Phase 5's ingest strip supersedes this by applying the
+/// same rule one layer earlier, cleaning the text as it arrives.
+///
+/// **It is a no-op on anything `k8s::text` produced, and it is the only strip several live inputs
+/// ever meet.** Two claims, both measured, and neither of them is *the live path does not need
+/// this* — a first draft of this paragraph said that and it was false
+/// (`k8s-admin`, 2026-08-31).
+///
+/// **No-op on ingested text**: [`k8s::text`](crate::k8s::text) removes or substitutes for every
+/// character [`k8s::unprintable`](crate::k8s::unprintable) answers for, so a value that came off
+/// the API holds nothing left for a second pass to find — 18 717 strings of every committed
+/// capture through both, 0 changed (`k8s_tests.rs`'s
+/// `sanitize_cannot_act_on_anything_the_ingest_strip_left`). That is the box's question answered:
+/// one string, one transformation.
+///
+/// **Where the driver applies it, and why never to a document, is `main.rs`'s to say**, beside
+/// the import that brings it there (NOTES § D264 ruling 14). Here it is the strip for text that
+/// never met `k8s::text` on the way in: a namespace the reader typed reaches [`scope`] and
+/// [`next_step`] through [`Coverage`], and nothing else stands between it and the terminal.
+pub fn sanitize(text: &str) -> String {
+    text.chars().filter(|c| !unprintable(*c)).collect()
+}
+
+/// **One plain clause: why a call did not work** — the caller supplies the subject, this
+/// supplies the reason (invariant 14, `PRIOR-ART § C1`).
+///
+/// **A generic sentence may never stand in for an error we were handed**, which is the whole of
+/// this function's reason to exist. k9s tells these apart internally and still shows
+/// `Ruroh? 'v1/pods' command not found` when a credential expires; every site on the cluster path
+/// that has a fault in hand — the connection, the version, the discovery answer, each watch, and
+/// the picker's failure box — routes through here.
+///
+/// **The claim is *the cluster path* and not *every site in `main.rs`*, because two typed errors
+/// live outside it** and are named where they are: an io error from a failed stdout write
+/// ([`stdout_failure`](crate::stdout_failure)) and one from a runtime that would not start
+/// ([`runtime_failure`](crate::runtime_failure)). Both print the standard library's own reason
+/// through [`sanitize`]. The first draft of this line said *every site in this driver* and the
+/// runtime arm was throwing its error away with a `_` (`tester`, 2026-08-27) — an overclaim and a
+/// defect in one sentence, which is the second box read literally.
+///
+/// **Which of the driver's sites are on that path is `main.rs`'s to say**, beside its import of
+/// this function.
+///
+/// **`asked` is what k8rs was trying to do, already spelled the way it should read.** Only the
+/// caller knows, so `` `get /apis` ``, `` `list` and `watch` pods `` and *reach this cluster*
+/// arrive as display text carrying their own backticks. That is what makes a refusal name the
+/// missing verb and resource, which the security gate requires — and what lets the one refusal
+/// that has neither, a `nonResourceURL` on `/apis`, name a **path** instead: its measured
+/// `Status` carries an empty `details`, so a sentence built from `details.group`/`details.kind`
+/// would be empty (NOTES § D160).
+///
+/// **`renewal` is [`k8s::Session::renewal`](crate::k8s::Session::renewal)** — the program the
+/// reader's *own kubeconfig* names, already stripped and bounded by `k8s.rs`'s ingest guard. It is
+/// never the cluster's text and never the login program's output, which is a credential
+/// (`docs/security.md` § Token hygiene).
+///
+/// **Nothing here formats the error we were handed**: [`k8s::Fault`](Fault) carries no string at
+/// all, and `said` is one named field selected by [`k8s::said`](crate::k8s::said) — never a
+/// `Display`, which walks down to an `exec` plugin's stdout (`docs/security.md` § Token hygiene).
+///
+/// **`said` is the server's own sentence about this call, already stripped and bounded by
+/// `k8s.rs`'s ingest guard**, and `None` where the server sent none or where nothing was ever sent
+/// to a server. **Exactly one arm reads it and the rest ignore it on purpose**
+/// ([`k8s::Fault::Rejected`](Fault::Rejected)): for every other fault this function's own sentence
+/// is the better one and was written to be — a `403`'s message names a user and a verb where *the
+/// role this kubeconfig uses needs to …* names the fix, and a `404`'s repeats a name the reader
+/// just typed. The rejected call is the one where k8rs has nothing of its own to say.
+pub fn because(fault: Fault, asked: &str, renewal: Option<&str>, said: Option<&str>) -> String {
+    // The program named, or not named, without changing the sentence around it.
+    let named = renewal.map_or(String::new(), |program| format!(" (`{program}`)"));
+    match fault {
+        // **Three sentences where there was one constant over all fifteen of
+        // `KubeconfigError`'s variants**
+        // (`k8s-admin`, 2026-08-27). *"…or names no such context"* was printed for a
+        // `client-certificate` path that had moved and for a cluster entry with no `server:`,
+        // and in both the file read fine and the context was there — a generic string standing
+        // in for a typed error, which is this box's whole subject, through a door it had not
+        // been looked at through.
+        Fault::Kubeconfig => {
+            "the kubeconfig itself could not be read — it is missing, unreadable, or not valid \
+             YAML"
+                .to_string()
+        }
+        Fault::NoContext => {
+            "this kubeconfig has no such context — check the `current-context` line in the \
+             file, and any `--context` on the command line"
+                .to_string()
+        }
+        // **It does not say *which* entry, and that is the honest limit of a `Fault`.** The
+        // variant names the class and the words are the caller's; naming the field would mean
+        // carrying kubeconfig text on the type, which is the property that keeps every other
+        // sentence in this function free of anything a cluster wrote.
+        Fault::BadEntry => {
+            "this kubeconfig loaded, and something it points at did not — a certificate file it \
+             names, a `server:` line, or a cluster one of its contexts refers to"
+                .to_string()
+        }
+        Fault::NoCredential => format!(
+            "the program this kubeconfig logs in with{named} gave k8rs nothing to sign in with"
+        ),
+        // **The one place a renewal is worth naming** (NOTES § D19): a login minted by a helper
+        // ran out mid-session, and what the reader needs is which system to sign in to again —
+        // not a cloud guessed from the server URL.
+        //
+        // **It promises nothing about restarting, and that is measured** (`tester`, 2026-08-27).
+        // kube re-runs the `exec` plugin as its cached credential falls out of its own window —
+        // 25 plugin executions against 22 requests over a ten-second run — so for the ordinary
+        // exec kubeconfig the watch recovers on its own the moment the login is repaired, and
+        // *restart k8rs* would be D19's own failure wearing the other face: a true problem
+        // answered with the wrong errand.
+        //
+        // **One shape reaches this arm where *renew it there* is true but incomplete**, and it is
+        // narrower than *a plugin that fails mid-session* — that one has been produced since, and
+        // it lands in [`k8s::Fault::NoCredential`] rather than here (NOTES § D167). What is left
+        // is a plugin whose credential carries **no `expirationTimestamp` from the start**:
+        // `Auth::try_from` matches `(Some(token), None) => Ok(Self::Bearer(token))`
+        // (`auth/mod.rs:364-367`), so it is a static header with no `RefreshableToken` behind it.
+        // Nothing ever re-runs the plugin, no `AuthError` is ever raised, and the server simply
+        // answers `401` — so renewing the login where it comes from is necessary and not
+        // sufficient, because k8rs also has to be restarted to pick the new token up.
+        //
+        // **The sentence stays as it is**: it is true of both, and the shape that needs the extra
+        // half is the PM's to box rather than this arm's to guess at.
+        Fault::Expired => match renewal {
+            Some(program) => format!(
+                "this cluster no longer accepts this login — it comes from `{program}`, so \
+                 renew it there"
+            ),
+            None => "this cluster no longer accepts this login — this kubeconfig needs a new one"
+                .to_string(),
+        },
+        // **It names what the role needs, not what the kubeconfig is not allowed to do**
+        // (`k8s-admin`, 2026-08-27). A watch is two verbs and [`k8s::Trouble`] cannot say which
+        // of them was refused — measured through a forwarder that passed `list` and answered
+        // only `?watch=true` with a real `403`: the LIST **succeeded**, forty pods printed, and
+        // the line beside them said *not allowed to `list` and `watch` pods*. A `Role` granting
+        // `list` and omitting `watch` is an ordinary hand-written Role, and the operator adds a
+        // verb that was never missing.
+        //
+        // **Collapsing `InitialListFailed` and `WatchStartFailed` into one [`k8s::Fault`] is
+        // right** — that is what one classifier means — so the fix is the frame: *the role needs
+        // both of these* is true whichever was refused, where *is not allowed to* is a claim
+        // about current state this code cannot make. The security gate asks a refusal to name
+        // the missing verb and resource; this names the verbs and the resource without
+        // pretending to know which one is absent.
+        //
+        // **`needs to {asked}` and not `needs {asked}`**, so one verb phrase serves this arm and
+        // the two below it: the grid test reddened on *needs reach this cluster* the moment the
+        // frame changed, which is what twelve literals are for.
+        Fault::Refused => format!("the role this kubeconfig uses needs to {asked}"),
+        // **`when k8rs tries to …` and not `there is nothing to …`** (`tester`, 2026-08-27).
+        // The old frame wanted a noun where every caller supplies a verb phrase, so it read
+        // *there is nothing to `list` and `watch` pods* — and it was only ever fed the one
+        // framing where that passes, `` `get /apis` `` (NOTES § D29, in a function whose own doc
+        // is about framings). This frame takes all four.
+        Fault::Gone => {
+            format!("this server says there is no such thing when k8rs tries to {asked}")
+        }
+        // **The server's own words where it wrote any, because for this fault they are the
+        // diagnosis** (`k8s::said`). Measured on a live kind cluster, `--logs` against the pod
+        // `--once` had just carded CRITICAL: the API server answered *container "app" in pod
+        // "broken-config" is waiting to start: CreateContainerConfigError* — the same root cause
+        // the card names — and k8rs replaced it with the self-accusation below
+        // (`k8s-admin`, 2026-09-03). `k8s::Fault::Rejected` was this defect's first pass and
+        // fixed only the category; this is the message.
+        //
+        // **Quoted verbatim rather than re-explained, which is NOTES § D37's rule and not an
+        // exemption from invariant 14.** Rules 3, 4 and 10 already put the runtime's own message
+        // on the card word for word, and the card for this very pod carries the plain-language
+        // reading beside the kubelet's own line: *Container needs a ConfigMap or Secret that does
+        // not exist (CreateContainerConfigError)* over *configmap "…" not found*. The jargon word
+        // is kept **and** explained, on the surface built to explain it.
+        //
+        // **[`WAITING_REASONS`] is reachable from here and is still not reused, which is
+        // the question this box had to answer.** (It stood in `main.rs` until the detail tabs
+        // needed the same words and it moved down, NOTES § D254; the argument below did not move
+        // with it then, because it is about this call site and not about where the table lives.)
+        // Reaching it is not the obstacle — the obstacle is that its phrases are a paraphrase of
+        // the cards, not the cards' words, and for one of the two states a live cluster produced
+        // they and the server disagree outright: the API server writes
+        // *trying and failing to pull image* where that table writes
+        // *cannot get its image* (`default/broken-image`, 2026-09-03). Printing both in one
+        // sentence is two spellings of one condition, which is the defect this repo has paid most
+        // for; keying off the message's trailing word to pick one would be scraping free text the
+        // API server never promised the shape of. **And this function has no container in scope
+        // anyway** — fourteen callers, one of which is a log request — so the reason would have to
+        // travel from a pod read that happened a round trip earlier and may already be stale.
+        //
+        // **So the choice is the cluster's sentence or none, and the cluster's says what is
+        // wrong.** What is *not* closed by that is the reader who runs only `--logs` and never
+        // sees the card; `screens/detail.md` has no state for a refused log request at all, and
+        // that is the screen's gap to fill rather than this line's to guess at.
+        //
+        // **`and said:` attributes it.** The words after it are the server's and the reader has
+        // to be able to tell; nothing else in this function quotes anybody.
+        Fault::Rejected => match said {
+            Some(said) => format!(
+                "this cluster would not accept the request k8rs made to {asked}, and said: {said}"
+            ),
+            // **The honest fallback, and it stays as it was.** With no message there is nothing
+            // to go on but the code, and a `400` is a request this side built — so *the reader
+            // has nothing to fix here* remains the only thing that can be said.
+            //
+            // **No shape produced so far enters it, and that is a measurement and not a
+            // guarantee.** Both `400`s a live four-node kind cluster answered for `--logs`
+            // carried a message (`default/broken-config`, `default/broken-image`, 2026-09-03),
+            // and a `400` whose body is not a `Status` at all loses its code inside kube and
+            // lands in `k8s::Fault::Unanswered` instead (`k8s::answer`). What is *not* claimed is
+            // that no server ever sends a `Status` with an empty `message`: the field is
+            // `#[serde(default)]`, nothing was measured that does it, and the arm is here for
+            // exactly that.
+            None => format!(
+                "this cluster would not accept the request k8rs made to {asked} — that is a \
+                 fault in k8rs, and nothing is wrong with the cluster or with this login"
+            ),
+        },
+        // **The one arm that names no verb, because a `409` is not about what was asked** — it
+        // is about the object having moved between the read and the write (NOTES § D213). It is
+        // the only fault whose fix is *k8rs reads it again*, so the sentence says what the reader
+        // will see happen rather than sending them anywhere.
+        Fault::Conflict => {
+            "something else changed this object while k8rs was working on it — nothing was \
+             changed, and reading it again shows what it looks like now"
+                .to_string()
+        }
+        Fault::Unanswered => format!("nothing usable came back when k8rs tried to {asked}"),
+        // **The one arm with no cause in it, and that is the arm** (`k8s::Fault::Unfinished`).
+        // Nothing came back and nothing said why, so every sentence that would explain it is a
+        // guess: NOTES § D148's missing keepalive makes a socket that died mid-LIST look exactly
+        // like a server that went quiet, and NOTES § D150 refuses to call a LIST that is still
+        // moving *hung*. An earlier draft said *nothing is wrong with this login: it is the
+        // cluster, or the network in between, that has gone quiet* and was both — a cause the
+        // taxonomy cannot see and a verdict D150 forbids (`k8s-admin`, 2026-09-03).
+        //
+        // **What a `--once` reader gets instead is the two numbers**, and they are `main.rs`'s
+        // `unreadable`'s, not this function's: `k8s::Trouble::outstanding` travels beside the
+        // fault for exactly that.
+        Fault::Unfinished => {
+            format!("the request k8rs made to {asked} had not been answered")
+        }
+    }
+}
+
+/// **Where k8rs looked, in the reader's words** — the fact that decides whether a `Role` or a
+/// `ClusterRole` is what they go and ask for.
+///
+/// **It reads [`Coverage::namespace`], the collapse**, because the *place* is the same whichever
+/// way k8rs arrived at it; what differs is the next step, which is [`next_step`]'s and reads the
+/// whole [`Coverage`].
+pub fn scope(coverage: &Coverage) -> String {
+    match coverage.namespace() {
+        None => "across the whole cluster".to_string(),
+        Some(namespace) => format!("in the namespace {}", sanitize(namespace)),
+    }
+}
+
+/// **What the reader can do about a watch that never listed**, or `None` where there is no honest
+/// answer (`screens/context.md` § The scope changes the next step, not just a number).
+///
+/// **Three faults have a next step, and inventing one for the rest is the fallback [`because`]
+/// refuses** — which three is NOTES § D264 ruling 32's. An expired login already carries its own
+/// action inside [`because`], and a stream that ended without saying why has no honest one.
+///
+/// **The refusal's answer is per [`Coverage`] and never per `Coverage::namespace()`**
+/// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1): *or run k8rs in one namespace*
+/// is a spent door for a reader who already typed `--namespace`, and asking for access to a
+/// namespace k8rs guessed sends the reader after one they never chose. `resource` is the API's own
+/// plural, as [`watching`] takes it.
+///
+/// **`running` is whether k8rs is already up**, which changes only the two arms that end in the
+/// flag (NOTES § D264 ruling 23): the picker's failure box passes `true`, `--once` passes `false`.
+pub fn next_step(
+    fault: Fault,
+    coverage: &Coverage,
+    resource: &str,
+    running: bool,
+) -> Option<String> {
+    match fault {
+        Fault::Refused => Some(match coverage {
+            Coverage::Cluster if running => format!(
+                "Ask whoever runs this cluster for a role that may read {resource} in every \
+                 namespace — `k8rs-readonly` in the k8rs docs is that role — or quit and start \
+                 k8rs again in one namespace you can read: {NAMESPACE} <name>"
+            ),
+            Coverage::Cluster => format!(
+                "Ask whoever runs this cluster for a role that may read {resource} in every \
+                 namespace — `k8rs-readonly` in the k8rs docs is that role — or run k8rs in one \
+                 namespace you can read: {NAMESPACE} <name>"
+            ),
+            // **The one arm where the namespace was not the reader's choice**, so the door the
+            // arm below has already spent is the door this one has to open
+            // (`k8s::Coverage::Blind`).
+            Coverage::Blind(namespace) if running => format!(
+                "This kubeconfig names no namespace, so k8rs had to guess {} and was refused \
+                 there too. Quit and start k8rs again in the namespace you work in: {NAMESPACE} \
+                 <name>",
+                sanitize(namespace)
+            ),
+            Coverage::Blind(namespace) => format!(
+                "This kubeconfig names no namespace, so k8rs had to guess {} and was refused \
+                 there too. Say which namespace you work in: {NAMESPACE} <name>",
+                sanitize(namespace)
+            ),
+            Coverage::Asked(namespace) | Coverage::Refused(namespace) => format!(
+                "Ask whoever runs this cluster for a role that may read {resource} in {} — the \
+                 same rules as `k8rs-readonly` in the k8rs docs, granted in one namespace \
+                 instead of all of them",
+                sanitize(namespace)
+            ),
+        }),
+        Fault::Unanswered => Some(
+            "Check the server address this kubeconfig names, and that this machine can reach it"
+                .to_string(),
+        ),
+        Fault::Gone => Some(
+            "Check the server address this kubeconfig names — as written, it does not lead to a \
+             Kubernetes API server"
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+// --- WHY A CALL DID NOT WORK END ---
 
 #[cfg(test)]
 #[path = "views_tests.rs"]

@@ -133,6 +133,7 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
         clock: None,
         link: Link::Live,
         detail: None,
+        contexts: &[],
     }
 }
 
@@ -2848,7 +2849,13 @@ fn a_mode_whose_footer_names_no_mutating_key_leaves_none_live() {
             !app.may_mutate(offer),
             "{what} left a key live that its own footer never names — {offer:?}"
         );
-        let (keys, _) = app.footer(asked.detail.is_some(), offer, Refused::default(), "");
+        let (keys, _) = app.footer(
+            asked.detail.is_some(),
+            offer,
+            Refused::default(),
+            "",
+            asked.contexts,
+        );
         for withheld in ["s scale", "r restart"] {
             assert!(!keys.contains(withheld), "{what}: {keys:?}");
         }
@@ -6275,23 +6282,30 @@ fn mockup_refused() -> Vec<String> {
 /// **The section runs to the next `##` and takes its `###` subsections with it**, which is what
 /// `screens/dialogs.md` needs: its own § *Detail tabs and Analysis keep their own footer* sits
 /// inside § *While the call is running*.
+///
+/// **A fence indented under a list item is a block too, with that indent taken off its lines** —
+/// `screens/context.md` draws the sentences that stand in for an address inside a bullet, and a
+/// reader that saw only column-0 fences skipped them without a word.
 fn fenced(file: &str, section: &str) -> Vec<Vec<String>> {
     let path = format!("{}/screens/{file}", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("the screen file {path} could not be read: {e}"));
     let mut blocks = Vec::new();
-    let mut open: Option<Vec<String>> = None;
+    let mut open: Option<(usize, Vec<String>)> = None;
     for line in text
         .lines()
         .skip_while(|line| *line != section)
         .skip(1)
         .take_while(|line| !line.starts_with("## "))
     {
-        match (&mut open, line.starts_with("```")) {
+        let indent = line.len() - line.trim_start().len();
+        match (&mut open, line.trim_start().starts_with("```")) {
             (None, false) => {}
-            (None, true) => open = Some(Vec::new()),
-            (Some(block), false) => block.push(line.trim_end().to_owned()),
-            (Some(_), true) => blocks.push(open.take().expect("open")),
+            (None, true) => open = Some((indent, Vec::new())),
+            (Some((at, block)), false) => {
+                block.push(line.get(*at..).unwrap_or_default().trim_end().to_owned());
+            }
+            (Some(_), true) => blocks.push(open.take().expect("open").1),
         }
     }
     assert!(
@@ -8421,4 +8435,1757 @@ fn a_warning_over_a_typed_name_field_cuts_in_order_and_still_fits() {
             crowded.join("\n")
         );
     }
+}
+
+// --- THE CLUSTER PICKER ---
+
+/// **The rows come out of `k8s::contexts` over a kubeconfig this file wrote** — which row is
+/// derived, written, insecure or current is that function's answer, never a literal here.
+fn contexts_of(yaml: &str) -> Vec<Choice> {
+    crate::k8s::contexts(
+        &kube::config::Kubeconfig::from_yaml(yaml).expect("a kubeconfig this file wrote itself"),
+        None,
+    )
+}
+
+/// **`screens/context.md` § The picker's four contexts**: `prod-eu` current with a written tag,
+/// `staging` with none, `kind-k8rs` whose tag kind's own name gives away, and `dev-cluster` on an
+/// Amazon host with TLS verification off.
+///
+/// **The hosts are reserved names, and the page's `prod-eu.internal` is not one**:
+/// `scripts/security-guard.py` refuses an `https://` address in `src/` whose host could be
+/// reached, so `prod-eu` serves `prod-eu.example` and the page's row is read with that one
+/// substitution, width kept ([`on_the_page`]). The Amazon host carries no scheme, which is a
+/// `server:` kube accepts and the one shape a `~aws` needs here.
+const FOUR: &str = "apiVersion: v1\n\
+     kind: Config\n\
+     current-context: prod-eu\n\
+     clusters:\n\
+     - {name: prod, cluster: {server: 'https://prod-eu.example:6443'}}\n\
+     - {name: staging, cluster: {server: 'https://staging.invalid:6443'}}\n\
+     - {name: kind, cluster: {server: 'https://kind.invalid:41234'}}\n\
+     - {name: dev, cluster: {server: 'dev.gr7.eu-west-1.eks.amazonaws.com', \
+       insecure-skip-tls-verify: true}}\n\
+     contexts:\n\
+     - {name: prod-eu, context: {cluster: prod, user: u, \
+       extensions: [{name: k8rs, extension: {tag: 'aws · prod'}}]}}\n\
+     - {name: staging, context: {cluster: staging, user: u}}\n\
+     - {name: kind-k8rs, context: {cluster: kind, user: u}}\n\
+     - {name: dev-cluster, context: {cluster: dev, user: u}}\n\
+     users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n";
+
+/// The picker opened over `prod-eu` while it is live — the ordinary `X`.
+fn live() -> views::Connection {
+    views::Connection::Live(Some("prod-eu".to_owned()))
+}
+
+fn picking(rows: &[Choice], connection: views::Connection) -> App {
+    App {
+        modal: Some(views::Modal::ContextPick(views::Picker::new(
+            rows, connection,
+        ))),
+        ..App::default()
+    }
+}
+
+/// A picker, the cursor moved `down` rows from where it opened and `typed` into `/`.
+fn moved(rows: &[Choice], connection: views::Connection, down: usize, typed: &str) -> App {
+    let mut app = picking(rows, connection);
+    if let Some(views::Modal::ContextPick(picker)) = &mut app.modal {
+        for _ in 0..down {
+            picker.down(rows);
+        }
+        for character in typed.chars() {
+            picker.filter.push(character);
+        }
+    }
+    app
+}
+
+/// **The row of the page's own mockup that the picker's command log line is on** — so the line is
+/// held to the page and not to [`views::GET_CONTEXTS`] itself.
+const PAGE_LOG: &str = "$ kubectl config get-contexts";
+
+/// The Alerts screen a picker is drawn over, with `contexts` handed in and the command log ending
+/// on the line the picker put there.
+fn pick_over<'a>(
+    alerts: &'a Pane<Vec<Card>>,
+    now: &'a Time,
+    log: &'a [String],
+    contexts: &'a [Choice],
+) -> Screen<'a> {
+    let mut screen = screen(alerts, now);
+    screen.log = log;
+    screen.contexts = contexts;
+    screen
+}
+
+/// The nested box as drawn on a terminal `height` rows tall, and every row of the frame.
+fn picked_at(height: u16, app: &App, contexts: &[Choice]) -> (Vec<String>, Vec<String>) {
+    let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
+    let now = now();
+    let log = [
+        "$ kubectl get daemonsets -A --watch".to_owned(),
+        views::GET_CONTEXTS.to_owned(),
+    ];
+    let screen = pick_over(&alerts, &now, &log, contexts);
+    let drawn = rows(&render_at(MIN_WIDTH, height, app, &screen));
+    (nested(&drawn), drawn)
+}
+
+/// [`picked_at`] at the 80×24 floor.
+fn picked(app: &App, contexts: &[Choice]) -> (Vec<String>, Vec<String>) {
+    picked_at(MIN_HEIGHT, app, contexts)
+}
+
+/// **How many rows the body has in a drawn frame** — counted off the frame, from under its top
+/// border down to the first rule, rather than restated.
+fn body_rows(frame: &[String]) -> usize {
+    frame
+        .iter()
+        .position(|row| row.starts_with('├'))
+        .expect("a frame has a rule under its body")
+        - 2
+}
+
+/// **A drawn picker row at the width of the page `screens/context.md` is drawn on.**
+///
+/// The floor's 78-column body is ten columns wider than that page's 68, and the picker's box
+/// widens with it (its § The tag column: *a wider terminal only widens that one slot*). So a **list
+/// row** gives the ten back out of the end of its name slot — box columns 25 to 35, the name slot
+/// being 20 on the page — and **every other row** out of its pad before the right border. Both are
+/// asserted to be blank before they are dropped, so this cannot hide a character.
+fn at_page_width(row: &str, list: bool) -> String {
+    let characters: Vec<char> = row.chars().collect();
+    let extra = characters.len() - 62;
+    let from = if list {
+        25
+    } else {
+        characters.len() - 1 - extra
+    };
+    let dropped: String = characters[from..from + extra].iter().collect();
+    assert!(
+        dropped.chars().all(|c| c == ' ' || c == '─'),
+        "the columns the page does not have were not blank in {row:?}: {dropped:?}"
+    );
+    characters[..from]
+        .iter()
+        .chain(&characters[from + extra..])
+        .collect()
+}
+
+/// The page's row with the one substitution [`FOUR`]'s hosts need, width kept.
+fn on_the_page(row: &str) -> String {
+    row.replacen("prod-eu.internal:6443", "prod-eu.example:6443 ", 1)
+}
+
+fn words_of(row: &str) -> Vec<String> {
+    row.trim_matches('│')
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// A box's text as one line of words, its borders taken off first — a sentence that wraps is then
+/// one string to search, and never broken by the `│` between its two rows.
+fn inside(box_: &[String]) -> String {
+    words(
+        &box_
+            .iter()
+            .map(|row| row.trim_matches(['│', '┌', '┐', '└', '┘', '─']))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+/// **`screens/context.md` § The picker and § Opening at startup, every row of the box** — the four
+/// rows, their name, tag and badge columns, the server line of `(current)` with the cursor on it,
+/// the two-line sentence and the blank rows between, at the page's width. The buttons are compared
+/// by their words, because their centring moves with the width (`the_delete_boxes_…`'s
+/// exception). **The footer and the command log line are the page's rows, byte for byte**, so
+/// neither [`views::GET_CONTEXTS`] nor the footer can drift from the page without this reddening.
+#[test]
+fn the_picker_is_the_screen_files_box_both_ways() {
+    let four = contexts_of(FOUR);
+    for (connection, section) in [
+        (live(), "## The picker"),
+        (views::Connection::Never, "## Opening at startup"),
+    ] {
+        let page = &fenced("context.md", section)[0];
+        let mockup = nested(page);
+        let (drawn, frame) = picked(&picking(&four, connection), &four);
+        assert_eq!(drawn.len(), mockup.len(), "{section}: the box's height");
+        for (n, row) in mockup.iter().enumerate() {
+            let row = on_the_page(row);
+            if row.contains("[ ⏎") {
+                assert_eq!(
+                    words_of(&drawn[n]),
+                    words_of(&row),
+                    "{section}: the buttons"
+                );
+            } else {
+                assert_eq!(
+                    at_page_width(&drawn[n], (2..6).contains(&n)),
+                    row,
+                    "{section}, row {n}"
+                );
+            }
+        }
+        let log = page
+            .iter()
+            .find(|row| row.starts_with("│ $ "))
+            .expect("the page draws a command log");
+        assert_eq!(unframed(log), PAGE_LOG, "{section}: the page's command log");
+        assert_eq!(
+            unframed(&frame[20]),
+            unframed(log),
+            "{section}: the command log line"
+        );
+        assert_eq!(
+            unframed(&frame[22]),
+            unframed(&page[page.len() - 2]),
+            "{section}: the footer"
+        );
+        assert_eq!(
+            words_of(&frame[0]),
+            words_of(&page[0]),
+            "{section}: the header"
+        );
+    }
+}
+
+/// **At startup the header is `choose a cluster` and nothing is drawn behind the box**
+/// (`screens/context.md` § Opening at startup) — no vitals, no sidebar, no divider, whatever the
+/// caller handed over — **and the failure that picker leads to is drawn over nothing too**, on a
+/// drawn frame. **`X`'s picker clears the body behind it as well** (NOTES § D264 ruling 9) and
+/// keeps the running app's header; the failure a live switch leads to is a box over the app, the
+/// way every other dialog is.
+#[test]
+fn a_picker_is_drawn_over_an_empty_body_and_only_a_startup_one_over_no_header() {
+    let four = contexts_of(FOUR);
+    let empty = |frame: &[String], what: &str| {
+        assert!(
+            !frame[1].contains('┬') && !frame[18].contains('┴'),
+            "{what}: a sidebar divider was drawn behind the box"
+        );
+        for row in &frame[2..18] {
+            assert!(
+                !row.contains("ALERTS") && !row.contains("payments/web"),
+                "{what}: the app showed through behind the box: {row:?}"
+            );
+        }
+    };
+
+    let (_, starting) = picked(&picking(&four, views::Connection::Never), &four);
+    let header = format!("{:38}k8rs{:>38}", "", "choose a cluster · admin");
+    assert_eq!(starting[0], header, "the startup header");
+    empty(&starting, "the startup picker");
+
+    let failed = |before| views::Modal::Unconnected {
+        to: Some("staging".to_owned()),
+        before,
+        sent: true,
+        fault: Fault::Refused,
+        said: None,
+        coverage: Coverage::Cluster,
+        renewal: None,
+    };
+    // **Vitals handed over, and the startup failure draws none of them**, under the page's header.
+    let (_, after_startup) = failed_under(
+        failed(views::Before::Picking(views::Picker::new(
+            &four,
+            views::Connection::Never,
+        ))),
+        &page_header(),
+        "nodes 3/3",
+    );
+    empty(&after_startup, "the startup failure");
+    assert!(
+        !after_startup[0].contains("nodes") && after_startup[0].ends_with(&page_header()),
+        "the startup failure drew vitals, or not the context the caller named: {:?}",
+        after_startup[0]
+    );
+
+    for connection in [
+        live(),
+        views::Connection::Dropped(Some("prod-eu".to_owned())),
+    ] {
+        let (_, switching) = picked(&picking(&four, connection.clone()), &four);
+        empty(&switching, "X's picker");
+        assert!(
+            switching[0].starts_with(" nodes 3/3")
+                && switching[0].ends_with("ctx: prod-eu · live · admin"),
+            "{connection:?}: {:?}",
+            switching[0]
+        );
+    }
+    let (_, dismissing) = failure_box(failed(views::Before::Connected(Some("prod-eu".to_owned()))));
+    assert!(
+        dismissing[1].contains('┬') && dismissing[2].contains("ALERTS"),
+        "the failure of a live switch hid the app it is a box over"
+    );
+
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let mut screen = pick_over(&alerts, &now, &[], &four);
+    for writes in [
+        Writes::ReadOnly,
+        Writes::Unaudited("the audit log could not be opened"),
+    ] {
+        screen.writes = writes;
+        let drawn = rows(&render(&picking(&four, views::Connection::Never), &screen));
+        assert!(
+            drawn[0].ends_with("choose a cluster · read-only"),
+            "{:?}",
+            drawn[0]
+        );
+    }
+}
+
+/// A kubeconfig of one current context and the rows under test, so no row below is the one the
+/// cursor opens on and each draws exactly as the page's excerpt does.
+fn beside(contexts: &str, clusters: &str) -> String {
+    format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: anchor\n\
+         clusters:\n\
+         - {{name: anchor, cluster: {{server: 'https://anchor.example:6443'}}}}\n\
+         {clusters}\
+         contexts:\n\
+         - {{name: anchor, context: {{cluster: anchor, user: u}}}}\n\
+         {contexts}\
+         users: [{{name: u, user: {{token: k8rs-tests-fake-static-token}}}}]\n"
+    )
+}
+
+/// **One excerpt row against one drawn row**, at the page's width, character for character.
+fn against_excerpt(excerpt: &str, drawn: &str) {
+    assert_eq!(at_page_width(drawn, true), excerpt);
+}
+
+/// **A 60-character tag clips at the slot's edge, and a right-to-left override is stripped before
+/// the tag is a `Span`** (`screens/context.md` § A 60-character tag, § A tag holding a control
+/// character) — neither moves the badge column, and the override never reaches a cell.
+#[test]
+fn a_long_tag_clips_at_twelve_and_an_override_never_reaches_the_screen() {
+    let yaml = beside(
+        "- {name: aws-prod, context: {cluster: anchor, user: u, extensions: [{name: k8rs, \
+           extension: {tag: 'production-us-east-1-payments-platform-blue-green-canary-01x'}}]}}\n\
+         - {name: aws-staging, context: {cluster: anchor, user: u, extensions: [{name: k8rs, \
+           extension: {tag: \"prod\\u202Ereversed\"}}]}}\n",
+        "",
+    );
+    let rows = contexts_of(&yaml);
+    let long = match &rows[1].tag {
+        Tag::Written(tag) => tag.clone(),
+        other => panic!("the long tag was not read as written: {other:?}"),
+    };
+    assert_eq!(
+        width(&long),
+        60,
+        "the fixture's tag is not the 60 columns the page names"
+    );
+    let (box_, _) = picked(&picking(&rows, live()), &rows);
+    let blocks = fenced("context.md", "## The tag column");
+    against_excerpt(&blocks[1][1], &box_[3]);
+    against_excerpt(&blocks[2][1], &box_[4]);
+    assert!(
+        !box_.iter().any(|row| row.contains('\u{202e}')),
+        "the override reached a cell"
+    );
+}
+
+/// **The EKS fleet `aws eks update-kubeconfig` writes is told apart by its tail**
+/// (`screens/context.md` § Three contexts told apart only by their tail, NOTES § D264 ruling 5) —
+/// the page's own 80×24 mockup: each name gives way from its front in its slot, the server line's
+/// label does too, and every row earns `~aws` off the Amazon host the page draws.
+///
+/// **The whole frame is the page's, byte for byte, from the top border down** (ruling 21): the box,
+/// the blank row either side of it, both log rows — the page's one command and the blank under it —
+/// and the footer. **The header is byte for byte through `k8rs`, and its right zone as text**:
+/// this mockup ends that zone two columns short of its frame, as most in `screens/` do, and
+/// `screens/widgets.md` § 1a's right alignment puts it at the edge.
+///
+/// **One substitution, width kept**, as [`on_the_page`] makes for [`FOUR`]: the host is written
+/// with no scheme — `scripts/security-guard.py` refuses a reachable `https://` host in `src/`, and
+/// a schemeless one is how [`FOUR`] earns its `~aws` too — so the page's `https://` becomes blanks
+/// at the end of the address.
+#[test]
+fn a_fleet_of_arn_named_contexts_is_told_apart_by_the_tail_of_each_name() {
+    const HOST: &str = "B4E2.eu-west-1.eks.amazonaws.com";
+    let page: Vec<String> = fenced("context.md", "## The tag column")[3]
+        .iter()
+        .map(|row| {
+            row.replacen("https://", "", 1)
+                .replacen(HOST, &format!("{HOST}        "), 1)
+        })
+        .collect();
+    let fleet: String = ["prod", "staging", "dev"]
+        .iter()
+        .map(|env| {
+            format!(
+                "- {{name: 'arn:aws:eks:eu-west-1:111122223333:cluster/payments-{env}', \
+                 context: {{cluster: eks, user: u}}}}\n"
+            )
+        })
+        .collect();
+    let rows = contexts_of(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         clusters:\n\
+         - {{name: eks, cluster: {{server: '{HOST}'}}}}\n\
+         contexts:\n\
+         {fleet}\
+         users: [{{name: u, user: {{token: k8rs-tests-fake-static-token}}}}]\n"
+    ));
+    assert!(
+        rows.len() == 3
+            && rows
+                .iter()
+                .all(|row| row.tag == Tag::Derived("aws") && !row.current),
+        "the fleet does not earn ~aws off its host"
+    );
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = [views::GET_CONTEXTS.to_owned()];
+    let frame = rows_of(&render(
+        &moved(&rows, live(), 1, ""),
+        &pick_over(&alerts, &now, &log, &rows),
+    ));
+    assert_eq!(frame.len(), page.len(), "the frame's height");
+    let through = page[0].find(NAME).expect("the page's header draws k8rs") + NAME.len();
+    assert_eq!(
+        frame[0][..through],
+        page[0][..through],
+        "the header, through k8rs"
+    );
+    assert_eq!(
+        frame[0][through..].trim(),
+        page[0][through..].trim(),
+        "the header's right zone"
+    );
+    for (n, (drawn, row)) in frame.iter().zip(&page).enumerate().skip(1) {
+        assert_eq!(drawn, row, "row {n} from the top");
+    }
+}
+
+/// **The unhappy rows § Unhappy states draws, each against its excerpt**: an undefined cluster, a
+/// name that strips to nothing on the current row, a duplicate, and an address k8rs will not draw
+/// — plus the two sentences that stand in for an address, word for word and hung under their
+/// text. The duplicate's sentence wraps a word earlier at the floor than on the page's narrower
+/// box, which is why words and not rows.
+#[test]
+fn every_unhappy_row_is_the_excerpt_the_screen_file_draws() {
+    let yaml = beside(
+        "- {name: old-cluster, context: {cluster: nowhere, user: u}}\n\
+         - {name: \"\\u200B\", context: {cluster: anchor, user: u}}\n\
+         - {name: prod-eu, context: {cluster: anchor, user: u}}\n\
+         - {name: prod-eu, context: {cluster: anchor, user: u}}\n\
+         - {name: weird-proxy, context: {cluster: weird, user: u}}\n",
+        "- {name: weird, cluster: {server: '//admin:aGVsbG8/d29ybGQ=@APISERVER:6443', \
+         insecure-skip-tls-verify: true}}\n",
+    )
+    .replace("current-context: anchor", "current-context: \"\\u200B\"");
+    let rows = contexts_of(&yaml);
+    assert_eq!(
+        rows[1].server,
+        Address::Undefined,
+        "the fixture's undefined row"
+    );
+    assert!(
+        rows[2].name.is_none() && rows[2].current,
+        "the fixture's unnamed row"
+    );
+    assert!(
+        rows[4].shadowed && !rows[3].shadowed,
+        "the fixture's duplicate"
+    );
+    assert!(
+        rows[5].server == Address::Unreadable && rows[5].insecure,
+        "the fixture's unreadable address"
+    );
+    let blocks = fenced("context.md", "## Unhappy states");
+
+    // The cursor opens on the unnamed row; the excerpts draw none of these selected, so it is moved
+    // up onto the anchor. Thirty rows, so all six contexts are on one box.
+    let mut app = picking(&rows, live());
+    if let Some(views::Modal::ContextPick(picker)) = &mut app.modal {
+        picker.up(&rows);
+    }
+    let (box_, _) = picked_at(30, &app, &rows);
+    against_excerpt(&blocks[0][1], &box_[3]);
+    against_excerpt(&blocks[1][1], &box_[4]);
+    against_excerpt(&blocks[2][1], &box_[6]);
+    against_excerpt(&blocks[4][1], &box_[7]);
+
+    for (down, sentence) in [(2, &blocks[3]), (3, &blocks[5])] {
+        let (drawn, _) = picked_at(30, &moved(&rows, live(), down, ""), &rows);
+        let at = drawn
+            .iter()
+            .position(|row| row.contains("  —  "))
+            .unwrap_or_else(|| panic!("no sentence under the list:\n{}", drawn.join("\n")));
+        let under: Vec<&String> = drawn[at..]
+            .iter()
+            .take_while(|row| !words_of(row).is_empty())
+            .collect();
+        assert_eq!(
+            words(
+                &under
+                    .iter()
+                    .map(|row| row.trim_matches('│'))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            words(&sentence.join(" ")),
+            "the sentence that stands in for an address"
+        );
+        let hang =
+            drawn[at].chars().position(|c| c == '—').expect("the joint") + "—  ".chars().count();
+        for row in &under[1..] {
+            let characters: Vec<char> = row.chars().collect();
+            assert!(
+                characters[1..hang].iter().all(|c| *c == ' ') && characters[hang] != ' ',
+                "a continuation is not hung under the sentence: {row:?}"
+            );
+        }
+    }
+}
+
+/// **Two contexts, and neither names a cluster the file defines** — `screens/context.md` § No row
+/// is both current and landable's own `[7]` rows.
+const UNDEFINED: &str = "- {name: dev-cluster, context: {cluster: dev, user: u}}\n\
+     - {name: old-cluster, context: {cluster: old, user: u}}\n";
+
+/// [`UNDEFINED`] alone, `current-context` naming one of them, so no row can be landed on at all.
+fn undefined_only() -> Vec<Choice> {
+    contexts_of(
+        &beside(UNDEFINED, "")
+            .replace("current-context: anchor", "current-context: dev-cluster")
+            .replace(
+                "- {name: anchor, context: {cluster: anchor, user: u}}\n",
+                "",
+            ),
+    )
+}
+
+/// **`⏎` is drawn dim, dropped from the footer, and explained in the slot under the list wherever
+/// it would do nothing** (NOTES § D264 rulings 2, 16 and 18), each state against the page's own
+/// excerpt in § Unhappy states, byte for byte at its width: no row selected with one to find
+/// (`[6]`, `current-context` naming a context the file no longer has); no row that can be (`[7]`),
+/// both ways the page names — every context undefined, and a filter that shows only undefined
+/// rows; a filter that hides every row (`[8]`); and a kubeconfig with no contexts (`[9]`). From
+/// `[7]` on, `↑↓ move` leaves the footer too, and **where `/` holds the text that emptied the list,
+/// `esc` reads `clear filter`** (ruling 27). Each draws its own sentence and none of the other
+/// three. Everywhere else the button is the live one.
+///
+/// **Drawn thirty rows tall**: at the floor a two-row slot leaves a four-context list three rows
+/// and a scrollbar ([`a_long_list_scrolls_under_a_scrollbar_and_the_box_grows_with_the_terminal`]),
+/// and the page's `[6]` draws the fourth.
+#[test]
+fn enter_is_dim_and_unoffered_and_the_slot_says_why_wherever_it_does_nothing() {
+    let blocks = fenced("context.md", "## Unhappy states");
+    let four = contexts_of(FOUR);
+    let dangling = contexts_of(&FOUR.replace("current-context: prod-eu", "current-context: gone"));
+    let undefined = undefined_only();
+    assert!(
+        undefined.len() == 2 && undefined.iter().all(|row| row.server == Address::Undefined),
+        "the fixture's undefined rows"
+    );
+    let filtered = contexts_of(&beside(UNDEFINED, ""));
+    let none: Vec<Choice> = Vec::new();
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    for (what, app, rows, excerpt, footer) in [
+        (
+            "no row selected",
+            picking(&dangling, live()),
+            &dangling,
+            Some(6),
+            "↑↓ move  / filter  esc cancel",
+        ),
+        (
+            "every row undefined",
+            picking(&undefined, live()),
+            &undefined,
+            Some(7),
+            "/ filter  esc cancel",
+        ),
+        (
+            "a filter that shows only undefined rows",
+            moved(&filtered, live(), 0, "-cluster"),
+            &filtered,
+            Some(7),
+            "/ filter  esc clear filter",
+        ),
+        (
+            "a filter that hides every row",
+            moved(&four, live(), 0, "prod-uk"),
+            &four,
+            Some(8),
+            "/ filter  esc clear filter",
+        ),
+        (
+            "a kubeconfig with no contexts",
+            picking(&none, live()),
+            &none,
+            Some(9),
+            "/ filter  esc cancel",
+        ),
+        (
+            "the live row",
+            picking(&four, live()),
+            &four,
+            None,
+            "↑↓ move  / filter  ⏎ switch  esc cancel",
+        ),
+    ] {
+        let drawn = render_at(MIN_WIDTH, 30, &app, &pick_over(&alerts, &now, &[], rows));
+        let frame = rows_of(&drawn);
+        let box_ = nested(&frame);
+        let button = frame
+            .iter()
+            .position(|row| row.contains("[ ⏎ switch ]"))
+            .unwrap_or_else(|| panic!("{what}: no ⏎ button:\n{}", frame.join("\n")));
+        let x = frame[button]
+            .chars()
+            .position(|c| c == '[')
+            .expect("the button");
+        let cell = drawn.cell((x as u16, button as u16)).expect("a cell");
+        assert_eq!(
+            unframed(&frame[frame.len() - 2]),
+            footer,
+            "{what}: the footer"
+        );
+        let Some(excerpt) = excerpt else {
+            assert_eq!(
+                cell.fg,
+                ink(theme::TEXT, Depth::TrueColor),
+                "{what}: the button"
+            );
+            assert!(
+                cell.modifier.contains(Modifier::REVERSED),
+                "{what}: the button"
+            );
+            continue;
+        };
+        assert_eq!(
+            cell.fg,
+            ink(theme::DIM, Depth::TrueColor),
+            "{what}: the button"
+        );
+        assert!(
+            !box_.iter().any(|row| row.contains(MARKER.trim_end())),
+            "{what}: a row was marked selected"
+        );
+
+        // **Rows above the excerpt's last blank are contexts, found by name, and rows below it are
+        // the slot's sentence, found by its first line** — the shape all three excerpts draw.
+        let inner = &blocks[excerpt][1..blocks[excerpt].len() - 1];
+        let blank = inner
+            .iter()
+            .rposition(|row| words_of(row).is_empty())
+            .expect("the excerpt separates the slot with a blank row");
+        for row in inner[..blank]
+            .iter()
+            .filter(|row| !words_of(row).is_empty())
+        {
+            let name = words_of(row).remove(0);
+            let at = box_
+                .iter()
+                .position(|drawn| words_of(drawn).first() == Some(&name))
+                .unwrap_or_else(|| panic!("{what}: {name} is not drawn:\n{}", box_.join("\n")));
+            assert_eq!(at_page_width(&box_[at], true), *row, "{what}: {name}'s row");
+        }
+        let sentence = &inner[blank + 1..];
+        let first = sentence[0].trim_matches('│').trim();
+        let at = box_
+            .iter()
+            .position(|drawn| drawn.contains(first))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{what}: the slot does not say {first:?}:\n{}",
+                    box_.join("\n")
+                )
+            });
+        assert!(
+            words_of(&box_[at - 1]).is_empty(),
+            "{what}: no blank row above the slot"
+        );
+        for (n, row) in sentence.iter().enumerate() {
+            assert_eq!(
+                at_page_width(&box_[at + n], false),
+                *row,
+                "{what}: the slot, row {n}"
+            );
+        }
+        for other in [6, 7, 8, 9].into_iter().filter(|&nth| nth != excerpt) {
+            let last = blocks[other][blocks[other].len() - 2]
+                .trim_matches('│')
+                .trim();
+            assert!(
+                !inside(&box_).contains(last),
+                "{what}: `[{other}]`'s {last:?} was drawn too"
+            );
+        }
+    }
+
+    // **A filter over a picker with no row selected is still *pick one*, not *nothing matches***:
+    // the rows it shows are right there, and only a filter that hides them all is about the filter.
+    let (box_, _) = picked(&moved(&dangling, live(), 0, "prod"), &dangling);
+    let said = inside(&box_);
+    assert!(
+        said.contains("prod-eu")
+            && said.contains(&UNSTARTED.join(" "))
+            && !said.contains("No context matches"),
+        "{}",
+        box_.join("\n")
+    );
+    // **And a filter over a kubeconfig with no contexts is still about the file**: there was
+    // nothing for it to hide.
+    let said = inside(&picked(&moved(&none, live(), 0, "prod"), &none).0);
+    assert!(
+        said.contains(&EMPTIED.join(" ")) && !said.contains("No context matches"),
+        "{said}"
+    );
+
+    let (box_, frame) = picked(&moved(&four, live(), 0, "prod-uk"), &four);
+    assert!(
+        !box_
+            .iter()
+            .any(|row| ["prod-eu", "staging", "kind-k8rs", "dev-cluster"]
+                .iter()
+                .any(|name| row.contains(name))),
+        "a filter that hides every row still drew one:\n{}",
+        frame.join("\n")
+    );
+    let shadowed = contexts_of(&FOUR.replace("name: staging,", "name: prod-eu,"));
+    assert!(shadowed[1].shadowed);
+    let (box_, frame) = picked(&moved(&shadowed, live(), 1, ""), &shadowed);
+    assert_eq!(unframed(&frame[22]), "↑↓ move  / filter  esc cancel");
+    assert!(
+        inside(&box_).contains("Every lookup by that name, ⏎ here included, finds it first"),
+        "{}",
+        box_.join("\n")
+    );
+}
+
+/// **The box's `esc` button and the footer name `esc` with one word, in every state `/` can be
+/// typed into** (NOTES § D264 ruling 31), on all three connections: `clear filter` on both while
+/// `/` holds text — over a live row, no row selected, a shadowed row, only undefined rows, no row
+/// shown and a kubeconfig with no contexts — and `quit` at startup or `cancel` otherwise when it
+/// holds none. **The pair stays one centred run four columns apart** whichever word it carries,
+/// six columns wider with `clear filter`.
+#[test]
+fn the_esc_button_and_the_footer_say_one_word_in_every_state_a_filter_can_be_typed_in() {
+    let four = contexts_of(FOUR);
+    let dangling = contexts_of(&FOUR.replace("current-context: prod-eu", "current-context: gone"));
+    let shadowed = contexts_of(&FOUR.replace("name: staging,", "name: prod-eu,"));
+    let undefined = undefined_only();
+    let filtered = contexts_of(&beside(UNDEFINED, ""));
+    let none: Vec<Choice> = Vec::new();
+    for (what, rows, down, filter) in [
+        ("the live row", &four, 0, "prod"),
+        ("no row selected", &dangling, 0, "prod"),
+        ("a shadowed row", &shadowed, 1, "prod"),
+        ("every row undefined", &undefined, 0, "cluster"),
+        (
+            "a filter that shows only undefined rows",
+            &filtered,
+            0,
+            "-cluster",
+        ),
+        ("a filter that hides every row", &four, 0, "prod-uk"),
+        ("a kubeconfig with no contexts", &none, 0, "prod"),
+    ] {
+        for connection in [
+            live(),
+            views::Connection::Dropped(Some("prod-eu".to_owned())),
+            views::Connection::Never,
+        ] {
+            for typed in ["", filter] {
+                let label = format!("{what}, /{typed:?}, {connection:?}");
+                let expected = match (typed.is_empty(), &connection) {
+                    (false, _) => "clear filter",
+                    (true, views::Connection::Never) => "quit",
+                    (true, _) => "cancel",
+                };
+                let (box_, frame) = picked(&moved(rows, connection.clone(), down, typed), rows);
+                let footer = unframed(&frame[usize::from(MIN_HEIGHT) - 2]);
+                let (_, said) = footer
+                    .rsplit_once("esc ")
+                    .unwrap_or_else(|| panic!("{label}: no esc in {footer:?}"));
+                assert_eq!(said, expected, "{label}: the footer");
+
+                let row = box_
+                    .iter()
+                    .find(|row| row.contains("[ ⏎ "))
+                    .unwrap_or_else(|| panic!("{label}: no buttons:\n{}", box_.join("\n")));
+                let inner = row.trim_matches('│');
+                let (start, end) = (
+                    inner.find('[').expect("a button"),
+                    inner.rfind(']').expect("a button") + 1,
+                );
+                let (enter, leave) = inner[start..end]
+                    .split_once("    ")
+                    .unwrap_or_else(|| panic!("{label}: no four-column gap in {row:?}"));
+                assert!(
+                    enter.starts_with("[ ⏎ ") && enter.ends_with(" ]"),
+                    "{label}: {row:?}"
+                );
+                assert_eq!(
+                    leave
+                        .strip_prefix("[ esc ")
+                        .and_then(|leave| leave.strip_suffix(" ]")),
+                    Some(said),
+                    "{label}: the button and the footer spell esc two ways in {row:?}"
+                );
+                let (left, right) = (inner[..start].chars().count(), inner[end..].chars().count());
+                assert!(
+                    left.abs_diff(right) <= 1,
+                    "{label}: the pair is not centred in {row:?}"
+                );
+                if what == "a filter that hides every row"
+                    && !typed.is_empty()
+                    && connection == live()
+                {
+                    println!("{}", frame.join("\n"));
+                }
+            }
+        }
+    }
+}
+
+/// The rows of a drawn buffer, for a test that also reads its cells.
+fn rows_of(buffer: &Buffer) -> Vec<String> {
+    rows(buffer)
+}
+
+/// **The styles the page says carry a fact**: a written tag bright with no marker, a derived one
+/// dim behind `~`, and a row the cursor skips dim throughout — while the unnamed row is drawn like
+/// any other (§ A context whose name strips to nothing: *not dimmed*).
+#[test]
+fn a_guess_is_dim_behind_a_tilde_and_a_statement_is_bright_with_none() {
+    let four = contexts_of(FOUR);
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let drawn = render(
+        &picking(&four, live()),
+        &pick_over(&alerts, &now, &[], &four),
+    );
+    let fg = |needle: &str| {
+        let y = rows(&drawn)
+            .iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} is not drawn"));
+        let x = rows(&drawn)[y]
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(needle.chars().count())
+            .position(|w| w.iter().collect::<String>() == needle)
+            .expect("found above");
+        drawn.cell((x as u16, y as u16)).expect("a cell").fg
+    };
+    assert_eq!(fg("aws · prod"), ink(theme::TEXT, Depth::TrueColor));
+    assert_eq!(fg("~local"), ink(theme::DIM, Depth::TrueColor));
+    assert_eq!(fg("~aws"), ink(theme::DIM, Depth::TrueColor));
+    assert!(
+        !holds(&drawn, "~aws · prod"),
+        "a written tag was marked as a guess"
+    );
+    assert_eq!(fg("staging"), ink(theme::TEXT, Depth::TrueColor));
+
+    let yaml = beside(
+        "- {name: old-cluster, context: {cluster: nowhere, user: u}}\n\
+         - {name: \"\\u200B\", context: {cluster: anchor, user: u}}\n\
+         - {name: anchor, context: {cluster: anchor, user: u}}\n",
+        "",
+    );
+    let rows_ = contexts_of(&yaml);
+    let drawn = render_at(
+        MIN_WIDTH,
+        30,
+        &picking(&rows_, live()),
+        &pick_over(&alerts, &now, &[], &rows_),
+    );
+    let fg = |needle: &str, nth: usize| {
+        let (y, x) = rows(&drawn)
+            .iter()
+            .enumerate()
+            .filter_map(|(y, row)| {
+                row.chars()
+                    .collect::<Vec<_>>()
+                    .windows(needle.chars().count())
+                    .position(|w| w.iter().collect::<String>() == needle)
+                    .map(|x| (y, x))
+            })
+            .nth(nth)
+            .unwrap_or_else(|| panic!("{needle:?} is not drawn {nth} times"));
+        drawn.cell((x as u16, y as u16)).expect("a cell").fg
+    };
+    assert_eq!(fg("old-cluster", 0), ink(theme::DIM, Depth::TrueColor));
+    assert_eq!(fg(views::UNNAMED, 0), ink(theme::TEXT, Depth::TrueColor));
+    assert_eq!(
+        fg("anchor", 1),
+        ink(theme::DIM, Depth::TrueColor),
+        "the duplicate"
+    );
+    assert_eq!(
+        fg("anchor", 0),
+        ink(theme::TEXT, Depth::TrueColor),
+        "the entry it shadows"
+    );
+}
+
+/// **`⚠ TLS not verified` beats `(current)`** (§ The badge tie-break) — and only on a row that is
+/// both: the current row alone still says `(current)`.
+#[test]
+fn a_tls_warning_takes_the_badge_from_current_and_nothing_else_does() {
+    let insecure = FOUR.replace("current-context: prod-eu", "current-context: dev-cluster");
+    for (yaml, current, badge, not) in [
+        (
+            insecure.as_str(),
+            "dev-cluster",
+            "⚠ TLS not verified",
+            "(current)",
+        ),
+        (FOUR, "prod-eu", "(current)", "⚠ TLS not verified"),
+    ] {
+        let rows = contexts_of(yaml);
+        let (box_, _) = picked(&picking(&rows, live()), &rows);
+        let row = box_
+            .iter()
+            .find(|row| row.contains(&format!("▸ {current}")))
+            .unwrap_or_else(|| panic!("{current} is not the selected row:\n{}", box_.join("\n")));
+        assert!(row.contains(badge), "{row:?}");
+        assert!(!row.contains(not), "{row:?}");
+    }
+    let rows = contexts_of(&insecure);
+    let (box_, _) = picked(&picking(&rows, live()), &rows);
+    assert!(
+        !box_.iter().any(|row| row.contains("(current)")),
+        "(current) was drawn beside the warning that took its slot"
+    );
+}
+
+/// **One context and `X`: the picker opens and says why nothing can be picked** — the page's
+/// sentence, in the place of the one about switching, which two contexts keep — **and a name too
+/// long for its row gives way from its front there too** (NOTES § D264 rulings 5 and 11), keeping
+/// the tail that tells one EKS cluster from the next.
+#[test]
+fn one_context_says_it_is_the_only_one_and_two_do_not() {
+    let one = |name: &str| {
+        contexts_of(&format!(
+            "apiVersion: v1\n\
+             kind: Config\n\
+             current-context: '{name}'\n\
+             clusters: [{{name: prod, cluster: {{server: 'https://prod-eu.example:6443'}}}}]\n\
+             contexts: [{{name: '{name}', context: {{cluster: prod, user: u}}}}]\n\
+             users: [{{name: u, user: {{token: k8rs-tests-fake-static-token}}}}]\n"
+        ))
+    };
+    let prod = one("prod-eu");
+    let (box_, _) = picked(&picking(&prod, live()), &prod);
+    assert!(
+        inside(&box_).contains("prod-eu is the only cluster in your kubeconfig."),
+        "{}",
+        box_.join("\n")
+    );
+    assert!(!box_.iter().any(|row| row.contains(UNCHANGED[0])));
+
+    // **The page's own ARN excerpt, both rows byte for byte** (§ The picker, ruling 21): a name
+    // narrower than the line is drawn whole and the sentence wraps, at the floor the page names.
+    let excerpt = &fenced("context.md", "## The picker")[1];
+    let arn = "arn:aws:eks:eu-west-1:111122223333:cluster/payments-prod";
+    let rows = one(arn);
+    let (box_, _) = picked(&picking(&rows, live()), &rows);
+    let at = box_
+        .iter()
+        .position(|row| row == &excerpt[0])
+        .unwrap_or_else(|| panic!("{:?} is not drawn:\n{}", excerpt[0], box_.join("\n")));
+    assert_eq!(excerpt.len(), 2, "the page's excerpt");
+    assert_eq!(box_[at + 1], excerpt[1], "the sentence's second row");
+
+    let wider =
+        "arn:aws:eks:eu-west-1:111122223333:cluster/payments-platform-production-blue-green";
+    let rows = one(wider);
+    let (box_, _) = picked(&picking(&rows, live()), &rows);
+    let said: Vec<&String> = box_
+        .iter()
+        .filter(|row| row.contains("payments-platform") || row.contains("only cluster"))
+        .filter(|row| !row.contains('→') && !row.contains(MARKER))
+        .collect();
+    assert_eq!(
+        said.len(),
+        2,
+        "the sentence is not two rows:\n{}",
+        box_.join("\n")
+    );
+    let sentence = words(
+        &said
+            .iter()
+            .map(|row| row.trim_matches('│'))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    assert!(
+        sentence.starts_with(CUT)
+            && sentence.ends_with("-production-blue-green is the only cluster in your kubeconfig."),
+        "{sentence:?}"
+    );
+
+    let four = contexts_of(FOUR);
+    let (box_, _) = picked(&picking(&four, live()), &four);
+    assert!(!box_.iter().any(|row| row.contains("the only cluster")));
+    assert!(box_.iter().any(|row| row.contains(UNCHANGED[1])));
+}
+
+/// **More contexts than the box has rows: the list scrolls with the cursor, a scrollbar says so,
+/// and the box grows with the terminal** (NOTES § D264 rulings 6 and 9). Measured at the floor and
+/// at forty rows, each against the same rule: the box stops one row short of the body, so the
+/// list is what the body has left after the box's fixed rows — never `MODAL_ROWS`, which only
+/// agrees with that at 24.
+#[test]
+fn a_long_list_scrolls_under_a_scrollbar_and_the_box_grows_with_the_terminal() {
+    let contexts: String = (0..30)
+        .map(|n| format!("- {{name: ctx-{n:02}, context: {{cluster: anchor, user: u}}}}\n"))
+        .collect();
+    let rows = contexts_of(&beside(&contexts, ""));
+    for height in [MIN_HEIGHT, 40] {
+        for down in [0, 3, 17, 30, 40] {
+            let (box_, frame) = picked_at(height, &moved(&rows, live(), down, ""), &rows);
+            assert_eq!(frame.len(), usize::from(height));
+            // The box's rows: its two borders, and the nine the list does not take — four blanks,
+            // the one-row server line, the two-line sentence, the buttons and the blank under them.
+            let fixed = 2 + 9;
+            let listed = body_rows(&frame) - 1 - fixed;
+            assert_eq!(
+                box_.len(),
+                body_rows(&frame) - 1,
+                "{height} rows, ↓ {down}: the box is not one row short of the body:\n{}",
+                frame.join("\n")
+            );
+            let list = &box_[2..2 + listed];
+            let selected = if down == 0 {
+                "anchor".to_owned()
+            } else {
+                format!("ctx-{:02}", (down - 1).min(29))
+            };
+            let at = list
+                .iter()
+                .position(|row| row.contains(&format!("▸ {selected} ")))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{height}, ↓ {down}: {selected} is not drawn:\n{}",
+                        box_.join("\n")
+                    )
+                });
+            assert_eq!(at, down.min(listed - 1), "{height}, ↓ {down}: the window");
+
+            // **The scrollbar is the list's right-hand column**: its thumb at the top of the track
+            // while the window is at the top, and at the bottom once the cursor is on the last row.
+            let edge: Vec<char> = list
+                .iter()
+                .map(|row| {
+                    row.chars()
+                        .rev()
+                        .nth(1)
+                        .expect("a column inside the border")
+                })
+                .collect();
+            assert!(
+                edge.iter().all(|c| ['█', '║'].contains(c)) && edge.contains(&'█'),
+                "{height}, ↓ {down}: no scrollbar down the list: {edge:?}\n{}",
+                box_.join("\n")
+            );
+            if down < listed {
+                assert_eq!(
+                    edge[0], '█',
+                    "{height}, ↓ {down}: the thumb is not at the top"
+                );
+            }
+            if down >= 30 {
+                assert_eq!(
+                    edge[listed - 1],
+                    '█',
+                    "{height}, ↓ {down}: the thumb is not at the foot"
+                );
+                assert_ne!(
+                    edge[0], '█',
+                    "{height}, ↓ {down}: the thumb still covers the top"
+                );
+            }
+        }
+    }
+
+    // **The thumb is as long as the share of the list on screen**, to the nearest cell — twenty of
+    // twenty-three rows is seventeen cells of a twenty-row track, with the window at the top and
+    // at the foot alike.
+    let contexts: String = (0..22)
+        .map(|n| format!("- {{name: ctx-{n:02}, context: {{cluster: anchor, user: u}}}}\n"))
+        .collect();
+    let rows = contexts_of(&beside(&contexts, ""));
+    for down in [0, 22] {
+        let (box_, frame) = picked_at(40, &moved(&rows, live(), down, ""), &rows);
+        let listed = body_rows(&frame) - 1 - (2 + 9);
+        let thumb = box_[2..2 + listed]
+            .iter()
+            .filter(|row| row.chars().rev().nth(1) == Some('█'))
+            .count();
+        let share = (listed * listed) as f64 / rows.len() as f64;
+        assert_eq!(listed, 20, "the fixture's arithmetic");
+        assert_eq!(
+            thumb,
+            share.round() as usize,
+            "↓ {down}: the thumb's length"
+        );
+    }
+
+    // **A list that fits has no scrollbar** — `screens/widgets.md` § 2's *only* when the content is
+    // taller than the viewport.
+    let four = contexts_of(FOUR);
+    for height in [MIN_HEIGHT, 40] {
+        let (box_, _) = picked_at(height, &picking(&four, live()), &four);
+        assert!(
+            !box_
+                .iter()
+                .any(|row| row.contains('█') || row.contains('║')),
+            "{height}: a scrollbar over a list that fits:\n{}",
+            box_.join("\n")
+        );
+    }
+}
+
+/// **A context name and a server address at the ingest bound cannot size the picker**: the tag and
+/// badge columns hold still, the name gives way from its front, the server line is cut at the rows
+/// the longest sentence k8rs writes in its place takes, and **the sentence and the buttons are
+/// still on the box** (`tester`, NOTES § D264).
+#[test]
+fn a_name_and_an_address_at_the_ingest_bound_move_no_column_and_push_nothing_off() {
+    let huge = "n".repeat(10_000);
+    let yaml = beside(
+        &format!(
+            "- {{name: {huge}, context: {{cluster: long, user: u, \
+             extensions: [{{name: k8rs, extension: {{tag: t}}}}]}}}}\n"
+        ),
+        &format!(
+            "- {{name: long, cluster: {{server: 'https://{}.example:6443'}}}}\n",
+            "h".repeat(600)
+        ),
+    );
+    let rows = contexts_of(&yaml);
+    let address = match &rows[1].server {
+        Address::Server(address) => address.clone(),
+        other => panic!("the long address was not read: {other:?}"),
+    };
+    assert!(
+        address.len() >= 512,
+        "the fixture's address is {} bytes",
+        address.len()
+    );
+    let (short_box, _) = picked(&picking(&rows, live()), &rows);
+    let (box_, frame) = picked(&moved(&rows, live(), 1, ""), &rows);
+    assert_eq!(frame.len(), 24);
+    assert!(frame.iter().all(|row| row.chars().count() == 80));
+    assert_eq!(
+        box_.len(),
+        short_box.len(),
+        "the box changed height under the cursor"
+    );
+    assert!(box_.len() < body_rows(&frame), "the box outgrew the body");
+    let long_row = box_
+        .iter()
+        .find(|row| row.contains(&format!("▸ {CUT}nnn")))
+        .expect("the long row, cut from its front");
+    assert_eq!(
+        long_row.chars().nth(1 + 2 + 2 + 30 + GAP),
+        Some('t'),
+        "the tag moved: {long_row:?}"
+    );
+    // **The slot keeps the rows of the longest sentence k8rs itself writes there, and not one
+    // more** — § A context defined twice's, behind the page's own `prod-eu`: drawn whole at the
+    // floor in the rows the page gives it, and those are the rows a 512-byte address is cut at.
+    // A slot one row taller costs the list that row for nothing, and one shorter cuts k8rs's own
+    // sentence.
+    let shadowed = contexts_of(&FOUR.replace("name: staging,", "name: prod-eu,"));
+    let (duplicate, _) = picked(&moved(&shadowed, live(), 1, ""), &shadowed);
+    let sentence: Vec<&String> = duplicate
+        .iter()
+        .skip_while(|row| !row.contains("  —  "))
+        .take_while(|row| !words_of(row).is_empty())
+        .collect();
+    let page = fenced("context.md", "## Unhappy states")[3].len();
+    assert!(
+        sentence.len() == page && !sentence.iter().any(|row| row.contains(CUT)),
+        "the duplicate's sentence is not the page's {page} rows, whole:\n{}",
+        duplicate.join("\n")
+    );
+    let server = box_.iter().filter(|row| row.contains("hhh")).count();
+    assert_eq!(
+        server,
+        sentence.len(),
+        "the server line took {server} rows:\n{}",
+        box_.join("\n")
+    );
+    for kept in [UNCHANGED[0], UNCHANGED[1], "[ ⏎ switch ]", "[ esc cancel ]"] {
+        assert!(
+            box_.iter().any(|row| row.contains(kept)),
+            "{kept:?} was pushed off the box:\n{}",
+            frame.join("\n")
+        );
+    }
+}
+
+/// **The failure box a picked context ends in**, as drawn over the Alerts screen at the floor.
+fn unconnected_box(
+    to: Option<&str>,
+    before: views::Before,
+    sent: bool,
+    fault: Fault,
+    coverage: Coverage,
+) -> (Vec<String>, Vec<String>) {
+    failure_box(views::Modal::Unconnected {
+        to: to.map(str::to_owned),
+        before,
+        sent,
+        fault,
+        said: None,
+        coverage,
+        renewal: None,
+    })
+}
+
+/// **[`failed_under`] the page's own header, with nothing in the vitals zone** — `ctx: staging · ⚠
+/// not allowed · admin`, read off § When the new cluster does not work's `[0]`, and never the
+/// helper [`screen`]'s `prod-eu · live`: the header names the context that was tried and not the
+/// one live before it (§ Opening at startup), and nothing from the old cluster survives the switch
+/// (§ What happens on `⏎`), so the page draws no vitals.
+fn failure_box(modal: views::Modal) -> (Vec<String>, Vec<String>) {
+    failed_under(modal, &page_header(), "")
+}
+
+/// **A failure box at the floor under `header` and `vitals`**, the caller's two strings — so a
+/// test can hand vitals over and watch the startup frame drop them.
+fn failed_under(modal: views::Modal, header: &str, vitals: &str) -> (Vec<String>, Vec<String>) {
+    let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
+    let now = now();
+    let log = [
+        "$ kubectl get daemonsets -A --watch".to_owned(),
+        views::GET_CONTEXTS.to_owned(),
+    ];
+    let mut screen = pick_over(&alerts, &now, &log, &[]);
+    screen.context = header;
+    screen.vitals = vitals;
+    let app = App {
+        modal: Some(modal),
+        ..App::default()
+    };
+    let drawn = rows(&render(&app, &screen));
+    (nested(&drawn), drawn)
+}
+
+/// The right zone of the header both *staging said no* mockups draw.
+fn page_header() -> String {
+    fenced("context.md", "## When the new cluster does not work")[0][0]
+        .trim()
+        .to_owned()
+}
+
+/// **A drawn header against the page's**, which is 70 columns wide: at 80 the centred [`NAME`]
+/// fits between the zones and at 70 it does not (`screens/widgets.md` § 1a drops it first), so it
+/// is blanked before the rows are compared, and nothing else is.
+fn against_page_header(drawn: &str, page: &str) {
+    assert_eq!(
+        drawn
+            .replacen(NAME, &" ".repeat(width(NAME)), 1)
+            .trim_start(),
+        page.trim_start(),
+        "the header"
+    );
+}
+
+/// The picker a failed first connection goes back to.
+fn never(rows: &[Choice]) -> views::Before {
+    views::Before::Picking(views::Picker::new(rows, views::Connection::Never))
+}
+
+/// **Both *staging said no* boxes are the screen file's, byte for byte** — `Refused` on a watch
+/// cluster-wide, over a live switch and over the startup picker: every row of the box, its title
+/// and both borders included, and the footer each draws (`screens/context.md` § When the new
+/// cluster does not work, NOTES § D264 ruling 1) — **the button row too**, whose odd spare column
+/// the page puts on the left, where `screens/dialogs.md`'s two boxes of the same width put it
+/// (ruling 19). **The paragraph's next step is the running one** (ruling 23), six rows in the box,
+/// and **the header is each mockup's own** ([`against_page_header`]).
+#[test]
+fn both_refusals_are_the_screen_files_boxes() {
+    let four = contexts_of(FOUR);
+    let blocks = fenced("context.md", "## When the new cluster does not work");
+    for (block, before) in [
+        (
+            &blocks[0],
+            views::Before::Connected(Some("prod-eu".to_owned())),
+        ),
+        (&blocks[2], never(&four)),
+    ] {
+        let (drawn, frame) = unconnected_box(
+            Some("staging"),
+            before,
+            true,
+            Fault::Refused,
+            Coverage::Cluster,
+        );
+        let mockup = nested(block);
+        assert_eq!(drawn.len(), mockup.len(), "the box's height");
+        for (n, (drawn, row)) in drawn.iter().zip(&mockup).enumerate() {
+            assert_eq!(drawn, row, "row {n}");
+        }
+        assert_eq!(
+            unframed(&frame[22]),
+            unframed(&block[block.len() - 2]),
+            "the footer"
+        );
+        against_page_header(&frame[0], &block[0]);
+    }
+}
+
+/// **A namespace the reader named and one k8rs had to guess take the page's two next steps**, and
+/// the same opening reason (`screens/context.md` § The scope changes the next step, not just a
+/// number) — the contrast `Coverage::namespace()` alone collapsed. **Each is the page's quote with
+/// nothing added**: the reason before it ends in the full stop `failed` writes, and what follows it
+/// in the box is the way out, so a stop the driver's sentence does not have would be caught.
+#[test]
+fn a_named_namespace_and_a_guessed_one_take_the_page_s_two_next_steps() {
+    let excerpt = &fenced("context.md", "## When the new cluster does not work")[1];
+    let paragraphs: Vec<String> = excerpt
+        .split(|row| row.ends_with(':') && !row.starts_with(' '))
+        .skip(1)
+        .map(|rows| words(&rows.join(" ")))
+        .collect();
+    assert_eq!(paragraphs.len(), 2, "{excerpt:?}");
+    for (coverage, next, namespace) in [
+        (
+            Coverage::Asked("payments".to_owned()),
+            &paragraphs[0],
+            "payments",
+        ),
+        (
+            Coverage::Blind("default".to_owned()),
+            &paragraphs[1],
+            "default",
+        ),
+    ] {
+        let (drawn, _) = unconnected_box(
+            Some("staging"),
+            never(&[]),
+            true,
+            Fault::Refused,
+            coverage.clone(),
+        );
+        let said = inside(&drawn);
+        assert!(
+            said.contains(&format!(
+                "needs to `list` and `watch` pods in the namespace {namespace}. {next} Nothing has \
+                 connected yet"
+            )),
+            "{coverage:?}:\n{}",
+            drawn.join("\n")
+        );
+        assert!(!said.contains("across the whole cluster"), "{coverage:?}");
+    }
+}
+
+/// **Every other fault is the driver's sentence under the title of its class** — *said no*,
+/// *did not answer*, *could not be opened* — and the class is whether a request reached a cluster,
+/// never the HTTP class (`screens/context.md` § Every other fault has its own sentence, its table)
+/// **and never the path the fault came by**: the four that build no client are *could not be
+/// opened* on a watch too (NOTES § D264 ruling 17). The
+/// sentence is the moved functions' own output, because that is the page's claim about it; the
+/// titles are the page's table, row by row. The way out is on every one of them.
+#[test]
+fn every_fault_is_the_driver_s_sentence_under_the_title_its_request_earns() {
+    let four = contexts_of(FOUR);
+    let sent = [
+        (Fault::Refused, "said no"),
+        (Fault::Expired, "said no"),
+        (Fault::Rejected, "said no"),
+        (Fault::Gone, "said no"),
+        (Fault::Conflict, "said no"),
+        (Fault::Unanswered, "did not answer"),
+        (Fault::Unfinished, "did not answer"),
+        (Fault::Kubeconfig, "could not be opened"),
+        (Fault::NoContext, "could not be opened"),
+        (Fault::BadEntry, "could not be opened"),
+        (Fault::NoCredential, "could not be opened"),
+    ];
+    let unsent = [
+        Fault::Kubeconfig,
+        Fault::NoContext,
+        Fault::BadEntry,
+        Fault::NoCredential,
+        Fault::Unanswered,
+    ];
+    let cases = sent
+        .iter()
+        .map(|&(fault, title)| (true, fault, title))
+        .chain(
+            unsent
+                .iter()
+                .map(|&fault| (false, fault, "could not be opened")),
+        );
+    for (went_out, fault, title) in cases {
+        // **Asked as *reach this cluster* wherever the title is *could not be opened*** — the
+        // page's table, row by row — **and the running next step after it only for ruling 32's
+        // three, and only where a request went out** (NOTES § D264 rulings 23 and 32). Written from
+        // the ruling's list and not read off `next_step`, which answers `Unanswered` unsent too.
+        let reason = if title != "could not be opened" {
+            let asked = format!(
+                "{} {}",
+                views::watching("pods"),
+                views::scope(&Coverage::Cluster)
+            );
+            capitalised(&views::because(fault, &asked, None, None))
+        } else {
+            capitalised(&views::because(fault, views::REACH, None, None))
+        };
+        let has_next =
+            went_out && matches!(fault, Fault::Refused | Fault::Unanswered | Fault::Gone);
+        let paragraph = if has_next {
+            let next = views::next_step(fault, &Coverage::Cluster, "pods", true)
+                .expect("ruling 32 lists this fault");
+            format!("{reason}. {next}")
+        } else {
+            format!("{reason}.")
+        };
+        for (before, way_out) in [
+            (
+                views::Before::Connected(Some("prod-eu".to_owned())),
+                "Nothing is wrong with prod-eu — X takes you back.",
+            ),
+            (
+                never(&four),
+                "Nothing has connected yet — esc takes you back to the list to try a different \
+                 cluster.",
+            ),
+        ] {
+            let (drawn, _) =
+                unconnected_box(Some("staging"), before, went_out, fault, Coverage::Cluster);
+            let said = inside(&drawn);
+            assert!(
+                drawn[0].starts_with(&format!("┌ staging {title} ─")),
+                "{fault:?}, sent {went_out}: {:?}",
+                drawn[0]
+            );
+            // **The paragraph ends where the way out begins**, so a next step drawn where none is
+            // owed is a red here and not a longer string that still contains the reason.
+            assert!(
+                said.contains(&words(&format!("{paragraph} {way_out}"))),
+                "{fault:?}, sent {went_out}:\n{}",
+                drawn.join("\n")
+            );
+            assert!(drawn.len() <= MODAL_ROWS + 2, "{fault:?}");
+        }
+    }
+
+    // **Ruling 32's `Gone` in its own bytes, straight after its reason and straight before the way
+    // out — and `NoCredential`, sent or not, with nothing between its reason and the way out.**
+    for (went_out, fault, title, said) in [
+        (
+            true,
+            Fault::Gone,
+            "said no",
+            "This server says there is no such thing when k8rs tries to `list` and `watch` pods \
+             across the whole cluster. Check the server address this kubeconfig names — as \
+             written, it does not lead to a Kubernetes API server Nothing has connected yet",
+        ),
+        (
+            true,
+            Fault::NoCredential,
+            "could not be opened",
+            "The program this kubeconfig logs in with gave k8rs nothing to sign in with. Nothing \
+             has connected yet",
+        ),
+        (
+            false,
+            Fault::NoCredential,
+            "could not be opened",
+            "The program this kubeconfig logs in with gave k8rs nothing to sign in with. Nothing \
+             has connected yet",
+        ),
+    ] {
+        let (drawn, _) = unconnected_box(
+            Some("staging"),
+            never(&four),
+            went_out,
+            fault,
+            Coverage::Cluster,
+        );
+        assert!(
+            drawn[0].starts_with(&format!("┌ staging {title} ─")) && inside(&drawn).contains(said),
+            "{fault:?}, sent {went_out}:\n{}",
+            drawn.join("\n")
+        );
+    }
+
+    // **The login program is named where the kubeconfig has one** — the `401` on an EKS login the
+    // first draft could not name.
+    let (drawn, _) = failure_box(views::Modal::Unconnected {
+        to: Some("staging".to_owned()),
+        before: never(&four),
+        sent: true,
+        fault: Fault::Expired,
+        said: None,
+        coverage: Coverage::Cluster,
+        renewal: Some("aws-iam-authenticator".to_owned()),
+    });
+    assert!(inside(&drawn).contains("it comes from `aws-iam-authenticator`, so renew it there."));
+
+    // **The cluster's own words are quoted, and bounded** — four kilobytes of a `Strict` rejection
+    // cannot push the way out or the button off the box.
+    let (drawn, frame) = failure_box(views::Modal::Unconnected {
+        to: Some("staging".to_owned()),
+        before: views::Before::Connected(Some("prod-eu".to_owned())),
+        sent: true,
+        fault: Fault::Rejected,
+        said: Some("spec.containers[0].env: ".repeat(170)),
+        coverage: Coverage::Cluster,
+        renewal: None,
+    });
+    assert_eq!(drawn.len(), MODAL_ROWS + 2, "{}", frame.join("\n"));
+    let said = inside(&drawn);
+    assert!(said.contains("and said: spec.containers[0].env:") && said.contains(CUT));
+    assert!(said.contains("X takes you back.") && said.contains("[ esc dismiss ]"));
+}
+
+/// **Two failed switches in a row, and the second box still names the context that was last
+/// live** (NOTES § D264 ruling 15). Each failure is built the way the caller builds it, off
+/// [`views::Picker::chosen`] over the picker `X` opens — the first over live `prod-eu`, the second
+/// over nothing live — and each says *Nothing is wrong with prod-eu — X takes you back.* under
+/// `esc dismiss`, never *Nothing has connected yet*. **A run that never connected says the second,
+/// on both attempts**, under `esc back to the list`.
+#[test]
+fn a_second_failed_switch_in_a_row_still_names_the_context_that_was_last_live() {
+    let four = contexts_of(FOUR);
+    let fail = |connection: views::Connection, down: usize| {
+        let mut picker = views::Picker::new(&four, connection);
+        for _ in 0..down {
+            picker.down(&four);
+        }
+        let views::Chosen::Connect { row, before } = picker.chosen(&four) else {
+            panic!("⏎ did not connect");
+        };
+        let (drawn, frame) = unconnected_box(
+            Some(views::drawn_name(row)),
+            before.clone(),
+            true,
+            Fault::Refused,
+            Coverage::Cluster,
+        );
+        (before, inside(&drawn), unframed(&frame[22]))
+    };
+
+    let mut connection = live();
+    for (attempt, down) in [(1, 1), (2, 2)] {
+        let (before, said, footer) = fail(connection, down);
+        assert!(
+            said.contains("Nothing is wrong with prod-eu — X takes you back.")
+                && !said.contains("Nothing has connected yet"),
+            "switch {attempt} in a row: {said}"
+        );
+        assert_eq!(footer, "esc dismiss", "switch {attempt} in a row");
+        let views::Before::Connected(last) = before else {
+            panic!("switch {attempt} in a row went back to a list nothing had connected behind");
+        };
+        connection = views::Connection::Dropped(last);
+    }
+
+    for attempt in [1, 2] {
+        let (_, said, footer) = fail(views::Connection::Never, attempt);
+        assert!(
+            said.contains("Nothing has connected yet — esc takes you back to the list")
+                && !said.contains("Nothing is wrong with"),
+            "startup attempt {attempt}: {said}"
+        );
+        assert_eq!(footer, "esc back to the list", "startup attempt {attempt}");
+    }
+}
+
+/// **A context name past the ingest bound costs the failure box nothing** (NOTES § D264 rulings 5
+/// and 25) — the box stays inside its ceiling, the title keeps its outcome, and the way out keeps
+/// *X takes you back* on its two rows.
+///
+/// **The name comes the way the driver's does**: through `k8s::contexts`, and into the box through
+/// [`views::Picker::chosen`] on a second attempt, which is where both names in it are read (NOTES
+/// § D29). **What is not claimed is which cluster it was**: `k8s::contexts` has already cut the
+/// name at its tail, so the front cut keeps little but that mark, and ruling 25 accepts it.
+#[test]
+fn a_name_at_the_ingest_bound_keeps_the_title_s_outcome_and_the_box_s_way_out() {
+    let huge = "arn:aws:eks:eu-west-1:123456789012:cluster/".repeat(12) + "payments-prod";
+    let rows = contexts_of(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: '{huge}'\n\
+         clusters: [{{name: eks, cluster: {{server: 'https://eks.example:6443'}}}}]\n\
+         contexts: [{{name: '{huge}', context: {{cluster: eks, user: u}}}}]\n\
+         users: [{{name: u, user: {{token: k8rs-tests-fake-static-token}}}}]\n"
+    ));
+    let name = rows[0].name.clone().expect("the name survives the strip");
+    assert!(
+        huge.len() > crate::k8s::IDENTIFIER && !name.contains("payments-prod"),
+        "the fixture's name was not cut at the ingest bound: {name:?}"
+    );
+    // **`X` again after a switch to it failed**: nothing is live, and the context last live is it.
+    let picker = views::Picker::new(&rows, views::Connection::Dropped(Some(name.clone())));
+    let views::Chosen::Connect { row, before } = picker.chosen(&rows) else {
+        panic!("⏎ did not connect");
+    };
+    for (sent, fault, outcome) in [
+        (true, Fault::Refused, "said no"),
+        (true, Fault::Unanswered, "did not answer"),
+        (false, Fault::BadEntry, "could not be opened"),
+    ] {
+        let (drawn, frame) = unconnected_box(
+            Some(views::drawn_name(row)),
+            before.clone(),
+            sent,
+            fault,
+            Coverage::Blind("default".to_owned()),
+        );
+        assert_eq!(frame.len(), 24);
+        assert!(
+            drawn.len() <= MODAL_ROWS + 2,
+            "{fault:?}: {} rows",
+            drawn.len()
+        );
+        let title = drawn[0].trim_end_matches(['─', '┐']).trim_end();
+        assert!(
+            title.starts_with(&format!("┌ {CUT}")) && title.ends_with(&format!(" {outcome}")),
+            "{fault:?}: {title:?}"
+        );
+        let said = inside(&drawn);
+        assert!(
+            said.contains("Nothing is wrong with")
+                && said.contains(" — X takes you back.")
+                && drawn.iter().any(|row| row.contains("[ esc dismiss ]")),
+            "{fault:?} lost its way out:\n{}",
+            drawn.join("\n")
+        );
+        let way_out = drawn
+            .iter()
+            .filter(|row| row.contains("Nothing is wrong") || row.contains("X takes you back"))
+            .count();
+        assert!(way_out <= 2, "{fault:?}: the way out took {way_out} rows");
+    }
+}
+
+/// **Every picker screen, printed whole** — `cargo test -- --nocapture` — the switcher, its startup
+/// form, the states where `⏎` does nothing — four of them with no row to land on at all — a long
+/// list, and the refusals a picked context can end in, a second failed switch in a row among them.
+#[test]
+fn every_picker_on_the_screen_it_belongs_to() {
+    let four = contexts_of(FOUR);
+    let dangling = contexts_of(&FOUR.replace("current-context: prod-eu", "current-context: gone"));
+    let many: String = (0..9)
+        .map(|n| format!("- {{name: ctx-{n}, context: {{cluster: anchor, user: u}}}}\n"))
+        .collect();
+    let many = contexts_of(&beside(&many, ""));
+    let show = |title: &str, app: &App, rows: &[Choice]| {
+        println!("--- {title} ---\n{}\n", picked(app, rows).1.join("\n"));
+    };
+    show("X", &picking(&four, live()), &four);
+    show("X · on staging", &moved(&four, live(), 1, ""), &four);
+    show("Startup", &picking(&four, views::Connection::Never), &four);
+    show("No row selected", &picking(&dangling, live()), &dangling);
+    show(
+        "Filter hides every row",
+        &moved(&four, live(), 0, "prod-uk"),
+        &four,
+    );
+    let undefined = undefined_only();
+    show(
+        "Every row undefined",
+        &picking(&undefined, live()),
+        &undefined,
+    );
+    let filtered = contexts_of(&beside(UNDEFINED, ""));
+    show(
+        "Filter shows only undefined rows",
+        &moved(&filtered, live(), 0, "-cluster"),
+        &filtered,
+    );
+    show("No contexts in the kubeconfig", &picking(&[], live()), &[]);
+    show("Ten contexts", &moved(&many, live(), 6, ""), &many);
+    // **The failure boxes under the header the page draws for them** — the context that was tried,
+    // never `prod-eu · live`. No page draws a header for a `404` or a login program's failure, so
+    // those two name the context and the permission alone.
+    let failure = |title: &str,
+                   header: &str,
+                   before: views::Before,
+                   sent: bool,
+                   fault: Fault,
+                   renewal: Option<&str>| {
+        let modal = views::Modal::Unconnected {
+            to: Some(title.split(' ').next().expect("a name").to_owned()),
+            before,
+            sent,
+            fault,
+            said: None,
+            coverage: Coverage::Cluster,
+            renewal: renewal.map(str::to_owned),
+        };
+        println!(
+            "--- {title} ---\n{}\n",
+            failed_under(modal, header, "").1.join("\n")
+        );
+    };
+    let refused = page_header();
+    let live_before = || views::Before::Connected(Some("prod-eu".to_owned()));
+    failure(
+        "staging said no",
+        &refused,
+        live_before(),
+        true,
+        Fault::Refused,
+        None,
+    );
+    failure(
+        "staging said no · startup",
+        &refused,
+        never(&four),
+        true,
+        Fault::Refused,
+        None,
+    );
+    let mut again = views::Picker::new(
+        &four,
+        views::Connection::Dropped(Some("prod-eu".to_owned())),
+    );
+    again.down(&four);
+    again.down(&four);
+    let views::Chosen::Connect { before, .. } = again.chosen(&four) else {
+        panic!("⏎ on kind-k8rs did not connect");
+    };
+    failure(
+        "kind-k8rs said no · the second failed switch in a row",
+        &refused.replacen("staging", "kind-k8rs", 1),
+        before,
+        true,
+        Fault::Refused,
+        None,
+    );
+    failure(
+        "staging said no · 404, the address leads to no API server",
+        "ctx: staging · admin",
+        live_before(),
+        true,
+        Fault::Gone,
+        None,
+    );
+    failure(
+        "staging could not be opened · the login program gave nothing",
+        "ctx: staging · admin",
+        never(&four),
+        false,
+        Fault::NoCredential,
+        Some("aws"),
+    );
 }

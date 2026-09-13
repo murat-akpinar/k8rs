@@ -1130,7 +1130,10 @@ fn escape_closes_one_level_per_press_and_never_two() {
     }
     app.modal = Some(Modal::Confirm(dialog(None)));
 
-    app.escape();
+    assert!(
+        !app.escape(),
+        "an esc with no startup picker open ended the run"
+    );
     assert!(app.modal.is_none(), "esc did not close the modal");
     assert_eq!(
         app.filters.text.text(),
@@ -1138,7 +1141,10 @@ fn escape_closes_one_level_per_press_and_never_two() {
         "esc closed the modal and cleared a filter in one press"
     );
 
-    app.escape();
+    assert!(
+        !app.escape(),
+        "an esc with no startup picker open ended the run"
+    );
     assert!(
         app.filters.text.is_empty(),
         "esc did not clear the text filter"
@@ -1149,7 +1155,10 @@ fn escape_closes_one_level_per_press_and_never_two() {
         "one press dropped the text filter and the namespace scope together"
     );
 
-    app.escape();
+    assert!(
+        !app.escape(),
+        "an esc with no startup picker open ended the run"
+    );
     assert!(
         app.filters.namespace.is_empty(),
         "the second press did not clear the namespace scope"
@@ -1164,8 +1173,709 @@ fn escape_clears_the_namespace_scope_when_no_text_filter_is_set() {
     for character in "payments".chars() {
         app.filters.namespace.push(character);
     }
-    app.escape();
+    assert!(
+        !app.escape(),
+        "an esc with no startup picker open ended the run"
+    );
     assert!(app.filters.namespace.is_empty());
+}
+
+// --- THE CLUSTER PICKER ---
+
+/// **The rows come out of `k8s::contexts` over a kubeconfig this file wrote**, never a hand-built
+/// `Choice`: which row is shadowed, undefined, current or derived is that function's answer, and a
+/// literal would be this file's guess at it.
+fn listed(yaml: &str) -> Vec<Choice> {
+    crate::k8s::contexts(
+        &kube::config::Kubeconfig::from_yaml(yaml).expect("a kubeconfig this file wrote itself"),
+        None,
+    )
+}
+
+/// The picker opened over `prod-eu` while it is live — the ordinary `X`.
+fn live() -> Connection {
+    Connection::Live(Some("prod-eu".to_owned()))
+}
+
+/// **`X` after a switch away from `prod-eu` failed** — nothing is live, and `prod-eu` is the
+/// context that last was (NOTES § D264 ruling 15).
+fn dropped() -> Connection {
+    Connection::Dropped(Some("prod-eu".to_owned()))
+}
+
+/// Six contexts, one of each thing the cursor has a rule about, in this order: **0** `prod-eu`,
+/// current · **1** `old-cluster`, whose cluster the file does not define · **2** `staging`, whose
+/// name carries a zero-width space the drawn name does not · **3** `prod-eu` again, shadowed ·
+/// **4** `kind-k8rs` · **5** `dev-cluster`.
+const SIX: &str = "apiVersion: v1\n\
+     kind: Config\n\
+     current-context: prod-eu\n\
+     clusters:\n\
+     - {name: prod, cluster: {server: 'https://prod-eu.example:6443'}}\n\
+     - {name: staging, cluster: {server: 'https://staging.invalid:6443'}}\n\
+     - {name: kind, cluster: {server: 'https://kind.invalid:41234'}}\n\
+     - {name: dev, cluster: {server: 'dev.gr7.eu-west-1.eks.amazonaws.com'}}\n\
+     contexts:\n\
+     - {name: prod-eu, context: {cluster: prod, user: u, \
+       extensions: [{name: k8rs, extension: {tag: 'aws · prod'}}]}}\n\
+     - {name: old-cluster, context: {cluster: nowhere, user: u}}\n\
+     - {name: \"stag\\u200Bing\", context: {cluster: staging, user: u}}\n\
+     - {name: prod-eu, context: {cluster: staging, user: u}}\n\
+     - {name: kind-k8rs, context: {cluster: kind, user: u}}\n\
+     - {name: dev-cluster, context: {cluster: dev, user: u}}\n\
+     users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n";
+
+/// **The fixture is what its doc says**, so a test below that reads *row 1 is skipped* is reading
+/// a row that is really undefined rather than one this file assumed was.
+#[test]
+fn the_picker_fixture_holds_one_row_of_every_shape() {
+    let rows = listed(SIX);
+    assert_eq!(rows.len(), 6);
+    assert!(rows[0].current && !rows[0].shadowed);
+    assert_eq!(rows[1].server, Address::Undefined);
+    assert_eq!(
+        (rows[2].name.as_deref(), rows[2].key.as_str()),
+        (Some("staging"), "stag\u{200b}ing")
+    );
+    assert!(rows[3].shadowed && !rows[3].current);
+    assert_eq!(rows[4].tag, Tag::Derived("local"));
+    assert_eq!(rows[5].tag, Tag::Derived("aws"));
+    assert!(rows.iter().filter(|row| row.current).count() == 1);
+}
+
+/// **Opened on `(current)`, and the cursor skips an undefined row while landing on a shadowed
+/// one** (`screens/context.md` § A context whose cluster the file does not define, § A context
+/// defined twice). Both ends clamp.
+#[test]
+fn the_cursor_skips_an_undefined_row_and_lands_on_a_shadowed_one() {
+    let rows = listed(SIX);
+    let mut picker = Picker::new(&rows, live());
+    assert_eq!(
+        picker.selected(&rows),
+        Some(0),
+        "the picker did not open on (current)"
+    );
+
+    picker.down(&rows);
+    assert_eq!(
+        picker.selected(&rows),
+        Some(2),
+        "↓ landed on the undefined row"
+    );
+    picker.down(&rows);
+    assert_eq!(
+        picker.selected(&rows),
+        Some(3),
+        "↓ skipped the shadowed row"
+    );
+    picker.down(&rows);
+    picker.down(&rows);
+    picker.down(&rows);
+    assert_eq!(
+        picker.selected(&rows),
+        Some(5),
+        "↓ did not clamp at the last row"
+    );
+
+    for _ in 0..3 {
+        picker.up(&rows);
+    }
+    assert_eq!(picker.selected(&rows), Some(2));
+    picker.up(&rows);
+    assert_eq!(
+        picker.selected(&rows),
+        Some(0),
+        "↑ landed on the undefined row"
+    );
+    picker.up(&rows);
+    assert_eq!(
+        picker.selected(&rows),
+        Some(0),
+        "↑ did not clamp at the first row"
+    );
+
+    // **A duplicate whose own entry names no cluster is still landed on** — the one shape where
+    // *shadowed* and *undefined* are both true, and where skipping it would hide the only row
+    // that says the file has a duplicate.
+    let both = SIX.replace(
+        "- {name: prod-eu, context: {cluster: staging, user: u}}",
+        "- {name: prod-eu, context: {cluster: nowhere, user: u}}",
+    );
+    let rows = listed(&both);
+    assert!(rows[3].shadowed && rows[3].server == Address::Undefined);
+    let mut picker = Picker::new(&rows, live());
+    picker.down(&rows);
+    picker.down(&rows);
+    assert_eq!(
+        picker.selected(&rows),
+        Some(3),
+        "a duplicate was skipped because its own cluster is undefined"
+    );
+}
+
+/// **No row is selected when no row is both current and landable, and `⏎` does nothing until one
+/// is** (`screens/context.md` § No row is both current and landable, NOTES § D264 ruling 3). A
+/// `current-context` naming an undefined entry, one `kubectl config delete-context` left dangling,
+/// and none at all each opened on row 0, where one keypress connected to a context nobody named.
+/// `↓` then selects the first row the cursor may land on and `↑` the last.
+#[test]
+fn no_row_is_selected_when_none_is_both_current_and_landable() {
+    for (shape, yaml) in [
+        (
+            "an undefined current-context",
+            SIX.replace("current-context: prod-eu", "current-context: old-cluster"),
+        ),
+        (
+            "a deleted current-context",
+            SIX.replace("current-context: prod-eu", "current-context: deleted"),
+        ),
+        (
+            "no current-context",
+            SIX.replace("current-context: prod-eu\n", ""),
+        ),
+    ] {
+        let rows = listed(&yaml);
+        for connection in [Connection::Never, dropped(), live()] {
+            let picker = Picker::new(&rows, connection);
+            assert_eq!(picker.selected(&rows), None, "{shape}: a row was selected");
+            assert!(
+                matches!(picker.chosen(&rows), Chosen::Stay),
+                "{shape}: ⏎ did something with no row selected"
+            );
+            assert!(picker.inert(&rows), "{shape}");
+
+            let mut down = picker.clone();
+            down.down(&rows);
+            assert_eq!(down.selected(&rows), Some(0), "{shape}: ↓");
+            let mut up = picker;
+            up.up(&rows);
+            assert_eq!(up.selected(&rows), Some(5), "{shape}: ↑");
+            assert!(
+                !up.inert(&rows),
+                "{shape}: ↑ selected a row ⏎ still refuses"
+            );
+        }
+    }
+    assert!(
+        listed(&SIX.replace("current-context: prod-eu", "current-context: old-cluster"))[1].current,
+        "the fixture edit did not move current-context"
+    );
+
+    // **One context, and its cluster undefined, stays unselected under both keys** — the page's
+    // *current-context itself with only that one context present* — and so does an empty list.
+    let rows = listed(&SIX.replace("cluster: prod,", "cluster: nowhere,"));
+    assert!(rows[0].current && !landable(&rows[0]));
+    for rows in [&rows[..1], &[][..]] {
+        let mut picker = Picker::new(rows, Connection::Never);
+        picker.down(rows);
+        assert_eq!(picker.selected(rows), None);
+        picker.up(rows);
+        assert_eq!(picker.selected(rows), None);
+    }
+}
+
+/// **What `⏎` means, row by row** (`screens/context.md`): `(current)` closes only while it is live
+/// — after a failed switch it is the retry — a shadowed row stays open, and every other row
+/// connects to **the row itself**, whose key is the file's own spelling and not the drawn name
+/// (NOTES § D264 rulings 4 and 8).
+#[test]
+fn enter_closes_only_on_a_live_current_row_and_connects_to_the_row() {
+    let rows = listed(SIX);
+    assert!(matches!(
+        Picker::new(&rows, live()).chosen(&rows),
+        Chosen::Close
+    ));
+    for (connection, expected) in [
+        (
+            Connection::Never,
+            Before::Picking(Picker::new(&rows, Connection::Never)),
+        ),
+        (dropped(), Before::Connected(Some("prod-eu".to_owned()))),
+    ] {
+        match Picker::new(&rows, connection.clone()).chosen(&rows) {
+            Chosen::Connect { row, before } => {
+                assert_eq!(row.key, "prod-eu", "{connection:?}");
+                assert_eq!(
+                    before, expected,
+                    "{connection:?}: the failure would not go back to what is behind it"
+                );
+            }
+            _ => panic!("{connection:?}: ⏎ on a (current) nothing is connected to did not connect"),
+        }
+    }
+
+    let mut switching = Picker::new(&rows, live());
+    switching.down(&rows);
+    match switching.chosen(&rows) {
+        Chosen::Connect { row, before } => {
+            assert_eq!(
+                (row.key.as_str(), row.name.as_deref()),
+                ("stag\u{200b}ing", Some("staging")),
+                "⏎ did not hand back the row, with the spelling a lookup in the file finds"
+            );
+            assert_eq!(
+                before,
+                Before::Connected(Some("prod-eu".to_owned())),
+                "the failure would not name the cluster that was live"
+            );
+        }
+        _ => panic!("⏎ on staging did not connect"),
+    }
+
+    let mut starting = Picker::new(&rows, Connection::Never);
+    starting.down(&rows);
+    match starting.chosen(&rows) {
+        Chosen::Connect {
+            before: Before::Picking(tried),
+            ..
+        } => assert_eq!(
+            tried.selected(&rows),
+            Some(2),
+            "the list would reopen on a row that was not the one tried"
+        ),
+        _ => panic!("⏎ on staging at startup did not connect"),
+    }
+
+    for mut picker in [switching, starting] {
+        picker.down(&rows);
+        assert_eq!(picker.selected(&rows), Some(3));
+        assert!(
+            matches!(picker.chosen(&rows), Chosen::Stay),
+            "⏎ on a duplicate did something"
+        );
+        assert!(picker.inert(&rows));
+    }
+}
+
+/// **Which variant is drawn is read off what has connected in this run, never off who opened the
+/// picker** (NOTES § D264 ruling 4): the startup words hold across a failed first attempt and the
+/// window before its answer, and `X` after a failed switch keeps the mid-session ones.
+#[test]
+fn the_variant_is_what_has_connected_and_not_who_opened_the_picker() {
+    let rows = listed(SIX);
+    for (connection, startup, verbs) in [
+        (Connection::Never, true, ("connect", "quit")),
+        (dropped(), false, ("switch", "cancel")),
+        (live(), false, ("switch", "cancel")),
+    ] {
+        let picker = Picker::new(&rows, connection.clone());
+        assert_eq!(picker.startup(), startup, "{connection:?}");
+        assert_eq!(picker.verbs(), verbs, "{connection:?}");
+    }
+}
+
+/// **A switch that fails after the run has connected names the context that was last live, however
+/// many fail in a row** (NOTES § D264 ruling 15). The chain is the one Phase 12's caller walks: `X`
+/// over live `prod-eu`, `⏎` on `staging`, which fails; `X` again, now over nothing live, `⏎` on
+/// `kind-k8rs`, which fails; and a third time on the `(current)` row, which is a retry and not a
+/// close. Every failure answers `prod-eu` — never `Picking`, whose box says *nothing has connected
+/// yet* to a reader who was on `prod-eu` a minute ago. **A run that never connected answers
+/// `Picking` every time**, the other half.
+#[test]
+fn a_failed_switch_names_the_last_live_context_however_many_fail_in_a_row() {
+    let rows = listed(SIX);
+    let mut connection = live();
+    for (attempt, down) in [(1, 1), (2, 3), (3, 0)] {
+        let mut picker = Picker::new(&rows, connection.clone());
+        for _ in 0..down {
+            picker.down(&rows);
+        }
+        let Chosen::Connect {
+            before: Before::Connected(last),
+            ..
+        } = picker.chosen(&rows)
+        else {
+            panic!("attempt {attempt}: ⏎ over {connection:?} did not answer a live context");
+        };
+        assert_eq!(
+            last.as_deref(),
+            Some("prod-eu"),
+            "attempt {attempt}: the failure does not name the context that was last live"
+        );
+        connection = Connection::Dropped(last);
+    }
+
+    let mut picker = Picker::new(&rows, Connection::Never);
+    picker.down(&rows);
+    for attempt in 1..=3 {
+        let Chosen::Connect {
+            before: Before::Picking(tried),
+            ..
+        } = picker.chosen(&rows)
+        else {
+            panic!("attempt {attempt}: a run that never connected named a context as fine");
+        };
+        assert!(tried.startup(), "attempt {attempt}");
+        picker = tried;
+    }
+}
+
+/// **A picker with no row it may land on offers no key that moves** (NOTES § D264 rulings 16 and
+/// 18): every context names a cluster the file does not define, `/` left only such rows, `/` hid
+/// every row, or the kubeconfig has no contexts at all. `↑`/`↓` select nothing and `⏎` stays inert.
+/// **A list with a row it may land on is never this** — a picker with no row selected that has one
+/// to find, a selected shadowed row, a filter that keeps a landable row beside an undefined one.
+#[test]
+fn a_picker_with_no_row_to_land_on_is_nowhere_and_only_then() {
+    let undefined = listed(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: dev-cluster\n\
+         contexts:\n\
+         - {name: dev-cluster, context: {cluster: dev, user: u}}\n\
+         - {name: old-cluster, context: {cluster: old, user: u}}\n\
+         users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    );
+    assert!(undefined.iter().all(|row| row.server == Address::Undefined));
+    let rows = listed(SIX);
+    let none: Vec<Choice> = Vec::new();
+    let typed = |mut picker: Picker, text: &str| {
+        for character in text.chars() {
+            picker.filter.push(character);
+        }
+        picker
+    };
+    for (what, picker, contexts) in [
+        (
+            "every row undefined, at startup",
+            Picker::new(&undefined, Connection::Never),
+            &undefined,
+        ),
+        (
+            "every row undefined, on X",
+            Picker::new(&undefined, live()),
+            &undefined,
+        ),
+        (
+            "a filter that shows only an undefined row",
+            typed(Picker::new(&rows, live()), "old"),
+            &rows,
+        ),
+        (
+            "a filter that hides every row",
+            typed(Picker::new(&rows, live()), "zzz"),
+            &rows,
+        ),
+        (
+            "a kubeconfig with no contexts",
+            Picker::new(&none, live()),
+            &none,
+        ),
+    ] {
+        assert!(picker.nowhere(contexts), "{what}");
+        assert!(picker.inert(contexts), "{what}");
+        let mut moved = picker.clone();
+        moved.down(contexts);
+        moved.up(contexts);
+        assert_eq!(
+            moved.selected(contexts),
+            None,
+            "{what}: a key moved the cursor"
+        );
+    }
+
+    let dangling = listed(&SIX.replace("current-context: prod-eu", "current-context: deleted"));
+    let mut shadowed = Picker::new(&rows, live());
+    for _ in 0..2 {
+        shadowed.down(&rows);
+    }
+    for (what, picker, contexts) in [
+        (
+            "no row selected, one to find",
+            Picker::new(&dangling, live()),
+            &dangling,
+        ),
+        ("a shadowed row selected", shadowed, &rows),
+        (
+            "a filter that shows an undefined row beside a landable one",
+            typed(Picker::new(&rows, live()), "cluster"),
+            &rows,
+        ),
+        (
+            "the same list with nothing typed",
+            typed(Picker::new(&rows, live()), ""),
+            &rows,
+        ),
+    ] {
+        assert!(!picker.nowhere(contexts), "{what}");
+    }
+}
+
+/// **`/` matches what the row draws and nothing else** — the name as drawn, `(unnamed)` included,
+/// the tag as drawn, `~` included — never the server or a badge (NOTES § D264 ruling 7). The cursor
+/// is never left on a row it hid, nor on one it may not land on, and a filter nothing matches
+/// leaves `⏎` inert.
+#[test]
+fn a_filter_matches_what_the_row_draws_and_takes_the_cursor_with_it() {
+    let rows = listed(SIX);
+    let mut picker = Picker::new(&rows, live());
+    for _ in 0..3 {
+        picker.down(&rows);
+    }
+    assert_eq!(picker.selected(&rows), Some(4));
+    let typed = |picker: &mut Picker, text: &str| {
+        picker.filter.clear();
+        for character in text.chars() {
+            picker.filter.push(character);
+        }
+    };
+
+    typed(&mut picker, "PROD");
+    assert_eq!(
+        picker.shown(&rows),
+        [0, 3],
+        "the name is not matched case-blind"
+    );
+    assert_eq!(
+        picker.selected(&rows),
+        Some(0),
+        "the cursor stayed on a row the filter hid"
+    );
+    for (text, expected) in [
+        ("~loc", &[4][..]),
+        ("~", &[4, 5]),
+        ("aws", &[0, 5]),
+        ("aws · p", &[0]),
+        ("cluster", &[1, 5]),
+    ] {
+        typed(&mut picker, text);
+        assert_eq!(picker.shown(&rows), expected, "/{text}");
+    }
+    for text in ["6443", "invalid", "https", "current", "duplicate", "TLS"] {
+        typed(&mut picker, text);
+        assert!(
+            picker.shown(&rows).is_empty(),
+            "/{text} matched something the row does not draw as its name or tag"
+        );
+    }
+    let unnamed = listed(&SIX.replace("name: kind-k8rs", "name: \"\\u200B\""));
+    assert_eq!(
+        unnamed[4].name, None,
+        "the fixture edit did not strip a name"
+    );
+    let mut blank = Picker::new(&unnamed, live());
+    typed(&mut blank, "unnamed");
+    assert_eq!(
+        blank.shown(&unnamed),
+        [4],
+        "(unnamed) is drawn and not matched"
+    );
+
+    typed(&mut picker, "old");
+    assert_eq!(picker.shown(&rows), [1], "an undefined row is still drawn");
+    assert_eq!(
+        picker.selected(&rows),
+        None,
+        "the cursor landed on an undefined row"
+    );
+    assert!(picker.inert(&rows));
+
+    typed(&mut picker, "nothing-is-called-this");
+    assert!(picker.shown(&rows).is_empty());
+    picker.down(&rows);
+    picker.up(&rows);
+    assert!(picker.inert(&rows));
+
+    picker.filter.clear();
+    assert_eq!(
+        picker.selected(&rows),
+        Some(4),
+        "clearing the filter lost the row the cursor was put on"
+    );
+}
+
+/// **`esc` on the picker: the typed filter first, then the picker** — which on `X` goes back to
+/// what is behind it and at startup ends the run, because nothing is. A failure's `esc` goes where
+/// the `Before` [`Picker::chosen`] built says: dismissed over a live cluster, back to the list
+/// otherwise — never a dead end (NOTES § D264 ruling 4).
+#[test]
+fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_it_came_from() {
+    let rows = listed(SIX);
+    for connection in [live(), dropped()] {
+        let mut switching = App {
+            modal: Some(Modal::ContextPick(Picker::new(&rows, connection.clone()))),
+            ..App::default()
+        };
+        if let Some(Modal::ContextPick(picker)) = &mut switching.modal {
+            picker.filter.push('s');
+        }
+        assert!(!switching.escape());
+        assert!(
+            matches!(
+                &switching.modal,
+                Some(Modal::ContextPick(picker)) if picker.filter.is_empty()
+            ),
+            "{connection:?}: esc closed the picker with a filter still typed into it"
+        );
+        assert!(
+            !switching.escape(),
+            "{connection:?}: esc on X's picker ended the run"
+        );
+        assert!(switching.modal.is_none(), "esc did not cancel the picker");
+    }
+
+    let mut starting = App {
+        modal: Some(Modal::ContextPick(Picker::new(&rows, Connection::Never))),
+        ..App::default()
+    };
+    if let Some(Modal::ContextPick(picker)) = &mut starting.modal {
+        picker.filter.push('s');
+    }
+    assert!(
+        !starting.escape(),
+        "esc over a typed filter quit at startup"
+    );
+    let before = starting.clone();
+    assert!(
+        starting.escape(),
+        "esc on the startup picker did not end the run"
+    );
+    assert_eq!(
+        starting, before,
+        "the esc that ends the run changed the screen it ends on"
+    );
+
+    let failed = |connection: Connection| {
+        let mut picker = Picker::new(&rows, connection);
+        picker.down(&rows);
+        let Chosen::Connect { before, .. } = picker.chosen(&rows) else {
+            panic!("⏎ on staging did not connect");
+        };
+        App {
+            modal: Some(Modal::Unconnected {
+                to: Some("staging".to_owned()),
+                before,
+                sent: true,
+                fault: Fault::Refused,
+                said: None,
+                coverage: Coverage::Cluster,
+                renewal: None,
+            }),
+            ..App::default()
+        }
+    };
+    let mut app = failed(Connection::Never);
+    assert!(!app.escape(), "esc on a failure ended the run");
+    assert!(
+        matches!(
+            &app.modal,
+            Some(Modal::ContextPick(picker))
+                if picker.selected(&rows) == Some(2) && picker.startup()
+        ),
+        "esc did not go back to the startup list it came from, on the row tried"
+    );
+    // **A failure after something has connected is dismissed, whether that context was still live
+    // or a switch had already failed** (NOTES § D264 ruling 15) — the way back is `X`.
+    for connection in [live(), dropped()] {
+        let mut dismissed = failed(connection.clone());
+        assert!(!dismissed.escape(), "{connection:?}");
+        assert!(
+            dismissed.modal.is_none(),
+            "{connection:?}: esc did not dismiss the failure"
+        );
+    }
+}
+
+/// **Nothing the reader did on the old cluster survives a switch**, and the command log starts
+/// empty (`screens/context.md` § What happens on `⏎`).
+#[test]
+fn a_switch_puts_the_view_back_on_alerts_and_empties_the_command_log() {
+    let rows = listed(SIX);
+    let mut app = App {
+        view: View::Resources(7),
+        expanded: Some(Group::Network),
+        tab: Tab::Yaml,
+        scroll: 40,
+        following: true,
+        modal: Some(Modal::ContextPick(Picker::new(&rows, live()))),
+        ..App::default()
+    };
+    app.content.select(3, &[None, None, None, None]);
+    app.nav.select(1, &[None, None]);
+    app.filters.text.push('w');
+    app.filters.namespace.push('p');
+    let mut log = Log::default();
+    log.ran(GET_CONTEXTS.to_owned());
+    log.sent("$ kubectl get pods -A --watch".to_owned());
+
+    app.switched(&mut log);
+    assert_eq!(
+        app,
+        App::default(),
+        "something of the old cluster's survived the switch"
+    );
+    assert_eq!(
+        log,
+        Log::default(),
+        "the command log kept the old context's lines"
+    );
+    log.outcome("not allowed");
+    assert!(
+        log.lines().is_empty(),
+        "an outcome landed on a line from before the switch"
+    );
+}
+
+/// **Only a picker nothing has connected behind, and the failure it led to, are drawn over
+/// nothing** — the frame draws no sidebar and no vitals for exactly these two.
+#[test]
+fn only_a_picker_with_nothing_connected_and_its_failure_are_drawn_over_nothing() {
+    let rows = listed(SIX);
+    let failed = |before| App {
+        modal: Some(Modal::Unconnected {
+            to: None,
+            before,
+            sent: false,
+            fault: Fault::Unanswered,
+            said: None,
+            coverage: Coverage::Cluster,
+            renewal: None,
+        }),
+        ..App::default()
+    };
+    let over = |modal| App {
+        modal: Some(modal),
+        ..App::default()
+    };
+    assert!(over(Modal::ContextPick(Picker::new(&rows, Connection::Never))).connecting_first());
+    assert!(failed(Before::Picking(Picker::new(&rows, Connection::Never))).connecting_first());
+    assert!(!failed(Before::Picking(Picker::new(&rows, dropped()))).connecting_first());
+    assert!(!over(Modal::ContextPick(Picker::new(&rows, dropped()))).connecting_first());
+    assert!(!over(Modal::ContextPick(Picker::new(&rows, live()))).connecting_first());
+    assert!(!failed(Before::Connected(None)).connecting_first());
+    assert!(!over(Modal::Help).connecting_first());
+    assert!(!App::default().connecting_first());
+}
+
+/// **`X` is unbound while the picker or its failure is open** (NOTES § D16 ruling 1) — a picker
+/// over a picker is the stacking the modal enum exists to refuse.
+#[test]
+fn the_switcher_is_refused_under_its_own_picker_and_its_own_failure() {
+    let rows = listed(SIX);
+    for modal in [
+        Modal::ContextPick(Picker::new(&rows, live())),
+        unconnected(Before::Connected(None)),
+    ] {
+        let app = App {
+            modal: Some(modal),
+            ..App::default()
+        };
+        assert!(!app.may_switch_cluster());
+        assert!(!app.may_mutate(Offer::Act));
+    }
+}
+
+/// A `403` on staging's pods, over whatever `before` says was behind it.
+fn unconnected(before: Before) -> Modal {
+    Modal::Unconnected {
+        to: Some("staging".to_owned()),
+        before,
+        sent: true,
+        fault: Fault::Refused,
+        said: None,
+        coverage: Coverage::Cluster,
+        renewal: None,
+    }
 }
 
 // --- THE COMMAND LOG ---
@@ -1620,7 +2330,7 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
             tab,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "");
+        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "", &[]);
         assert_eq!(
             (keys.as_ref(), quit),
             (expected, ""),
@@ -1690,7 +2400,7 @@ fn the_anchor_pair_ends_every_ordinary_footer() {
                     [restart.then_some(&Verdict::No)],
                     [None],
                 );
-                let (keys, quit) = app.footer(detail, offer, refused, "");
+                let (keys, quit) = app.footer(detail, offer, refused, "", &[]);
                 assert!(
                     keys.ends_with("? all keys  q quit"),
                     "{view:?} · {tab:?} · detail {detail} · {offer:?} — {keys:?} has no anchor pair"
@@ -1717,14 +2427,153 @@ fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "");
+    let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "", &[]);
     assert_eq!((keys.as_ref(), quit), ("? or esc to close", "q quit"));
     assert!(
-        !app.footer(false, Offer::Act, Refused::default(), "")
+        !app.footer(false, Offer::Act, Refused::default(), "", &[])
             .0
             .contains("all keys"),
         "the footer still pointed at a screen the reader is already on"
     );
+}
+
+/// **The picker's footers and its failure's two, byte for byte** — `screens/widgets.md` § 2a's
+/// mode list for the picker, `screens/context.md` for the failures — and none carries `X`, which
+/// cannot fire under a modal (NOTES § D16 ruling 1), nor the anchor pair. **`⏎` is dropped from
+/// the line wherever it would do nothing** — a shadowed row, no row selected — and kept on a
+/// `(current)` nothing is connected to, where it is the retry (NOTES § D264 rulings 2 and 4);
+/// **`↑↓ move` goes with it wherever no row can be landed on**, a filter that hides every row and
+/// a kubeconfig with no contexts included (rulings 16 and 18). **While `/` holds text, `esc` reads
+/// `clear filter` on both pickers and in every one of those shapes** (ruling 27) — and the same
+/// shapes with nothing typed keep `cancel` and `quit`.
+#[test]
+fn the_picker_and_its_failure_each_say_the_keys_valid_inside_them() {
+    let rows = listed(SIX);
+    let dangling = listed(&SIX.replace("current-context: prod-eu", "current-context: deleted"));
+    let undefined = listed(&SIX.replace("cluster: prod,", "cluster: nowhere,"))[..2].to_vec();
+    assert!(undefined.iter().all(|row| row.server == Address::Undefined));
+    let at = |connection: Connection, down: usize, filter: &str| {
+        let mut picker = Picker::new(&rows, connection);
+        for _ in 0..down {
+            picker.down(&rows);
+        }
+        for character in filter.chars() {
+            picker.filter.push(character);
+        }
+        Modal::ContextPick(picker)
+    };
+    for (modal, contexts, expected) in [
+        (
+            at(live(), 0, ""),
+            &rows[..],
+            "↑↓ move  / filter  ⏎ switch  esc cancel",
+        ),
+        (
+            at(Connection::Never, 0, ""),
+            &rows,
+            "↑↓ move  / filter  ⏎ connect  esc quit",
+        ),
+        (
+            at(dropped(), 0, ""),
+            &rows,
+            "↑↓ move  / filter  ⏎ switch  esc cancel",
+        ),
+        (at(live(), 2, ""), &rows, "↑↓ move  / filter  esc cancel"),
+        (
+            at(Connection::Never, 2, ""),
+            &rows,
+            "↑↓ move  / filter  esc quit",
+        ),
+        (
+            Modal::ContextPick(Picker::new(&[], live())),
+            &[],
+            "/ filter  esc cancel",
+        ),
+        (
+            Modal::ContextPick(Picker::new(&[], Connection::Never)),
+            &[],
+            "/ filter  esc quit",
+        ),
+        // **A filter that still shows the row the cursor is on**, both pickers: every key stays,
+        // and only `esc`'s word moves.
+        (
+            at(live(), 0, "prod"),
+            &rows,
+            "↑↓ move  / filter  ⏎ switch  esc clear filter",
+        ),
+        (
+            at(Connection::Never, 0, "prod"),
+            &rows,
+            "↑↓ move  / filter  ⏎ connect  esc clear filter",
+        ),
+        // **On the shadowed row it still shows**, where `⏎` is dropped.
+        (
+            at(live(), 2, "prod"),
+            &rows,
+            "↑↓ move  / filter  esc clear filter",
+        ),
+        (
+            at(Connection::Never, 2, "prod"),
+            &rows,
+            "↑↓ move  / filter  esc clear filter",
+        ),
+        // **A filter that hides every row, and one that shows only undefined rows** — the page's
+        // `[8]` and `[7]`'s filter-only trigger (ruling 30's last paragraph).
+        (at(live(), 0, "zzz"), &rows, "/ filter  esc clear filter"),
+        (
+            at(Connection::Never, 0, "zzz"),
+            &rows,
+            "/ filter  esc clear filter",
+        ),
+        (at(live(), 0, "old"), &rows, "/ filter  esc clear filter"),
+        (
+            at(Connection::Never, 0, "old"),
+            &rows,
+            "/ filter  esc clear filter",
+        ),
+        // **A filter typed over a kubeconfig with no contexts** still holds text for `esc` to
+        // clear.
+        (
+            Modal::ContextPick({
+                let mut picker = Picker::new(&[], live());
+                picker.filter.push('p');
+                picker
+            }),
+            &[],
+            "/ filter  esc clear filter",
+        ),
+        (
+            Modal::ContextPick(Picker::new(&undefined, live())),
+            &undefined,
+            "/ filter  esc cancel",
+        ),
+        (
+            Modal::ContextPick(Picker::new(&dangling, Connection::Never)),
+            &dangling,
+            "↑↓ move  / filter  esc quit",
+        ),
+        (unconnected(Before::Connected(None)), &[], "esc dismiss"),
+        (
+            unconnected(Before::Picking(Picker::new(&rows, Connection::Never))),
+            &[],
+            "esc back to the list",
+        ),
+    ] {
+        for view in [View::Alerts, View::Resources(0), View::Analysis(1)] {
+            let app = App {
+                view,
+                modal: Some(modal.clone()),
+                ..App::default()
+            };
+            for detail in [false, true] {
+                assert_eq!(
+                    app.footer(detail, Offer::Act, Refused::default(), "", contexts),
+                    (Cow::Borrowed(expected), ""),
+                    "{modal:?}"
+                );
+            }
+        }
+    }
 }
 
 /// **Help wins over whatever is underneath it, and over a detail tab**, because it is drawn over
@@ -1745,7 +2594,7 @@ fn help_is_the_footer_whatever_it_was_opened_from() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail, Offer::Act, Refused::default(), ""),
+            app.footer(detail, Offer::Act, Refused::default(), "", &[]),
             (Cow::Borrowed("? or esc to close"), "q quit"),
             "{view:?} · detail {detail} · {tab:?}"
         );
@@ -1762,12 +2611,15 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "").0,
+        app.footer(false, Offer::Act, Refused::default(), "", &[]).0,
         "? or esc to close"
     );
-    app.escape();
+    assert!(
+        !app.escape(),
+        "an esc with no startup picker open ended the run"
+    );
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "").0,
+        app.footer(false, Offer::Act, Refused::default(), "", &[]).0,
         "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
     );
 }
@@ -1843,11 +2695,11 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         ),
     ] {
         assert_eq!(
-            app.footer(false, Offer::Act, Refused::default(), "").0,
+            app.footer(false, Offer::Act, Refused::default(), "", &[]).0,
             expected
         );
         assert_eq!(
-            app.footer(false, Offer::Act, Refused::default(), "").1,
+            app.footer(false, Offer::Act, Refused::default(), "", &[]).1,
             "",
             "a dialog grew the right-hand zone only `?` has"
         );
@@ -1855,7 +2707,7 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         // replaced test pinned: a dialog is opened from a detail pane as readily as from a list,
         // and a footer that fell through for one of them would fall through for both.
         assert_eq!(
-            app.footer(true, Offer::Act, Refused::default(), "").0,
+            app.footer(true, Offer::Act, Refused::default(), "", &[]).0,
             expected
         );
     }
@@ -1885,7 +2737,7 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
             ..App::default()
         };
         assert!(
-            app.footer(false, Offer::Act, Refused::default(), "payments/web")
+            app.footer(false, Offer::Act, Refused::default(), "payments/web", &[])
                 .0
                 .ends_with("? all keys  q quit"),
             "{view:?} — nothing is running and the ordinary footer went"
@@ -1895,7 +2747,7 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
         let no = |refused: bool| refused.then_some(&Verdict::No);
         for (scale, restart) in [(false, false), (true, false), (false, true), (true, true)] {
             let refused = Refused::of("deployments", [no(scale); 2], [no(restart)], [None]);
-            let (keys, quit) = app.footer(false, Offer::Act, refused, "payments/web");
+            let (keys, quit) = app.footer(false, Offer::Act, refused, "payments/web", &[]);
             assert_eq!(
                 (keys.as_ref(), quit),
                 (
@@ -1938,11 +2790,11 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
             ..App::default()
         };
         let ordinary = app
-            .footer(detail, Offer::Act, Refused::default(), "payments/web")
+            .footer(detail, Offer::Act, Refused::default(), "payments/web", &[])
             .0;
 
         app.changing = Some(dialog(None).object);
-        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "payments/web");
+        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "payments/web", &[]);
         assert_eq!(
             format!("{keys}  q quit"),
             ordinary,
@@ -1970,7 +2822,7 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
 fn the_in_flight_arm_is_changings_and_never_the_names() {
     let mut app = App::default();
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "payments/web")
+        app.footer(false, Offer::Act, Refused::default(), "payments/web", &[])
             .0,
         "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
         "a name alone turned the in-flight footer on"
@@ -1978,7 +2830,7 @@ fn the_in_flight_arm_is_changings_and_never_the_names() {
 
     app.changing = Some(dialog(None).object);
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "").0,
+        app.footer(false, Offer::Act, Refused::default(), "", &[]).0,
         "↑↓ move  ⏎ open  ? keys  ·  changing  first",
         "an empty name turned the in-flight footer off"
     );
@@ -1997,13 +2849,13 @@ fn help_over_a_call_in_flight_drops_the_quit_it_cannot_promise() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), ""),
+        app.footer(false, Offer::Act, Refused::default(), "", &[]),
         (Cow::Borrowed("? or esc to close"), "q quit"),
         "help's ordinary footer changed"
     );
 
     app.changing = Some(dialog(None).object);
-    let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "");
+    let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "", &[]);
     assert_eq!(
         keys.as_ref(),
         "? or esc to close",
@@ -2051,7 +2903,7 @@ fn a_modal_keeps_its_own_closed_set_even_with_a_call_running_under_it() {
             changing: Some(running.clone()),
             ..App::default()
         };
-        let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "payments/web");
+        let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "payments/web", &[]);
         assert_eq!((keys.as_ref(), quit), (expected, ""), "{modal:?}");
         assert!(
             !keys.contains("changing"),
@@ -2109,6 +2961,36 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
                 recreated: true,
             }),
         ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::ContextPick(Picker::new(&listed(SIX), live()))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::ContextPick(Picker::new(
+                &listed(SIX),
+                Connection::Never,
+            ))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(unconnected(Before::Connected(None))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(unconnected(Before::Picking(Picker::new(
+                &listed(SIX),
+                Connection::Never,
+            )))),
+        ),
     ] {
         let app = App {
             view,
@@ -2116,7 +2998,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
             modal,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "");
+        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "", &[]);
         let width = ratatui::text::Span::raw(keys.as_ref()).width()
             + usize::from(!quit.is_empty())
             + ratatui::text::Span::raw(quit).width();
@@ -2126,7 +3008,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
         );
         seen += 1;
     }
-    assert_eq!(seen, 12, "a mode stopped being measured");
+    assert_eq!(seen, 16, "a mode stopped being measured");
 }
 
 /// **`screens/widgets.md` § 2a's own four-row table, read as the fixture** — the footer string and
@@ -2191,7 +3073,7 @@ fn the_list_footer_marks_the_keys_this_login_may_not_use() {
                 view,
                 ..App::default()
             };
-            let (keys, quit) = app.footer(false, Offer::Act, refused, "");
+            let (keys, quit) = app.footer(false, Offer::Act, refused, "", &[]);
             assert_eq!(
                 (keys.as_ref(), quit),
                 (expected.as_str(), ""),
@@ -2311,8 +3193,8 @@ fn a_refused_delete_changes_no_footer() {
                 ..App::default()
             };
             assert_eq!(
-                app.footer(detail, Offer::Act, refused, ""),
-                app.footer(detail, Offer::Act, Refused::default(), ""),
+                app.footer(detail, Offer::Act, refused, "", &[]),
+                app.footer(detail, Offer::Act, Refused::default(), "", &[]),
                 "{view:?} · detail {detail}"
             );
         }
@@ -2369,6 +3251,36 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
                 recreated: true,
             }),
         ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::ContextPick(Picker::new(&listed(SIX), live()))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(Modal::ContextPick(Picker::new(
+                &listed(SIX),
+                Connection::Never,
+            ))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(unconnected(Before::Connected(None))),
+        ),
+        (
+            View::Alerts,
+            false,
+            Tab::Logs,
+            Some(unconnected(Before::Picking(Picker::new(
+                &listed(SIX),
+                Connection::Never,
+            )))),
+        ),
     ] {
         let app = App {
             view,
@@ -2377,14 +3289,14 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail, Offer::Act, all, ""),
-            app.footer(detail, Offer::Act, Refused::default(), ""),
+            app.footer(detail, Offer::Act, all, "", &[]),
+            app.footer(detail, Offer::Act, Refused::default(), "", &[]),
             "{:?} · detail {detail} · {tab:?}",
             app.view
         );
         seen += 1;
     }
-    assert_eq!(seen, 10, "a footer stopped being measured");
+    assert_eq!(seen, 14, "a footer stopped being measured");
 }
 
 // --- THE SHAPES THE MUTATION GATE PROVED WERE NOT BEING FED ---
@@ -3068,10 +3980,240 @@ fn the_confirm_word_is_the_same_one_the_footer_and_the_button_use() {
         ..App::default()
     };
     assert!(
-        app.footer(false, Offer::Act, Refused::default(), "")
+        app.footer(false, Offer::Act, Refused::default(), "", &[])
             .0
             .contains(armed.confirm()),
         "the footer does not name the button's own word: {:?}",
-        app.footer(false, Offer::Act, Refused::default(), "").0
+        app.footer(false, Offer::Act, Refused::default(), "", &[]).0
     );
+}
+
+// --- WHY A CALL DID NOT WORK ---
+
+/// **Every fault's sentence, written out** — the driver's own words, moved down whole
+/// (NOTES § D264 ruling 1), so this is the grid `main_tests.rs` pins them with plus the arms it
+/// reads only through a caller. A literal per arm because a reworded frame is invisible to a
+/// predicate (`main_tests.rs`'s grid says why), and in the two framings the picker's failure box
+/// hands over: [`watching`] and [`REACH`].
+#[test]
+fn every_fault_reads_the_sentence_the_driver_prints() {
+    let pods = watching("pods");
+    assert_eq!(pods, "`list` and `watch` pods");
+    let grid = [
+        (
+            Fault::Refused,
+            "the role this kubeconfig uses needs to `list` and `watch` pods",
+            "the role this kubeconfig uses needs to reach this cluster",
+        ),
+        (
+            Fault::Gone,
+            "this server says there is no such thing when k8rs tries to `list` and `watch` pods",
+            "this server says there is no such thing when k8rs tries to reach this cluster",
+        ),
+        (
+            Fault::Rejected,
+            "this cluster would not accept the request k8rs made to `list` and `watch` pods — \
+             that is a fault in k8rs, and nothing is wrong with the cluster or with this login",
+            "this cluster would not accept the request k8rs made to reach this cluster — that is \
+             a fault in k8rs, and nothing is wrong with the cluster or with this login",
+        ),
+        (
+            Fault::Unanswered,
+            "nothing usable came back when k8rs tried to `list` and `watch` pods",
+            "nothing usable came back when k8rs tried to reach this cluster",
+        ),
+        (
+            Fault::Unfinished,
+            "the request k8rs made to `list` and `watch` pods had not been answered",
+            "the request k8rs made to reach this cluster had not been answered",
+        ),
+        (
+            Fault::Kubeconfig,
+            "the kubeconfig itself could not be read — it is missing, unreadable, or not valid \
+             YAML",
+            "the kubeconfig itself could not be read — it is missing, unreadable, or not valid \
+             YAML",
+        ),
+        (
+            Fault::NoContext,
+            "this kubeconfig has no such context — check the `current-context` line in the \
+             file, and any `--context` on the command line",
+            "this kubeconfig has no such context — check the `current-context` line in the \
+             file, and any `--context` on the command line",
+        ),
+        (
+            Fault::BadEntry,
+            "this kubeconfig loaded, and something it points at did not — a certificate file it \
+             names, a `server:` line, or a cluster one of its contexts refers to",
+            "this kubeconfig loaded, and something it points at did not — a certificate file it \
+             names, a `server:` line, or a cluster one of its contexts refers to",
+        ),
+        (
+            Fault::NoCredential,
+            "the program this kubeconfig logs in with gave k8rs nothing to sign in with",
+            "the program this kubeconfig logs in with gave k8rs nothing to sign in with",
+        ),
+        (
+            Fault::Expired,
+            "this cluster no longer accepts this login — this kubeconfig needs a new one",
+            "this cluster no longer accepts this login — this kubeconfig needs a new one",
+        ),
+        (
+            Fault::Conflict,
+            "something else changed this object while k8rs was working on it — nothing was \
+             changed, and reading it again shows what it looks like now",
+            "something else changed this object while k8rs was working on it — nothing was \
+             changed, and reading it again shows what it looks like now",
+        ),
+    ];
+    for (fault, watched, reached) in grid {
+        assert_eq!(because(fault, &pods, None, None), watched, "{fault:?}");
+        assert_eq!(because(fault, REACH, None, None), reached, "{fault:?}");
+    }
+
+    // **The login program is named where the kubeconfig has one** — and only by the two arms whose
+    // fix is on the reader's own machine.
+    assert_eq!(
+        because(Fault::Expired, &pods, Some("aws"), None),
+        "this cluster no longer accepts this login — it comes from `aws`, so renew it there"
+    );
+    assert_eq!(
+        because(Fault::NoCredential, REACH, Some("aws"), None),
+        "the program this kubeconfig logs in with (`aws`) gave k8rs nothing to sign in with"
+    );
+    // **The cluster's words are quoted by the rejected call and by nothing else.**
+    let wrote = "container \"app\" in pod \"broken-config\" is waiting to start: \
+                 CreateContainerConfigError";
+    assert_eq!(
+        because(Fault::Rejected, &pods, None, Some(wrote)),
+        "this cluster would not accept the request k8rs made to `list` and `watch` pods, and \
+         said: container \"app\" in pod \"broken-config\" is waiting to start: \
+         CreateContainerConfigError"
+    );
+    for (fault, _, _) in grid {
+        if fault != Fault::Rejected {
+            assert_eq!(
+                because(fault, &pods, Some("aws"), Some(wrote)),
+                because(fault, &pods, Some("aws"), None),
+                "{fault:?} quoted the cluster"
+            );
+        }
+    }
+}
+
+/// **The scope is the place, and the next step is per [`Coverage`]** — a namespace the reader named
+/// and one k8rs had to guess read the same place and opposite next steps
+/// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1, NOTES § D264 ruling 1).
+///
+/// **Not running — `--once` — first, and its bytes are the ones this grid held before k8rs could
+/// be running** (NOTES § D264 ruling 23). Running, the two arms that end in the flag say to quit
+/// and start again, in `screens/context.md` § When the new cluster does not work's `[0]` and `[1]`
+/// words, which `ui_tests.rs` holds the drawn box to; nothing else moves. **Three faults answer
+/// either way** (NOTES § D264 ruling 32), `Gone` in that ruling's bytes.
+#[test]
+fn the_next_step_is_per_coverage_and_only_three_faults_have_one() {
+    let payments = || "payments".to_owned();
+    assert_eq!(scope(&Coverage::Cluster), "across the whole cluster");
+    for coverage in [
+        Coverage::Asked(payments()),
+        Coverage::Refused(payments()),
+        Coverage::Blind(payments()),
+    ] {
+        assert_eq!(
+            scope(&coverage),
+            "in the namespace payments",
+            "{coverage:?}"
+        );
+    }
+
+    let named = "Ask whoever runs this cluster for a role that may read pods in payments — the \
+                 same rules as `k8rs-readonly` in the k8rs docs, granted in one namespace instead \
+                 of all of them";
+    for (running, coverage, expected) in [
+        (
+            false,
+            Coverage::Cluster,
+            "Ask whoever runs this cluster for a role that may read pods in every namespace — \
+             `k8rs-readonly` in the k8rs docs is that role — or run k8rs in one namespace you can \
+             read: --namespace <name>",
+        ),
+        (false, Coverage::Asked(payments()), named),
+        (false, Coverage::Refused(payments()), named),
+        (
+            false,
+            Coverage::Blind(payments()),
+            "This kubeconfig names no namespace, so k8rs had to guess payments and was refused \
+             there too. Say which namespace you work in: --namespace <name>",
+        ),
+        (
+            true,
+            Coverage::Cluster,
+            "Ask whoever runs this cluster for a role that may read pods in every namespace — \
+             `k8rs-readonly` in the k8rs docs is that role — or quit and start k8rs again in one \
+             namespace you can read: --namespace <name>",
+        ),
+        (true, Coverage::Asked(payments()), named),
+        (true, Coverage::Refused(payments()), named),
+        (
+            true,
+            Coverage::Blind(payments()),
+            "This kubeconfig names no namespace, so k8rs had to guess payments and was refused \
+             there too. Quit and start k8rs again in the namespace you work in: --namespace <name>",
+        ),
+    ] {
+        let at = || format!("running {running}, {coverage:?}");
+        assert_eq!(
+            next_step(Fault::Refused, &coverage, "pods", running).as_deref(),
+            Some(expected),
+            "{}",
+            at()
+        );
+        for (fault, expected) in [
+            (
+                Fault::Unanswered,
+                "Check the server address this kubeconfig names, and that this machine can reach \
+                 it",
+            ),
+            (
+                Fault::Gone,
+                "Check the server address this kubeconfig names — as written, it does not lead to \
+                 a Kubernetes API server",
+            ),
+        ] {
+            assert_eq!(
+                next_step(fault, &coverage, "pods", running).as_deref(),
+                Some(expected),
+                "{fault:?}, {}",
+                at()
+            );
+        }
+        for fault in [
+            Fault::Expired,
+            Fault::Rejected,
+            Fault::Conflict,
+            Fault::Unfinished,
+            Fault::Kubeconfig,
+            Fault::NoContext,
+            Fault::BadEntry,
+            Fault::NoCredential,
+        ] {
+            assert_eq!(
+                next_step(fault, &coverage, "pods", running),
+                None,
+                "{fault:?}, {}",
+                at()
+            );
+        }
+    }
+
+    // **A namespace nobody stripped is stripped here, running or not** — `--namespace` is argv, and
+    // argv never met `k8s::text` (invariant 9).
+    let crafted = Coverage::Blind("pay\u{1b}\u{202e}ments".to_owned());
+    assert_eq!(scope(&crafted), "in the namespace payments");
+    for running in [false, true] {
+        let next = next_step(Fault::Refused, &crafted, "pods", running)
+            .expect("a refusal has a next step");
+        assert!(next.contains("guess payments and"), "{next:?}");
+        assert!(!next.chars().any(unprintable), "{next:?}");
+    }
 }

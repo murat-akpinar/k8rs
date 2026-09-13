@@ -4510,12 +4510,15 @@ string and key was settled in the design phase, so this phase is drawing.
       the unreachability holds for a value Phase 12 has not yet produced
       (D263 ruling 10). `Writes::ReadOnly` is built and constructed nowhere;
       the `--read-only` box below is its first reader
-- [ ] **Cluster switcher** (`X`), [screens/context.md](screens/context.md):
+- [x] **Cluster switcher** (`X`), [screens/context.md](screens/context.md):
       picker over `Kubeconfig::contexts`, then the Phase 5 `connect()` call
       again with everything from the old context dropped. Refused while a
       write is in flight; a failed switch stays on the chosen context and says
-      why, it does not fall back
-- [ ] **The same picker opens at startup**, with a **tag column** so `aws-prod`
+      why, it does not fall back — landed 2026-09-13 as state and drawing
+      ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)). **What it does not close, ruled rather than missed**: nothing
+      calls `connect()`, drops the old `Session` or builds the failure box yet,
+      which is Phase 12's *The cluster picker is wired*
+- [x] **The same picker opens at startup**, with a **tag column** so `aws-prod`
       and `kind-k8rs` are told apart before anything is touched. Only when the
       kubeconfig holds two or more contexts and no `--context` was given; the
       current context is preselected, so `⏎` lands where today's default lands
@@ -4523,7 +4526,9 @@ string and key was settled in the design phase, so this phase is drawing.
       there is no cluster behind the modal yet. A derived tag and a user-written
       one are not drawn as the same fact
       ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19) ·
-      [screens/context.md](screens/context.md))
+      [screens/context.md](screens/context.md)) — landed 2026-09-13 with the
+      switcher ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)); *whether* it opens is Phase 12's *One place decides
+      which context is used*
 - [ ] `--read-only` visibly marked in the header — **and the help screen's
       *Changing things* block replaced by one line**, which is
       [screens/help.md](screens/help.md)'s own rule and is not built: neither
@@ -4591,6 +4596,18 @@ Goal: one binary, live and safe.
       script that hangs forever. Proven by running `k8rs --once` with two
       contexts in the file and no terminal attached
       ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19))
+- [ ] **The cluster picker is wired** ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13) rulings 8, 13, 29 and 32).
+      `X` and the startup `⏎` call `connect()` again, the old `Session` and any
+      open detail stream are dropped beside `App::switched`, and a failure
+      builds `Modal::Unconnected` from the fault, its `Coverage` and the
+      renewal program. The caller supplies `views::Connection`. The picker
+      opening appends `$ kubectl config get-contexts`, every later line carries
+      `--context <name>`, and `Unconnected`'s context name, `Before::Connected`
+      and those lines are stripped before they are handed over.
+      **And decide how an `exec` login program meets the terminal**: kube runs
+      it at connect *and* on its own near expiry, inheriting stdin and stderr
+      (27 runs in a 12 s session, measured), so a handover around connect alone
+      does not reach it — `interactive_mode: Never`, or a handover that does
 - [ ] **Every string a dialog draws is proven stripped, and this is the wiring
       that makes it provable** — invariant 9. Phase 11 drew the boxes and
       nothing outside a test constructs one, so `tester` could prove the strip

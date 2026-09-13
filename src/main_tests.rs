@@ -6280,6 +6280,13 @@ fn the_block_a_run_with_no_pods_ends_on_names_the_scope_and_a_next_step_that_fit
     );
     // **The README is not cited**, because there is not one until Phase 13.
     assert!(!wide.contains("README"), "{wide:?}");
+    // **`--once` runs at a shell, so the flag is the whole next step** — the restart wording is
+    // the TUI's, and both contain the flag (NOTES § D264 ruling 23).
+    assert!(
+        wide.ends_with("or run k8rs in one namespace you can read: --namespace <name>")
+            && !wide.contains("start k8rs again"),
+        "a run that has already ended was told to quit and start again: {wide:?}"
+    );
 
     let scoped = pods_unread(
         &unread(&refused),
@@ -6314,6 +6321,11 @@ fn the_block_a_run_with_no_pods_ends_on_names_the_scope_and_a_next_step_that_fit
     assert!(
         blind.contains("k8rs had to guess default") && blind.contains("--namespace <name>"),
         "the one scope the reader did not choose was told to choose a different one: {blind:?}"
+    );
+    assert!(
+        blind.ends_with("Say which namespace you work in: --namespace <name>")
+            && !blind.contains("start k8rs again"),
+        "a run that has already ended was told to quit and start again: {blind:?}"
     );
 
     // **Nothing answered is not a permission problem and is not given a role to ask for.**

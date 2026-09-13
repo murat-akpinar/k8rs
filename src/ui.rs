@@ -43,7 +43,7 @@
 )]
 
 use crate::analysis::{Badge, Report, Row as ReportRow};
-use crate::k8s::{Browsable, Fault};
+use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, Tag};
 use crate::rules::{ContainerSnapshot, Finding, ObjectId, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
 use crate::views::{self, App, Card, NavItem, Offer, Pane, Refused, Tab, View};
@@ -53,7 +53,8 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs,
+    Block, Clear, List, ListItem, ListState, Paragraph, Row, Scrollbar, ScrollbarOrientation,
+    ScrollbarState, Table, TableState, Tabs,
 };
 use std::borrow::Cow;
 
@@ -179,6 +180,68 @@ const FIELD_ROWS: usize = 4;
 
 /// Between a dialog's two buttons (`screens/dialogs.md`, every box on it).
 const BUTTON_GAP: &str = "    ";
+
+/// **How far in from each side of the body the cluster picker's box sits** — read off
+/// `screens/context.md` § The picker, whose 62-column box sits three columns in on a 68-column
+/// body. **The margin is fixed and the box is not**: a wider terminal widens the name slot and
+/// nothing else (that file's § The tag column), which is why this is not one of [`CONFIRM_BOX`]'s
+/// three widths.
+const PICK_MARGIN: u16 = 3;
+
+/// **A context's tag slot — 12 columns, fixed**, and cut at its edge with no mark: there is nowhere
+/// to escape into and read the rest (`screens/context.md` § A 60-character tag).
+const TAG: usize = 12;
+
+/// **A context's badge slot — 20 columns, fixed**, the width of `⚠ TLS not verified` and its pad.
+const BADGE: usize = 20;
+
+/// **The most the context's name takes in front of the server line** — the name slot's own width
+/// on the page `screens/context.md` draws. The line below the list is the *am I about to touch
+/// production* line, and a 90-character EKS ARN in front of it would push the address off it.
+const LABEL: usize = 20;
+
+/// **The rows the server line may take**, and the rows the box keeps for it: the three § A context
+/// defined twice's sentence takes behind a short name, the longest k8rs itself writes there. An EKS
+/// endpoint is 72 columns and needs two, and anything longer is cut with a mark. **Every row more
+/// is a list row less at the 80×24 floor** — measured with an address at the ingest bound selected
+/// over two contexts: three shows both, four shows one, and five leaves no blank row above the box.
+const SERVER_ROWS: usize = 3;
+
+/// **The sentence under the picker's list, on the two lines `screens/context.md` breaks it at.**
+/// Fixed text written to fit, so it is two literals rather than a wrap that would move with the
+/// terminal's width.
+const UNCHANGED: [&str; 2] = [
+    "k8rs does not change your kubeconfig — it just",
+    "talks to the cluster you pick here.",
+];
+
+/// **What the slot under the picker's list says when no row is selected and one can be**
+/// (`screens/context.md` § No row is both current and landable) — in place of an address, so `⏎`
+/// does not look bound. On the page's two lines, for [`UNCHANGED`]'s reason.
+const UNSTARTED: [&str; 2] = [
+    "k8rs cannot start you on a row here —",
+    "pick one with ↑ or ↓.",
+];
+
+/// **What the slot says when the list shows rows and none can be landed on** — no key moves the
+/// cursor, so the sentence sends the reader to none (NOTES § D264 ruling 16).
+const UNREACHABLE: [&str; 2] = [
+    "None of these can be reached — every one names a",
+    "cluster this kubeconfig does not define.",
+];
+
+/// **What the slot says when the kubeconfig has no contexts left in it** — there is no row, dimmed
+/// or not, for a key to reach, so the sentence sends the reader to none (`screens/context.md`
+/// § The kubeconfig has no contexts at all, NOTES § D264 ruling 18).
+const EMPTIED: [&str; 2] = [
+    "This kubeconfig has no contexts in it —",
+    "there is nothing here to connect to.",
+];
+
+/// **The rows the picker's box leaves unspent in the body**: its own two borders and one more, the
+/// row [`MODAL_ROWS`] leaves at the 80×24 floor. The list takes whatever else a taller terminal has
+/// (NOTES § D264 ruling 9).
+const PICK_SPARE: usize = 3;
 
 /// **The one title the frame's outer border ever carries**, and it carries it only while `?` is
 /// open (`screens/widgets.md` § 5, `screens/help.md`). A space each side, because that is how
@@ -488,6 +551,10 @@ pub struct Screen<'a> {
     /// not a fourth [`View`]**: `esc` goes back to the pane the reader came from, and a view that
     /// had to be re-derived to go back to would be a second place holding where they were.
     pub detail: Option<&'a Detail<'a>>,
+    /// **The kubeconfig's contexts, while the picker is open** — [`crate::k8s::contexts`]' answer,
+    /// read once when it opened and the same list every `crate::views::Picker` method was handed.
+    /// Empty when nothing is picking.
+    pub contexts: &'a [Choice],
 }
 
 /// **Whether a write can happen at all in this run, and the sentence that says why not**
@@ -792,8 +859,17 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
     ])
     .areas(body);
 
-    sidebar(frame, nav, app, screen);
-    content(frame, pane, app, screen);
+    // **Before the first connection there is no app frame to float over** (`screens/context.md`
+    // § Opening at startup): the sidebar belongs to a frame that is not built until a cluster has
+    // been picked, so neither pane — nor the divider below — is drawn under the startup picker or
+    // the failure it led to. **`X`'s picker is drawn over an empty body too** (NOTES § D264
+    // ruling 9): its box is as wide as the body less three columns a side, and a pane left under
+    // it showed through those margins letter by letter.
+    let bare = app.connecting_first() || matches!(app.modal, Some(views::Modal::ContextPick(_)));
+    if !bare {
+        sidebar(frame, nav, app, screen);
+        content(frame, pane, app, screen);
+    }
     // **Drawn over the body the normal pass just filled, and not instead of it** —
     // `screens/widgets.md` § 5's own draw order. Under it the `Clear` inside [`help`] and
     // [`boxed`] is load-bearing: their lines are shorter than the region they are drawn in, and a
@@ -821,7 +897,7 @@ pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
     // **The divider is the one part of the frame Help does not keep**: it is drawn *after* the
     // panes, so leaving it in would rule a sidebar edge straight down the cleared key map, and
     // `screens/help.md` draws the body as one field with no sidebar left to divide off.
-    if !helping {
+    if !helping && !bare {
         divider(frame, split.x, rest.y, above_log.y, border);
     }
 
@@ -870,7 +946,13 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let dim = screen.fg(theme::DIM);
     let row = indented(area);
     let offer = offered(app, screen);
-    let (line, quit) = app.footer(screen.detail.is_some(), offer, screen.refused, "");
+    let (line, quit) = app.footer(
+        screen.detail.is_some(),
+        offer,
+        screen.refused,
+        "",
+        screen.contexts,
+    );
     let keys = match &app.changing {
         Some(object) => {
             let room = usize::from(row.width).saturating_sub(width(&line));
@@ -880,6 +962,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
                 offer,
                 screen.refused,
                 &name_cut(&whole, room),
+                screen.contexts,
             )
             .0
         }
@@ -1068,9 +1151,24 @@ fn indented(area: Rect) -> Rect {
 /// **Being last is also why [`shortened`] needs no case for it**: that cut eats the *front* of
 /// the zone, so the cluster's name erodes and the tail — `read-only`, the TLS warning and this
 /// mark — never does.
+///
+/// **The startup picker is the one state whose zone is not the caller's** (`screens/context.md`
+/// § Opening at startup, `screens/widgets.md` § 1a): no context has been chosen, so the zone reads
+/// `choose a cluster` and the one fact already known before any connection — whether writes are
+/// on for this run, [`Writes::live`]'s answer — and the vitals are blank because nothing has been
+/// read. The failure that picker can lead to names the context it tried, which is the caller's
+/// ordinary zone again.
 fn header(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let dim = screen.fg(theme::DIM);
-    let whole: Cow<str> = if app.changing.is_some() {
+    let picking = matches!(&app.modal, Some(views::Modal::ContextPick(picker)) if picker.startup());
+    let whole: Cow<str> = if picking {
+        let may = if screen.writes.live() {
+            "admin"
+        } else {
+            mark(theme::READ_ONLY)
+        };
+        Cow::Owned(format!("choose a cluster · {may}"))
+    } else if app.changing.is_some() {
         Cow::Owned(format!("{} · {}", screen.context, mark(theme::CHANGING)))
     } else {
         Cow::Borrowed(screen.context)
@@ -1087,7 +1185,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     );
 
     let room = indented(left);
-    let vitals = if width(screen.vitals) <= usize::from(room.width) {
+    let vitals = if !app.connecting_first() && width(screen.vitals) <= usize::from(room.width) {
         screen.vitals
     } else {
         ""
@@ -1180,8 +1278,9 @@ fn strip(frame: &mut Frame, area: Rect, screen: &Screen) {
 ///
 /// **`changing` reaches [`help`] and no other box**: Help is the one modal that can be open over a
 /// call on the wire (`screens/dialogs.md` § *While the call is running* — it is not a `Modal`, so
-/// `?` still opens on top of it), and the other three are each built from that call's own before
-/// or after.
+/// `?` still opens on top of it). The three dialogs are each built from that call's own before or
+/// after, and the picker and its failure open only on an `X` that a running call refuses
+/// (`crate::views::App::may_switch_cluster`).
 fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, screen: &Screen) {
     match open {
         views::Modal::Help => help(frame, body, changing, screen),
@@ -1190,6 +1289,20 @@ fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, scr
             refused(frame, body, *sent, fault, said.as_deref(), screen);
         }
         views::Modal::Gone { object, recreated } => gone(frame, body, object, *recreated, screen),
+        views::Modal::ContextPick(picker) => pick(frame, body, picker, screen),
+        views::Modal::Unconnected {
+            to,
+            before,
+            sent,
+            fault,
+            said,
+            coverage,
+            renewal,
+        } => {
+            let (outcome, why) =
+                failed(*sent, *fault, said.as_deref(), coverage, renewal.as_deref());
+            unconnected(frame, body, to.as_deref(), before, outcome, &why, screen);
+        }
     }
 }
 
@@ -1203,6 +1316,8 @@ fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, scr
 /// floor's 78 the same call leaves 9/9, 8/7 and 11/11. **Neither set is written down anywhere in
 /// this file**, which is the point of § 5's *not six hand-computed rectangles*.
 ///
+/// **It answers with the box's inner area**, which is where [`pick`] draws its [`scrollbar`].
+///
 /// **The title is cut here rather than by ratatui.** `Block` clips a title at its own border with
 /// nothing to show for it, and a 512-byte object name is a name the API server accepts
 /// (`k8s::IDENTIFIER`); a name is one token, so it is [`clipped`]'s cut and not [`command_cut`]'s
@@ -1214,7 +1329,7 @@ fn boxed(
     title: &str,
     lines: Vec<Line>,
     screen: &Screen,
-) {
+) -> Rect {
     let rows = u16::try_from(lines.len()).unwrap_or(u16::MAX);
     let area = body.centered(
         Constraint::Length(width.saturating_add(2)),
@@ -1234,6 +1349,7 @@ fn boxed(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    inner
 }
 
 /// The columns a nested box has for text — its width less [`MODAL_MARGIN`], which is on the left
@@ -1526,20 +1642,15 @@ fn refused(
     let text = screen.fg(theme::TEXT);
     let dim = screen.fg(theme::DIM);
 
-    // **Did the server answer at all?** It is the question both sentences below turn on, and it
-    // is [`Fault`]'s to answer rather than this file's: these five are answers, and the rest are
-    // *nothing came back* or a failure on this machine before anything was sent.
-    let answered = matches!(
-        fault,
-        Fault::Rejected | Fault::Expired | Fault::Refused | Fault::Gone | Fault::Conflict
-    );
+    // **Did the server answer at all?** It is the question both sentences below turn on
+    // ([`answered`]).
     let (title, outcome, because) = if !sent {
         (
             "The cluster refused this",
             "Nothing was changed.",
             "This is the check that runs before the real change — it stopped this one.",
         )
-    } else if answered {
+    } else if answered(*fault) {
         (
             "The cluster refused this",
             "Nothing was changed.",
@@ -1643,6 +1754,393 @@ fn gone(frame: &mut Frame, body: Rect, object: &views::Object, recreated: bool, 
     boxed(frame, body, DISMISS_BOX, "Already gone", lines, screen);
 }
 
+/// **The cluster picker** (`screens/context.md` § The picker, § Opening at startup) — one box both
+/// ways, [`views::Picker::startup`] choosing its title and [`views::Picker::verbs`] its two words,
+/// the footer's own.
+///
+/// **Top to bottom**: the list, the slot under it, the sentence that k8rs does not change the
+/// kubeconfig — or, over a file with one context, that it is the only one — and the buttons, each
+/// block a blank row from the next.
+///
+/// **The slot is the selected row's server line, or why `⏎` has nothing to act on** — no row
+/// selected, no row that can be, a filter that hides every row, or a kubeconfig with no contexts
+/// in it (NOTES § D264 rulings 2, 16 and 18). Its rows are kept for the
+/// tallest thing any shown row, or that sentence, would need, so the box does not change height
+/// under the cursor ([`box_width`]'s reason, one axis over).
+///
+/// **The list takes what the body has left** ([`PICK_SPARE`]), scrolls with the cursor where it has
+/// fewer rows than the filter shows — its offset derived fresh from the selection every frame and
+/// kept nowhere between them, the value a fresh `ListState` of that height would give
+/// (`screens/widgets.md` § 4, NOTES § D264 ruling 26) — and says so with a [`scrollbar`].
+///
+/// **Every string came from [`crate::k8s::contexts`] already stripped and bounded** (invariant 9);
+/// what this adds is that none of them can size the box: a name gives way at its slot, a tag at
+/// [`TAG`], and the slot at [`SERVER_ROWS`].
+fn pick(frame: &mut Frame, body: Rect, picker: &views::Picker, screen: &Screen) {
+    let rows = screen.contexts;
+    let wide = body.width.saturating_sub(2 * PICK_MARGIN + 2);
+    let columns = room(wide);
+    // **The two gaps are not written beside each other**: `GAP + GAP` and `GAP * GAP` are both
+    // four, and a term a mutation cannot change is a term no test can hold.
+    let slot = columns.saturating_sub(GAP + TAG + GAP + BADGE + width(MARKER));
+    let text = screen.fg(theme::TEXT);
+    let shown = picker.shown(rows);
+    let selected = picker.selected(rows);
+
+    let inert = match selected {
+        Some(_) => Vec::new(),
+        // **The file before the filter**: with no context in it, a filter has nothing to hide.
+        None if rows.is_empty() => EMPTIED.map(str::to_owned).to_vec(),
+        None if shown.is_empty() => cut(
+            &format!("No context matches \"{}\".", picker.filter.text()),
+            columns,
+            SERVER_ROWS,
+        ),
+        None if picker.nowhere(rows) => UNREACHABLE.map(str::to_owned).to_vec(),
+        None => UNSTARTED.map(str::to_owned).to_vec(),
+    };
+    let kept = shown
+        .iter()
+        .filter(|&&at| views::landable(&rows[at]))
+        .map(|&at| served(&rows[at], columns).len())
+        .fold(inert.len().max(1), usize::max);
+    // **One context and `X`: still a picker, and it says why nothing can be picked**
+    // (`screens/context.md`: *a key that appears to do nothing is worse than a screen that
+    // explains why*). It takes the place of the kubeconfig sentence, which is about a switch there
+    // is nothing to make, and a name wider than the whole slot gives way from its front
+    // (NOTES § D264 ruling 5) before the sentence wraps.
+    let under = match rows {
+        [only] => wrapped(
+            &format!(
+                "{} is the only cluster in your kubeconfig.",
+                shortened(views::drawn_name(only), columns)
+            ),
+            columns,
+        ),
+        _ => UNCHANGED.map(str::to_owned).to_vec(),
+    };
+    // The blank above the list, below it, below the slot and below the sentence, the buttons, and
+    // the blank under them.
+    let fixed = 6 + kept + under.len();
+    let most = usize::from(body.height)
+        .saturating_sub(PICK_SPARE)
+        .saturating_sub(fixed)
+        .max(1);
+    let listed = shown.len().clamp(1, most);
+    let place = selected
+        .and_then(|at| shown.iter().position(|&nth| nth == at))
+        .unwrap_or_default();
+    let first = (place + 1).saturating_sub(listed);
+
+    let mut lines = vec![Line::raw("")];
+    lines.extend(
+        shown
+            .iter()
+            .skip(first)
+            .take(listed)
+            .map(|&at| context(&rows[at], Some(at) == selected, slot, screen)),
+    );
+    lines.resize(1 + listed, Line::raw(""));
+    lines.push(Line::raw(""));
+    let said = selected.map_or(inert, |at| served(&rows[at], columns));
+    let mut said = indent(said, MODAL_MARGIN, text);
+    said.resize(kept, Line::raw(""));
+    lines.extend(said);
+    lines.push(Line::raw(""));
+    lines.extend(indent(under, MODAL_MARGIN, text));
+    lines.push(Line::raw(""));
+    let (go, leave) = picker.verbs();
+    let enter = if picker.inert(rows) {
+        screen.fg(theme::DIM)
+    } else {
+        focused(screen)
+    };
+    lines.push(
+        Line::from(vec![
+            Span::styled(format!("[ ⏎ {go} ]"), enter),
+            Span::raw(BUTTON_GAP),
+            Span::styled(format!("[ esc {leave} ]"), text),
+        ])
+        .centered(),
+    );
+    lines.push(Line::raw(""));
+
+    let title = if picker.startup() {
+        "Choose a cluster"
+    } else {
+        "Switch cluster"
+    };
+    let inner = boxed(frame, body, wide, title, lines, screen);
+    let list = Rect {
+        y: inner.y + 1,
+        height: u16::try_from(listed).unwrap_or(u16::MAX),
+        ..inner
+    };
+    scrollbar(frame, list, shown.len(), first, screen);
+}
+
+/// **A list with more rows than it is drawn in, marked down its right-hand column**
+/// (`screens/widgets.md` § 2: a `Scrollbar`, drawn **only** once the content is taller than the
+/// viewport — a permanent one in a short list is noise). `first` is the first row drawn.
+///
+/// **No arrows at the ends**: the picker's list is three rows at the 80×24 floor, and two of those
+/// spent on `▲`/`▼` would leave a one-row track whose thumb cannot say where the window is.
+fn scrollbar(frame: &mut Frame, area: Rect, content: usize, first: usize, screen: &Screen) {
+    let rows = usize::from(area.height);
+    if content <= rows {
+        return;
+    }
+    // **The state counts the places the window can start at, not the rows**, so a window on its
+    // last row puts the thumb on the track's last cell: counted in rows, the thumb stopped eight
+    // cells short of the foot of a 20-row list.
+    let mut state = ScrollbarState::new(content - rows + 1)
+        .position(first)
+        .viewport_content_length(rows);
+    frame.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .style(screen.fg(theme::BORDER)),
+        area,
+        &mut state,
+    );
+}
+
+/// **One context's row: name, tag, badge** (`screens/context.md` § The tag column) — the name slot
+/// flexible, the other two fixed, so a 90-character name never moves the tag.
+///
+/// **The name gives way from its front and the tag from its tail** (NOTES § D264 rulings 5 and
+/// 24): an EKS fleet shares a long prefix and differs at the end, and a written tag is read from
+/// its front. No one cut tells every naming scheme apart; the server line under the list does.
+///
+/// **A written tag is bright with no marker and a derived one is dim behind `~`** — the tilde is
+/// what survives a monochrome terminal and a paste into a chat, so the difference is carried by a
+/// character and not by colour alone (NOTES § D116). **A row the cursor skips, or cannot open as
+/// itself, is dim throughout**: a written tag on it is dimmed with the rest.
+///
+/// **The badge is one of four, in this order**: `⚠ duplicate name`, `⚠ cluster undefined`,
+/// `⚠ TLS not verified`, `(current)`. The TLS warning beats `(current)` because the cursor's own
+/// position already said which row is current (§ The badge tie-break); a shadowed row carries
+/// neither of those two, `k8s::contexts` having cleared both (NOTES § D175).
+fn context<'a>(row: &Choice, selected: bool, slot: usize, screen: &Screen) -> Line<'a> {
+    let dimmed = row.shadowed || row.server == Address::Undefined;
+    let style = screen.fg(if dimmed { theme::DIM } else { theme::TEXT });
+    let guessed = matches!(row.tag, Tag::Derived(_));
+    let badge = if row.shadowed {
+        format!("{} duplicate name", mark(theme::ALARM))
+    } else if row.server == Address::Undefined {
+        format!("{} cluster undefined", mark(theme::ALARM))
+    } else if row.insecure {
+        format!("{} TLS not verified", mark(theme::ALARM))
+    } else if row.current {
+        "(current)".to_owned()
+    } else {
+        String::new()
+    };
+    let marker = if selected {
+        MARKER.to_owned()
+    } else {
+        " ".repeat(width(MARKER))
+    };
+    let gap = " ".repeat(GAP);
+    let name = shortened(views::drawn_name(row), slot);
+    let line = Line::from(vec![
+        Span::styled(
+            format!("{MODAL_MARGIN}{marker}{}{gap}", slotted(&name, slot)),
+            style,
+        ),
+        Span::styled(
+            slotted(&views::drawn_tag(&row.tag), TAG),
+            screen.fg(if dimmed || guessed {
+                theme::DIM
+            } else {
+                theme::TEXT
+            }),
+        ),
+        Span::styled(format!("{gap}{}", slotted(&badge, BADGE)), style),
+    ]);
+    // **The fill and the mark together**, as the sidebar and the browser draw a selection:
+    // `PANEL` degrades to nothing at sixteen colours and `▸` is what carries it there.
+    if selected {
+        line.style(Style::new().bg(ink(theme::PANEL, screen.depth)))
+    } else {
+        line
+    }
+}
+
+/// `text` in exactly `columns` — cut between characters where it is longer, padded where it is
+/// shorter. **No mark**: a tag and a badge clip at their slot's edge like a cell does
+/// (`screens/context.md` § A 60-character tag), and [`fits`] is the one cut that never lands inside
+/// a character. A name reaches here already [`shortened`] to the slot, so nothing of it is cut.
+fn slotted(text: &str, columns: usize) -> String {
+    let kept = fits(text, columns);
+    format!("{kept}{}", " ".repeat(columns.saturating_sub(width(kept))))
+}
+
+/// **The line under the list for one row** — `name  →  address`, or `name  —  ` and the sentence
+/// that stands in for an address (`screens/context.md` § A context defined twice, § A server
+/// address k8rs will not guess at). Continuations hang under the text, as both of that file's
+/// sentences draw, and the name gives way from its front at [`LABEL`] (NOTES § D264 ruling 5).
+///
+/// **A shadowed row's sentence beats its address**: what a lookup by its name opens is an entry
+/// above it, so its own address describes a connection nobody makes — and the sentence claims
+/// nothing about that entry, which can be broken too (NOTES § D264 ruling 3). **A row whose
+/// cluster is undefined has no line at all**, and the cursor never lands on one to ask.
+fn served(row: &Choice, columns: usize) -> Vec<String> {
+    let name = views::drawn_name(row);
+    let (joint, said) = match &row.server {
+        _ if row.shadowed => (
+            "—",
+            Cow::Owned(format!(
+                "another context earlier in this file is also named {name}. Every lookup by that \
+                 name, ⏎ here included, finds it first, never this row."
+            )),
+        ),
+        Address::Server(address) => ("→", Cow::Borrowed(address.as_str())),
+        Address::Unreadable => (
+            "—",
+            Cow::Borrowed(
+                "k8rs found a server address here it cannot read safely, so nothing is shown \
+                 instead of a guess.",
+            ),
+        ),
+        Address::Undefined => return Vec::new(),
+    };
+    let lead = format!("{}  {joint}  ", shortened(name, LABEL));
+    let hang = " ".repeat(width(&lead));
+    let room = columns.saturating_sub(width(&lead));
+    cut(&said, room, SERVER_ROWS)
+        .into_iter()
+        .enumerate()
+        .map(|(nth, line)| format!("{}{line}", if nth == 0 { &lead } else { &hang }))
+        .collect()
+}
+
+/// **Why a picked context did not connect, in the driver's own words** (NOTES § D264 ruling 1) —
+/// the title's outcome, and the one paragraph under it.
+///
+/// **Whether a request reached a cluster decides both** (`screens/context.md` § Every other fault
+/// has its own sentence). A connection that sent nothing *could not be opened* and is asked as
+/// [`views::REACH`], `--live`'s framing, with no scope — **and so are the four faults that never
+/// put a request in front of a cluster, whatever path they came by**: a `NoCredential` on a watch
+/// mid-session built no client either (NOTES § D264 ruling 17). A pods watch that never listed is
+/// asked as [`views::watching`] in [`views::scope`] — the scope folded into what was asked, which
+/// is where `because`'s arms put `asked`. Of those, the ones the cluster answered *said no* and the
+/// rest *did not answer*: [`answered`], the question [`refused`] asks.
+///
+/// **[`views::next_step`] follows the reason only where a request went out, asked as a running
+/// k8rs** (NOTES § D264 rulings 23 and 32) — so an `Unanswered` whose client was never built draws
+/// none, which is the sentence `--once` prints for it (§ Every other fault's table, ruling 28).
+fn failed(
+    sent: bool,
+    fault: Fault,
+    said: Option<&str>,
+    coverage: &Coverage,
+    renewal: Option<&str>,
+) -> (&'static str, String) {
+    let local = matches!(
+        fault,
+        Fault::Kubeconfig | Fault::NoContext | Fault::BadEntry | Fault::NoCredential
+    );
+    let (outcome, reason, next) = if !sent || local {
+        let reason = views::because(fault, views::REACH, renewal, None);
+        ("could not be opened", reason, None)
+    } else {
+        // **Pods, because the permanent pods watch is the one request a fresh connection makes**
+        // (`screens/context.md` § Every other fault has its own sentence).
+        let asked = format!("{} {}", views::watching("pods"), views::scope(coverage));
+        let outcome = if answered(fault) {
+            "said no"
+        } else {
+            "did not answer"
+        };
+        (
+            outcome,
+            views::because(fault, &asked, renewal, said),
+            views::next_step(fault, coverage, "pods", true),
+        )
+    };
+    let reason = capitalised(&reason);
+    let paragraph = match next {
+        Some(next) => format!("{reason}. {next}"),
+        None => format!("{reason}."),
+    };
+    (outcome, paragraph)
+}
+
+/// **Did the server answer at all?** These five are answers; the rest are *nothing came back* or a
+/// failure on this machine before anything was sent. [`Fault`]'s to answer and asked in one place,
+/// so [`refused`] and [`failed`] cannot sort one fault two ways.
+fn answered(fault: Fault) -> bool {
+    matches!(
+        fault,
+        Fault::Rejected | Fault::Expired | Fault::Refused | Fault::Gone | Fault::Conflict
+    )
+}
+
+/// **A picked context that did not connect** (`screens/context.md` § When the new cluster does not
+/// work) — the same box mid-session and at startup, where only the way out and the button differ.
+///
+/// **Every word inside it but the way out is [`failed`]'s**, and the way out is the page's two
+/// sentences: *nothing is wrong with* the context that was last live, or *nothing has connected
+/// yet* — which [`views::Before`] it is, read off what has connected in this run
+/// (NOTES § D264 ruling 15).
+///
+/// **Bounded however long the names and the cluster's words are**: both names give way from the
+/// front, the title's at whatever leaves its outcome whole and the way out's at what keeps that
+/// sentence to two rows; the paragraph takes the rows [`MODAL_ROWS`] has left and is cut with a
+/// mark past them — the one thing in it that is not k8rs's own is [`Fault::Rejected`]'s quote.
+fn unconnected(
+    frame: &mut Frame,
+    body: Rect,
+    to: Option<&str>,
+    before: &views::Before,
+    outcome: &str,
+    why: &str,
+    screen: &Screen,
+) {
+    let columns = room(DISMISS_BOX);
+    let text = screen.fg(theme::TEXT);
+    let way_out = match before {
+        views::Before::Connected(from) => {
+            let lead = "Nothing is wrong with ";
+            let from = from.as_deref().unwrap_or(views::UNNAMED);
+            format!(
+                "{lead}{} — X takes you back.",
+                shortened(from, columns.saturating_sub(width(lead)))
+            )
+        }
+        views::Before::Picking(_) => {
+            "Nothing has connected yet — esc takes you back to the list to try a different \
+             cluster."
+                .to_owned()
+        }
+    };
+    let way_out = wrapped(&way_out, columns);
+    // The blank under the title, under the paragraph and under the way out, the button, and the
+    // blank under it.
+    let paragraph = cut(why, columns, MODAL_ROWS.saturating_sub(5 + way_out.len()));
+
+    let mut lines = vec![Line::raw("")];
+    lines.extend(indent(paragraph, MODAL_MARGIN, text));
+    lines.push(Line::raw(""));
+    lines.extend(indent(way_out, MODAL_MARGIN, text));
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(format!("[ esc {} ]", before.leave()), text).centered());
+    lines.push(Line::raw(""));
+
+    let tail = format!(" {outcome}");
+    let to = to.unwrap_or(views::UNNAMED);
+    let title = format!(
+        "{}{tail}",
+        shortened(
+            to,
+            usize::from(DISMISS_BOX).saturating_sub(2 + width(&tail))
+        )
+    );
+    boxed(frame, body, DISMISS_BOX, &title, lines, screen);
+}
+
 /// **One of `ops.rs`'s verdict lines as a dialog draws it** — its first letter raised and a full
 /// stop added (`screens/dialogs.md` § Scale, § Delete).
 ///
@@ -1670,10 +2168,12 @@ fn spoken(line: &str) -> String {
 }
 
 /// A verb with its first letter raised, for a title bar — `scale` is `ops::Operation::verb`'s own
-/// spelling and `Scale payments/web` is `screens/dialogs.md`'s.
+/// spelling and `Scale payments/web` is `screens/dialogs.md`'s — and the first word of a sentence
+/// [`failed`] builds.
 ///
 /// **ASCII, and that is a fact about the input rather than an assumption**: every verb this is
-/// handed is one of the literals the driver holds, never a word the API sent.
+/// handed is one of the literals the driver holds, and every sentence starts on a word
+/// `views::because` wrote, never a word the API sent.
 fn capitalised(verb: &str) -> String {
     let mut characters = verb.chars();
     characters.next().map_or_else(String::new, |first| {

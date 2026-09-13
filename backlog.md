@@ -2526,6 +2526,43 @@ recorded reversal and a later box rather than a dev round
   directory — but it will go red on those three lines the moment it is switched
   on, so the box has to own the reflow too. Found by `tester`, 2026-09-05
 
+- **`scripts/screens-check.py` measures a mockup's width and height, but not
+  whether its box closes.** A top or bottom border 2 columns narrower than the
+  box's sides passed in two `screens/context.md` failure mockups, and so did an
+  excerpt whose rows had no side borders. Found by `dev-ui` drawing the page
+  ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)),
+  2026-09-13. The fix belongs to `scripts/`, which is `tester`'s.
+
+- **The typed `/` filter is drawn in no pane.** Whether `esc` clears the filter
+  or leaves the screen depends on text the reader cannot see. The picker covers
+  its own case, where the filter hides every row
+  ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+  ruling 7); Alerts, Resources and Analysis do not. Found by `k8s-admin`,
+  2026-09-13.
+
+- **`main.rs` still has three second copies that the D264 move did not reach.**
+  - `scoped_because` writes `Pass --namespace <name>` twice rather than
+    `{NAMESPACE}`.
+  - `scoped_because` also has "`list` pods across the whole cluster", beside
+    `views::scope`'s wording.
+  - `live` and `opened` format *no cluster to watch* separately.
+
+  Also, no `main_tests.rs` test pins `views::REACH` at its three call sites;
+  only a binary run did. **And a connect that fails in the login program prints
+  no next step.** `live`'s `Err` arm calls `because` alone, so a `NoCredential`
+  that reaches `--once` before any request is made does not get *Run that program
+  yourself…*. The picker's failure box does draw it
+  ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+  ruling 22), and `tester` measured the gap with a missing login program,
+  2026-09-13. Found by `dev-core`, 2026-09-13. It is the temporary
+  driver's code, and it goes away with Phase 12's wiring, or with the box that
+  owns `--once`'s wording.
+
+- **No test reads the selected row's `theme::PANEL` fill, anywhere in the
+  product.** Replacing the picker's fill with a plain line passed all 1379 tests,
+  and neither the sidebar's fill nor the browser's is asserted either. Found by
+  `tester`, 2026-09-13. The screens name the fill; nothing holds it.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
