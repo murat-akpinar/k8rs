@@ -131,6 +131,7 @@
 - *(main)* A refusal named the word it had just said k8rs does not have ([a41c3bb](https://github.com/murat-akpinar/k8rs/commit/a41c3bb62354c48fcedb0a1183ebd15f13ec14a8)) — With a zero-width space in it, `ops restart dep<ZWSP>loyment/web` answered "k8rs does not work on a kind called deployment — the ones an operation can be pointed at are deployment, statefulset, ...". The operator retypes an identical-looking line and gets an identical refusal, forever. ops.rs had already ruled this class and the ruling landed in the copy nothing can reach: `a_kind` quotes a word only where the strip left it alone, and its own doc says neither arm is reachable from argv.
 - *(ui)* The spike said a listing cluster was an empty one ([a1632ce](https://github.com/murat-akpinar/k8rs/commit/a1632ceec24a5d128e5a9a2013cc20a957631563)) — The re-review of Phase 8's own fixes, four findings, none blocking.
 - *(ci)* Force cargo's output plain where a guard parses it ([a356a5a](https://github.com/murat-akpinar/k8rs/commit/a356a5a5159d4a0210bbf86b9d987271347af84f))
+- *(ui)* Stop six screens drawing something false before phase 11 closes ([7553d3e](https://github.com/murat-akpinar/k8rs/commit/7553d3e57149512701182446c8cd7ffbc09c66ee)) — A confirm dialog now names the object it will hit. The identity cut gives way from the namespace's front first and the name's front last, because two objects differ at the end of their names, so a canary and its stable sibling no longer draw byte-identical scale, restart, gone and in-flight frames. The same cut serves the Alerts card and the detail heading, and sidebar kind rows cut from their front behind a visible mark.
 
 ### 💼 Other
 
@@ -234,6 +235,7 @@
 - *(docs)* Point the dirty-tree gate at the session check ([194fe12](https://github.com/murat-akpinar/k8rs/commit/194fe12999af2917757c695aaa53cb88261531cf))
 - *(docs)* Send an agent's scratch build volume to $HOME, not the tmpfs scratchpad ([4165485](https://github.com/murat-akpinar/k8rs/commit/41654850f2ce4ed94accc0f7c6b0e94af23d8853))
 - *(docs)* Name the commit-body shape git-cliff swallows ([7cac406](https://github.com/murat-akpinar/k8rs/commit/7cac406c6aa18de78defdb4b1420571580e1679b))
+- *(docs)* Rule the phase 11 close — six false screens first, and the freeze moves to its consumer ([4b96f08](https://github.com/murat-akpinar/k8rs/commit/4b96f086705fa7fc0526a7932f8d12875909797a)) — The family read of the whole phase found six screens that draw something false, each reproduced through the real renderer, and surface no caller can supply without editing a file this close was about to freeze. The six are fixed before the close. ui.rs and views.rs now freeze at Phase 12's close, by D246's own rule one layer up, and the missing surface is boxed there (NOTES D266).
 
 ### ⚡ Performance
 
