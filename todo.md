@@ -4546,13 +4546,37 @@ Secret is redrawn after the reveal is dismissed.
 
 **Done when:** the running screen matches [`screens/`](screens/README.md) at
 80×24; every key in the footer works.
-**Frozen after:** `ui.rs` **and `views.rs`** — the latter carried forward from Phase 10 ([D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3).
+**Frozen after:** nothing — **`ui.rs` and `views.rs` freeze at Phase 12's close**, the first phase with a caller for either ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 2, [D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3's rule one layer up).
 
 ## Phase 12 — Final wiring · **milestone M3**
 
 *Also read: [PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted) — k9s's own "skip the cycle when nothing changed" was merged and reverted a month later, and invariant 7 is the same manoeuvre. Also [§ D4](PRIOR-ART.md#d4--the-terminal-after-a-subprocess): leaving raw mode and re-entering it is one function, not one per path.*
 
 Goal: one binary, live and safe.
+
+**The surface the console still owes its wiring** — boxed at Phase 11's close
+([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 3), in `ui.rs` / `views.rs`, which stay open until this phase closes:
+
+- [ ] **A footer key has something behind it**: `c container` opens a picker
+      (`screens/detail.md` § Choosing a container, and when there is nothing to
+      choose — `Modal` has no variant for it), `/` and `n` have a typing state the footer can say and an empty
+      filtered list that is not *nothing is broken*, and a filter does not
+      survive into a view that cannot draw it
+- [ ] **`Offer` says which of `s` / `r` this kind supports** — a Node card
+      offers `s scale` today and a DaemonSet cannot be said at all — and
+      `may_mutate` is asked per key
+- [ ] **`⏎ to see` opens something**: `Detail` carries the card's findings and
+      the *which pods* step `screens/detail.md` draws (the rules closing § The logs tab)
+- [ ] **What a caller hands `Screen` is stripped once, and the header's
+      connection word comes from `Screen::link`** — `context`, `vitals`, `note`,
+      `clock`, `--namespace` and the command log's own lines meet no strip on the
+      way in, and a right-to-left override survives into `List`, `Table` and
+      title cells
+- [ ] **Four behaviours a key reaches that are wrong today**: `k` after
+      following a log jumps to the top; `esc` closes a confirm whose check has
+      not answered; `--context` appended last is what a cut command line drops
+      first; and the `dead_code` expectations over `ui.rs` / `views.rs` are
+      removed so an unwired function is reported
 
 - [ ] `main.rs`: single `tokio::select!` (watch streams · crossterm events ·
       Ctrl-C), draw-on-change with ~100ms coalescing, block when idle.
@@ -4626,15 +4650,14 @@ Goal: one binary, live and safe.
       are whatever this wiring hands them ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)). Feed a
       crafted name — ANSI escape, right-to-left override, 10k on one line —
       through the real path and watch the frame stay 80×24
-- [ ] **The two sentences `ops.rs` keeps to itself stop being copied** — this
-      wiring is the first code that hands a real `ops::Checked` to a
-      `views::Dialog`, so it is where `ops::ACCEPTED` / `ops::UNCHECKABLE` and
-      `ops::removal`'s pod hedge stop having a second copy in `src/ui.rs` and
-      `src/ui_tests.rs`. All three are private to a file frozen after Phase 7,
-      which is why Phase 11 named the seam instead of opening one
-      ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12) item 6): the fixtures already carry what
-      `ops.rs` really returns rather than the drawn form, and what is owed is
-      that they stop being retyped at all
+- [ ] **Rule, before wiring a dialog, what happens to the two sentences `ops.rs`
+      keeps to itself** — `ops::ACCEPTED` / `ops::UNCHECKABLE` and `ops::removal`'s
+      pod hedge are copied into `src/ui.rs` and `src/ui_tests.rs`, and the original
+      is private to a file frozen since Phase 7, so *stop copying them* cannot be
+      done without a reversal ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12) item 6 ·
+      [D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 3).
+      Either the copy stays and a test pins it against what `ops.rs` really
+      returns through the wiring, or the reversal is written first
 - [ ] Manual pass of the REQUIREMENTS error-state list (no kubeconfig, 403 on
       read, 403 on write, API down mid-run, watch drop, rejected admission,
       409 conflict)
@@ -4647,6 +4670,7 @@ on purpose.
 
 **Done when:** k8rs runs against kind end-to-end and every error state
 behaves as specified.
+**Frozen after:** `ui.rs` and `views.rs` ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 2).
 
 ## Phase 13 — Ship v0.1 · **milestone M4**
 

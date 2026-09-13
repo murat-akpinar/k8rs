@@ -287,6 +287,7 @@ its line moving with it.
 - [D263](#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12) — the nine states: a refusal that was also a scope, a stack that cut the one banner with nothing else to say, and a test named for a body it never compared
 - [D264](#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13) — the picker round: a failure box with a second vocabulary, a current row that could not be retried, and a cursor on a context nobody chose
 - [D265](#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13) — the read-only mark: the header joins the permission word itself, and Help swaps for either cause
+- [D266](#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) — the Phase 11 close: six screens that draw something false, and a freeze set one phase before its consumer
 
 ## Why it exists — where the gap is
 
@@ -23325,3 +23326,43 @@ round three's two findings and nothing else: the clock clause's *quit and start 
 real frame: Help promising keys the footer withheld, a Phase 12 source that could not be reached,
 and a next step that did not work. The gate over the tree that lands: `just check` green,
 `just mutants-diff` 17 mutants, 15 caught, 2 unviable on a missing `Default` bound.
+
+### D266 — the Phase 11 close: six screens that draw something false, and a freeze set one phase before its consumer (2026-09-13)
+
+`k8s-admin`'s family read of the whole phase (`reports/2026-09-13-phase-11-close-family-read.md`)
+measured a Python copy of the cutting code; `tester` re-ran every item through `ui::draw` at 80×24
+and **all of them reproduced**, two worse than reported.
+
+**1. Six blockers, fixed before the close (ritual step 6 — wrong output):**
+- **A confirm dialog does not show which object it will hit** — Phase 11's own security gate.
+  `…/checkout-worker-service-canary` and `…-stable` draw byte-identical scale, restart, *Already
+  gone* and in-flight frames: the title and `$` line cut the name's end, where the two differ.
+- **Three silent cuts make two objects one**: the Alerts card identity (no `…`, and the `/`
+  gone), the sidebar kind row (`persistentvolum` twice on every cluster), the detail heading.
+- **The command log strip cuts the outcome first**: a running restart and a rejected one draw the
+  same row, and the namespace goes although the command fit.
+- **`○ nothing is broken` draws over a lost link or an expired login.**
+- **The *cluster refused* box says the cluster refused a check that never left this machine**,
+  for all eight `sent: false` faults, while the audit line says *never left this machine* or *does
+  not know whether it reached the cluster*. A `409` draws *refused* too.
+- **A drain-safety answer taller than the pane blanks the whole Analysis body**, on the committed
+  captures: ratatui skips a `List` item that does not fit, and D263 item 5 trimmed Alerts only.
+
+**2. The reversal: `ui.rs` and `views.rs` freeze at Phase 12's close, not Phase 11's.**
+[D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+ruling 3's own rule, one layer up: a file is the top layer until its consumer exists, and
+`main.rs`'s wiring is the only consumer both have. The read found surface no caller can supply —
+no container-picker modal behind `c container`, no per-key `Offer` (a Node card offers `s scale`),
+no filter-typing state, no finding on `Detail` behind *⏎ to see* — and freezing now would turn
+each into a reversal the day Phase 12 meets it. **Nothing else loosens**: the six above are still
+Phase 11's.
+
+**3. Boxed in Phase 12, not this close**: that surface; the follow-mode scroll offset; the
+connection word still in the caller's string (D265 left it); where `--context` sits on a cut
+command line; the `dead_code` expectations nothing will report; `App::escape` closing a confirm
+whose check has not answered; and the strip of every `Screen` string a caller supplies —
+`context`, `vitals`, `note`, `clock`, `--namespace` and the command log's own lines meet no strip
+on the way in, and a right-to-left override survives into cells on `List`, `Table` and title
+surfaces (`tester`, measured). **The `ops.rs` sentences box cannot be done as written** — the
+copy is in `ui.rs` and the original is private to a file frozen since Phase 7 — so its box is
+rewritten to a ruling Phase 12 makes first.
