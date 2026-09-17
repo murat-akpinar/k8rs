@@ -288,6 +288,7 @@ its line moving with it.
 - [D264](#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13) — the picker round: a failure box with a second vocabulary, a current row that could not be retried, and a cursor on a context nobody chose
 - [D265](#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13) — the read-only mark: the header joins the permission word itself, and Help swaps for either cause
 - [D266](#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) — the Phase 11 close: six screens that draw something false, and a freeze set one phase before its consumer
+- [D267](#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17) — nothing builds on the dev machine: the gate, the sweep and the binary move to the test host
 
 ## Why it exists — where the gap is
 
@@ -23383,3 +23384,41 @@ rewritten to a ruling Phase 12 makes first.
   cutting the action silently. No wording `analysis.rs` builds reaches it.
 - **The refused box's audit-class grouping in its test is transcribed**, because `ops::Record::check`
   is private to a file frozen since Phase 7.
+
+### D267 — nothing builds on the dev machine: the gate, the sweep and the binary move to the test host (2026-09-17)
+
+**The user's ruling, 2026-09-17:** *"burada ki amacım bu bilgisayarı çok kirletme hep test cihazında
+çalış"* — the dev machine only edits files and runs git. It held a 24 GiB `target/` and 3.2 GiB of
+review build trees under `~/.cache` when this was said.
+
+**What runs where.** `cargo` in any form, `just check`, `just mutants-diff` / `just mutants`, every
+guard and the binary itself run on `ssh ubuntu`, in `~/k8rs-src`, after mirroring the working tree
+into it with `rsync -a --delete`, which leaves out `target/` and `mutants.out*` because the host's own
+runs write those and `--iterate` reads them (CLAUDE.md § Running it has the two lines). That
+directory stays the only checkout there, and nothing is ever edited in it — the next mirror deletes
+the edit. It is a file tree like any other: one command runs in it at a time.
+
+**What the host needed, installed 2026-09-17**, all user-level except `rsync`: rustc 1.98.1 with
+clippy and rustfmt as rustup's default (`toolchain-guard.py` refuses 1.97.1, which the host had —
+[D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03)),
+`cargo-deny` 0.20.2 from its release tarball with the published sha256 checked, `cargo-mutants`
+27.1.0 from its release tarball, and `rsync` from apt. Versions match the dev machine's.
+
+**Measured on the host, not assumed:** the first `just check` there — cold, a toolchain change
+under it — ran 732 s, sampled at 3.0 of 3.8 GiB used during the tests beside `kind-k8rs`, and passed
+fmt, clippy, 1397 + 35 tests and the guards. It went red on `cargo deny`: GHSA-2mjx-qc3c-rqvc against
+`rustls` 0.23.43, published after the last green run and fixed by a lockfile bump to 0.23.45 (a two-line
+`Cargo.lock` diff, 319 packages). The rerun was green in 490 s.
+
+**What this costs, said now so it is not found later.** Two things the host is too small for do not
+move with a sentence:
+- **Mutation jobs.** `scripts/mutants.sh` defaults to 4 jobs at 4 GiB of scratch each; the disk has
+  it, the RAM does not. The sweep runs with `CARGO_MUTANTS_JOBS=1` on the host until a run there
+  measures more.
+- **Fixture captures.** [D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
+  is why captures went to the dev machine. They now run on the host **with nothing else running
+  there** — no build, no second cluster — and `cluster.sh verify` refusing the host is what a
+  capture waits on, never something to route around.
+
+A call longer than the ten-minute foreground cap runs the `ssh` in the background with its output
+in a file on the host.

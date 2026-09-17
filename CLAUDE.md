@@ -467,6 +467,19 @@ that goes green says nothing about those.
 installed locally is added to `just check` anyway: a missing binary is a loud
 error, a missing step is an invisible gap.
 
+**Nothing builds or runs on this machine — every `cargo`, `just`, guard and
+binary run happens on the test host** ([D267](NOTES.md#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17),
+the user's ruling). Edit here, mirror, run there:
+
+```
+rsync -a --delete --exclude=/target --exclude='/mutants.out*' ~/GIT/k8rs/ ubuntu:k8rs-src/
+ssh ubuntu 'cd ~/k8rs-src && export PATH=$HOME/.cargo/bin:$PATH && just check'
+```
+
+`~/k8rs-src` is never edited, since the next mirror deletes the edit. One command
+runs in it at a time. A mutation run there takes `CARGO_MUTANTS_JOBS=1`. A run
+longer than ten minutes goes to the background with its log on the host.
+
 **Green tests are not the same as working software.** Something is *run* every
 box, and its output goes in the report — never report "done" for something that
 was not run. Until Phase 3's last box wires the temporary `main.rs`, the real run
@@ -853,11 +866,12 @@ in order, no skipping:
    whose only evidence is `cargo test` has never left the fixture. `ssh ubuntu`
    (`murat@192.168.1.130`): build the real binary there and run it — against a
    committed fixture while the temporary `main.rs` is the driver, against kind
-   from Phase 5 on, breaking pods by hand and watching the screen answer. **Run
-   there, never capture there**: that host has 3.8 GiB and silently reports a
-   memory-limit kill as `Error` instead of `OOMKilled`, which is how a capture
-   taken on it destroys rule 2's fixture
-   ([D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)).
+   from Phase 5 on, breaking pods by hand and watching the screen answer. **A
+   capture there runs with nothing else on the host**: at 3.8 GiB, a busy host
+   reports a memory-limit kill as `Error` instead of `OOMKilled`, and that is how
+   a capture destroys rule 2's fixture
+   ([D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14) ·
+   [D267](NOTES.md#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17)).
 3. **Every box of the phase is checked, and every check is true.** If something
    could not be proven, leave the box open and say why in the item — an honest
    open box beats a false tick.
