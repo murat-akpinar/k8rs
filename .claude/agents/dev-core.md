@@ -32,6 +32,15 @@ test that cannot fail, and the whole-file run is the phase-close gate — and th
 thing actually run, a fixture or kind. Prove your own change red then green and paste
 both; that is evidence for the reader, and it is why nobody re-runs it after you.
 
+**Three checks that each replaced a review round once**, all found downstream
+*after* a green `just check` and a clean sweep
+([D270](../../NOTES.md#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18)):
+a test with no assertion is not a test, and an assertion that names the geometry
+is not the claim; change a bound and exercise **both** sides of it, since two
+tests can partition a space so that neither stands on the defect between them;
+and when you fix a claim in one doc comment, grep for its other copies — nothing
+in `just check` can see a comment that has become false.
+
 Report: what changed and where · the commands and their real output · the red run
 and the green run · what you could not prove · anything you wanted to touch
 outside your files · **every choice you had to make that the brief did not

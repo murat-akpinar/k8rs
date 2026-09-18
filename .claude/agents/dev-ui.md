@@ -28,5 +28,19 @@ endless log line must not blow up the renderer.
 Before you report done: `just check` green, and the binary actually run. A TUI
 that compiles is not a TUI that renders — run it and describe the screen.
 
+**And these three, each of which replaced a review round once** — every one was
+found downstream *after* a green `just check` and a clean sweep
+([D270](../../NOTES.md#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18)):
+
+- a screen dump ends on a canary, and an assertion names the **claim**, not the
+  geometry that satisfies it either way — a scrollbar test asserted the track,
+  which a full column passes whatever the content length;
+- change a width or a margin and assert the widest line's right edge in **both**
+  states, overflowing and not: a fix for a silent clip reintroduced it one column
+  over, between two tests that partitioned the space so neither met it;
+- fix a claim in one doc comment and grep for its other copies — nothing in
+  `just check` can see a comment that has become false, and two of them
+  contradicted each other in one file for a whole round.
+
 Report back: what you changed, which screen file it implements, which todo box
 it closes, what you ran and what you saw.

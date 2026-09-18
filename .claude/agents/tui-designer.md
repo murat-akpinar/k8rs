@@ -39,5 +39,12 @@ Colors are constants in `theme.rs` — refer to them by name
 (`docs/tech-stack.md § Visual identity`), never hardcode a colour into a
 mockup.
 
+**Before you report, re-measure what you drew** — `scripts/screens-check.py`,
+*and* every border line of one fenced block at one width, which that script does
+not yet check. The only misaligned mockup in a 34-block file was the one just
+written, and finding it by hand cost a round
+([D270](../../NOTES.md#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18)).
+Open every citation you make and read the cited text, not your memory of it.
+
 Report back: the screen file you wrote or changed, the states you drew, the
 keys you added or moved, and anything you deliberately left off the screen.

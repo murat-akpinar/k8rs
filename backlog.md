@@ -3184,3 +3184,14 @@ long-form version and stays the authority.*
   reachable on the one kind the screens say delete works on — but `may_mutate` has no production
   caller yet, and `Act{false,false}` draws the same line `Move` does, so nothing enforces the promise.
   The assertion is owed by Phase 12's `ctrl-d` box. Found by `k8s-admin`, same report, 2026-09-18.
+
+- **`scripts/screens-check.py` measures that a mockup *fits* 80×24 and not that one block's border
+  lines share a width, which is a review round it could have been a 40-second gate for.** It already
+  computes display columns correctly — `─` at three bytes and one column, East Asian W/F at two — and
+  already walks all 240 fenced blocks, so the missing assertion is *every line starting with a border
+  glyph inside one block has the same width*. Measured on the round that found it: 34 blocks in
+  `screens/detail.md`, 33 uniform, the newly written one out by a column on four lines and two on a
+  fifth, and `just check` green throughout
+  ([D270](NOTES.md#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18)).
+  `tui-designer`'s own definition now carries the check by hand, which is the copy that goes stale.
+  `tester`'s, and the guard must be seen red before it is trusted (D26). Found by the PM, 2026-09-18.
