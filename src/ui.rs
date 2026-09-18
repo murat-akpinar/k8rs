@@ -44,7 +44,7 @@
 
 use crate::analysis::{Badge, Report, Row as ReportRow};
 use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, Tag};
-use crate::rules::{ContainerSnapshot, Finding, ObjectId, PodSnapshot, Severity, age};
+use crate::rules::{ContainerSnapshot, Finding, ObjectId, ObjectKind, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
 use crate::views::{
     self, App, Card, Cursor, Filters, Input, NavItem, Offer, Pane, Refused, Tab, Typing, View,
@@ -311,21 +311,26 @@ const TITLE: &str = " Keys ";
 /// *and the next line's leading whitespace*, so `Moving around` drew at column 0 while its two
 /// sibling headings drew at 2. It was invisible to a test that compared the screen with this
 /// constant, and visible the moment the screen was compared with `screens/help.md`.
+/// **The three groups run without a blank row between them, and that is paid for and not tidy**
+/// (`screens/help.md` § Rules): the body is capped at sixteen rows by `screens/widgets.md` § 1's
+/// budget, `s` and `r` each needed a second line, and a verbatim sentence cannot be shortened to
+/// fit. The two separators are what bought them. It is denser, the screen file says so, and every
+/// full-body mockup on that page is drawn without them.
 const HELP: &str = "  Moving around
     ↑ ↓ / j k    move            ⏎     open the selected thing
     tab          next panel      esc   back / close
     X            switch cluster
     [ ]          detail tabs     / n   filter · namespace
-
   Looking at things (always available)
     l  logs, with the log from before a crash
        in the log tab:  f follow · c container · ⇧p previous
     d  describe — the object and what happened to it
     y  view as YAML
-
   Changing things (each one asks first, and shows the command)
     s       run more or fewer copies       (scale)
+            works on a deployment, a statefulset and a replicaset
     r       restart, at its own pace       (rollout restart)
+            works on a deployment, a statefulset and a daemonset
     ctrl-d  delete — you type the name to confirm";
 
 /// **[`HELP`]'s sixteen rows, with a *why not* clause on each key this login has been told it may
@@ -371,8 +376,10 @@ const HELP: &str = "  Moving around
 /// while `App::may_mutate` was false — the reader presses one, gets nothing, and no line anywhere
 /// says why (PRIOR-ART § G1's *refuses for no visible reason*). **One reason is drawn, in this
 /// order**: `held` when it is [`Held::Off`], then `changing`, then `held` when it is
-/// [`Held::Paused`]. Off also puts the cause's own sentence in the `s` row and blanks `r` and
-/// `ctrl-d`; the other two leave the three rows alone.
+/// [`Held::Paused`]. Off also puts the cause's own sentence in the `s` row and blanks the four
+/// rows under it — `r`, `ctrl-d` and both [`SCALE_KINDS`] lines; the other two leave the block's
+/// six rows alone, because *what kind does this work on* is not the question either of them
+/// answers (`screens/help.md` § While the call is running).
 ///
 /// **The heading governs `s`, `r` and `ctrl-d` at once, where a permission rewrites the rows and
 /// leaves the heading.** That is not a layout preference: every one of these reasons refuses all
@@ -407,8 +414,15 @@ fn key_map(help: &str, refused: Refused, changing: bool, held: Option<Held>) -> 
         clauses.push((CHANGING_HEADING, format!("{CHANGING_HEADING} ({why})")));
     }
     if let Some(Held::Off(why)) = held {
+        // **Four blank rows, not two** (`screens/help.md` § Under a dead-writes run): the cause's
+        // sentence replaces the `s` row, and `r`, `ctrl-d` **and the two `works on …` lines** go
+        // with it. A kind list under a key that is off for the whole run answers a question nobody
+        // can reach. The block keeps the six rows it has everywhere else, so the body stays
+        // sixteen and `screens/widgets.md` § 1's budget is untouched.
         clauses.push((SCALE_ROW, format!("    {why}")));
+        clauses.push((SCALE_KINDS, String::new()));
         clauses.push((RESTART_ROW, String::new()));
+        clauses.push((RESTART_KINDS, String::new()));
         clauses.push((DELETE_ROW, String::new()));
     } else if heading.is_none() {
         if refused.scale() {
@@ -454,6 +468,29 @@ const CHANGING_HEADING: &str = "  Changing things";
 const SCALE_ROW: &str = "    s ";
 const RESTART_ROW: &str = "    r ";
 const DELETE_ROW: &str = "    ctrl-d ";
+
+/// **What `s` and `r` work on, and the one place in this file that says it**
+/// (`screens/help.md` § Rules). A reader who watched `s` leave the footer because the selected kind
+/// has no `/scale` has nowhere else to ask *why* — the row it sat on is gone — so `?` closes the
+/// loop, which `(scale)` alone never did (`crate::views::Offer::Act`).
+///
+/// **Each is `works on ` followed, character for character, by `ops.rs`'s own refusal sentence** —
+/// its private `SCALABLE` and `RESTARTABLE`, the text `ops::scalable` and `ops::restartable` put
+/// in the `Err` they hand a headless run. **The second copy is deliberate and it is not
+/// avoidable**: those constants are private to `ops.rs`, which froze at the end of Phase 7, so
+/// nothing here can read them. **Verbatim and never reworded** for exactly that reason —
+/// `tester`'s guard compares these two literals with `ops.rs` as text, and a rephrasing is a copy
+/// it cannot pin. Change one and the other has to move in the same commit.
+///
+/// **They double as [`key_map`]'s anchors for those two rows**, which have no key to be found by:
+/// the whole line is the anchor, and the two differ in their last word, so neither can match the
+/// other's row.
+///
+/// **`ctrl-d` has no such line**, and that is the screen file's ruling rather than an omission:
+/// `ops.rs`'s `DELETABLE` names all six kinds this product ships, so delete is never withheld for
+/// a kind's own sake and there is no *why did this vanish* for Help to answer.
+const SCALE_KINDS: &str = "            works on a deployment, a statefulset and a replicaset";
+const RESTART_KINDS: &str = "            works on a deployment, a statefulset and a daemonset";
 
 /// The heading's clause while writes are dead for the run (`screens/help.md` § Under a dead-writes
 /// run).
@@ -1131,14 +1168,23 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 /// line that is drawn and the key that is live cannot disagree: `crate::views::App::may_mutate` is
 /// handed this same value.
 ///
-/// **Four facts decide it and none stands in for another** (PM rulings, 2026-09-12). *Is there
-/// anything to act on* is read off the open pane and moves frame to frame. *Is the connection
-/// answering* is [`Screen::link`] and nothing else — **never [`Pane::Denied`]**, which is also the
-/// namespace-scoped fallback, and reading it as *we cannot reach the cluster* took both mutating
-/// keys from a developer whose `RoleBinding` allows them. *Can a write happen in this run* is
-/// [`Screen::writes`]. *Can the times on the page be trusted* is [`clock`]. The last three are
-/// [`withheld`]'s, and any one of them answering no gives `Move`, with no key marked `no`: that
-/// mark is reserved for `crate::views::Refused`.
+/// **Five facts decide it and none stands in for another** (PM rulings, 2026-09-12;
+/// `screens/widgets.md` § 2a, extended 2026-09-18). *Is there anything to act on* is read off the
+/// open pane and moves frame to frame. *Is the connection answering* is [`Screen::link`] and
+/// nothing else — **never [`Pane::Denied`]**, which is also the namespace-scoped fallback, and
+/// reading it as *we cannot reach the cluster* took both mutating keys from a developer whose
+/// `RoleBinding` allows them. *Can a write happen in this run* is [`Screen::writes`]. *Can the
+/// times on the page be trusted* is [`clock`]. Those three are [`withheld`]'s, and any one of them
+/// answering no gives `Move`, with no key marked `no`: that mark is reserved for
+/// `crate::views::Refused`.
+///
+/// **The fifth is *what kind is under the cursor*, and it is the only one that answers per key**
+/// — a Node cannot be scaled by anyone, a DaemonSet has no `/scale`, and most of what the browser
+/// can reach supports neither. It is read here rather than handed over on [`Screen`] for the
+/// reason every other fact on this line is: the value that draws the footer and the value
+/// `crate::views::App::may_mutate` refuses a press from are one, so the pane's own highlight
+/// decides both. `crate::views::Offer::act` is what turns the kind into the pair, by asking
+/// `crate::ops` (invariant 12).
 ///
 /// **`switch` is set wherever the login has expired, whatever the pane is drawing** — an expired
 /// login over a still-loading pane is `Nothing { switch: true }` and over an empty kind
@@ -1172,7 +1218,7 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
         namespace: app.filters.clears() == Some(Typing::Namespace),
         browsing,
     };
-    let rows = match app.view {
+    let selected: Option<(&str, Cow<'_, str>)> = match app.view {
         View::Analysis(_) => return Offer::Move { switch: false },
         View::Alerts => match screen.alerts {
             Pane::Loading => return Offer::Nothing { switch },
@@ -1186,13 +1232,30 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
             // is withheld** ([`Link`]): `Pane::Denied` carries whatever did come back, and a
             // namespace-scoped developer's cards are as selectable as anybody's.
             Pane::Ready(cards) | Pane::Denied(_, cards) => {
-                if !cards.is_empty() && shown_cards(app, cards).is_empty() {
+                let shown = shown_cards(app, cards);
+                if !cards.is_empty() && shown.is_empty() {
                     return hidden(false);
                 }
-                !cards.is_empty()
+                // **The card under the cursor, read the way the pane reads it** — [`alerts`]
+                // builds the same anchors over the same filtered list, so the kind asked about
+                // here is the object the highlight is on and not the first card in the store. An
+                // empty list answers `None`, which is *nothing is selected* and the one state this
+                // value could not express before (`crate::views::Offer::Move`).
+                //
+                // **`get` and not an index**, though `Cursor::selected` clamps into the slice it
+                // was handed: a panic on a draw is the one failure this file cannot recover from,
+                // and nothing is bought by depending on that clamp twice.
+                let anchors: Vec<Option<&str>> = shown.iter().map(|_| None).collect();
+                app.content
+                    .selected(&anchors)
+                    .and_then(|at| shown.get(at))
+                    .map(|card| {
+                        let (group, kind) = addressed(&card.owner.kind);
+                        (group, Cow::Borrowed(kind))
+                    })
             }
         },
-        View::Resources(_) => match screen.browser {
+        View::Resources(at) => match screen.browser {
             Pane::Loading => return Offer::Nothing { switch },
             // **Zero rows is zero rows whichever answer holds them** — a 403 on `list jobs` that
             // came back with nothing promised `⏎ open` over fourteen blank rows until this arm
@@ -1204,17 +1267,72 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
                 if shown_rows(app, table).is_empty() {
                     return hidden(true);
                 }
-                true
+                // **Every row in this pane is of the open kind, so the cursor is not asked** —
+                // `Screen::browser` is one `Table` for the kind `View::Resources` names, and *which
+                // kind that is* is this index into [`Screen::kinds`] and nothing else (that
+                // field's own doc, invariant 12). **Lowercased, not [`Browsable::plural`]**: the
+                // word `crate::ops` matches on is the singular a manifest spells, and `plural` is
+                // the URL path's.
+                //
+                // **[`Browsable::group`] goes with it, and dropping it was a defect** (`k8s-admin`,
+                // `reports/2026-09-18-offer-per-kind-operator-read.md` § 1; NOTES § D51): the kind
+                // word alone is not an address. `k8s::browsable` deliberately keeps the same
+                // plural under two groups as two resources, so a sidebar row reading
+                // `statefulsets` can be `apps/v1`'s or OpenKruise's — and a stock cluster with no
+                // CRD at all already serves two `Event`s. `crate::views::Offer::act` is where the
+                // two halves are compared.
+                screen.kinds.get(at).map(|kind| {
+                    (
+                        kind.group.as_str(),
+                        Cow::Owned(kind.kind.to_ascii_lowercase()),
+                    )
+                })
             }
         },
     };
-    // **Four reasons, one line, and none of them a `Refused` mark**: nothing selected, and the
-    // three run-level ones [`withheld`] answers — which [`help`] reads too, so the footer and `?`
-    // cannot disagree about whether `s` and `r` can be pressed.
-    if rows && withheld(screen).is_none() {
-        Offer::Act
-    } else {
-        Offer::Move { switch }
+    // **Five reasons, one line, and none of them a `Refused` mark**: nothing selected, the three
+    // run-level ones [`withheld`] answers — which [`help`] reads too, so the footer and `?` cannot
+    // disagree about whether `s` and `r` can be pressed — and, inside `Act`, the selected kind's
+    // own (`crate::views::Offer::act`), which takes one key and leaves the other.
+    match selected {
+        Some((group, kind)) if withheld(screen).is_none() => Offer::act(group, &kind),
+        _ => Offer::Move { switch },
+    }
+}
+
+/// **The address an [`ObjectKind`] is** — its API group and the singular word, the two halves a
+/// manifest spells as `apiVersion:` and `kind:` (NOTES § D51). The spelling only: *which*
+/// operations serve that address is [`crate::views::Offer::act`]'s question and `crate::ops`'
+/// answer, never a list here (invariant 12).
+///
+/// **The group is not a second fact about the kind, it is half of the one fact.** Each variant of
+/// that enum *is* a (group, kind) pair already — `ObjectKind::from_api` builds it from exactly
+/// those two and files anything else under `Other` — so this is that table read the other way, and
+/// the two cannot come apart. A `deployment` under any group but `apps` is not the object
+/// `ops::scale` addresses.
+///
+/// **[`ObjectKind::Other`] has no address here and says so with two empty words.** Every kind k8rs
+/// can point an operation at has its own variant, so an `Other` is by construction not one of them
+/// — and empty is the answer that stays true however the API spelled it, where handing the
+/// reported string on would put a name from the cluster into a match it could only pass by
+/// accident. Nothing is drawn from this, so no strip is owed either (invariant 9).
+///
+/// **This is the second place that knows the pairing, and it stays here because the first one is
+/// frozen.** `rules::ObjectKind::from_api` builds the enum *from* a group and a kind; the inverse
+/// belongs beside it, and `rules.rs` closed at the end of Phase 3 — so rather than reopen a frozen
+/// file, the copy lives at the one place that needs it and is pinned as a pair by `tester`'s
+/// guard. The two cannot drift silently: a variant added to that enum is a compile error here.
+fn addressed(kind: &ObjectKind) -> (&'static str, &'static str) {
+    match kind {
+        ObjectKind::Deployment => ("apps", "deployment"),
+        ObjectKind::StatefulSet => ("apps", "statefulset"),
+        ObjectKind::DaemonSet => ("apps", "daemonset"),
+        ObjectKind::ReplicaSet => ("apps", "replicaset"),
+        ObjectKind::Job => ("batch", "job"),
+        ObjectKind::CronJob => ("batch", "cronjob"),
+        ObjectKind::Node => ("", "node"),
+        ObjectKind::Pod => ("", "pod"),
+        ObjectKind::Other(_) => ("", ""),
     }
 }
 

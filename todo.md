@@ -4578,9 +4578,11 @@ Goal: one binary, live and safe.
       survive into a view that cannot draw it
       ([D268](NOTES.md#d268--the-footer-key-box-a-filter-nobody-could-see-a-picker-whose-name-column-the-cluster-could-erase-and-an-esc-that-meant-two-things-2026-09-18) ·
       [reports/2026-09-18-filter-and-container-picker.md](reports/2026-09-18-filter-and-container-picker.md))
-- [ ] **`Offer` says which of `s` / `r` this kind supports** — a Node card
+- [x] **`Offer` says which of `s` / `r` this kind supports** — a Node card
       offers `s scale` today and a DaemonSet cannot be said at all — and
       `may_mutate` is asked per key
+      ([D269](NOTES.md#d269--the-per-key-offer-a-key-a-kind-has-not-got-leaves-the-line-and-the-browser-was-asking-about-a-kind-word-with-the-group-thrown-away-2026-09-18) ·
+      [reports/2026-09-18-offer-per-kind-operator-read.md](reports/2026-09-18-offer-per-kind-operator-read.md))
 - [ ] **`⏎ to see` opens something**: `Detail` carries the card's findings and
       the *which pods* step `screens/detail.md` draws (the rules closing § The logs tab)
 - [ ] **What a caller hands `Screen` is stripped once, and the header's

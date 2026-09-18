@@ -61,6 +61,15 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
   reason behind `?` are [widgets.md § The footer](widgets.md#2a-the-footer)'s
   and [help.md § When a key is refused](help.md#when-a-key-is-refused)'s, not
   repeated here — this list is the only other place either key is drawn.
+- **A card's own kind decides which of `s`/`r` its footer carries, and a
+  kind that cannot use one at all drops the key instead of marking it** —
+  a Node, a bare Pod, a DaemonSet (`r` only) or a bare ReplicaSet (`s`
+  only), the opposite move from the row above: nothing was refused, there
+  was never anything to refuse. **Every card on this screen is subject to
+  this, the tallest-card mockup below included** — a bare-pod card such as
+  `default/healthy-sidecar` draws neither key. The column counts for each
+  combination are [widgets.md § The footer](widgets.md#2a-the-footer)'s, not
+  redrawn here.
 - **One card per owner, never per pod.** `payments/web · 3 of 5 pods`, not
   three cards. A DaemonSet on forty nodes is still one card
   ([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)).
@@ -449,7 +458,7 @@ captures, and reaches all four caps at once:
 │ $ kubectl get statefulsets -A --watch                                        │
 │ $ kubectl get daemonsets -A --watch                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit            │
+│ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                                │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 

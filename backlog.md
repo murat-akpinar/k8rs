@@ -3154,3 +3154,33 @@ long-form version and stays the authority.*
   detail tab's footer; a reader who reaches for it first simply gets nothing, and the first `esc`
   heals it. One parameter and its call sites, and Phase 12's wiring touches this code anyway. Found by
   `k8s-admin` and `dev-ui`, 2026-09-18.
+
+- **Help and the footer will disagree about `s`/`r` the day the `may_i` probe is wired.**
+  `ui::key_map` rewrites the `s` row to name the missing permission whenever `refused.scale()` is
+  true, and it knows nothing about the selected kind; the footer, since 2026-09-18, drops the key
+  entirely on a kind that has no such operation. Fire the probe for `scale` on a Node and Help would
+  say *you lack this permission* about a key the footer does not draw. Nothing wires either today
+  (`may_i_in` and `may_mutate` have no production caller), so it is a constraint on Phase 12's
+  wiring box, not a live defect: either do not ask about an operation the kind does not support, or
+  hand `key_map` the `Offer` too. Found by `tester`, 2026-09-18.
+
+- **A ReplicaSet card offers `s scale` and no `r restart`, and the card is usually an unresolved
+  owner rather than a bare ReplicaSet.** Measured on the fixture cluster: 8 of 8 ReplicaSets are
+  controlled by a Deployment, none bare — so what puts `ObjectKind::ReplicaSet` on a card is
+  `Store::unresolved_owners` (the first frames of every run, and permanently after a 403, a 404
+  mid-rollout or one dead socket, since nothing retries — D148, D151). On such a card `s scale`
+  reaches `replicasets/scale` and the Deployment controller reverts it, while `r restart` — the key
+  that would fix a crashlooping Deployment — is gone from the line with no word, and `ops::rollout`'s
+  own teaching sentence (*a replicaset is normally made by a deployment…*, D224) becomes unreachable
+  from the TUI. `Card` cannot tell unresolved from bare: the flag lives in `Store` behind a frozen
+  `k8s.rs`. Two shapes the reviewer would accept — draw `Move`'s line while the owner is unresolved,
+  or let the `s` dialog carry `ops::rollout`'s sentence — and the second belongs to Phase 12's dialog
+  wiring. `screens/widgets.md` § 2a should also stop using *a bare ReplicaSet* as that row's running
+  example; it is the case that does not occur. Found by `k8s-admin`
+  (`reports/2026-09-18-offer-per-kind-operator-read.md`), 2026-09-18.
+
+- **`ctrl-d delete` on a Node is asserted by no test.** A Node is `Act { scalable: false,
+  restartable: false }` and not `Offer::Move` precisely so a delete gate keyed on the shape stays
+  reachable on the one kind the screens say delete works on — but `may_mutate` has no production
+  caller yet, and `Act{false,false}` draws the same line `Move` does, so nothing enforces the promise.
+  The assertion is owed by Phase 12's `ctrl-d` box. Found by `k8s-admin`, same report, 2026-09-18.

@@ -16,7 +16,7 @@ use crate::rules::{
     ClusterSnapshot, ContainerSnapshot, ContainerState, Finding, NodeSnapshot, ObjectId,
     ObjectKind, PodSnapshot,
 };
-use crate::views::Group;
+use crate::views::{Group, Op};
 use k8s_openapi::jiff::Timestamp;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -2236,6 +2236,20 @@ fn dead_log() -> String {
     said
 }
 
+/// **Both mutating keys on one screen, asked separately** ([`Op`]) — `(s, r)`, live exactly where
+/// the footer above them draws them.
+///
+/// **[`offered`] is called once and handed to both**, which is the whole guarantee: the value that
+/// drew the line is the value that decides the press, so a key can never be on one and not the
+/// other (invariant 2's *unreachable, not merely unbound*).
+fn pressable(app: &App, screen: &Screen) -> (bool, bool) {
+    let offer = offered(app, screen);
+    (
+        app.may_mutate(offer, Op::Scale),
+        app.may_mutate(offer, Op::Restart),
+    )
+}
+
 /// **The ordinary screen is the only one that offers a mutating key** — the must-not-fire half of
 /// [`every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`], and every cause that
 /// takes the offer away, one at a time.
@@ -2256,9 +2270,10 @@ fn the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key() {
         "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
         "a pane with a card in it, the link up, writes live and every time on it trustworthy"
     );
-    assert!(
-        app().may_mutate(offered(&app(), &ordinary)),
-        "the ordinary screen refused the key it had just drawn"
+    assert_eq!(
+        pressable(&app(), &ordinary),
+        (true, true),
+        "the ordinary screen refused a key it had just drawn"
     );
 
     // **And the browser's ordinary screen too, which is a table with rows in it** — the one state
@@ -2275,9 +2290,10 @@ fn the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key() {
         "a browser pane with rows in it:\n{}",
         rows(&drawn).join("\n")
     );
-    assert!(
-        opened().may_mutate(offered(&opened(), &listing)),
-        "the browser refused the key it had just drawn"
+    assert_eq!(
+        pressable(&opened(), &listing),
+        (true, true),
+        "the browser refused a key it had just drawn"
     );
 
     // One cause at a time, each off the ordinary screen above, so nothing here passes by accident
@@ -2309,11 +2325,220 @@ fn the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key() {
         for withheld in ["s scale", "r restart", "s no scale", "r no restart"] {
             assert!(!footer.contains(withheld), "{cause}: {footer:?}");
         }
-        assert!(
-            !app().may_mutate(offered(&app(), screen)),
+        assert_eq!(
+            pressable(&app(), screen),
+            (false, false),
             "{cause}: the key was off the line and live behind it"
         );
     }
+}
+
+/// **The selected object's *kind* decides which of `s` and `r` is on the line, and a Node's answer
+/// is neither** (`screens/widgets.md` § 2a, extended 2026-09-18; NOTES § D261 ruling 8). This is
+/// the defect the box named: a node card offered `s scale`, a key `ops::scale` refuses outright
+/// and `may_i` was never asked about.
+///
+/// **Both panes, because they read the kind from two different places** — an Alerts card from its
+/// own owner, a browser row from the kind the sidebar has open — and one of them being right says
+/// nothing about the other.
+///
+/// **A kind is a group and a word, and the browser rows say so** (NOTES § D51,
+/// `reports/2026-09-18-offer-per-kind-operator-read.md` § 1). The word alone is not an address:
+/// `k8s::browsable` keeps the same plural under two groups as two resources, and a stock cluster
+/// with no CRD installed already serves `v1 Event` beside `events.k8s.io/v1 Event`. So the last
+/// three browser rows are workload plurals under somebody else's group — the shape `ops::scale`
+/// would address in `apps/v1` and must therefore never offer a key for.
+///
+/// **The missing key is missing and not marked**: the whole drawn line is compared, so `s no
+/// scale` on a Node fails here exactly as a live `s scale` does. That is the shape rule
+/// `screens/widgets.md` § 2a states — refused is the ordinary line plus one word, unsupported is
+/// the ordinary line minus one key — and it is asserted here rather than assumed, because the two
+/// are only distinguishable if the unsupported one really does lose the key.
+///
+/// **And the two compose**: a DaemonSet whose `r` this login may not use draws `r no restart` and
+/// still no `s` at all, which is the one row where both mechanisms are on the same line.
+///
+/// **Every Alerts list here holds two cards of *different* kinds, and that is the assertion and
+/// not a garnish** (`tester`, 2026-09-18). With a one-card list `shown[0]` and
+/// `shown[selected]` are the same card, so the branch's own claim — *the card under the cursor,
+/// not the first card in the store* — was asserted by nothing: `shown.first()` in place of the
+/// selection left the whole suite green. Each row is drawn twice over the same pair, once with the
+/// cursor on the second card and once on the first, so `first()` fails the one and `last()` fails
+/// the other, and neither can pass by symmetry.
+#[test]
+fn a_kind_that_cannot_scale_or_restart_is_not_offered_that_key() {
+    let now = now();
+    let both = "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit";
+    let only_r = "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit";
+    let only_s = "↑↓ move  ⏎ open  s scale  / filter  ? all keys  q quit";
+    let neither = "↑↓ move  ⏎ open  / filter  ? all keys  q quit";
+    // **One Alerts pane, several cards, and the cursor put somewhere in it** — the footer it draws
+    // and what that footer leaves pressable, which are one value and are read as one.
+    let alerts_footer = |kinds: &[ObjectKind], at: usize| {
+        let cards: Vec<Card> = kinds
+            .iter()
+            .map(|kind| {
+                let mut card = oom();
+                card.owner = id(kind.clone(), Some("payments"), "web");
+                card
+            })
+            .collect();
+        let alerts = Pane::Ready(cards);
+        let screen = screen(&alerts, &now);
+        let mut app = app();
+        // The anchors the pane itself builds — one `None` per card, `alerts`' own literal.
+        let anchors: Vec<Option<&str>> = vec![None; kinds.len()];
+        app.content.select(at, &anchors);
+        let drawn = render(&app, &screen);
+        (
+            unframed(&rows(&drawn)[22]),
+            pressable(&app, &screen),
+            rows(&drawn).join("\n"),
+        )
+    };
+    for (kind, expected, live) in [
+        (ObjectKind::Deployment, both, (true, true)),
+        (ObjectKind::StatefulSet, both, (true, true)),
+        (ObjectKind::DaemonSet, only_r, (false, true)),
+        (ObjectKind::ReplicaSet, only_s, (true, false)),
+        (ObjectKind::Node, neither, (false, false)),
+        (ObjectKind::Pod, neither, (false, false)),
+        (ObjectKind::Job, neither, (false, false)),
+        (ObjectKind::CronJob, neither, (false, false)),
+        // A CRD, group-qualified as `rules.rs` builds one.
+        (
+            ObjectKind::Other("Rollout.argoproj.io".to_owned()),
+            neither,
+            (false, false),
+        ),
+        // **The `Other` that distinguishes the claim `ui::singular`'s doc makes** (`tester`,
+        // 2026-09-18). The row above is refused by `crate::ops` whatever `singular` hands it, so
+        // handing the reported word straight through would have passed it. This one is the word
+        // `ops::scalable` serves, worn by a kind that is not it — every kind k8rs can operate on
+        // has its own `ObjectKind` variant, so an `Other` is by construction not one, and it must
+        // not borrow the answer belonging to the name it happens to carry.
+        (
+            ObjectKind::Other("deployment".to_owned()),
+            neither,
+            (false, false),
+        ),
+    ] {
+        // **The partner card is always a kind with a different answer**, so a renderer reading the
+        // store's first card rather than the selected one draws the partner's line and fails.
+        let partner = match expected == both {
+            true => ObjectKind::Node,
+            false => ObjectKind::Deployment,
+        };
+        let pair = [partner, kind.clone()];
+        let (line, keys, frame) = alerts_footer(&pair, 1);
+        // **The line a reader would be looking at, printed** — `cargo test -- --nocapture` is the
+        // only way this phase can *run* the renderer, because nothing outside `#[cfg(test)]` calls
+        // `ui.rs` until Phase 12 wires `main.rs` (this file's own head).
+        println!("{kind:?} (second of two)\n  {line}");
+        assert_eq!(line, expected, "an Alerts card on a {kind:?}:\n{frame}");
+        assert_eq!(
+            keys, live,
+            "an Alerts card on a {kind:?} — drawn and live disagree"
+        );
+
+        // The control: the same two cards the other way round, cursor on the first. A renderer
+        // that read the *last* card would pass the row above and fail this one.
+        let pair = [pair[1].clone(), pair[0].clone()];
+        let (line, keys, frame) = alerts_footer(&pair, 0);
+        assert_eq!(
+            line, expected,
+            "an Alerts card on a {kind:?}, first of two:\n{frame}"
+        );
+        assert_eq!(
+            keys, live,
+            "a {kind:?} first of two — drawn and live differ"
+        );
+    }
+
+    // **The three pairs the review named, spelled out** — the sweep above builds them by rule, and
+    // a rule is one edit away from building something else.
+    for (pair, expected) in [
+        (
+            [ObjectKind::Deployment, ObjectKind::Node],
+            "↑↓ move  ⏎ open  / filter  ? all keys  q quit",
+        ),
+        (
+            [ObjectKind::Node, ObjectKind::Deployment],
+            "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        ),
+        (
+            [ObjectKind::Node, ObjectKind::DaemonSet],
+            "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
+        ),
+    ] {
+        let (line, _, frame) = alerts_footer(&pair, 1);
+        println!("{pair:?} · cursor on 1\n  {line}");
+        assert_eq!(
+            line, expected,
+            "{pair:?} with the cursor on the second:\n{frame}"
+        );
+    }
+
+    // **The browser, where a kind supporting neither is the common case and not the exception**
+    // (`screens/resources.md`): most rows it can reach are a ConfigMap, a Service, a Node.
+    //
+    // **The group is named on every row, because the kind word alone is not an address**
+    // (NOTES § D51, `reports/2026-09-18-offer-per-kind-operator-read.md` § 1). The last three are
+    // the regression: the same four workload plurals under somebody else's group — OpenKruise's
+    // `apps.kruise.io StatefulSet` beside `apps/v1`'s under one sidebar row, and a CRD called
+    // `Deployment` — all of which `ops::scale` would address in `apps/v1` and therefore must not
+    // be offered `s` at all.
+    let listed = Pane::Ready(table("table-deployments"));
+    for (group, plural, expected, live) in [
+        ("apps", "deployments", both, (true, true)),
+        ("apps", "statefulsets", both, (true, true)),
+        ("apps", "daemonsets", only_r, (false, true)),
+        ("apps", "replicasets", only_s, (true, false)),
+        ("", "pods", neither, (false, false)),
+        ("", "nodes", neither, (false, false)),
+        ("", "configmaps", neither, (false, false)),
+        ("apps.kruise.io", "statefulsets", neither, (false, false)),
+        ("apps.kruise.io", "daemonsets", neither, (false, false)),
+        ("example.com", "deployments", neither, (false, false)),
+    ] {
+        let kinds = [browsable_in(group, plural, true)];
+        let listing = browsing(&listed, &kinds, &now);
+        let drawn = render(&opened(), &listing);
+        let shown = format!("{group}/{plural}");
+        println!("browsing {shown}\n  {}", unframed(&rows(&drawn)[22]));
+        assert_eq!(
+            unframed(&rows(&drawn)[22]),
+            expected,
+            "the browser open on {shown}:\n{}",
+            rows(&drawn).join("\n")
+        );
+        assert_eq!(
+            pressable(&opened(), &listing),
+            live,
+            "the browser open on {shown} — drawn and live disagree"
+        );
+    }
+
+    // **Refused and unsupported on one line.** `r` is the only mutating key a DaemonSet has, this
+    // login may not use it, and `s` is still absent rather than marked: the refusal reaches the key
+    // that was asked about and nothing else.
+    let no = Some(&crate::ops::Verdict::No);
+    let mut card = oom();
+    card.owner = id(ObjectKind::DaemonSet, Some("payments"), "web");
+    let alerts = Pane::Ready(vec![card]);
+    let mut screen = screen(&alerts, &now);
+    screen.refused = Refused::of("daemonsets", [no; 2], [no], [None]);
+    let drawn = render(&app(), &screen);
+    println!(
+        "a DaemonSet this login may not restart\n{}",
+        rows(&drawn).join("\n")
+    );
+    assert_eq!(
+        unframed(&rows(&drawn)[22]),
+        "↑↓ move  ⏎ open  r no restart  / filter  ? all keys  q quit",
+        "a refused key on a kind that has only that one:\n{}",
+        rows(&drawn).join("\n")
+    );
 }
 
 /// **A namespace-scoped login that may act keeps both keys** — the defect `Pane::Denied` carried
@@ -2343,9 +2568,10 @@ fn a_namespace_scoped_login_that_may_act_keeps_its_keys() {
         "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
         "a refusal that came back with cards is a selection, not a dead link"
     );
-    assert!(
-        app().may_mutate(offered(&app(), &developer)),
-        "a namespace-scoped login could not reach the key its own grant allows"
+    assert_eq!(
+        pressable(&app(), &developer),
+        (true, true),
+        "a namespace-scoped login could not reach the keys its own grant allows"
     );
     assert!(
         holds(&drawn, "Showing only the payments namespace"),
@@ -3155,8 +3381,9 @@ fn a_mode_whose_footer_names_no_mutating_key_leaves_none_live() {
         ("a detail tab", &app(), &over),
     ] {
         let offer = offered(app, asked);
-        assert!(
-            !app.may_mutate(offer),
+        assert_eq!(
+            pressable(app, asked),
+            (false, false),
             "{what} left a key live that its own footer never names — {offer:?}"
         );
         let (keys, _) = app.footer(
@@ -3200,13 +3427,40 @@ fn filter(text: &str) -> Input {
     input
 }
 
-/// A kind as discovery describes it. **Only `plural` and `namespaced` are read by the renderer**,
-/// which is the point — the rest is what a URL is built from, one layer down.
+/// A kind as discovery describes it, **in the group a real cluster serves that plural under** —
+/// `apps` for the four workload plurals, `example.com` for everything else, which is a CRD and is
+/// a coherent thing for a cluster to serve.
+///
+/// **Three of the four fields are read by the renderer now, and the fixture has to be an object
+/// that could exist** (`k8s-admin`, `reports/2026-09-18-offer-per-kind-operator-read.md`; NOTES
+/// § D51). It said `plural: "deployments"` beside `group: "example.com"` and `kind: "Whatever"`,
+/// and when [`offered`] started reading the kind the answer was *"the right answer to the fixture
+/// and the wrong one to the test"* — which was itself the defect: for an `example.com` kind called
+/// `Deployment`, drawing no `s scale` is the right answer to **both**, and pinning the opposite as
+/// the requirement is exactly what D51 forbids. The group is what makes it honest; the kind is
+/// still de-pluralised, which is right for every plural these tests use and for the one reader,
+/// which lowercases before matching.
+///
+/// [`browsable_in`] is the same thing with the group named, for the tests that are *about* it.
 fn browsable(plural: &str, namespaced: bool) -> Browsable {
+    let group = match plural {
+        "deployments" | "statefulsets" | "daemonsets" | "replicasets" => "apps",
+        _ => "example.com",
+    };
+    browsable_in(group, plural, namespaced)
+}
+
+/// [`browsable`] with the API group spelled out — **the field that decides whether a mutating key
+/// is offered at all**, so a test about that decision names it rather than inheriting it.
+fn browsable_in(group: &str, plural: &str, namespaced: bool) -> Browsable {
+    let mut kind = plural.strip_suffix('s').unwrap_or(plural).to_owned();
+    if let Some(first) = kind.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
     Browsable {
-        group: "example.com".to_owned(),
+        group: group.to_owned(),
         version: "v1".to_owned(),
-        kind: "Whatever".to_owned(),
+        kind,
         plural: plural.to_owned(),
         namespaced,
         verbs: vec!["list".to_owned()],
@@ -6588,10 +6842,25 @@ fn help_replaces_the_body_and_leaves_the_rest_of_the_frame_alone() {
 /// section's own fenced block: the *Changing things* heading and the three keys under it, all
 /// three refused, which is the worst case that file draws.
 ///
-/// **A second reader rather than a second literal**, for [`mockup`]'s reason: the block is four
-/// lines of plain text with no border to strip, and the `Changing things` heading in it is
-/// asserted below to be the very row [`mockup`] already returns, so the two readers cannot drift
-/// into describing two different screens.
+/// **Where a row is, found by its own leading text and never by counting** — [`key_map`]'s own
+/// rule (*"never by arithmetic"*), applied to the fixtures that check it.
+///
+/// **It exists because three tests here did count** (`tester`/`k8s-admin`, 2026-09-18): they held
+/// the *Changing things* heading at row 12 and its keys at 13, 14, 15, which was true only while
+/// two blank separators sat above it and the block held three rows. `screens/help.md` removed the
+/// separators to pay for `s` and `r`'s `works on …` lines, every one of those numbers moved, and
+/// the arithmetic had no way to say so — it read a different row and compared it happily.
+fn row_at(body: &[String], anchor: &str) -> usize {
+    body.iter()
+        .position(|row| row.starts_with(anchor))
+        .unwrap_or_else(|| panic!("no row starting {anchor:?} in {body:?}"))
+}
+
+/// **A second reader rather than a second literal**, for [`mockup`]'s reason: the block is six
+/// lines of plain text with no border to strip — the heading, three keys and the two `works on …`
+/// lines `s` and `r` gained — and the `Changing things` heading in it is asserted below to be the
+/// very row [`mockup`] already returns, so the two readers cannot drift into describing two
+/// different screens.
 fn mockup_refused() -> Vec<String> {
     let path = format!("{}/screens/help.md", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path)
@@ -6606,8 +6875,8 @@ fn mockup_refused() -> Vec<String> {
         .collect();
     assert_eq!(
         rows.len(),
-        4,
-        "screens/help.md § When a key is refused no longer draws the heading and its three keys"
+        6,
+        "screens/help.md § When a key is refused no longer draws the heading and its five rows"
     );
     rows
 }
@@ -6682,13 +6951,13 @@ fn labelled(block: &[String], label: &str) -> String {
 }
 
 /// The three fenced blocks of `screens/help.md` § *While the call is running*, in its own order:
-/// **0** the rewritten `X` row · **1** the rewritten *Changing things* heading and the three rows
+/// **0** the rewritten `X` row · **1** the rewritten *Changing things* heading and the five rows
 /// left unchanged beneath it · **2** the footer, which that state already emptied.
 fn mockup_paused() -> Vec<Vec<String>> {
     let blocks = fenced("help.md", "## While the call is running");
     assert_eq!(
         blocks.iter().map(Vec::len).collect::<Vec<_>>(),
-        [1, 4, 1],
+        [1, 6, 1],
         "screens/help.md § While the call is running no longer draws two rows and a footer"
     );
     blocks
@@ -6756,11 +7025,12 @@ fn a_key_map_with_nothing_refused_is_the_mockup_untouched() {
 fn all_three_refused_is_the_block_the_screen_file_draws() {
     let base = mockup();
     let clause = mockup_refused();
+    let heading = row_at(&base, CHANGING_HEADING);
     assert_eq!(
-        clause[0], base[12],
+        clause[0], base[heading],
         "the two readers disagree about which row the Changing things heading is"
     );
-    let expected: Vec<String> = base[..12].iter().chain(&clause).cloned().collect();
+    let expected: Vec<String> = base[..heading].iter().chain(&clause).cloned().collect();
     assert_eq!(
         key_map(HELP, refusing(true, true, true, "deployments"), false, None)
             .lines()
@@ -6781,9 +7051,12 @@ fn each_refused_row_answers_only_for_its_own_key() {
         for restart in [false, true] {
             for delete in [false, true] {
                 let mut expected = base.clone();
-                for (nth, marked) in [scale, restart, delete].into_iter().enumerate() {
+                for (anchor, marked) in [SCALE_ROW, RESTART_ROW, DELETE_ROW]
+                    .into_iter()
+                    .zip([scale, restart, delete])
+                {
                     if marked {
-                        expected[13 + nth] = clause[1 + nth].clone();
+                        expected[row_at(&base, anchor)] = clause[row_at(&clause, anchor)].clone();
                     }
                 }
                 assert_eq!(
@@ -6951,12 +7224,16 @@ fn a_key_map_finds_its_rows_by_their_own_text_wherever_the_block_sits() {
         .iter()
         .position(|row| row.starts_with("  Changing things"))
         .expect("HELP's Changing things heading");
-    let mut moved: Vec<&str> = rows[at..at + 4].to_vec();
+    // **The block's size is derived and never written down**: *Changing things* is HELP's last
+    // group, so it runs from its heading to the end — and it grew from four rows to six when `s`
+    // and `r` gained their `works on …` lines, which a literal `4` here would have survived by
+    // shuffling half a block.
+    let block = rows.len() - at;
+    let mut moved: Vec<&str> = rows[at..].to_vec();
     moved.extend(&rows[..at]);
-    moved.extend(&rows[at + 4..]);
     moved.push("");
     let input = moved.join("\n");
-    let rest: Vec<String> = moved[4..].iter().map(|row| (*row).to_owned()).collect();
+    let rest: Vec<String> = moved[block..].iter().map(|row| (*row).to_owned()).collect();
 
     let off = dead_body(Writes::ReadOnly);
     let heading = off
@@ -6970,7 +7247,7 @@ fn a_key_map_finds_its_rows_by_their_own_text_wherever_the_block_sits() {
         false,
         Some(Held::Off(why)),
     );
-    let expected: Vec<String> = off[heading..heading + 4]
+    let expected: Vec<String> = off[heading..heading + block]
         .iter()
         .chain(&rest)
         .cloned()
@@ -7327,7 +7604,7 @@ fn help_says_changing_things_is_open_exactly_when_the_footer_offers_it() {
                 screen.link = link;
                 screen.clock = clock;
                 let open = body_of(&rows(&render(&helping, &screen))).contains(&plain);
-                let act = offered(&app(), &screen) == Offer::Act;
+                let act = matches!(offered(&app(), &screen), Offer::Act { .. });
                 assert_eq!(
                     open, act,
                     "{writes:?} · {link:?} · clock {clock:?} — Help and the footer disagree"
@@ -7376,7 +7653,8 @@ fn the_refused_key_map_is_what_the_help_screen_draws() {
         marked.join("\n")
     );
 
-    let expected: Vec<String> = mockup()[..12]
+    let base = mockup();
+    let expected: Vec<String> = base[..row_at(&base, CHANGING_HEADING)]
         .iter()
         .chain(&mockup_refused())
         .cloned()
@@ -7742,10 +8020,11 @@ fn help_over_a_call_in_flight_draws_no_quit_at_the_right_edge() {
 fn help_pauses_the_four_keys_a_running_call_refuses() {
     let base = mockup();
     let paused = mockup_paused();
+    let heading = row_at(&base, CHANGING_HEADING);
     assert_eq!(
         &paused[1][1..],
-        &base[13..16],
-        "the two readers disagree about the three rows under the Changing things heading"
+        &base[heading + 1..],
+        "the two readers disagree about the rows under the Changing things heading"
     );
 
     let expected: Vec<String> = base

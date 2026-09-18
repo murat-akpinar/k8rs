@@ -11,16 +11,16 @@ tool for beginners may not hide its verbs behind memory.
 │    tab          next panel      esc   back / close                 │
 │    X            switch cluster                                     │
 │    [ ]          detail tabs     / n   filter · namespace           │
-│                                                                    │
 │  Looking at things (always available)                              │
 │    l  logs, with the log from before a crash                       │
 │       in the log tab:  f follow · c container · ⇧p previous        │
 │    d  describe — the object and what happened to it                │
 │    y  view as YAML                                                 │
-│                                                                    │
 │  Changing things (each one asks first, and shows the command)      │
 │    s       run more or fewer copies       (scale)                  │
+│            works on a deployment, a statefulset and a replicaset   │
 │    r       restart, at its own pace       (rollout restart)        │
+│            works on a deployment, a statefulset and a daemonset    │
 │    ctrl-d  delete — you type the name to confirm                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ $ kubectl get statefulsets -A --watch                              │
@@ -57,6 +57,34 @@ Rules:
   right now, the same place every other screen puts it.
 - Grouped by **what you are doing**, not by keycode order, and the jargon is
   in brackets — a newcomer reads the sentence, and learns the term for free.
+- **`s` and `r` each carry a second line naming what they work on, verbatim
+  off `ops.rs`'s own refusal sentences.** A reader who watched `s` vanish
+  from the footer because the selected kind does not support it — a Node,
+  a bare Pod — has nowhere else on screen to ask *why*; the row it used to
+  sit on is gone, so `?` is the only place left, and until now `?` said
+  only `(scale)`, no kind, no answer. The line is `works on ` followed by
+  `ops.rs`'s own private `SCALABLE` / `RESTARTABLE` constant — *"a
+  deployment, a statefulset and a replicaset"* and *"a deployment, a
+  statefulset and a daemonset"* — copied whole, not paraphrased, so it
+  stays comparable to the string `ui.rs` will hold once Phase 12 wires it:
+  a sentence that rephrases the constant cannot be checked against it, only
+  one that repeats it verbatim can. **`ctrl-d` gets no such line.**
+  `ops.rs`'s own `DELETABLE` names all six kinds this product ships — a
+  deployment, a statefulset, a daemonset, a replicaset, a pod and a node —
+  so delete is never withheld for a kind's own sake the way `s`/`r` are;
+  there is no *why did this vanish* for a key that never does.
+  **Fitting two more lines cost the two blank rows between the three
+  groups** — *Moving around*, *Looking at things* and *Changing things* now
+  run straight into one another with no gap, because the sixteen-row body
+  has no sixteenth-plus row to spend and a verbatim sentence cannot be
+  shortened to fit one. This is denser, not tidier, and that is a real
+  trade — named here rather than left for a reviewer to notice the missing
+  blank lines and wonder if they were dropped by accident. It touches every
+  full mockup on this page that draws the whole body: [§ Under a
+  dead-writes run](#under-a-dead-writes-run)'s own two blanks are gone the
+  same way, and its *Changing things* block — which has nothing to put on
+  the six rows the group now always gets — carries four blank rows where it
+  used to carry two, rather than the body shrinking back to fourteen.
 - Only keys that exist in this build appear. **Once writes are dead for this
   run — `--read-only`, or an audit log that would not open, the same one
   signal either way — the *Changing things* heading is rewritten to say so,
@@ -90,15 +118,15 @@ command log strip, the same `?`/`q` footer this file draws everywhere else.
 │    tab          next panel      esc   back / close                           │
 │    X            switch cluster                                               │
 │    [ ]          detail tabs     / n   filter · namespace                     │
-│                                                                              │
 │  Looking at things (always available)                                        │
 │    l  logs, with the log from before a crash                                 │
 │       in the log tab:  f follow · c container · ⇧p previous                  │
 │    d  describe — the object and what happened to it                          │
 │    y  view as YAML                                                           │
-│                                                                              │
 │  Changing things (off for this whole run)                                    │
 │    k8rs was started with --read-only — quit and start it again without it    │
+│                                                                              │
+│                                                                              │
 │                                                                              │
 │                                                                              │
 ├──────────────────────────────────────────────────────────────────────────────┤
@@ -128,8 +156,11 @@ command log strip, the same `?`/`q` footer this file draws everywhere else.
 - **The heading is rewritten, not removed — anchored on `  Changing
   things`, the same leading text [`key_map`] already finds it by.** Its
   `s` row carries the cause's own sentence, at the same four-column indent
-  every mutating row uses; `r` and `ctrl-d` go blank. No row is added or
-  removed: the block keeps the four rows it always had.
+  every mutating row uses; `r` and `ctrl-d` go blank, and so do the two rows
+  that hold `s`'s and `r`'s own `works on …` line the rest of the time. No
+  row is added or removed here either: the block keeps the six rows it has
+  everywhere else on this screen, four of them blank instead of the usual
+  two.
 - **Neither row is marked refused.** Invariant 2's *unreachable, not
   merely unbound* is about **mutation**, not `ops.rs` as a whole — `may_i`
   writes nothing and touches no audit log, so neither `--read-only`
@@ -172,12 +203,14 @@ In **Moving around**, the `X` row:
     X            switch cluster (paused while a change is running)
 ```
 
-In **Changing things**, the heading and its three rows, unchanged beneath it:
+In **Changing things**, the heading and its five rows, unchanged beneath it:
 
 ```
   Changing things (paused while a change is running)
     s       run more or fewer copies       (scale)
+            works on a deployment, a statefulset and a replicaset
     r       restart, at its own pace       (rollout restart)
+            works on a deployment, a statefulset and a daemonset
     ctrl-d  delete — you type the name to confirm
 ```
 
@@ -186,14 +219,18 @@ In **Changing things**, the heading and its three rows, unchanged beneath it:
   permission-refused rows below already make to their own jargon
   parenthesis. It is anchored on `    X `, its own unique leading text, the
   same way `    s `, `    r ` and `    ctrl-d ` already are.
-- **The *Changing things* heading is rewritten instead of its three rows,
-  because the reason is one fact for all three, not three separate ones.**
-  A call in flight refuses `s`, `r` and `ctrl-d` uniformly — a missing
+- **The *Changing things* heading is rewritten instead of its rows, because
+  the reason is one fact for all three keys, not three separate ones.** A
+  call in flight refuses `s`, `r` and `ctrl-d` uniformly — a missing
   permission never does; one key can be refused while the other two are not.
-  Rewriting all three rows to say the same six words three times over would
+  Rewriting the key rows to say the same six words three times over would
   be the second copy of a fact this codebase already has one home for; the
   heading governs the group and says it once, anchored on `  Changing
-  things`, its own unique leading text.
+  things`, its own unique leading text. The two `works on …` lines are
+  untouched for the same reason [§ When a key is
+  refused](#when-a-key-is-refused)'s own excerpt leaves them untouched: they
+  answer *what kind*, not *can this login act right now*, and neither cause
+  changes what kind a key works on.
 - **This state and a permission refusal are never reconciled on the same
   row.** While a call is in flight, `s`, `r` and `ctrl-d` are inactionable
   for the wait's reason alone, whatever a permission probe would otherwise
@@ -249,7 +286,7 @@ actually be pressed
 
 **Same mechanism as [§ While the call is
 running](#while-the-call-is-running)'s own — the heading rewritten, its
-three rows unchanged beneath it, one reason drawn — not restated here**
+five rows unchanged beneath it, one reason drawn — not restated here**
 ([D262](../NOTES.md#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12)).
 **The `X` row is not rewritten for any of the three** — nothing about a
 lost link, an expired login or the clocks disagreeing stops a cluster
@@ -336,9 +373,16 @@ for its own over-70 row:**
 ```
   Changing things (each one asks first, and shows the command)
     s       run more or fewer copies   (scale — get+patch deployments/scale)
+            works on a deployment, a statefulset and a replicaset
     r       restart, at its own pace   (rollout restart — patch deployments)
+            works on a deployment, a statefulset and a daemonset
     ctrl-d  delete — you type the name to confirm (delete deployments)
 ```
+
+**The two `works on …` lines are unchanged by a refusal and are shown here
+for that reason** — they answer *what kind*, refusal answers *this login*,
+and a row that does not move when its neighbour does is still worth seeing
+in place rather than left to be inferred.
 
 Counted, not estimated:
 
@@ -392,10 +436,25 @@ lines.
   key at all, `may_i_in` is never asked, `Verdict::No` never arrives, and the
   key does not read as *refused* by this section — it is *withheld*, the same
   fact and the same word [states.md](states.md) already uses for a key with
-  nothing to act on, and drawing it is that file's own later box, not this
-  one's. A screen that asked the permission question anyway and drew `s no
-  scale` on a DaemonSet would tell the reader they lack a permission that
-  does not exist to hold.
+  nothing to act on. The footer that withholds it, and its column counts, are
+  [widgets.md § The footer](widgets.md#2a-the-footer)'s, not repeated here. A
+  screen that asked the permission question anyway and drew `s no scale` on
+  a DaemonSet would tell the reader they lack a permission that does not
+  exist to hold.
+- **This screen still lists the row, unmarked, on a kind that cannot use
+  it — and now names which kinds it does work on, in the same wording
+  `ops.rs` refuses the rest with.** `?` is the exhaustive map of the whole
+  product, not a menu scoped to whatever is selected right now — `s` works
+  on a Deployment even while a Node is on screen, and a reader who opens
+  Help to learn what the product can do is entitled to the whole list. This
+  is the same choice already made for `c container`: a single-container pod
+  drops it from the *footer*
+  ([detail.md § Choosing a container](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose))
+  but this screen's own key map names `c container` all the same, container
+  count aside. `s` and `r` follow it: each keeps its own `works on …` line
+  from the mockup at the top of this file, unchanged by what is selected,
+  and only a `Verdict::No` on the object actually selected ever changes the
+  row above it.
 - **The verb and resource are named because [states.md](states.md) already
   set the pattern for a missing permission on this product** — *"Missing
   permission: list nodes"*

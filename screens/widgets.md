@@ -346,6 +346,28 @@ the word after it. A reader tells the two apart by what is on the line, not
 by a colour: one line is shorter than the ordinary footer, the other is
 longer by one word.
 
+**Withheld now has a per-object cause as well as its run-level ones, and it
+draws exactly the same as every cause already listed for it: nothing
+selected, disconnected, `--read-only` and the rest all read as "not on the
+line," and so does this.** A Node cannot be scaled by anyone and a
+DaemonSet has no `/scale` subresource — this is a fact about the selected
+object's *kind*, true whatever the session state and whatever this login
+may do, and it is not a permission question, so `may_i_in` is never asked
+and the key is never marked `no` — `s no scale` on a Node would claim a
+verdict nobody was asked to give
+([D261 ruling 8](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
+**`c container` is this rule's own precedent, already shipped**: it drops
+from the footer entirely on a single-container pod rather than sitting
+there unusable
+([detail.md § Choosing a container](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose)) —
+a key that cannot work is a key that is not drawn, never a key drawn dim or
+marked, and `s`/`r` on a kind that does not support them follow the same
+rule. A reader still tells *refused* from *unsupported* apart at a glance,
+because the two are different shapes and not the same shape twice: refused
+is the ordinary line plus one word (`no`) per key; unsupported is the
+ordinary line minus one key. Nothing on this screen is ever both. The rows
+are counted below, after the refused table they extend.
+
 - **The word is `no`, inserted between the key and its label — `s no scale`,
   `r no restart` — never a symbol.** [`theme.rs`](../src/theme.rs) gives two
   non-colour carriers, `Signal::Mark` and `Signal::Reverse`; `Reverse` already
@@ -388,6 +410,32 @@ longer by one word.
   | `s` refused | `↑↓ move  ⏎ open  s no scale  r restart  / filter  ? all keys  q quit` | 68 |
   | `r` refused | `↑↓ move  ⏎ open  s scale  r no restart  / filter  ? all keys  q quit` | 68 |
   | both refused | `↑↓ move  ⏎ open  s no scale  r no restart  / filter  ? all keys  q quit` | 71 |
+
+  **The four rows above all assume a kind that supports both operations — a
+  Deployment or a StatefulSet, the running example everywhere else in this
+  product.** A kind that supports only one, or neither, is a shorter footer,
+  never a `no`-marked key for the one it lacks — the key that does not apply
+  is not on the line at all. Measured off the same two operations
+  [D261 ruling 8](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  already counted against the API: `scale` reaches a Deployment, a
+  StatefulSet or a bare ReplicaSet, never a DaemonSet; `restart` reaches a
+  Deployment, a StatefulSet or a DaemonSet, never a bare ReplicaSet; neither
+  reaches a Pod, a ConfigMap or a Node.
+
+  | State | Alerts / Resources footer | Columns |
+  |---|---|---|
+  | only `r` supported (a DaemonSet), not refused | `↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit` | 56 |
+  | only `r` supported (a DaemonSet), refused | `↑↓ move  ⏎ open  r no restart  / filter  ? all keys  q quit` | 59 |
+  | only `s` supported (a bare ReplicaSet), not refused | `↑↓ move  ⏎ open  s scale  / filter  ? all keys  q quit` | 54 |
+  | only `s` supported (a bare ReplicaSet), refused | `↑↓ move  ⏎ open  s no scale  / filter  ? all keys  q quit` | 57 |
+  | neither supported (a Node, a bare Pod, a ConfigMap, …) | `↑↓ move  ⏎ open  / filter  ? all keys  q quit` | 45 |
+
+  None of these approaches the 76-column ceiling — the widest line on this
+  page is still the *both refused* row above, at 71; dropping a key can only
+  shorten a line that adding `no` to two keys already proved fits. Where the
+  key that is missing is the one refused, there is nothing to mark: the
+  unsupported key was never asked about, so it has no verdict to draw and no
+  row in this table needs one.
 
 - **`Verdict::Yes`, `Verdict::CouldNotTell` and *not asked yet* draw the
   ordinary key, unmarked — the *neither refused* row above, exactly.**

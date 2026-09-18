@@ -48,9 +48,13 @@ now* — a lint report would never be empty.
   kind gives it: a pane-level control, not an operation on an object, so it is
   honest to offer even over a list with nothing in it right now
   ([widgets.md § 2a](widgets.md#2a-the-footer)'s own bucket for this state,
-  grouped with disconnected, login-expired, clock-skew, namespace-scoped and
-  [the audit log failing to open](#the-audit-log-could-not-be-opened) — one
-  shape, "ordinary, mutations withheld," for all six).
+  grouped with disconnected, login-expired, clock-skew, an unsupported kind
+  and [the audit log failing to open](#the-audit-log-could-not-be-opened) —
+  one shape, "ordinary, mutations withheld," for all six. **Namespace-scoped
+  is not on this list** — a scope withholds nothing on its own,
+  [You can only see some namespaces](#you-can-only-see-some-namespaces)
+  keeps both keys and says so in as many words, and this line used to
+  disagree with it before this edit).
 
 ## An empty kind in the browser
 

@@ -1143,13 +1143,15 @@ fn an_empty_name_never_arms_anything_however_little_is_typed() {
 #[test]
 fn quit_and_the_cluster_switcher_are_refused_exactly_where_the_key_map_says() {
     let mut app = App::default();
-    assert!(app.may_quit() && app.may_switch_cluster() && app.may_mutate(Offer::Act));
+    assert!(app.may_quit() && app.may_switch_cluster());
+    assert_eq!(pressable(&app, BOTH), (true, true));
 
     app.modal = Some(Modal::Help);
     assert!(app.may_quit(), "q was refused merely because help was open");
     assert!(!app.may_switch_cluster(), "X stayed bound under a modal");
-    assert!(
-        !app.may_mutate(Offer::Act),
+    assert_eq!(
+        pressable(&app, BOTH),
+        (false, false),
         "a second dialog could open over the first"
     );
 
@@ -1157,7 +1159,11 @@ fn quit_and_the_cluster_switcher_are_refused_exactly_where_the_key_map_says() {
     app.changing = Some(dialog(None).object);
     assert!(!app.may_quit(), "q was allowed mid-write");
     assert!(!app.may_switch_cluster());
-    assert!(!app.may_mutate(Offer::Act), "a second mutation was allowed");
+    assert_eq!(
+        pressable(&app, BOTH),
+        (false, false),
+        "a second mutation was allowed"
+    );
 }
 
 /// `screens/widgets.md:273`: **`esc` closes exactly one level, always** — and the two filters are
@@ -1906,7 +1912,7 @@ fn the_switcher_is_refused_under_its_own_picker_and_its_own_failure() {
             ..App::default()
         };
         assert!(!app.may_switch_cluster());
-        assert!(!app.may_mutate(Offer::Act));
+        assert_eq!(pressable(&app, BOTH), (false, false));
     }
 }
 
@@ -2331,13 +2337,15 @@ fn a_manual_scroll_turns_follow_mode_off() {
 fn no_key_is_a_command_while_a_filter_is_being_typed() {
     for field in [Typing::Text, Typing::Namespace] {
         let mut app = App::default();
-        assert!(app.may_quit() && app.may_switch_cluster() && app.may_mutate(Offer::Act));
+        assert!(app.may_quit() && app.may_switch_cluster());
+        assert_eq!(pressable(&app, BOTH), (true, true));
 
         app.typing = Some(field);
         assert!(!app.may_quit(), "q quit while typing {field:?}");
         assert!(!app.may_switch_cluster(), "X while typing {field:?}");
-        assert!(
-            !app.may_mutate(Offer::Act),
+        assert_eq!(
+            pressable(&app, BOTH),
+            (false, false),
             "s or r would have fired while typing {field:?}"
         );
     }
@@ -2514,13 +2522,31 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
             tab,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]);
+        let (keys, quit) = app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]);
         assert_eq!(
             (keys.as_ref(), quit),
             (expected, ""),
             "{view:?} · detail {detail} · {tab:?}"
         );
     }
+}
+
+/// **The ordinary offer on a kind that supports both operations** — a Deployment, a StatefulSet,
+/// which is the running example everywhere in `screens/`. Every condition on [`App::may_mutate`]
+/// but the kind's own kills both keys together, so a test about one of *those* says `BOTH` and
+/// names neither key.
+const BOTH: Offer = Offer::Act {
+    scalable: true,
+    restartable: true,
+};
+
+/// **Both mutating keys, asked separately** ([`Op`]) — `(s, r)`, so a test can assert that a
+/// condition takes both and not merely that it took one.
+fn pressable(app: &App, offer: Offer) -> (bool, bool) {
+    (
+        app.may_mutate(offer, Op::Scale),
+        app.may_mutate(offer, Op::Restart),
+    )
 }
 
 /// **The pair that never gives way** (`screens/widgets.md` § 2a): `? all keys` and `q quit`,
@@ -2561,6 +2587,10 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
 /// ninth shape is a compile error in this function rather than a row every sweep below quietly
 /// stops walking. That is exactly how `Offer::Hidden` arrived unwalked behind a doc comment
 /// claiming otherwise (`tester`, 2026-09-18).
+///
+/// **[`Offer::Act`] is four rows and not one** since which of `s` and `r` a kind supports moved
+/// onto it: a sweep fed only the both-supported shape would leave the three shorter footers walked
+/// by nothing, which is the same hole `Offer::Hidden` fell through.
 fn every_offer() -> Vec<Offer> {
     fn exhaustive(offer: Offer) {
         match offer {
@@ -2568,10 +2598,18 @@ fn every_offer() -> Vec<Offer> {
             | Offer::Filter { .. }
             | Offer::Hidden { .. }
             | Offer::Move { .. }
-            | Offer::Act => {}
+            | Offer::Act { .. } => {}
         }
     }
-    let mut all = vec![Offer::Act];
+    let mut all = Vec::new();
+    for scalable in [false, true] {
+        for restartable in [false, true] {
+            all.push(Offer::Act {
+                scalable,
+                restartable,
+            });
+        }
+    }
     for switch in [false, true] {
         all.push(Offer::Nothing { switch });
         all.push(Offer::Filter { switch });
@@ -2644,10 +2682,10 @@ fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    let (keys, quit) = app.footer(None, Offer::Act, Refused::default(), "", &[]);
+    let (keys, quit) = app.footer(None, BOTH, Refused::default(), "", &[]);
     assert_eq!((keys.as_ref(), quit), ("? or esc to close", "q quit"));
     assert!(
-        !app.footer(None, Offer::Act, Refused::default(), "", &[])
+        !app.footer(None, BOTH, Refused::default(), "", &[])
             .0
             .contains("all keys"),
         "the footer still pointed at a screen the reader is already on"
@@ -2784,13 +2822,7 @@ fn the_picker_and_its_failure_each_say_the_keys_valid_inside_them() {
             };
             for detail in [false, true] {
                 assert_eq!(
-                    app.footer(
-                        detail.then_some(2),
-                        Offer::Act,
-                        Refused::default(),
-                        "",
-                        contexts
-                    ),
+                    app.footer(detail.then_some(2), BOTH, Refused::default(), "", contexts),
                     (Cow::Borrowed(expected), ""),
                     "{modal:?}"
                 );
@@ -2817,7 +2849,7 @@ fn help_is_the_footer_whatever_it_was_opened_from() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]),
+            app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]),
             (Cow::Borrowed("? or esc to close"), "q quit"),
             "{view:?} · detail {detail} · {tab:?}"
         );
@@ -2834,7 +2866,7 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(None, Offer::Act, Refused::default(), "", &[]).0,
+        app.footer(None, BOTH, Refused::default(), "", &[]).0,
         "? or esc to close"
     );
     assert!(
@@ -2842,7 +2874,7 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         "an esc with no startup picker open ended the run"
     );
     assert_eq!(
-        app.footer(None, Offer::Act, Refused::default(), "", &[]).0,
+        app.footer(None, BOTH, Refused::default(), "", &[]).0,
         "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
     );
 }
@@ -2918,11 +2950,11 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         ),
     ] {
         assert_eq!(
-            app.footer(None, Offer::Act, Refused::default(), "", &[]).0,
+            app.footer(None, BOTH, Refused::default(), "", &[]).0,
             expected
         );
         assert_eq!(
-            app.footer(None, Offer::Act, Refused::default(), "", &[]).1,
+            app.footer(None, BOTH, Refused::default(), "", &[]).1,
             "",
             "a dialog grew the right-hand zone only `?` has"
         );
@@ -2930,8 +2962,7 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         // replaced test pinned: a dialog is opened from a detail pane as readily as from a list,
         // and a footer that fell through for one of them would fall through for both.
         assert_eq!(
-            app.footer(Some(2), Offer::Act, Refused::default(), "", &[])
-                .0,
+            app.footer(Some(2), BOTH, Refused::default(), "", &[]).0,
             expected
         );
     }
@@ -2961,7 +2992,7 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
             ..App::default()
         };
         assert!(
-            app.footer(None, Offer::Act, Refused::default(), "payments/web", &[])
+            app.footer(None, BOTH, Refused::default(), "payments/web", &[])
                 .0
                 .ends_with("? all keys  q quit"),
             "{view:?} — nothing is running and the ordinary footer went"
@@ -2971,7 +3002,7 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
         let no = |refused: bool| refused.then_some(&Verdict::No);
         for (scale, restart) in [(false, false), (true, false), (false, true), (true, true)] {
             let refused = Refused::of("deployments", [no(scale); 2], [no(restart)], [None]);
-            let (keys, quit) = app.footer(None, Offer::Act, refused, "payments/web", &[]);
+            let (keys, quit) = app.footer(None, BOTH, refused, "payments/web", &[]);
             assert_eq!(
                 (keys.as_ref(), quit),
                 (
@@ -3016,7 +3047,7 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
         let ordinary = app
             .footer(
                 detail.then_some(2),
-                Offer::Act,
+                BOTH,
                 Refused::default(),
                 "payments/web",
                 &[],
@@ -3026,7 +3057,7 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
         app.changing = Some(dialog(None).object);
         let (keys, quit) = app.footer(
             detail.then_some(2),
-            Offer::Act,
+            BOTH,
             Refused::default(),
             "payments/web",
             &[],
@@ -3058,7 +3089,7 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
 fn the_in_flight_arm_is_changings_and_never_the_names() {
     let mut app = App::default();
     assert_eq!(
-        app.footer(None, Offer::Act, Refused::default(), "payments/web", &[])
+        app.footer(None, BOTH, Refused::default(), "payments/web", &[])
             .0,
         "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
         "a name alone turned the in-flight footer on"
@@ -3066,7 +3097,7 @@ fn the_in_flight_arm_is_changings_and_never_the_names() {
 
     app.changing = Some(dialog(None).object);
     assert_eq!(
-        app.footer(None, Offer::Act, Refused::default(), "", &[]).0,
+        app.footer(None, BOTH, Refused::default(), "", &[]).0,
         "↑↓ move  ⏎ open  ? keys  ·  changing  first",
         "an empty name turned the in-flight footer off"
     );
@@ -3085,13 +3116,13 @@ fn help_over_a_call_in_flight_drops_the_quit_it_cannot_promise() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(None, Offer::Act, Refused::default(), "", &[]),
+        app.footer(None, BOTH, Refused::default(), "", &[]),
         (Cow::Borrowed("? or esc to close"), "q quit"),
         "help's ordinary footer changed"
     );
 
     app.changing = Some(dialog(None).object);
-    let (keys, quit) = app.footer(None, Offer::Act, Refused::default(), "", &[]);
+    let (keys, quit) = app.footer(None, BOTH, Refused::default(), "", &[]);
     assert_eq!(
         keys.as_ref(),
         "? or esc to close",
@@ -3139,7 +3170,7 @@ fn a_modal_keeps_its_own_closed_set_even_with_a_call_running_under_it() {
             changing: Some(running.clone()),
             ..App::default()
         };
-        let (keys, quit) = app.footer(None, Offer::Act, Refused::default(), "payments/web", &[]);
+        let (keys, quit) = app.footer(None, BOTH, Refused::default(), "payments/web", &[]);
         assert_eq!((keys.as_ref(), quit), (expected, ""), "{modal:?}");
         assert!(
             !keys.contains("changing"),
@@ -3234,7 +3265,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
             modal,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]);
+        let (keys, quit) = app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]);
         let width = ratatui::text::Span::raw(keys.as_ref()).width()
             + usize::from(!quit.is_empty())
             + ratatui::text::Span::raw(quit).width();
@@ -3247,26 +3278,35 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
     assert_eq!(seen, 16, "a mode stopped being measured");
 }
 
-/// **`screens/widgets.md` § 2a's own four-row table, read as the fixture** — the footer string and
-/// the column count that section counted it at, in the file's order: neither refused · `s` · `r` ·
-/// both.
+/// **`screens/widgets.md` § 2a's own two tables, read as the fixture** — the footer string and the
+/// column count that section counted it at, in the file's order. The first four are a kind that
+/// supports both operations: neither refused · `s` · `r` · both. The five after them are the kinds
+/// that support one or neither, where the key that is missing is off the line rather than marked.
 ///
 /// **The screen file is the fixture, which is the point** (`ui_tests::mockup`'s own reason). A
-/// test that compared these four lines with the four literals `App::footer` returns would compare
+/// test that compared these nine lines with the nine literals `App::footer` returns would compare
 /// the implementation with itself.
+///
+/// **Both tables are read and not just the first.** They carry the same header row, so the parser
+/// that stopped at the first one went on passing when the second arrived — four rows asserted,
+/// five drawn by nothing.
 fn mockup_footers() -> Vec<(String, usize)> {
     let path = format!("{}/screens/widgets.md", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("the screen file {path} could not be read: {e}"));
-    let rows: Vec<(String, usize)> = text
-        .lines()
-        .skip_while(|line| {
-            !line
-                .trim_start()
+    let lines: Vec<&str> = text.lines().collect();
+    let rows: Vec<(String, usize)> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| {
+            line.trim_start()
                 .starts_with("| State | Alerts / Resources footer")
         })
-        .skip(2)
-        .take_while(|line| line.trim_start().starts_with('|'))
+        .flat_map(|(at, _)| {
+            lines[at + 2..]
+                .iter()
+                .take_while(|line| line.trim_start().starts_with('|'))
+        })
         .map(|line| {
             let cells: Vec<&str> = line.trim().trim_matches('|').split('|').collect();
             (
@@ -3280,51 +3320,165 @@ fn mockup_footers() -> Vec<(String, usize)> {
         .collect();
     assert_eq!(
         rows.len(),
-        4,
-        "screens/widgets.md § 2a no longer tabulates the four states of the list footer"
+        9,
+        "screens/widgets.md § 2a no longer tabulates the nine states of the list footer"
     );
     rows
 }
 
-/// **The list footer marks exactly the keys this login may not use, in `screens/widgets.md`
-/// § 2a's own four strings and at its own four column counts** (NOTES § D23, § D229).
+/// **The list footer marks exactly the keys this login may not use and draws only the keys the
+/// selected kind can use, in `screens/widgets.md` § 2a's own nine strings and at its own nine
+/// column counts** (NOTES § D23, § D229, § D261 ruling 8).
 ///
 /// **The width is measured the way ratatui measures**, because `↑↓`, `⏎` and `·` are not one byte
 /// each — and it is checked against the section's counted number rather than an inequality, so a
 /// row that fits but says the wrong thing still fails.
+///
+/// **A refusal on a key the kind has not got must change nothing**, which is the half that makes
+/// *refused* and *unsupported* two shapes rather than one: `may_i_in` was never asked about that
+/// key, so a `Verdict::No` sitting in [`Refused`] for it has no line to reach. Every row is
+/// therefore walked with *both* answers for the refusal it does not pin, and the same string has
+/// to come back.
 #[test]
 fn the_list_footer_marks_the_keys_this_login_may_not_use() {
     let table = mockup_footers();
-    let states = [(false, false), (true, false), (false, true), (true, true)];
-    for (nth, (scale, restart)) in states.into_iter().enumerate() {
-        let refused = Refused::of(
-            "deployments",
-            [scale.then_some(&Verdict::No); 2],
-            [restart.then_some(&Verdict::No)],
-            [None],
-        );
+    // The file's own order: which operations the kind supports, then the refusal that row is
+    // about. `None` is a refusal the row is *not* about — the key is off the line, so both answers
+    // must draw the same string.
+    let states = [
+        (true, true, Some(false), Some(false)),
+        (true, true, Some(true), Some(false)),
+        (true, true, Some(false), Some(true)),
+        (true, true, Some(true), Some(true)),
+        (false, true, None, Some(false)),
+        (false, true, None, Some(true)),
+        (true, false, Some(false), None),
+        (true, false, Some(true), None),
+        (false, false, None, None),
+    ];
+    for (nth, (scalable, restartable, pinned_scale, pinned_restart)) in
+        states.into_iter().enumerate()
+    {
         let (expected, columns) = &table[nth];
-        for view in [View::Alerts, View::Resources(0)] {
-            let app = App {
-                view,
-                ..App::default()
-            };
-            let (keys, quit) = app.footer(None, Offer::Act, refused, "", &[]);
-            assert_eq!(
-                (keys.as_ref(), quit),
-                (expected.as_str(), ""),
-                "{view:?} · s refused {scale} · r refused {restart}"
-            );
-            assert_eq!(
-                ratatui::text::Span::raw(keys.as_ref()).width(),
-                *columns,
-                "{keys:?} is not the width screens/widgets.md § 2a counted"
-            );
+        let walked = |pinned: Option<bool>| pinned.map_or(vec![false, true], |only| vec![only]);
+        for scale in walked(pinned_scale) {
+            for restart in walked(pinned_restart) {
+                let refused = Refused::of(
+                    "deployments",
+                    [scale.then_some(&Verdict::No); 2],
+                    [restart.then_some(&Verdict::No)],
+                    [None],
+                );
+                for view in [View::Alerts, View::Resources(0)] {
+                    let app = App {
+                        view,
+                        ..App::default()
+                    };
+                    let offer = Offer::Act {
+                        scalable,
+                        restartable,
+                    };
+                    let (keys, quit) = app.footer(None, offer, refused, "", &[]);
+                    assert_eq!(
+                        (keys.as_ref(), quit),
+                        (expected.as_str(), ""),
+                        "{view:?} · {offer:?} · s refused {scale} · r refused {restart}"
+                    );
+                    assert_eq!(
+                        ratatui::text::Span::raw(keys.as_ref()).width(),
+                        *columns,
+                        "{keys:?} is not the width screens/widgets.md § 2a counted"
+                    );
+                    // **Drawn and live are one fact** (invariant 2): the key that is on the line
+                    // is exactly the key that can be pressed, per key.
+                    assert_eq!(
+                        pressable(&app, offer),
+                        (scalable, restartable),
+                        "{offer:?} — a key was drawn and dead, or dead and drawn"
+                    );
+                }
+            }
         }
         // The ceiling `ui::indented` leaves at the 80×24 floor (`screens/widgets.md` § 2a). The
         // 66-column page the mockups are drawn at is not this row's budget: § 2a's own table puts
         // both-refused at 71 and calls it *inside the ceiling with 5 columns to spare*.
         assert!(*columns <= 76, "{expected:?} is {columns} columns");
+    }
+}
+
+/// **`may_mutate` is asked per key, because the two keys no longer have one answer**
+/// (`screens/widgets.md` § 2a, extended 2026-09-18): a DaemonSet's `r` is live in the same frame
+/// its `s` is not, and a press of `s` there must reach nothing.
+///
+/// **And every shape that is not [`Offer::Act`] refuses both**, whichever key is named — the
+/// catch-all in `Offer::offers` is the safe direction, and this is what says so for all fourteen
+/// of them rather than for the one a reader thought of.
+#[test]
+fn a_key_the_selected_kind_cannot_use_is_not_pressable() {
+    for (scalable, restartable) in [(false, false), (true, false), (false, true), (true, true)] {
+        let offer = Offer::Act {
+            scalable,
+            restartable,
+        };
+        assert_eq!(
+            pressable(&App::default(), offer),
+            (scalable, restartable),
+            "{offer:?} — the key the footer withheld was live behind it"
+        );
+    }
+    let mut withheld = 0;
+    for offer in every_offer()
+        .into_iter()
+        .filter(|offer| !matches!(offer, Offer::Act { .. }))
+    {
+        assert_eq!(
+            pressable(&App::default(), offer),
+            (false, false),
+            "{offer:?} draws neither key and left one pressable"
+        );
+        withheld += 1;
+    }
+    assert_eq!(
+        withheld, 14,
+        "a shape that offers no mutating key stopped being walked"
+    );
+}
+
+/// **A kind word is not an address, and [`Offer::act`] takes both halves** (NOTES § D51,
+/// PRIOR-ART § F4, `reports/2026-09-18-offer-per-kind-operator-read.md` § 1). `ops::scalable` and
+/// `ops::restartable` answer with `apps/v1` and nothing else, so the same word under another group
+/// is another object and gets no key.
+///
+/// **It needs no CRD to be reachable** — a stock cluster serves `v1 Event` beside
+/// `events.k8s.io/v1 Event`, two resources sharing one kind word — and the sidebar row a reader
+/// opens is the plural alone, so nothing on screen tells them apart. OpenKruise's
+/// `apps.kruise.io/v1beta1 StatefulSet` is the measured example.
+///
+/// **Asserted at this layer as well as through a drawn frame**, because this is where the rule
+/// lives: `ui::offered` can only hand over what it reads, and the comparison it depends on is
+/// here.
+#[test]
+fn a_kind_word_under_another_group_is_another_object_and_gets_no_key() {
+    for (group, kind, expected) in [
+        ("apps", "deployment", (true, true)),
+        ("apps", "statefulset", (true, true)),
+        ("apps", "daemonset", (false, true)),
+        ("apps", "replicaset", (true, false)),
+        // The same four words, owned by somebody else.
+        ("apps.kruise.io", "statefulset", (false, false)),
+        ("apps.kruise.io", "daemonset", (false, false)),
+        ("example.com", "deployment", (false, false)),
+        ("", "deployment", (false, false)),
+        // And the core group, which serves none of them.
+        ("", "pod", (false, false)),
+        ("", "node", (false, false)),
+        ("", "", (false, false)),
+    ] {
+        assert_eq!(
+            pressable(&App::default(), Offer::act(group, kind)),
+            expected,
+            "{group}/{kind}"
+        );
     }
 }
 
@@ -3429,8 +3583,8 @@ fn a_refused_delete_changes_no_footer() {
                 ..App::default()
             };
             assert_eq!(
-                app.footer(detail.then_some(2), Offer::Act, refused, "", &[]),
-                app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]),
+                app.footer(detail.then_some(2), BOTH, refused, "", &[]),
+                app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]),
                 "{view:?} · detail {detail}"
             );
         }
@@ -3525,8 +3679,8 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail.then_some(2), Offer::Act, all, "", &[]),
-            app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]),
+            app.footer(detail.then_some(2), BOTH, all, "", &[]),
+            app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]),
             "{:?} · detail {detail} · {tab:?}",
             app.view
         );
@@ -3545,7 +3699,7 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
 #[test]
 fn a_filter_being_typed_replaces_the_whole_footer() {
     let ask = |app: &App, cut: &str| {
-        app.footer(None, Offer::Act, Refused::default(), cut, &[])
+        app.footer(None, BOTH, Refused::default(), cut, &[])
             .0
             .into_owned()
     };
@@ -3667,7 +3821,7 @@ fn the_footer_over_a_filter_that_hides_every_row_names_the_field_esc_clears() {
 fn c_container_is_offered_only_where_there_is_something_to_choose() {
     let app = App::default();
     let ask = |containers| {
-        app.footer(containers, Offer::Act, Refused::default(), "", &[])
+        app.footer(containers, BOTH, Refused::default(), "", &[])
             .0
             .into_owned()
     };
@@ -3696,7 +3850,7 @@ fn the_container_picker_offers_three_keys_and_none_once_the_pod_has_gone() {
         ..App::default()
     };
     let ask = |containers| {
-        app.footer(containers, Offer::Act, Refused::default(), "", &[])
+        app.footer(containers, BOTH, Refused::default(), "", &[])
             .0
             .into_owned()
     };
@@ -4532,11 +4686,11 @@ fn the_confirm_word_is_the_same_one_the_footer_and_the_button_use() {
         ..App::default()
     };
     assert!(
-        app.footer(None, Offer::Act, Refused::default(), "", &[])
+        app.footer(None, BOTH, Refused::default(), "", &[])
             .0
             .contains(armed.confirm()),
         "the footer does not name the button's own word: {:?}",
-        app.footer(None, Offer::Act, Refused::default(), "", &[]).0
+        app.footer(None, BOTH, Refused::default(), "", &[]).0
     );
 }
 

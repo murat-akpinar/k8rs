@@ -131,6 +131,17 @@ python3 scripts/reports-guard.py
 # 2026-08-28: 639 tests pass with `k8s.rs`'s at sixty days).
 python3 scripts/twin-guard.py --self-test
 python3 scripts/twin-guard.py
+# The same debt in two shapes `twin-guard.py` cannot read, because it parses a
+# `SignedDuration` and these are a sentence and a table. `ops::SCALABLE` /
+# `RESTARTABLE` are private and frozen, so `ui.rs` hand-copies each into a
+# `works on …` line that `screens/help.md` then draws. Measured 2026-09-18: a
+# rewording reddens, but only against the copy next door — `ops.rs` against its
+# own quoted sentence, `ui.rs` against the page — so every red clears by
+# updating the neighbour and the far end is never read. `from_api` and
+# `addressed` are worse: filing `Job` under `apps`, or spelling `cronjob` as
+# `cronjobs`, leaves `cargo test --all-targets` fully green (NOTES § D51).
+python3 scripts/copy-guard.py --self-test
+python3 scripts/copy-guard.py
 # `cargo fmt` reflows code and leaves comments alone, so the 100-column rule was
 # a convention until this ran. rustfmt's own options for it are nightly-only.
 python3 scripts/width-guard.py --self-test

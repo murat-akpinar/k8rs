@@ -1912,7 +1912,9 @@ pub struct App {
 /// every run, before `may_i_in` has replied at all — and an operation the selected kind does not
 /// support, which is never asked (`ops::scalable` reaches no DaemonSet, `ops::restartable` no bare
 /// ReplicaSet, and neither reaches a Pod or a Node). A key the kind cannot act on is **withheld**,
-/// which is `screens/states.md`'s own word and its own later box; it is never *refused*.
+/// which is `screens/states.md`'s own word: it is off the line entirely, and never *refused*.
+/// [`Offer::Act`] is where that half is decided, and it asks the same two `ops` functions this
+/// paragraph names rather than keeping a list of its own.
 ///
 /// **The fields are private for that reason and not for tidiness.** A caller that could write
 /// `Refused { scale: true, .. }` could dim a permitted key from a probe that never answered, which
@@ -2050,23 +2052,26 @@ fn refuses(answers: &[Option<&Verdict>]) -> bool {
 /// pane came back with* is [`crate::ui::Screen`]'s half, not what the reader navigated to
 /// (NOTES § D259 ruling 5).
 ///
-/// **It answers one question — may a mutating key be offered right now — and two different facts
-/// hide behind it** (PM ruling, 2026-09-12). *There is nothing to act on* is about the pane's
-/// content and moves frame to frame; *writes are off for this whole run* is a property of the
-/// session ([`crate::ui::Writes`]). They are separate values and this is where they meet, because
-/// they end in the same drawn line.
+/// **It answers one question — may a mutating key be offered right now — and three different facts
+/// hide behind it** (PM ruling, 2026-09-12; `screens/widgets.md` § 2a, extended 2026-09-18). *There
+/// is nothing to act on* is about the pane's content and moves frame to frame; *writes are off for
+/// this whole run* is a property of the session ([`crate::ui::Writes`]); *this kind has no such
+/// operation* is a property of the object under the cursor and of nothing else ([`Offer::Act`]).
+/// They are separate values and this is where they meet, because they end in the same drawn line.
 ///
 /// **Neither of them is a [`Refused`] mark, and that is the distinction this type exists to keep**
 /// (`screens/widgets.md` § 2a, `screens/help.md` § *When a key is refused*): **withheld** is the
 /// key not being on the line at all, **refused** is the key on the line with `no` before its label.
-/// `no` is `may_i`'s answer about *this login's grant* — a dropped connection, an empty pane and a
-/// dead audit log asked nobody, so marking a key `no` for any of them would claim a verdict nobody
-/// gave. Only [`Offer::Act`] can carry a mark.
+/// `no` is `may_i`'s answer about *this login's grant* — a dropped connection, an empty pane, a
+/// dead audit log and a Node's missing `/scale` asked nobody, so marking a key `no` for any of them
+/// would claim a verdict nobody gave. Only [`Offer::Act`] can carry a mark.
 ///
-/// **One value and not a bool per key**, because these are the closed set `screens/states.md`
-/// draws and nothing may invent another: [`crate::ui::offered`] is the one place a screen becomes
-/// one of them, and [`App::may_mutate`] is handed the same value — so a key that is not on the line
-/// cannot be pressed either, which is the bar `--read-only` is held to (invariant 2).
+/// **One value, and the one shape inside it that varies per key is [`Offer::Act`]'s** — because
+/// these are the closed set `screens/states.md` draws and nothing may invent another:
+/// [`crate::ui::offered`] is the one place a screen becomes one of them, and [`App::may_mutate`] is
+/// handed the same value, per key ([`Op`]) — so a key that is not on the line cannot be pressed
+/// either, which is the bar `--read-only` is held to (invariant 2). Every other shape offers
+/// neither key, which is why only `Act` carries the pair.
 /// **`switch` is the one key this page promotes off `?`, and it is a second fact rather than a
 /// fifth shape** (`screens/states.md` § Your login expired). Which keys the *pane* offers and
 /// whether *switching cluster is the next step* are independent: the file draws their `Move`
@@ -2140,7 +2145,109 @@ pub enum Offer {
     },
     /// **The ordinary footer**, the one line a [`Refused`] mark can reach — and the only one
     /// [`App::may_mutate`] says yes to.
-    Act,
+    ///
+    /// **Which of `s` and `r` are on it is the selected object's *kind*, and that is a third cause
+    /// of *withheld* beside the run-level ones above** (`screens/widgets.md` § 2a): a Node cannot
+    /// be scaled by anyone and a DaemonSet has no `/scale` subresource. It is not a permission
+    /// question — it is true whatever this login may do — so `may_i_in` is never asked and the key
+    /// is never marked `no`; `s no scale` on a Node would claim a verdict nobody was asked to give
+    /// (NOTES § D261 ruling 8). **The key is simply not on the line**, which is the move `c
+    /// container` already makes on a single-container pod (`screens/detail.md` § Choosing a
+    /// container). The two stay different shapes and never the same shape twice: refused is the
+    /// ordinary line **plus** one word per key, unsupported is the ordinary line **minus** one key.
+    ///
+    /// **Both `false` is a real state and is not *nothing is selected***. A Node under the cursor
+    /// is selected: `⏎ open` opens it and `ctrl-d` acts on it (`ops::delete` serves a node), and
+    /// only `s` and `r` have nothing to reach. It draws the same line [`Offer::Move`] does, which
+    /// is § 2a's own rule rather than a collision — every cause of *withheld* draws alike, and
+    /// nothing on screen may tell one from another.
+    ///
+    /// **`?` is unchanged by any of this** (`screens/help.md`): Help is the exhaustive map of the
+    /// product and lists `s` and `r` whatever is selected, so nothing here reaches [`Refused`]'s
+    /// other reader.
+    Act {
+        /// `s` — [`crate::ops::scalable`] serves this kind.
+        scalable: bool,
+        /// `r` — [`crate::ops::restartable`] serves this kind.
+        restartable: bool,
+    },
+}
+
+/// **Which mutating key is being asked about.** The two had one answer until the kind became part
+/// of it, and they no longer do: `s` is live on a Deployment and dead on a DaemonSet in the same
+/// frame ([`Offer::Act`]).
+///
+/// **`ctrl-d delete` is not a variant, and that is not an omission.** It is on neither list footer
+/// — D259 took it off both for width before any of this existed — and its kind gate is private to
+/// `ops.rs`, so there is nothing here to ask yet. Its answer today is *any* [`Offer::Act`]
+/// whatever the kind, because `ops::delete` serves all six including a node; Phase 12's `ctrl-d`
+/// box is where that becomes a third arm rather than a guess made here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Op {
+    /// `s scale`.
+    Scale,
+    /// `r restart`.
+    Restart,
+}
+
+impl Offer {
+    /// **The ordinary footer for the object under the cursor** — the one place the kind question is
+    /// asked, so no second caller can answer it differently.
+    ///
+    /// **The answer is [`crate::ops::scalable`]'s and [`crate::ops::restartable`]'s, never a list
+    /// written here** (invariant 12). Those two are what the operation itself matches on, so a
+    /// footer offering `s` on a kind `ops::scale` then refuses would be a second opinion about the
+    /// same three words — and the defect this box closed was exactly that, one step further on: a
+    /// Node card offering `s scale`.
+    ///
+    /// **A kind is two fields and not one, and a manifest spells both** — `kind: Deployment` *and*
+    /// `apiVersion: apps/v1` (NOTES § D51, PRIOR-ART § F4: *`pods` is not a key; `apps/v1
+    /// deployments` is*). `kind` here is the singular word — `deployment`, never `deploy` and
+    /// never `Deployment` (`screens/dialogs.md` § Scale) — and `group` is the half that says
+    /// *whose* `deployment`. **It needs no CRD to matter**: a stock cluster serves `v1 Event` and
+    /// `events.k8s.io/v1 Event`, two resources whose kind word is the same, and OpenKruise's
+    /// `apps.kruise.io/v1beta1 StatefulSet` sits beside `apps/v1 StatefulSet` under one sidebar
+    /// row reading `statefulsets` (`reports/2026-09-18-offer-per-kind-operator-read.md` § 1).
+    ///
+    /// **So the resource `ops` hands back has to be the one the reader is looking at**, and that
+    /// is what the group comparison is: those two answer with an `ApiResource` of their own —
+    /// `apps/v1`, the crate's declaration and not a literal — so a kind word that matches under a
+    /// group that does not is refused here, with no second list of groups written down. A word
+    /// neither serves, `""` included, is a kind with no mutating key on its line.
+    ///
+    /// **Their `Err` is a whole sentence and it is dropped here**, because this asks a yes/no
+    /// question: the sentence is the headless driver's, printed on a line somebody typed.
+    pub fn act(group: &str, kind: &str) -> Offer {
+        Offer::Act {
+            scalable: crate::ops::scalable(kind).is_ok_and(|served| served.group == group),
+            restartable: crate::ops::restartable(kind).is_ok_and(|served| served.group == group),
+        }
+    }
+
+    /// **Whether this line carries that key** — [`App::may_mutate`]'s last condition, and the whole
+    /// of *a key that is not on the line cannot be pressed either*.
+    ///
+    /// **Both enums are matched exhaustively and neither has a catch-all**, which is not tidiness:
+    /// the shapes are listed so a new [`Offer`] is a compile error here, and the ops are listed
+    /// *inside* that arm so a new [`Op`] is one too. A `_` over the pair took both — it was safe
+    /// for a new `Offer`, which would fall through to *withheld*, and silently wrong for a new
+    /// `Op`, which would be withheld **everywhere** with a green build while [`Op`]'s own doc
+    /// promised the opposite (`k8s-admin`, 2026-09-18).
+    fn offers(self, op: Op) -> bool {
+        match self {
+            Offer::Act {
+                scalable,
+                restartable,
+            } => match op {
+                Op::Scale => scalable,
+                Op::Restart => restartable,
+            },
+            Offer::Nothing { .. }
+            | Offer::Filter { .. }
+            | Offer::Hidden { .. }
+            | Offer::Move { .. } => false,
+        }
+    }
 }
 
 impl App {
@@ -2223,19 +2330,23 @@ impl App {
     /// call is running*). Navigation stays free; this is only about opening another dialog.
     ///
     /// **A mutating key is live exactly where the footer draws it** (`screens/states.md`, NOTES
-    /// § D21): [`Offer::Act`] is the one shape whose line carries `s` and `r`, so this is handed
-    /// the same value [`crate::ui::offered`] gave the footer rather than re-deriving one. A dead
+    /// § D21): [`Offer::Act`] is the one shape whose line can carry `s` or `r` at all, so this is
+    /// handed the same value [`crate::ui::offered`] gave the footer rather than re-deriving one.
+    /// **Which of the two that line actually carries is `Act`'s own pair** — a Node is an `Act`
+    /// with neither, and it is still an `Act` because an object *is* selected. A dead
     /// audit log and an empty pane both land here as *not `Act`*, which is invariant 2's
     /// *unreachable, not merely unbound* — the bar `--read-only` is held to — instead of a banner
     /// over live keys.
     /// **And no key is a command while a filter is being typed** (`screens/widgets.md` § 2b):
     /// `s` and `r` are letters a filter can legitimately hold, the typing footer names neither,
     /// and *a key that is not on the line cannot be pressed either* is this method's whole job.
-    pub fn may_mutate(&self, offer: Offer) -> bool {
-        self.modal.is_none()
-            && self.changing.is_none()
-            && self.typing.is_none()
-            && matches!(offer, Offer::Act)
+    ///
+    /// **It is asked per key, because the two keys no longer have one answer** ([`Op`]): an
+    /// `Offer::Act` on a DaemonSet draws `r restart` and no `s`, and a press of `s` there must
+    /// reach nothing. One question and one answer — a caller that asked this and then narrowed it
+    /// with a second condition of its own would be the second place a key's liveness is decided.
+    pub fn may_mutate(&self, offer: Offer, op: Op) -> bool {
+        self.modal.is_none() && self.changing.is_none() && self.typing.is_none() && offer.offers(op)
     }
 
     /// **The footer — the keys valid right now, and the right-aligned zone beside them**
@@ -2287,9 +2398,12 @@ impl App {
     /// **`refused` arrives the same way `detail` does and for the same reason** — it is what the
     /// *store* answered, not what the user did (NOTES § D259, [`Refused`]). It reaches exactly one
     /// arm: a marked key stays on the line and gains the word `no` before its label, which is one
-    /// of the four fixed strings `screens/widgets.md` § 2a counts, never a string built here.
-    /// `ctrl-d` is not on this line to mark, and Analysis and the detail tabs name neither `s` nor
-    /// `r`, so a refusal cannot show on them.
+    /// of the nine fixed strings `screens/widgets.md` § 2a counts across its two tables, never a
+    /// string built here. **A mark reaches only a key the selected kind actually has**
+    /// ([`Offer::Act`]): a key that is off the line was never asked about and has no verdict to
+    /// draw, so a refusal carried here for it changes nothing — which is what keeps *refused* and
+    /// *unsupported* two shapes rather than one. `ctrl-d` is not on this line to mark, and Analysis
+    /// and the detail tabs name neither `s` nor `r`, so a refusal cannot show on them.
     ///
     /// **`changing` is the one string in any footer this product did not choose the length of** —
     /// the selected object's own name, already spelled `payments/web` and already cut to the room
@@ -2321,10 +2435,10 @@ impl App {
     /// every mode.
     ///
     /// **`offer` is `screens/states.md`'s own input and it reaches one arm, the same way `refused`
-    /// does** ([`Offer`]). The seven lines under it are `Nothing`, `Filter` and `Move` each with
-    /// and without `X switch cluster`, plus the ordinary one, byte for byte, as seven literals —
-    /// the same reason the four refusal rows below them are four (NOTES § D259 ruling 4): the one
-    /// footer these states can reach still spells every state of itself at compile time. Analysis
+    /// does** ([`Offer`]). The lines under it are `Nothing`, `Filter` and `Move` each with and
+    /// without `X switch cluster` and `Hidden` in its six, byte for byte, as literals — the same
+    /// reason the rows below them are nine (NOTES § D259 ruling 4): the one footer these states can
+    /// reach still spells every state of itself at compile time. Analysis
     /// and the detail tabs draw their own closed lines above this, which is `screens/widgets.md`
     /// § 2a's closed mode list; the `Offer` they are handed still decides `App::may_mutate`.
     ///
@@ -2475,10 +2589,10 @@ impl App {
                     "",
                 );
             }
-            // **The seven lines `screens/states.md` draws, as seven literals** ([`Offer`]).
+            // **The lines `screens/states.md` draws, as literals** ([`Offer`]).
             (None, _, View::Alerts | View::Resources(_)) => match offer {
-                // **`s` and `r` are on none of these six and are never marked `no` on one**
-                // ([`Offer`]): nothing here asked `may_i` anything.
+                // **`s` and `r` are on none of the lines before [`Offer::Act`] and are never
+                // marked `no` on one** ([`Offer`]): nothing here asked `may_i` anything.
                 Offer::Nothing { switch: false } => "? all keys  q quit",
                 Offer::Nothing { switch: true } => "X switch cluster  ? all keys  q quit",
                 Offer::Filter { switch: false } => "/ filter  ? all keys  q quit",
@@ -2526,10 +2640,14 @@ impl App {
                 Offer::Move { switch: true } => {
                     "↑↓ move  ⏎ open  X switch cluster  / filter  ? all keys  q quit"
                 }
-                // **The four rows of `screens/widgets.md` § 2a's own table, as four literals**
-                // (NOTES § D259 ruling 4): the one footer a refusal can reach still spells every
-                // state of itself at compile time.
-                Offer::Act => match (refused.scale(), refused.restart()) {
+                // **The four rows of `screens/widgets.md` § 2a's first table and the five of the
+                // second, as nine literals** (NOTES § D259 ruling 4): the one footer a refusal can
+                // reach still spells every state of itself at compile time. The first table's four
+                // are a kind that supports both operations — a Deployment, a StatefulSet.
+                Offer::Act {
+                    scalable: true,
+                    restartable: true,
+                } => match (refused.scale(), refused.restart()) {
                     (false, false) => {
                         "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit"
                     }
@@ -2543,6 +2661,33 @@ impl App {
                         "↑↓ move  ⏎ open  s no scale  r no restart  / filter  ? all keys  q quit"
                     }
                 },
+                // **A kind with only one of them is a shorter line, never a `no` on the one it
+                // lacks** ([`Offer::Act`]): a bare ReplicaSet scales and does not restart, a
+                // DaemonSet restarts and does not scale. The missing key was never asked about, so
+                // there is no verdict to draw and the refusal that is still readable here is the
+                // one belonging to the key that is on the line.
+                Offer::Act {
+                    scalable: true,
+                    restartable: false,
+                } => match refused.scale() {
+                    false => "↑↓ move  ⏎ open  s scale  / filter  ? all keys  q quit",
+                    true => "↑↓ move  ⏎ open  s no scale  / filter  ? all keys  q quit",
+                },
+                Offer::Act {
+                    scalable: false,
+                    restartable: true,
+                } => match refused.restart() {
+                    false => "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
+                    true => "↑↓ move  ⏎ open  r no restart  / filter  ? all keys  q quit",
+                },
+                // **Neither, and the line is [`Offer::Move`]'s own** — a Node, a bare Pod, a
+                // ConfigMap, which is most of what the browser can reach. Two states drawing one
+                // line is what § 2a asks for and not a collision: every cause of *withheld* draws
+                // alike.
+                Offer::Act {
+                    scalable: false,
+                    restartable: false,
+                } => "↑↓ move  ⏎ open  / filter  ? all keys  q quit",
             },
         };
         // **The three modes that keep their own footer lose one word and no more**

@@ -477,7 +477,10 @@ ssh ubuntu 'cd ~/k8rs-src && export PATH=$HOME/.cargo/bin:$PATH && just check'
 ```
 
 `~/k8rs-src` is never edited, since the next mirror deletes the edit. One command
-runs in it at a time. A run longer than ten minutes goes to the background with
+runs in it at a time. **`rsync -a` preserves mtimes, so `touch src/*.rs` after a
+mirror that restores a file** — otherwise `cargo` reuses the object built from
+the version you just replaced and the run measures a binary no tree ever held
+([D267](NOTES.md#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17)). A run longer than ten minutes goes to the background with
 its log on the host.
 
 **The one exception is the mutation sweep, and it runs here** — 82 s per mutant

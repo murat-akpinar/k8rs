@@ -290,6 +290,7 @@ its line moving with it.
 - [D266](#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) — the Phase 11 close: six screens that draw something false, and a freeze set one phase before its consumer
 - [D267](#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17) — nothing builds on the dev machine: the gate, the sweep and the binary move to the test host
 - [D268](#d268--the-footer-key-box-a-filter-nobody-could-see-a-picker-whose-name-column-the-cluster-could-erase-and-an-esc-that-meant-two-things-2026-09-18) — the footer-key box: a filter nobody could see, a picker whose name column the cluster could erase, and an `esc` that meant two things
+- [D269](#d269--the-per-key-offer-a-key-a-kind-has-not-got-leaves-the-line-and-the-browser-was-asking-about-a-kind-word-with-the-group-thrown-away-2026-09-18) — the per-key offer: a key a kind has not got leaves the line, and the browser was asking about a kind word with the group thrown away
 
 ## Why it exists — where the gap is
 
@@ -23431,6 +23432,16 @@ move with a sentence:
 A call longer than the ten-minute foreground cap runs the `ssh` in the background with its output
 in a file on the host.
 
+**`rsync -a` preserves mtimes, and cargo trusts mtimes — so a mirror that *restores* a file can be
+measured against a binary no tree ever held** (`dev-ui`, 2026-09-18). Mutate a file on the host by
+hand, mirror the good copy back over it, re-run: the restored file is older than the object cargo
+built from the mutation, the fingerprint sees no change, and the suite fails in the shape of a
+mutation that is no longer there. It cuts both ways — a stale *red* proves as little as a stale
+green, which is
+[D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+shape one level over. **`touch src/*.rs` after any mirror that restores or reverts**, before
+`cargo`.
+
 ### D268 — the footer-key box: a filter nobody could see, a picker whose name column the cluster could erase, and an `esc` that meant two things (2026-09-18)
 
 Phase 12's first box — `c container` opens a picker, `/` and `n` get a typing state, an emptied list
@@ -23504,3 +23515,65 @@ neither `rustfmt` nor a test can see — and the second operator pass is what ca
 `backlog.md` with their measurements: init containers drawn as peers of app containers, a *3 of 7
 shown* count, the narrowing running twice per frame, `may_switch_cluster` under an undrawn picker, and
 the *crash* wording still standing in `help.md` and the logs tab.
+
+### D269 — the per-key offer: a key a kind has not got leaves the line, and the browser was asking about a kind word with the group thrown away (2026-09-18)
+
+Phase 12's second box — `Offer` says which of `s` / `r` the selected kind supports, and `may_mutate`
+is asked per key. One screen round, one operator round, two blockers.
+
+**1. Unsupported is not refused, and it leaves rather than argues.** The product already had a word
+for *you may not*: `s no scale`, from `may_i_in`'s verdict. It had none for *this kind has no such
+operation*, and `s no scale` cannot stand in — it reports a verdict nobody gave
+([D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+ruling 8's shape). So the key **drops from the footer**, the move `c container` already makes on a
+single-container pod. The two stay legible by shape: refused is the ordinary line **plus** a word per
+key, unsupported is the ordinary line **minus** a key. Nine literals in `App::footer`'s `Act` arm, and
+`screens/widgets.md` § 2a counts them.
+
+**2. The blocker: a kind is two fields and the browser was spending one.** `offered()` read
+`Browsable::kind` alone, lowercased it, and handed it to `ops::scalable` / `ops::restartable`, whose
+answers are `apps/v1` and nothing else — so `apps.kruise.io/v1beta1 StatefulSet`, which `k8s::browsable`
+deliberately keeps beside the core one and `Group::of` files in the same sidebar group under the same
+plural, drew `s scale  r restart` over an object `ops` would address in `apps/v1`. That is
+[D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)
+by name and PRIOR-ART § F4 from k9s's side, and invariant 12's own sentence: *`pods` is not a key;
+`apps/v1 deployments` is*. **It needs no CRD to exist** — a stock cluster serves `v1 Event` and
+`events.k8s.io/v1 Event`, both lowercasing to `event`. `Offer::act` now takes the group and accepts
+only when the `ApiResource` `ops` returns carries the same one; the browser passes `Browsable::group`,
+Alerts passes what its `ObjectKind` implies. No second list of scalable kinds: the group compared
+against is `k8s-openapi`'s own declaration.
+
+**3. The second blocker was a fixture edited until the wrong answer appeared.** `ui_tests::browsable()`
+left `group: "example.com"` while deriving the kind word from the plural, so the suite asserted that a
+**CRD** named `Deployment` draws `s scale  r restart` — D51's forbidden answer pinned as the
+requirement, and green forever. The author's own comment had called the honest output *"the right
+answer to the fixture and the wrong one to the test"*; it was the right answer to both. The workload
+plurals now sit in `apps`, one row stays in `example.com`, and that row is the regression test the
+blocker had nowhere.
+
+**4. `?` had to close the loop, and it cost two rows.** A key that vanishes with no word is only
+readable if Help says which kinds it works on — `c container`'s absence is self-evident from a pod
+with one container, a Node's missing `s` is Kubernetes subresource trivia (invariant 13's second
+half). Help's `s` and `r` rows gained a second line each, verbatim from `ops::SCALABLE` /
+`ops::RESTARTABLE`. The body is hard-capped at sixteen rows at the 80×24 floor, so the two blank
+separators between the key groups paid for them. `ctrl-d` gets no such line: `ops::DELETABLE` is every
+kind this product ships.
+
+**5. Three copies of two sentences, and a table that could drift in silence — `scripts/copy-guard.py`.**
+`SCALABLE` and `RESTARTABLE` are private to a frozen `ops.rs`, so `ui.rs` and `screens/help.md` each
+carry a copy; `rules::ObjectKind::from_api` maps `(group, kind)` forward and `ui::addressed` maps it
+back, because `rules.rs` is frozen and the inverse could not live beside it. `twin-guard.py` reads
+`SignedDuration` constants and cannot see either. The new guard pins both as text — and **measured what
+each was worth rather than assuming**: a reworded sentence is red today, but only *adjacent* pairs are
+pinned (`ops.rs` against its own tests, `ui.rs` against the page), so a rewording is satisfiable in the
+wrong direction — update the test, update the page, and the far copy is never consulted. The table is
+worse: filing `Job` under `apps` instead of `batch`, or spelling `cronjob` as `cronjobs`, leaves
+`cargo test --all-targets` **fully green**. That guard is the only thing that looks.
+
+**6. What the box's own gates did not see.** `just check` was green and the sweep clean before the
+operator read; both blockers came from reading the family against a real cluster's API surface. And
+`tester` found the box's central claim — *the card under the cursor, not the first in the store* —
+asserted by nothing: every fixture used a one-card list, where the two are the same value. Deferred to
+`backlog.md`: the ReplicaSet card whose owner is unresolved (it offers `s` where a Deployment reverts
+the change, and hides the `r` that would have fixed it, and `Card` cannot tell unresolved from bare
+behind a frozen `k8s.rs`), and `ctrl-d` on a Node, which no test asserts until Phase 12 wires a key.
