@@ -289,6 +289,7 @@ its line moving with it.
 - [D265](#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13) — the read-only mark: the header joins the permission word itself, and Help swaps for either cause
 - [D266](#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) — the Phase 11 close: six screens that draw something false, and a freeze set one phase before its consumer
 - [D267](#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17) — nothing builds on the dev machine: the gate, the sweep and the binary move to the test host
+- [D268](#d268--the-footer-key-box-a-filter-nobody-could-see-a-picker-whose-name-column-the-cluster-could-erase-and-an-esc-that-meant-two-things-2026-09-18) — the footer-key box: a filter nobody could see, a picker whose name column the cluster could erase, and an `esc` that meant two things
 
 ## Why it exists — where the gap is
 
@@ -23412,9 +23413,16 @@ fmt, clippy, 1397 + 35 tests and the guards. It went red on `cargo deny`: GHSA-2
 
 **What this costs, said now so it is not found later.** Two things the host is too small for do not
 move with a sentence:
-- **Mutation jobs.** `scripts/mutants.sh` defaults to 4 jobs at 4 GiB of scratch each; the disk has
-  it, the RAM does not. The sweep runs with `CARGO_MUTANTS_JOBS=1` on the host until a run there
-  measures more.
+- **Mutation jobs — and the one thing that stayed on the dev machine.** `scripts/mutants.sh`
+  defaults to 4 jobs at 4 GiB of scratch each; the host's disk has it, its RAM does not, so a sweep
+  there runs one job. Measured on it the same day: **82 s per mutant — 36 s build, 46 s test** —
+  against a 136-mutant diff, so a single box's sweep was a three-hour gate. **The user reversed this
+  half on 2026-09-17: the mutation sweep runs on the dev machine** (12 cores, 23 GiB, 879 GB free,
+  the default 4 jobs), and **its scratch is deleted after every sweep** — `rm -rf
+  ~/.cache/k8rs-mutants`, which is where `mutants.sh` already puts it. Not inside the repo, which is
+  where it was first proposed: `rsync` would carry it to the host, the guards scan the tree, and
+  cargo-mutants copies the tree per job. Everything else — `cargo test`, clippy, `just check`, the
+  guards, every run of the binary — stays on the host.
 - **Fixture captures.** [D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
   is why captures went to the dev machine. They now run on the host **with nothing else running
   there** — no build, no second cluster — and `cluster.sh verify` refusing the host is what a
@@ -23422,3 +23430,77 @@ move with a sentence:
 
 A call longer than the ten-minute foreground cap runs the `ssh` in the background with its output
 in a file on the host.
+
+### D268 — the footer-key box: a filter nobody could see, a picker whose name column the cluster could erase, and an `esc` that meant two things (2026-09-18)
+
+Phase 12's first box — `c container` opens a picker, `/` and `n` get a typing state, an emptied list
+says why, a filter does not outlive the list it narrows
+([D266](#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)
+ruling 3). Three screen rounds, two operator rounds, and what follows is what those rounds decided.
+
+**1. The filter's lifetime, and where it is drawn.** It is cleared when the list it narrows *changes* —
+a different view, a different kind — and kept under anything drawn *over* that list: Detail, Help, a
+dialog, the container picker. `App::open` already reset the content cursor on `self.view != before`
+and now clears `Filters` and any typing session with it. **A committed filter is drawn at rest**, on its
+own row under the Resources title and above the first Alerts card, because without it a reader back
+from Detail sees a short list and an ordinary footer and counts the cluster wrong — `backlog.md`'s
+*typed `/` filter is drawn in no pane*, closed here.
+
+**2. `esc` is focus-aware while typing and global at rest.** Typing: the focused buffer is what clears,
+and an already-empty one closes the session. At rest: text first, then namespace, which is
+`App::escape`'s own order and narrow-to-wide. The first draft kept the global order inside typing too
+and drew the corner honestly — typing into `n` clears `/` — which is a surprise no screen can explain;
+the typing state is new code, so being focus-aware costs no branch anybody had.
+
+**3. What `/` matches is what the reader is looking at.** `shown_cards` matched the identity, each
+finding's title and evidence — not `Finding::action`, which every card draws behind its `→`. Typing a
+run of the remedy line answered *No problems match*. `action` joined the set. The two narrowing rules
+still differ and say so separately: `shown_rows` matches every cell the table holds, including columns
+`grid` drops at narrow widths, because filtering pods by a node you cannot see is what an operator
+wants.
+
+**4. The container picker's columns, and the cluster's own words inside them.** The layout stands as
+built — the name takes the remainder, the count sits at the right edge, matching the cluster picker —
+and `screens/detail.md`'s mockup was corrected to it rather than the code to the mockup. **The blocker
+was underneath that**: the name slot was the remainder after two columns measured from *server text*,
+and `views::container_state` translates `CreateContainerConfigError` into 47 columns — *needs a
+ConfigMap or Secret that does not exist*. At the floor the name column went to one, `front(name, 1, …)`
+drew the empty string, and two rows came out anonymous with `3 restarts` clipped to `3 r`, on exactly
+the pod a picker is for. `NAME_FLOOR = 20` (clearing `istio-proxy-metrics` at 19 by a column) and the
+*state* is what gives way, back-cut at a word boundary. The `Waiting` fall-through carries the
+kubelet's raw reason at up to 512 bytes, so the shape is fed, not reasoned about.
+
+**5. Two vocabularies the screens nearly shipped.** `namespace: "pay"` sat one row under the title's
+`ns: payments` — a client-side substring beside a server-side scope, a word apart. The label is
+`namespace like:` now, the same words the zero-match sentence already used. And the at-rest row's
+overflow premise (*a realistic filter never reaches it*) was false at the 80×24 floor: `/ kube` with
+`n kube-sys` left three columns per value. The **hint gives way first** — `esc clears it` is
+recoverable by reopening `/`, what the reader typed is written nowhere else — and the values share
+what is left, 22 columns, equally.
+
+**6. An emptied list keeps the keys its own pane keeps.** Alerts holds `↑↓ move` and `⏎ open` because
+the sidebar is still there to move across — § *Nothing is broken*'s own reasoning, which the first
+draft contradicted by borrowing the browser's — and the browser drops them. `X switch cluster` is on
+neither Alerts variant: the full line is 84 columns against 76, and on an expired login that fact has
+four other carriers on the same screen (the header segment, the banner that spells out *renew it, then
+press X*, the command-log strip, `?`), while `esc clear filter` and the cursor pair have none. The
+arithmetic lives in `screens/states.md`, cited from the code and not copied into it.
+
+**7. A press that does nothing, and the predicate that tells two `esc`s apart.** A `ContainerPick`
+whose containers vanish is not drawn, and `escape` still consumed the press on it — the *promised key
+that does nothing* this product forbids. It is dropped up front now. That left a second half the
+review caught: after the call `modal` is `None` whether a **drawn** picker was cancelled (the tab
+stays) or an **undrawn** one was dropped (the tab closes), and `modal.is_some()` is true before both.
+`views::picking` is the discriminator and is `pub`, beside `shown_cards` / `shown_rows`, which the key
+router needs for the same reason — a router that cannot call them either moves the cursor over the
+unfiltered list, defeating invariant 2's *explicitly selected object*, or re-derives the filter in
+`main.rs`, which is [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+second copy of a shared read.
+
+**8. What the gates could not have found.** `just check` was green on the host and the sweep clean
+before the operator read it; every finding above came from reading the family together and rendering
+frames. Two of the fixes then falsified the doc comments directly above them — the D216 class, which
+neither `rustfmt` nor a test can see — and the second operator pass is what caught that. Deferred to
+`backlog.md` with their measurements: init containers drawn as peers of app containers, a *3 of 7
+shown* count, the narrowing running twice per frame, `may_switch_cluster` under an undrawn picker, and
+the *crash* wording still standing in `help.md` and the logs tab.

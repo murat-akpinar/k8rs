@@ -49,6 +49,12 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
   that owner-grouping already shortened once ([D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)); it
   is offered for the same reason `/` is offered on every other list in this
   product, not because this list is expected to be long.
+- **What `/` and `n` do while they are being typed, and what a filter that
+  hides every card looks like, are not this file's own rules** —
+  [widgets.md § 2b](widgets.md#2b-typing-into-a-filter) and
+  [states.md § The filter hides every row](states.md#the-filter-hides-every-row)
+  are shared with [resources.md](resources.md), the same way the footer
+  itself is.
 - **An `s`/`r` this login may not use on the selected card is marked on this
   footer, not hidden** — `s no scale`, `r no restart`, whichever `may_i_in`
   answers `Verdict::No` for. The wording, the column arithmetic and the fuller

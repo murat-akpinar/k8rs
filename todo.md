@@ -3265,8 +3265,8 @@ public release.
       **This is the first unchecked box in the file and it is not the next one to
       work.** Nothing here can move until the user runs `cargo publish` and until
       Phase 13 writes the README. **The next box is the first unchecked one in the
-      lowest open phase below this one — Phase 11 today** (Phase 10 closed
-      2026-09-06), and that phase's head note says why a
+      lowest open phase below this one — Phase 12 today** (Phase 11 closed
+      2026-09-13), and that phase's head note says why a
       later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
       [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)).
       **This line names a phase and so it goes stale at every close** — it has now
@@ -4571,11 +4571,13 @@ Goal: one binary, live and safe.
 **The surface the console still owes its wiring** — boxed at Phase 11's close
 ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 3), in `ui.rs` / `views.rs`, which stay open until this phase closes:
 
-- [ ] **A footer key has something behind it**: `c container` opens a picker
+- [x] **A footer key has something behind it**: `c container` opens a picker
       (`screens/detail.md` § Choosing a container, and when there is nothing to
       choose — `Modal` has no variant for it), `/` and `n` have a typing state the footer can say and an empty
       filtered list that is not *nothing is broken*, and a filter does not
       survive into a view that cannot draw it
+      ([D268](NOTES.md#d268--the-footer-key-box-a-filter-nobody-could-see-a-picker-whose-name-column-the-cluster-could-erase-and-an-esc-that-meant-two-things-2026-09-18) ·
+      [reports/2026-09-18-filter-and-container-picker.md](reports/2026-09-18-filter-and-container-picker.md))
 - [ ] **`Offer` says which of `s` / `r` this kind supports** — a Node card
       offers `s scale` today and a DaemonSet cannot be said at all — and
       `may_mutate` is asked per key

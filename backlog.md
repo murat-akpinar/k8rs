@@ -3103,3 +3103,54 @@ long-form version and stays the authority.*
   transcribed them. Adding `Write` to that list was refused by the permission classifier, so it is
   the user's to grant — or the table's row changes to say the PM lands `k8s-admin`'s reports.
   2026-09-12
+
+- **The product has two mechanisms for one cursor, and `screens/widgets.md` § 2 is wrong about
+  which.** That table says the delete dialog's typed-name field uses `Frame::set_cursor_position`;
+  `ui::typed_name` draws a literal `_`. § 2b's filter footer, built this turn, uses the real terminal
+  cursor, so both now exist side by side and the older one is the one the page misdescribes. Either
+  `typed_name` moves to the real cursor or § 2's row is corrected — `tui-designer`'s page, `dev-ui`'s
+  code, and neither is a defect a reader can see today. Found by `dev-ui` while building the footer
+  key box. 2026-09-18
+
+- **`?` lists `c container` on a single-container pod, where the key is unbound.** Help is the
+  exhaustive key map by design, and the footer now withholds `c` exactly where the picker has nothing
+  to offer (`screens/detail.md` § Choosing a container), so the two disagree about the same fact for
+  the same pod. `screens/help.md` § When a key is refused already has the vocabulary for a key that is
+  drawn and not available; nothing says whether Help should use it here. Found by `dev-ui`, same box.
+  2026-09-18
+
+- **The container picker draws init containers as peers of the app container.**
+  `rules::ContainerSnapshot::role` already answers `Regular` / `Init` / `Sidecar` off
+  `spec.initContainers[].restartPolicy`, and the picker reads only `state` and `restarts` — so a pod
+  stuck in `Init:0/2` lists `app  not started` above `init-db  running` with nothing saying the first
+  waits on the second, where `kubectl describe` separates them. A prefix column or a divider row, and
+  the fact is already in hand. Found by `k8s-admin`
+  (`reports/2026-09-18-filter-and-container-picker.md`), 2026-09-18.
+
+- **Nothing on screen says how many rows a filter removed.** The sidebar badge keeps the cluster's
+  totals, correctly, so the only way to notice a new critical alert arriving behind an active `/web`
+  is to watch a number two panes away and infer. `filter: "web"   3 of 7 shown   esc clears it` is one
+  defensible denominator — same list, same frame — and the cheapest thing that would make a filter
+  safe to leave running. Found by `k8s-admin`, same report, 2026-09-18.
+
+- **The narrowing runs twice per frame, and it allocates per cell.** `offered()` computes the filtered
+  list for the footer's shape and the pane computes it again; `contains_ignoring_case` allocates two
+  `String`s per field per row per call, so a `-A` pod table on 5000 pods is ~90k allocations per
+  frame, once per keystroke while typing. Not invariant 6 — nothing re-LISTs — but it is
+  PRIOR-ART § A4's per-object overhead. Hoisting the lowercased needle and computing the list once per
+  frame closes both, and Phase 12's wiring will touch this code anyway. Found by `dev-ui` and
+  `k8s-admin`, 2026-09-18.
+
+- **`help.md`'s key map and `detail.md`'s logs tab still say a restart is a crash.** The container
+  picker's own hint was corrected on 2026-09-18 — *"the log from before that restart, if the kubelet
+  still has it"* — because a container that exits 0 under `restartPolicy: Always` increments
+  `restartCount` without crashing, and `--previous` 404s once the kubelet has rotated the old log.
+  The identical claim stands in two other places nobody's box named. `tui-designer`'s, when a box
+  next opens either page. 2026-09-18
+
+- **An undrawn `ContainerPick` keeps `may_switch_cluster` false until a press is spent.** That gate
+  reads `modal.is_none()`, and a picker whose containers vanished is a modal nobody can see — the same
+  class this box closed for `escape` (NOTES § D268). No visible harm today, because `X` is not on a
+  detail tab's footer; a reader who reaches for it first simply gets nothing, and the first `esc`
+  heals it. One parameter and its call sites, and Phase 12's wiring touches this code anyway. Found by
+  `k8s-admin` and `dev-ui`, 2026-09-18.

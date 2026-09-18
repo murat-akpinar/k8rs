@@ -87,6 +87,11 @@ own `Table` printing — the exact columns `kubectl get` would show.
   are the two keys that never give way; `ctrl-d delete` gives way to them here
   the same way `d describe` and `y view as YAML` already did, on every list
   view, before this footer was ever audited for width.
+- **What `/` and `n` do while they are being typed, and what a filter that
+  hides every row looks like, are not this file's own rules** —
+  [widgets.md § 2b](widgets.md#2b-typing-into-a-filter) and
+  [states.md § The filter hides every row](states.md#the-filter-hides-every-row)
+  are shared with [alerts.md](alerts.md), the same way the footer itself is.
 - **`s`/`r` on the selected row are marked the same way as on Alerts, and no
   differently for being over a table instead of a card** — `s no scale`,
   `r no restart`, from the same `may_i_in` result Alerts reads

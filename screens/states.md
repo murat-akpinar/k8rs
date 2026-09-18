@@ -152,6 +152,215 @@ to put in a sentence:
   sidebar, which is why the sentence sends them there instead of explaining
   the mechanism.
 
+## The filter hides every row
+
+A third reason a list can be empty, next to *nothing is broken* and *an
+empty kind in the browser* above — and neither of those two sentences fits
+it. `/` or `n` narrowed a cluster that has plenty to show down to nothing,
+which is not a verdict on the cluster (the claim `○ nothing is broken`
+makes) and not a kind that genuinely has zero rows (the claim the empty-kind
+sentence makes). Both of those would tell the reader something false about
+their cluster instead of something true about what they just typed. Alerts
+and Resources read it the same way, borrowing the shape
+[context.md § The filter hides every row](context.md#the-filter-hides-every-row)
+already uses for the same state on the cluster picker: name what was typed,
+and draw none of the four reserved symbols — `●` `▲` `○` are severities and
+this state carries none, `⚠` is a connection or trust problem and this is
+neither ([README § the five rules, item 4](README.md#the-five-rules-every-screen-obeys)).
+Centred, dim text, the same shape as
+[§ An empty kind in the browser](#an-empty-kind-in-the-browser) above, not the
+picker's own left-aligned line inside a nested box — these two screens are a
+full pane, not a small modal, and this is their own existing convention for
+*this pane has nothing to show, for a mundane reason*.
+
+Alerts, filtered by `/` alone:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│                                               │
+│  RESOURCES         │                                               │
+│   workloads        │                                               │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │            No problems match "prodeu".        │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│                                               │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  / filter  esc clear filter  ? all keys  q quit    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Resources, one kind, filtered by `/` alone — the title still reads
+`deployments`, never rewritten to say zero, because the kind itself is not
+empty:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  deployments          ns: payments            │
+│  RESOURCES         │                                               │
+│▸  workloads        │                                               │
+│     deployments  12│                                               │
+│     statefulsets  3│                                               │
+│     daemonsets    5│        No deployments match "prodeu".         │
+│     pods         84│                                               │
+│     jobs          7│                                               │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │                                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get deployments -n payments                              │
+├────────────────────────────────────────────────────────────────────┤
+│ / filter  esc clear filter  ? all keys  q quit                     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The sidebar's own counts are untouched** — `deployments  12` still reads
+  12, and `3 ● 7 ▲` still reads the cluster's real totals. `/` and `n` narrow
+  which rows the open pane draws; they are not a second read of the cluster
+  and they change nothing any badge on this product counts
+  ([widgets.md § The badge-glyph rule](widgets.md#2-element--widget)). A
+  reader who filters `deployments` down to nothing and then reads `12` two
+  columns to its left is seeing two true facts, not a contradiction.
+- **The sentence names what was typed, never just *nothing matches*** — the
+  reader just typed it and may have mistyped it, the same reasoning
+  [context.md](context.md#the-filter-hides-every-row) already gives for the
+  picker. `"prodeu"` above is `Filters::text`'s own content, unstripped
+  beyond the ordinary control-character strip every free string on this
+  product already gets (invariant 9).
+- **The noun changes, the shape does not.** Alerts has no one kind to name,
+  so the sentence says `problems` — the same plain word
+  [resources.md § The line under the table](resources.md#the-line-under-the-table)
+  already uses for a card on this exact product (*"web has 3 pods with
+  problems"*), not the internal term `finding`, which never reaches a
+  screen. Resources already knows its kind's own plural from the pane title,
+  and uses that instead — `deployments`, `jobs`, whatever kind is open.
+- **`n` alone, and both together, are the same sentence with one more
+  clause, never a second wording:**
+
+  ```
+  No problems match a namespace like "pay".
+  No problems match "prodeu" in a namespace like "pay".
+  ```
+
+  ```
+  No deployments match a namespace like "pay".
+  No deployments match "prodeu" in a namespace like "pay".
+  ```
+
+  `a namespace like "pay"` is plain language for *a substring match on the
+  namespace* — the same fact [`Filters::namespace`]'s own doc comment states
+  as *"a substring of the namespace, so `pay` reaches `payments`"* — without
+  the word "substring", which nobody reading this screen needs to know.
+- **`s scale` and `r restart` drop on both screens — nothing is selected to
+  act on, and showing a key with nothing to act on is the "promised key that
+  does nothing" this file's own rules already forbid. `↑↓ move` and
+  `⏎ open` do not agree between the two, and that is each screen following
+  its own precedent, not a slip.** Alerts keeps them, the same as
+  [§ Nothing is broken](#nothing-is-broken) already does for a genuinely
+  empty cluster: the sidebar's own rows are still there to move across and
+  open, and Alerts is the screen a reader lands on, where the cursor rests
+  on the sidebar until the content pane gives it something else to move
+  across. Resources drops them, the same as
+  [§ An empty kind in the browser](#an-empty-kind-in-the-browser) already
+  does: the cursor there is already inside the specific kind's own table —
+  reaching it took a sidebar selection that moved it there — and an empty
+  table is truly nothing to move across until the reader leaves it. **Why
+  it matters and not just as a rule to check**: a filter that hides every
+  row is not a claim about the cluster's health, unlike the two screens'
+  own zero-row precedents — a mistyped filter on Alerts, without `↑↓ move`
+  and `⏎ open`, would strand the reader on the one screen with the *most*
+  wrong in the cluster with fewer drawn keys than the clean one.
+- **`esc clear filter` joins both, in the room the dropped keys freed** —
+  `App::escape` already clears a committed filter with no modal open and no
+  typing session either ([widgets.md § 2b](widgets.md#2b-typing-into-a-filter)),
+  and unlike the ordinary at-rest footer, this one has the room for it. It
+  is the **same words** [context.md § The filter hides every
+  row](context.md#the-filter-hides-every-row) already draws for the picker's
+  own equivalent state, not a second vocabulary for one fact
+  ([widgets.md § 2b](widgets.md#2b-typing-into-a-filter) names the budget
+  math for why the *ordinary*, non-empty-result footer cannot afford the
+  same word). **The word matches whichever field `App::escape` is actually
+  about to clear** — `esc clear filter` while `Filters::text` holds anything
+  at all, `esc clear namespace` only once that field is already empty and
+  `Filters::namespace` is what is left — the same text-before-namespace
+  order `App::escape` already uses at rest, unrelated to the focus-aware one
+  typing itself uses ([widgets.md § 2b](widgets.md#2b-typing-into-a-filter)),
+  not a rule invented for this one footer. Editing rather than clearing
+  outright is `/` or `n` themselves,
+  which reopen typing on whichever field already holds the text this
+  sentence names, cursor at the end, ready for `⌫`.
+- **`X switch cluster` is not on this footer, on either screen, under any
+  link state — measured, not an oversight.** The full Alerts line — `X
+  switch cluster  ↑↓ move  ⏎ open  / filter  esc clear filter  ? all keys
+  q quit` — is **84 columns** against the 76 ceiling at the floor (**81**
+  with the shorter `esc clears it`), so one of `X`, `esc clear filter` and
+  the cursor pair had to give way. `X` is the one that gives: on an expired
+  login — the one state its absence here would actually cost something —
+  that fact already has four carriers on this exact screen, none of them
+  this footer. The header's own `⚠ login expired`
+  ([widgets.md § 1a](widgets.md#1a-the-header-row)) is true on every
+  degraded page regardless of what this section draws; the banner
+  [states.md § Your login expired](#your-login-expired) puts above the
+  sentence spells out the fix in full — *"Renew it, then press X and pick
+  this cluster again"*; the command-log strip carries `→ login expired` on
+  its own line; and `?`'s own *Changing things* heading already reads
+  *"paused — renew your login, then press X"*
+  ([help.md § While the link is down…](help.md#while-the-link-is-down-the-login-has-expired-or-the-clock-is-off)).
+  `esc clear filter` and `↑↓ move`/`⏎ open` have no such second carrier —
+  clearing a filter the reader typed themselves into is said nowhere else on
+  this screen, and the cursor pair is this section's own bullet above,
+  argued once and not re-argued by adding a key next to it.
+  **One residual, measured rather than closed by the argument above**:
+  `Link::Expired` can briefly coexist with `Pane::Ready`, in the window
+  before the next watch failure turns the pane `Denied` — the banner is not
+  drawn there, leaving two carriers instead of four. The header is the
+  right one to have left standing: it is already the fact this product
+  treats as unable to go missing on a degraded page, the same claim
+  [§ Over a pane with nothing to show yet](#over-a-pane-with-nothing-to-show-yet)
+  makes for a different empty pane — *"the token's death reaches the screen
+  through the header, already true on every degraded page"* — read here for
+  this one instead of restated.
+- **This is the live result of typing, not a state reached only once
+  committed.** The same sentence appears mid-keystroke, under the typing
+  footer of [widgets.md § 2b](widgets.md#2b-typing-into-a-filter) rather than
+  this one — the picker's own "no matches" state is reached exactly the same
+  way, live, not as a separate step after `⏎`.
+- **A different view, or a different kind, leaves this state behind rather
+  than redrawing it empty.** Both filters clear the moment the sidebar opens
+  something else — [widgets.md § 2b](widgets.md#2b-typing-into-a-filter)'s
+  own ruling — so this screen is never reached by switching into a kind that
+  merely *happens* to have nothing matching a filter left over from a
+  different list; it is reached only by typing one on the list it is
+  drawn over.
+- **Under a banner — link lost, login expired, a namespace scope — the
+  banner stays and this sentence draws below it, not instead of it.** D266
+  drew the line for the claim this state must never make: `○ nothing is
+  broken` is a *right now* verdict on the whole cluster, which cannot be
+  made from stale or restricted data, so it is withheld under exactly these
+  banners
+  ([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+  `No problems match "prodeu"` claims nothing about the cluster's health —
+  it is a mechanical fact about what the reader typed against whatever rows
+  are currently on screen, stale or not — so it carries no such conflict and
+  draws under a banner exactly as it would without one, in the same slot the
+  banner already leaves for the list beneath it
+  ([widgets.md § 2](widgets.md#2-element--widget), *"the list stays visible
+  and the banner says what is wrong with it"*).
+
 ## Still loading
 
 ```

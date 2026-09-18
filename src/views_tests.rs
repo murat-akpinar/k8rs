@@ -243,6 +243,25 @@ fn a_multi_byte_character_is_refused_whole_at_the_bound_and_popped_whole() {
     assert_eq!(multi.text(), "ü", "pop took a byte instead of a character");
 }
 
+/// **The one word a field is named by, in the three places a key is worded off it** — the typing
+/// footer's label, `esc`'s own second word, and the at-rest line `ui.rs` draws. Asserted against
+/// `screens/help.md`'s own `/ n   filter · namespace` row, not against what the match returns.
+#[test]
+fn a_filter_field_is_named_the_word_the_key_map_names_it() {
+    assert_eq!(Typing::Text.label(), "filter");
+    assert_eq!(Typing::Namespace.label(), "namespace");
+}
+
+/// A buffer with something in it — [`Input`] is only ever filled one character at a time, which
+/// is the guard `push` carries, so the tests fill it the same way the keyboard does.
+fn buffer(text: &str) -> Input {
+    let mut input = Input::default();
+    for character in text.chars() {
+        input.push(character);
+    }
+    input
+}
+
 // --- A CURSOR THAT STAYS ON THE SAME OBJECT ---
 
 #[test]
@@ -759,6 +778,32 @@ fn a_filter_that_matches_nothing_leaves_an_empty_list_and_an_empty_cursor() {
     assert_eq!(cursor.selected(&[]), None);
 }
 
+/// `screens/states.md` § The filter hides every row — **the word every surface uses for `esc` is
+/// read off the field that key really empties**, and [`App::escape`]'s order is what defines it.
+#[test]
+fn the_field_esc_clears_next_is_text_before_namespace() {
+    let mut filters = Filters::default();
+    assert_eq!(filters.clears(), None, "nothing set has nothing to clear");
+    assert!(!filters.any());
+
+    filters.namespace = buffer("pay");
+    assert_eq!(filters.clears(), Some(Typing::Namespace));
+    assert!(filters.any());
+
+    filters.text = buffer("web");
+    assert_eq!(
+        filters.clears(),
+        Some(Typing::Text),
+        "`esc` would have cleared the outer field first"
+    );
+
+    filters.text.clear();
+    assert_eq!(filters.clears(), Some(Typing::Namespace));
+    filters.namespace.clear();
+    assert_eq!(filters.clears(), None);
+    assert!(!filters.any());
+}
+
 // --- THE SIDEBAR ---
 
 /// The brief's own point: the core group alone holds kinds belonging to four of the five buckets,
@@ -1131,7 +1176,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     app.modal = Some(Modal::Confirm(dialog(None)));
 
     assert!(
-        !app.escape(),
+        !app.escape(None),
         "an esc with no startup picker open ended the run"
     );
     assert!(app.modal.is_none(), "esc did not close the modal");
@@ -1142,7 +1187,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     );
 
     assert!(
-        !app.escape(),
+        !app.escape(None),
         "an esc with no startup picker open ended the run"
     );
     assert!(
@@ -1156,7 +1201,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     );
 
     assert!(
-        !app.escape(),
+        !app.escape(None),
         "an esc with no startup picker open ended the run"
     );
     assert!(
@@ -1174,7 +1219,7 @@ fn escape_clears_the_namespace_scope_when_no_text_filter_is_set() {
         app.filters.namespace.push(character);
     }
     assert!(
-        !app.escape(),
+        !app.escape(None),
         "an esc with no startup picker open ended the run"
     );
     assert!(app.filters.namespace.is_empty());
@@ -1699,7 +1744,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
         if let Some(Modal::ContextPick(picker)) = &mut switching.modal {
             picker.filter.push('s');
         }
-        assert!(!switching.escape());
+        assert!(!switching.escape(None));
         assert!(
             matches!(
                 &switching.modal,
@@ -1708,7 +1753,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
             "{connection:?}: esc closed the picker with a filter still typed into it"
         );
         assert!(
-            !switching.escape(),
+            !switching.escape(None),
             "{connection:?}: esc on X's picker ended the run"
         );
         assert!(switching.modal.is_none(), "esc did not cancel the picker");
@@ -1722,12 +1767,12 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
         picker.filter.push('s');
     }
     assert!(
-        !starting.escape(),
+        !starting.escape(None),
         "esc over a typed filter quit at startup"
     );
     let before = starting.clone();
     assert!(
-        starting.escape(),
+        starting.escape(None),
         "esc on the startup picker did not end the run"
     );
     assert_eq!(
@@ -1755,7 +1800,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
         }
     };
     let mut app = failed(Connection::Never);
-    assert!(!app.escape(), "esc on a failure ended the run");
+    assert!(!app.escape(None), "esc on a failure ended the run");
     assert!(
         matches!(
             &app.modal,
@@ -1768,7 +1813,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
     // or a switch had already failed** (NOTES § D264 ruling 15) — the way back is `X`.
     for connection in [live(), dropped()] {
         let mut dismissed = failed(connection.clone());
-        assert!(!dismissed.escape(), "{connection:?}");
+        assert!(!dismissed.escape(None), "{connection:?}");
         assert!(
             dismissed.modal.is_none(),
             "{connection:?}: esc did not dismiss the failure"
@@ -2279,6 +2324,145 @@ fn a_manual_scroll_turns_follow_mode_off() {
     assert_eq!(app.scroll, 0, "the offset went below the top of the buffer");
 }
 
+/// `screens/widgets.md` § 2b — **`/` and `n` open on the field they name and nothing else is a
+/// command while one has focus.** `s`, `r`, `q`, `X` and `?` are letters a filter can hold, so the
+/// three questions that decide whether a key fires all answer no through one field.
+#[test]
+fn no_key_is_a_command_while_a_filter_is_being_typed() {
+    for field in [Typing::Text, Typing::Namespace] {
+        let mut app = App::default();
+        assert!(app.may_quit() && app.may_switch_cluster() && app.may_mutate(Offer::Act));
+
+        app.typing = Some(field);
+        assert!(!app.may_quit(), "q quit while typing {field:?}");
+        assert!(!app.may_switch_cluster(), "X while typing {field:?}");
+        assert!(
+            !app.may_mutate(Offer::Act),
+            "s or r would have fired while typing {field:?}"
+        );
+    }
+}
+
+/// **The buffer `/` or `n` has focus on is the filter itself**, never a third copy that would have
+/// to be written back — which is what lets the list narrow one keystroke at a time.
+#[test]
+fn the_focused_buffer_is_the_filter_field_itself() {
+    let mut app = App::default();
+    assert!(app.typed().is_none(), "nothing has focus while browsing");
+    assert!(app.typed_mut().is_none());
+
+    app.typing = Some(Typing::Text);
+    app.typed_mut().expect("`/` has focus").push('w');
+    assert_eq!(app.filters.text.text(), "w");
+    assert!(app.filters.namespace.is_empty(), "`n` was written into");
+
+    app.typing = Some(Typing::Namespace);
+    app.typed_mut().expect("`n` has focus").push('p');
+    assert_eq!(app.filters.namespace.text(), "p");
+    assert_eq!(app.typed().map(Input::text), Some("p"));
+    assert_eq!(
+        app.filters.text.text(),
+        "w",
+        "focus moved and took the other buffer with it"
+    );
+}
+
+/// `screens/widgets.md` § 2b — **`esc` while typing acts on the field that has focus**: it empties
+/// a buffer that has something in it and stays open, and it closes the session once that buffer is
+/// already empty, leaving the *other* field exactly as it was. That last clause is the one a
+/// global order would get wrong.
+#[test]
+fn esc_while_typing_empties_the_focused_field_then_closes_the_session() {
+    let mut app = App {
+        filters: Filters {
+            text: buffer("web"),
+            namespace: buffer("pay"),
+        },
+        typing: Some(Typing::Namespace),
+        ..App::default()
+    };
+
+    assert!(!app.escape(None));
+    assert!(app.filters.namespace.is_empty(), "`n` was not emptied");
+    assert_eq!(
+        app.filters.text.text(),
+        "web",
+        "`esc` reached a field that did not have focus"
+    );
+    assert_eq!(app.typing, Some(Typing::Namespace), "typing closed early");
+
+    assert!(!app.escape(None));
+    assert_eq!(app.typing, None, "typing stayed open over an empty buffer");
+    assert_eq!(
+        app.filters.text.text(),
+        "web",
+        "closing the session cleared the other field"
+    );
+}
+
+/// **A filter does not survive into a view that cannot draw it** (`screens/widgets.md` § 2b): the
+/// list is *changing*, not being drawn over, and `web` typed for Alerts' cards means nothing
+/// against a ConfigMap table. **Re-opening what is already open is not a change** — the same test
+/// the content cursor already uses.
+#[test]
+fn a_filter_does_not_survive_a_view_change_and_does_survive_a_press_that_changes_nothing() {
+    let filtered = || Filters {
+        text: buffer("web"),
+        namespace: buffer("pay"),
+    };
+    let mut app = App {
+        filters: filtered(),
+        ..App::default()
+    };
+
+    app.typing = Some(Typing::Text);
+    app.open(NavItem::Kind(2));
+    assert_eq!(app.filters, Filters::default(), "Alerts → a kind kept them");
+    // **The session goes with the buffer it was typing into** — left open, focus would sit on a
+    // field just emptied under it, on a list it was never about, with every printable key still
+    // text and a footer saying otherwise (`k8s-admin`, 2026-09-18).
+    assert_eq!(
+        app.typing, None,
+        "a typing session survived onto a different list"
+    );
+
+    app.filters = filtered();
+    app.typing = Some(Typing::Namespace);
+    app.open(NavItem::Kind(2));
+    assert_eq!(
+        app.filters,
+        filtered(),
+        "re-opening the kind already open cleared them"
+    );
+    assert_eq!(
+        app.typing,
+        Some(Typing::Namespace),
+        "a press that changed no list closed the session anyway"
+    );
+
+    app.open(NavItem::Group(Group::Network));
+    assert_eq!(
+        app.filters,
+        filtered(),
+        "a disclosure triangle is not a different list"
+    );
+
+    app.open(NavItem::Report(1));
+    assert_eq!(
+        app.filters,
+        Filters::default(),
+        "a kind → a report kept them"
+    );
+
+    app.filters = filtered();
+    app.open(NavItem::Alerts);
+    assert_eq!(
+        app.filters,
+        Filters::default(),
+        "a report → Alerts kept them"
+    );
+}
+
 // --- THE FOOTER ---
 
 /// **Five of the sixteen rows of `screens/widgets.md` § 2a's closed list — this box's five** —
@@ -2330,7 +2514,7 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
             tab,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "", &[]);
+        let (keys, quit) = app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]);
         assert_eq!(
             (keys.as_ref(), quit),
             (expected, ""),
@@ -2353,8 +2537,12 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
 /// asserted, and what *this* test guarantees it is that there is a `  q quit` to strip at all. A
 /// mode that stopped ending in the pair would drop nothing there and go green.
 ///
-/// **Every [`Offer`] is walked, because the pair holds on all of them and `screens/states.md` says
-/// so in as many words** — *`? all keys` and `q quit` stay too; they hold on this pane and every
+/// **Every [`Offer`] is walked, and [`every_offer`] is what makes that sentence true rather than a
+/// claim about a hand-written list** (`tester`, 2026-09-18). It was one: seven literals, written
+/// when there were seven shapes, and `Offer::Hidden` arrived as the eighth and was walked by
+/// nothing — with this doc still saying *every*. **The pair holds on all of them and
+/// `screens/states.md` says so in as many words** — *`? all keys` and `q quit` stay too; they
+/// hold on this pane and every
 /// other one on this page*, their one named exception being a mutation call in flight, which is
 /// what `changing: None` excludes. The narrowest state of all, [`Offer::Nothing`], is the pair and
 /// nothing else.
@@ -2367,6 +2555,43 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
 /// *inside the ceiling with 5 columns to spare* (`k8s-admin`, 2026-09-12). The exact four widths
 /// are `the_list_footer_marks_the_keys_this_login_may_not_use`'s, read off that section's own
 /// table; what this one adds is that no combination of shape and refusal passes it.
+/// **Every [`Offer`] there is, as a list a new variant cannot be left out of.**
+///
+/// **The `match` is what makes it mechanical**: it names each variant and has no `_` arm, so a
+/// ninth shape is a compile error in this function rather than a row every sweep below quietly
+/// stops walking. That is exactly how `Offer::Hidden` arrived unwalked behind a doc comment
+/// claiming otherwise (`tester`, 2026-09-18).
+fn every_offer() -> Vec<Offer> {
+    fn exhaustive(offer: Offer) {
+        match offer {
+            Offer::Nothing { .. }
+            | Offer::Filter { .. }
+            | Offer::Hidden { .. }
+            | Offer::Move { .. }
+            | Offer::Act => {}
+        }
+    }
+    let mut all = vec![Offer::Act];
+    for switch in [false, true] {
+        all.push(Offer::Nothing { switch });
+        all.push(Offer::Filter { switch });
+        all.push(Offer::Move { switch });
+        for namespace in [false, true] {
+            for browsing in [false, true] {
+                all.push(Offer::Hidden {
+                    switch,
+                    namespace,
+                    browsing,
+                });
+            }
+        }
+    }
+    for offer in &all {
+        exhaustive(*offer);
+    }
+    all
+}
+
 #[test]
 fn the_anchor_pair_ends_every_ordinary_footer() {
     for (view, detail, tab) in [
@@ -2384,15 +2609,7 @@ fn the_anchor_pair_ends_every_ordinary_footer() {
             changing: None,
             ..App::default()
         };
-        for offer in [
-            Offer::Nothing { switch: false },
-            Offer::Nothing { switch: true },
-            Offer::Filter { switch: false },
-            Offer::Filter { switch: true },
-            Offer::Move { switch: false },
-            Offer::Move { switch: true },
-            Offer::Act,
-        ] {
+        for offer in every_offer() {
             for (scale, restart) in [(false, false), (true, false), (false, true), (true, true)] {
                 let refused = Refused::of(
                     "deployments",
@@ -2400,7 +2617,7 @@ fn the_anchor_pair_ends_every_ordinary_footer() {
                     [restart.then_some(&Verdict::No)],
                     [None],
                 );
-                let (keys, quit) = app.footer(detail, offer, refused, "", &[]);
+                let (keys, quit) = app.footer(detail.then_some(2), offer, refused, "", &[]);
                 assert!(
                     keys.ends_with("? all keys  q quit"),
                     "{view:?} · {tab:?} · detail {detail} · {offer:?} — {keys:?} has no anchor pair"
@@ -2427,10 +2644,10 @@ fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "", &[]);
+    let (keys, quit) = app.footer(None, Offer::Act, Refused::default(), "", &[]);
     assert_eq!((keys.as_ref(), quit), ("? or esc to close", "q quit"));
     assert!(
-        !app.footer(false, Offer::Act, Refused::default(), "", &[])
+        !app.footer(None, Offer::Act, Refused::default(), "", &[])
             .0
             .contains("all keys"),
         "the footer still pointed at a screen the reader is already on"
@@ -2567,7 +2784,13 @@ fn the_picker_and_its_failure_each_say_the_keys_valid_inside_them() {
             };
             for detail in [false, true] {
                 assert_eq!(
-                    app.footer(detail, Offer::Act, Refused::default(), "", contexts),
+                    app.footer(
+                        detail.then_some(2),
+                        Offer::Act,
+                        Refused::default(),
+                        "",
+                        contexts
+                    ),
                     (Cow::Borrowed(expected), ""),
                     "{modal:?}"
                 );
@@ -2594,7 +2817,7 @@ fn help_is_the_footer_whatever_it_was_opened_from() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail, Offer::Act, Refused::default(), "", &[]),
+            app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]),
             (Cow::Borrowed("? or esc to close"), "q quit"),
             "{view:?} · detail {detail} · {tab:?}"
         );
@@ -2611,15 +2834,15 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "", &[]).0,
+        app.footer(None, Offer::Act, Refused::default(), "", &[]).0,
         "? or esc to close"
     );
     assert!(
-        !app.escape(),
+        !app.escape(None),
         "an esc with no startup picker open ended the run"
     );
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "", &[]).0,
+        app.footer(None, Offer::Act, Refused::default(), "", &[]).0,
         "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
     );
 }
@@ -2695,11 +2918,11 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         ),
     ] {
         assert_eq!(
-            app.footer(false, Offer::Act, Refused::default(), "", &[]).0,
+            app.footer(None, Offer::Act, Refused::default(), "", &[]).0,
             expected
         );
         assert_eq!(
-            app.footer(false, Offer::Act, Refused::default(), "", &[]).1,
+            app.footer(None, Offer::Act, Refused::default(), "", &[]).1,
             "",
             "a dialog grew the right-hand zone only `?` has"
         );
@@ -2707,7 +2930,8 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         // replaced test pinned: a dialog is opened from a detail pane as readily as from a list,
         // and a footer that fell through for one of them would fall through for both.
         assert_eq!(
-            app.footer(true, Offer::Act, Refused::default(), "", &[]).0,
+            app.footer(Some(2), Offer::Act, Refused::default(), "", &[])
+                .0,
             expected
         );
     }
@@ -2737,7 +2961,7 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
             ..App::default()
         };
         assert!(
-            app.footer(false, Offer::Act, Refused::default(), "payments/web", &[])
+            app.footer(None, Offer::Act, Refused::default(), "payments/web", &[])
                 .0
                 .ends_with("? all keys  q quit"),
             "{view:?} — nothing is running and the ordinary footer went"
@@ -2747,7 +2971,7 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
         let no = |refused: bool| refused.then_some(&Verdict::No);
         for (scale, restart) in [(false, false), (true, false), (false, true), (true, true)] {
             let refused = Refused::of("deployments", [no(scale); 2], [no(restart)], [None]);
-            let (keys, quit) = app.footer(false, Offer::Act, refused, "payments/web", &[]);
+            let (keys, quit) = app.footer(None, Offer::Act, refused, "payments/web", &[]);
             assert_eq!(
                 (keys.as_ref(), quit),
                 (
@@ -2790,11 +3014,23 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
             ..App::default()
         };
         let ordinary = app
-            .footer(detail, Offer::Act, Refused::default(), "payments/web", &[])
+            .footer(
+                detail.then_some(2),
+                Offer::Act,
+                Refused::default(),
+                "payments/web",
+                &[],
+            )
             .0;
 
         app.changing = Some(dialog(None).object);
-        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "payments/web", &[]);
+        let (keys, quit) = app.footer(
+            detail.then_some(2),
+            Offer::Act,
+            Refused::default(),
+            "payments/web",
+            &[],
+        );
         assert_eq!(
             format!("{keys}  q quit"),
             ordinary,
@@ -2822,7 +3058,7 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
 fn the_in_flight_arm_is_changings_and_never_the_names() {
     let mut app = App::default();
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "payments/web", &[])
+        app.footer(None, Offer::Act, Refused::default(), "payments/web", &[])
             .0,
         "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
         "a name alone turned the in-flight footer on"
@@ -2830,7 +3066,7 @@ fn the_in_flight_arm_is_changings_and_never_the_names() {
 
     app.changing = Some(dialog(None).object);
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "", &[]).0,
+        app.footer(None, Offer::Act, Refused::default(), "", &[]).0,
         "↑↓ move  ⏎ open  ? keys  ·  changing  first",
         "an empty name turned the in-flight footer off"
     );
@@ -2849,13 +3085,13 @@ fn help_over_a_call_in_flight_drops_the_quit_it_cannot_promise() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(false, Offer::Act, Refused::default(), "", &[]),
+        app.footer(None, Offer::Act, Refused::default(), "", &[]),
         (Cow::Borrowed("? or esc to close"), "q quit"),
         "help's ordinary footer changed"
     );
 
     app.changing = Some(dialog(None).object);
-    let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "", &[]);
+    let (keys, quit) = app.footer(None, Offer::Act, Refused::default(), "", &[]);
     assert_eq!(
         keys.as_ref(),
         "? or esc to close",
@@ -2903,7 +3139,7 @@ fn a_modal_keeps_its_own_closed_set_even_with_a_call_running_under_it() {
             changing: Some(running.clone()),
             ..App::default()
         };
-        let (keys, quit) = app.footer(false, Offer::Act, Refused::default(), "payments/web", &[]);
+        let (keys, quit) = app.footer(None, Offer::Act, Refused::default(), "payments/web", &[]);
         assert_eq!((keys.as_ref(), quit), (expected, ""), "{modal:?}");
         assert!(
             !keys.contains("changing"),
@@ -2998,7 +3234,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
             modal,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail, Offer::Act, Refused::default(), "", &[]);
+        let (keys, quit) = app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]);
         let width = ratatui::text::Span::raw(keys.as_ref()).width()
             + usize::from(!quit.is_empty())
             + ratatui::text::Span::raw(quit).width();
@@ -3073,7 +3309,7 @@ fn the_list_footer_marks_the_keys_this_login_may_not_use() {
                 view,
                 ..App::default()
             };
-            let (keys, quit) = app.footer(false, Offer::Act, refused, "", &[]);
+            let (keys, quit) = app.footer(None, Offer::Act, refused, "", &[]);
             assert_eq!(
                 (keys.as_ref(), quit),
                 (expected.as_str(), ""),
@@ -3193,8 +3429,8 @@ fn a_refused_delete_changes_no_footer() {
                 ..App::default()
             };
             assert_eq!(
-                app.footer(detail, Offer::Act, refused, "", &[]),
-                app.footer(detail, Offer::Act, Refused::default(), "", &[]),
+                app.footer(detail.then_some(2), Offer::Act, refused, "", &[]),
+                app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]),
                 "{view:?} · detail {detail}"
             );
         }
@@ -3289,14 +3525,320 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
             ..App::default()
         };
         assert_eq!(
-            app.footer(detail, Offer::Act, all, "", &[]),
-            app.footer(detail, Offer::Act, Refused::default(), "", &[]),
+            app.footer(detail.then_some(2), Offer::Act, all, "", &[]),
+            app.footer(detail.then_some(2), Offer::Act, Refused::default(), "", &[]),
             "{:?} · detail {detail} · {tab:?}",
             app.view
         );
         seen += 1;
     }
     assert_eq!(seen, 14, "a footer stopped being measured");
+}
+
+/// `screens/widgets.md` § 2b — **the four footers that section draws, byte for byte.** The whole
+/// line is replaced rather than curated, the label is the field's own word, and `esc`'s second
+/// word drops to `cancel` exactly when the focused buffer is empty.
+///
+/// **The typed text arrives as an argument, the way the in-flight line's object name does** —
+/// `ui.rs` measures the fixed parts by asking for this same line with an empty one, and the arm is
+/// chosen by [`App::typing`] and never by the argument.
+#[test]
+fn a_filter_being_typed_replaces_the_whole_footer() {
+    let ask = |app: &App, cut: &str| {
+        app.footer(None, Offer::Act, Refused::default(), cut, &[])
+            .0
+            .into_owned()
+    };
+
+    let mut app = App {
+        typing: Some(Typing::Text),
+        ..App::default()
+    };
+    assert_eq!(ask(&app, ""), "filter:   ⏎ done  esc cancel");
+
+    app.filters.text = buffer("payments");
+    assert_eq!(
+        ask(&app, "payments"),
+        "filter: payments  ⏎ done  esc clear filter"
+    );
+
+    app.typing = Some(Typing::Namespace);
+    assert_eq!(
+        ask(&app, ""),
+        "namespace like:   ⏎ done  esc cancel",
+        "`esc`'s word read the field that did not have focus"
+    );
+    app.filters.namespace = buffer("pay");
+    assert_eq!(
+        ask(&app, "pay"),
+        "namespace like: pay  ⏎ done  esc clear namespace"
+    );
+
+    // **Nothing else can be open at once, and the answer is still the typing line** — `?`, `X`
+    // and `⏎` are characters while a filter has focus, so the arm answers first on purpose.
+    app.typing = Some(Typing::Text);
+    app.modal = Some(Modal::Help);
+    assert_eq!(
+        ask(&app, "payments"),
+        "filter: payments  ⏎ done  esc clear filter"
+    );
+}
+
+/// `screens/states.md` § The filter hides every row — **the one list footer that can afford
+/// `esc`'s own word, and it affords it because it has just dropped the four keys with nothing to
+/// act on.** The word follows [`Filters::clears`], so it names the field that key really empties.
+#[test]
+fn the_footer_over_a_filter_that_hides_every_row_names_the_field_esc_clears() {
+    let app = App::default();
+    let ask = |offer| {
+        app.footer(None, offer, Refused::default(), "", &[])
+            .0
+            .into_owned()
+    };
+    let hidden = |switch, namespace, browsing| {
+        ask(Offer::Hidden {
+            switch,
+            namespace,
+            browsing,
+        })
+    };
+
+    // **Alerts keeps the cursor keys and the browser drops them** — each screen's own zero-row
+    // precedent, not one rule applied twice (`screens/states.md` § The filter hides every row).
+    assert_eq!(
+        hidden(false, false, false),
+        "↑↓ move  ⏎ open  / filter  esc clear filter  ? all keys  q quit"
+    );
+    assert_eq!(
+        hidden(false, true, false),
+        "↑↓ move  ⏎ open  / filter  esc clear namespace  ? all keys  q quit"
+    );
+    assert_eq!(
+        hidden(false, false, true),
+        "/ filter  esc clear filter  ? all keys  q quit"
+    );
+    assert_eq!(
+        hidden(false, true, true),
+        "/ filter  esc clear namespace  ? all keys  q quit"
+    );
+    assert_eq!(
+        hidden(true, false, true),
+        "X switch cluster  / filter  esc clear filter  ? all keys  q quit"
+    );
+    assert_eq!(
+        hidden(true, true, true),
+        "X switch cluster  / filter  esc clear namespace  ? all keys  q quit"
+    );
+
+    // **`X switch cluster` is not on Alerts' pair, and that is arithmetic**: with it the line is
+    // 84 columns against `ui::indented`'s 76 at the floor. An expired login draws the same two
+    // lines as a live one there, and `X` stays where `? all keys` points.
+    for namespace in [false, true] {
+        assert_eq!(
+            hidden(true, namespace, false),
+            hidden(false, namespace, false),
+            "Alerts' zero-match line moved for a key it has no room for"
+        );
+    }
+
+    // **The two mutating keys are on none of the six** — nothing is selected, and the cursor keys
+    // Alerts keeps are exactly the ones the page rules it keeps.
+    for switch in [false, true] {
+        for namespace in [false, true] {
+            for browsing in [false, true] {
+                let line = hidden(switch, namespace, browsing);
+                for gone in ["s scale", "r restart", "s no"] {
+                    assert!(!line.contains(gone), "{line:?} still promises {gone:?}");
+                }
+                assert_eq!(
+                    line.contains("↑↓ move") && line.contains("⏎ open"),
+                    !browsing,
+                    "the two panes did not differ on the cursor keys: {line:?}"
+                );
+            }
+        }
+    }
+}
+
+/// `screens/detail.md` § Choosing a container — **`c container` is on the logs footer only where
+/// there is more than one answer**, and a pod whose snapshot has not arrived draws the same line a
+/// single-container pod does rather than a key that would do nothing.
+#[test]
+fn c_container_is_offered_only_where_there_is_something_to_choose() {
+    let app = App::default();
+    let ask = |containers| {
+        app.footer(containers, Offer::Act, Refused::default(), "", &[])
+            .0
+            .into_owned()
+    };
+
+    assert_eq!(
+        ask(Some(2)),
+        "[ ] tabs  f follow  c container  esc back  ? all keys  q quit"
+    );
+    for many in [0, 1] {
+        assert_eq!(
+            ask(Some(many)),
+            "[ ] tabs  f follow  esc back  ? all keys  q quit",
+            "{many} containers still offered a picker"
+        );
+    }
+}
+
+/// `screens/detail.md` § Choosing a container, § The pod disappears while the picker is open —
+/// **the picker's closed set, and what is drawn when the pod it was about has gone.** There is no
+/// second *already gone* box for it: the picker is not drawn, and the footer under it is the logs
+/// tab's own, because that is what the reader is looking at.
+#[test]
+fn the_container_picker_offers_three_keys_and_none_once_the_pod_has_gone() {
+    let app = App {
+        modal: Some(Modal::ContainerPick(Cursor::default())),
+        ..App::default()
+    };
+    let ask = |containers| {
+        app.footer(containers, Offer::Act, Refused::default(), "", &[])
+            .0
+            .into_owned()
+    };
+
+    assert_eq!(ask(Some(3)), "↑↓ move  ⏎ pick  esc cancel");
+    for many in [0, 1] {
+        assert_eq!(
+            ask(Some(many)),
+            "[ ] tabs  f follow  esc back  ? all keys  q quit",
+            "a picker with {many} containers kept a footer of its own"
+        );
+    }
+}
+
+/// `screens/widgets.md` § 5 — **`esc` closes the container picker like any other modal**, one
+/// level per press, and it leaves the filters alone on the way out.
+///
+/// **A picker with nothing left to pick is not a level, and one press does both** — the box is not
+/// drawn once the containers have gone (`screens/detail.md` § The pod disappears while the picker
+/// is open), so spending a press closing it is a key that visibly does nothing (`k8s-admin`,
+/// 2026-09-18). It is dropped and the press goes on to what the drawn footer promises.
+#[test]
+fn esc_closes_the_container_picker_and_touches_nothing_else() {
+    let picking = || App {
+        modal: Some(Modal::ContainerPick(Cursor::default())),
+        filters: Filters {
+            text: buffer("web"),
+            namespace: Input::default(),
+        },
+        ..App::default()
+    };
+
+    let mut app = picking();
+    assert!(!app.escape(Some(3)));
+    assert_eq!(app.modal, None);
+    assert_eq!(
+        app.filters.text.text(),
+        "web",
+        "closing a modal reached past it into a filter"
+    );
+
+    // **Nothing left to pick: the invisible modal goes, and the press does the visible thing in
+    // the same press.** What that is depends on what is drawn under it — a logs tab is still open
+    // for `Some(0)`/`Some(1)`, so this press is the `esc back` its footer promises and the filter
+    // is untouched; with no tab at all it is the ordinary at-rest `esc`.
+    for containers in [Some(0), Some(1)] {
+        let mut app = picking();
+        assert!(!app.escape(containers));
+        assert_eq!(app.modal, None, "{containers:?}");
+        assert_eq!(
+            app.filters.text.text(),
+            "web",
+            "{containers:?}: `esc back` out of the tab cleared its filter"
+        );
+    }
+
+    let mut app = picking();
+    assert!(!app.escape(None));
+    assert_eq!(app.modal, None);
+    assert!(
+        app.filters.text.is_empty(),
+        "the press was spent on a box nobody can see"
+    );
+}
+
+/// **What a press meant is the caller's to read, and only [`picking`] answers it** (`k8s-admin`,
+/// 2026-09-18).
+///
+/// `App::escape` leaves [`App::modal`] `None` whether it cancelled a **drawn** picker — whose own
+/// footer said `esc cancel`, so the tab behind it stays — or dropped an **undrawn** one, where the
+/// footer the reader was looking at was the logs tab's `esc back` and the tab closes. `modal` is
+/// the same value after both and `modal.is_some()` is the same before both, so a caller reading
+/// either one closes the detail tab out from under a picker somebody had just cancelled.
+#[test]
+fn only_picking_tells_a_cancelled_picker_from_a_dropped_one() {
+    // The predicate is what the two rows differ on, and it is what the caller can reach.
+    assert!(picking(Some(2)) && picking(Some(9)));
+    for none in [None, Some(0), Some(1)] {
+        assert!(
+            !picking(none),
+            "{none:?} has nothing to pick and said it had"
+        );
+    }
+
+    let open = || App {
+        modal: Some(Modal::ContainerPick(Cursor::default())),
+        filters: Filters {
+            text: buffer("web"),
+            namespace: Input::default(),
+        },
+        ..App::default()
+    };
+
+    for containers in [Some(3), Some(1), Some(0), None] {
+        let mut app = open();
+        assert!(app.modal.is_some(), "both rows start with a modal open");
+        assert!(!app.escape(containers));
+        assert_eq!(
+            app.modal, None,
+            "{containers:?}: `modal` is the same after both rows, which is the whole finding"
+        );
+        // The press's *effect* differs, and it follows `picking`, not `modal`: a drawn picker
+        // spends the press on itself, an undrawn one lets it through to what was drawn under it.
+        assert_eq!(
+            !app.filters.text.is_empty(),
+            picking(containers) || containers.is_some(),
+            "{containers:?}: what the press reached does not follow `picking`"
+        );
+    }
+}
+
+/// `screens/widgets.md` § 2b — **a filter survives `esc` back from Detail**, which is the whole of
+/// why that page draws Detail as an overlay: going back is not going somewhere else.
+///
+/// `App` cannot see that a tab is open, so it is handed the same fact [`App::footer`] is
+/// (`k8s-admin`, 2026-09-18 — this arm cleared the filter the page promises survives it).
+#[test]
+fn esc_out_of_a_detail_tab_leaves_the_filter_where_it_was() {
+    let filtered = || App {
+        filters: Filters {
+            text: buffer("web"),
+            namespace: buffer("pay"),
+        },
+        ..App::default()
+    };
+
+    for containers in [Some(0), Some(1), Some(4)] {
+        let mut app = filtered();
+        assert!(!app.escape(containers));
+        assert_eq!(
+            app.filters,
+            filtered().filters,
+            "{containers:?}: `esc back` cleared a filter Detail was drawn over"
+        );
+    }
+
+    // And with no tab open it is the ordinary at-rest `esc`, narrow to wide.
+    let mut app = filtered();
+    assert!(!app.escape(None));
+    assert!(app.filters.text.is_empty() && !app.filters.namespace.is_empty());
+    assert!(!app.escape(None));
+    assert!(app.filters.namespace.is_empty());
 }
 
 // --- THE SHAPES THE MUTATION GATE PROVED WERE NOT BEING FED ---
@@ -3860,6 +4402,10 @@ fn a_containers_state_is_a_word_a_beginner_reads() {
 
 /// **`, 3 restarts`, or nothing at all** — one spelling of a fact two surfaces draw, and a count
 /// no API server produces is drawn as none.
+///
+/// **And `3 restarts` beside it is the same count without the comma**, which the container picker
+/// draws in a column of its own (`screens/detail.md` § Choosing a container). Both are asserted
+/// off one status, because a second count is exactly what this pair exists to stop.
 #[test]
 fn a_restart_count_is_spelled_once_and_a_negative_one_is_not_a_count() {
     let counted = |restarts: i32| ContainerSnapshot {
@@ -3885,6 +4431,12 @@ fn a_restart_count_is_spelled_once_and_a_negative_one_is_not_a_count() {
     assert_eq!(restarts(Some(&counted(1))), ", 1 restart");
     assert_eq!(restarts(Some(&counted(12))), ", 12 restarts");
     assert_eq!(restarts(Some(&counted(-1))), "");
+
+    assert_eq!(restart_count(None), "");
+    assert_eq!(restart_count(Some(&counted(0))), "");
+    assert_eq!(restart_count(Some(&counted(1))), "1 restart");
+    assert_eq!(restart_count(Some(&counted(12))), "12 restarts");
+    assert_eq!(restart_count(Some(&counted(-1))), "");
 }
 
 /// **`⇧p` with no previous run to show** falls back and says so — and stays silent when it was not
@@ -3980,11 +4532,11 @@ fn the_confirm_word_is_the_same_one_the_footer_and_the_button_use() {
         ..App::default()
     };
     assert!(
-        app.footer(false, Offer::Act, Refused::default(), "", &[])
+        app.footer(None, Offer::Act, Refused::default(), "", &[])
             .0
             .contains(armed.confirm()),
         "the footer does not name the button's own word: {:?}",
-        app.footer(false, Offer::Act, Refused::default(), "", &[]).0
+        app.footer(None, Offer::Act, Refused::default(), "", &[]).0
     );
 }
 

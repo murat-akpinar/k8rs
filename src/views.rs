@@ -171,6 +171,48 @@ impl Input {
     }
 }
 
+/// **Which of the two filters `/` and `n` is being typed into** (`screens/widgets.md` § 2b).
+///
+/// **One at a time, and there is nothing here that can say *both*.** `n` pressed while `/` already
+/// has focus is a printable character like every other one and lands in the buffer that already
+/// has it — that section's own rule — so a second focus is not a state to model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Typing {
+    /// `/` — [`Filters::text`].
+    Text,
+    /// `n` — [`Filters::namespace`].
+    Namespace,
+}
+
+impl Typing {
+    /// **The word after `esc` that names the field it clears** — `screens/help.md`'s own
+    /// `/ n   filter · namespace` row, so the key map, the typing footer and the zero-match
+    /// footer spell one field one way (`screens/widgets.md` § 2b).
+    pub fn label(self) -> &'static str {
+        match self {
+            Typing::Text => "filter",
+            Typing::Namespace => "namespace",
+        }
+    }
+
+    /// **The label drawn in front of the buffer, live and at rest** — and it is not
+    /// [`Self::label`], which is the half this was learned the hard way
+    /// (`k8s-admin`, `reports/2026-09-18-filter-and-container-picker.md` § 4).
+    ///
+    /// **`namespace like:`, never a bare `namespace:`.** Drawn one row under the browser's own
+    /// title, a bare `namespace:` reads as a second *scope* — the server-side `ns: payments` that
+    /// title already carries — rather than a substring match over rows already in hand, and no
+    /// operator has a reason to tell the two apart from two labels stacked a row apart. The
+    /// zero-match sentence had the fix already (*"a namespace like `pay`"*), so the label takes
+    /// the same word rather than growing a third spelling.
+    pub fn prompt(self) -> &'static str {
+        match self {
+            Typing::Text => "filter",
+            Typing::Namespace => "namespace like",
+        }
+    }
+}
+
 // --- WHAT THE USER TYPES END ---
 
 // --- A CURSOR THAT STAYS ON THE SAME OBJECT START ---
@@ -494,6 +536,31 @@ impl Filters {
             || namespace.is_some_and(|value| contains_ignoring_case(value, self.namespace.text()));
         namespace_ok && holds(&self.text, fields)
     }
+
+    /// **Is anything being filtered at all?** What decides whether the pane draws a `filter: "web"`
+    /// line over the list it narrowed (`screens/widgets.md` § A committed filter is drawn at rest,
+    /// too).
+    pub fn any(&self) -> bool {
+        self.clears().is_some()
+    }
+
+    /// **Which field the next `esc` empties, or `None` when there is nothing left to empty** —
+    /// [`App::escape`]'s own text-before-namespace order, read rather than restated.
+    ///
+    /// **Three screens word a key off this and none of them counts the fields itself**: the
+    /// at-rest line's `esc clears filter`, the zero-match footer's `esc clear filter`
+    /// (`screens/states.md` § The filter hides every row) and `escape` itself. A footer naming a
+    /// field `esc` is not about to clear is the *promised key that does nothing* this product
+    /// already forbids, one word over.
+    pub fn clears(&self) -> Option<Typing> {
+        if !self.text.is_empty() {
+            Some(Typing::Text)
+        } else if !self.namespace.is_empty() {
+            Some(Typing::Namespace)
+        } else {
+            None
+        }
+    }
 }
 
 /// **`/` over whatever a row shows the reader** — [`Filters::matches`]' text half, and the cluster
@@ -788,6 +855,25 @@ pub enum Modal {
         /// to back one.
         recreated: bool,
     },
+    /// **`c` on the logs tab — which container to read** (`screens/detail.md` § Choosing a
+    /// container, and when there is nothing to choose).
+    ///
+    /// **A [`Cursor`] and not a [`Picker`]**, because the two pickers differ in everything but the
+    /// word: this one has no filter, no shadowed row, no badge and nothing it cannot land on — a
+    /// container is always pickable — so what is left is *which row*, which is what `Cursor`
+    /// already is. Its anchor is the container's own name, which is unique inside one pod and
+    /// stable for its life.
+    ///
+    /// **The list is not in here**, for [`Picker`]'s reason one box over: it is the selected pod's
+    /// `crate::rules::PodSnapshot` containers, in `spec` order, handed to the renderer as
+    /// `crate::ui::Described::containers` and never copied here.
+    ///
+    /// **Nothing in this variant says the pod still exists, and the screen is what closes it**
+    /// (§ The pod disappears while the picker is open). A pod deleted under an open picker leaves
+    /// no container to pick, and a box with no rows is not drawn and its footer is not offered —
+    /// there is no second `Gone` for it, because picking a container is not a pending mutation
+    /// and has nothing to reassure anybody about.
+    ContainerPick(Cursor),
     /// **The cluster picker — on `X`, and by itself at startup** (`screens/context.md`,
     /// NOTES § D16, § D116). One list and one key map both ways; [`Picker::startup`] is the whole
     /// of the difference, and it is read off what has connected rather than off who opened it
@@ -1754,6 +1840,27 @@ pub struct App {
     pub content: Cursor,
     /// `/` and `n`.
     pub filters: Filters,
+    /// **Which filter is being typed into, or `None` for browsing** (`screens/widgets.md` § 2b).
+    ///
+    /// **It is a mode and not a widget.** While it is `Some`, every printable key is text — `s`,
+    /// `q`, `X` and `?` included — so the three `may_*` questions below all answer no through it,
+    /// and the footer is replaced rather than curated. The buffer being typed into is
+    /// [`Filters::text`] or [`Filters::namespace`] itself, never a third copy that would have to be
+    /// written back: that is what makes the list narrow live, one keystroke at a time.
+    ///
+    /// **`↑` and `↓` are the exception, and the footer not naming them is not an unbinding**
+    /// (`screens/widgets.md` § 2b: *"`↑` / `↓` still move the selection over whatever rows the
+    /// live-narrowed list is currently showing, exactly as they do outside typing"*). An arrow is
+    /// never a letter, which is what lets the picker's own list do the same thing; the typing
+    /// footer spends its room on the two keys that get the reader *out*, which is § 2a's curation
+    /// rule and not a claim that nothing else is bound. **Said here because the key router is
+    /// Phase 12's and the footer is the only other place this could be read off.**
+    ///
+    /// **`⏎` is `self.typing = None` and has no method of its own**: committing keeps what was
+    /// typed and changes nothing else — the filter was already live while it was being typed, so
+    /// there is no second pass over the rows and no cursor to move ([`Cursor::follow`] has been
+    /// following the narrowed list throughout).
+    pub typing: Option<Typing>,
     /// Which detail tab is open, when something is open.
     pub tab: Tab,
     /// **The free-text panes' own scroll offset** — logs, yaml, describe **and events**. Lists and
@@ -1906,6 +2013,23 @@ impl Refused {
     }
 }
 
+/// **Whether `c` has more than one answer, which is the whole of *is there anything to pick***
+/// (`screens/detail.md` § Choosing a container, and when there is nothing to choose).
+///
+/// **One predicate, four readers, and the fourth is the key router** — [`App::footer`]'s logs
+/// line, its container-picker line, [`App::escape`]'s dropping of a picker that has nothing left
+/// in it, and the caller that has to decide what a press just meant. `None` is *no detail tab is
+/// open at all*, and `Some(0)`/`Some(1)` are *k8rs does not know of a second container*: a pod
+/// whose snapshot has not landed and a pod that only ever has one draw the same screen, because
+/// guessing is what the header's own vitals refuse.
+///
+/// **`pub` because [`App::escape`] cannot hand its answer back** — see that method's own doc:
+/// `modal` is `None` after the press either way, so the fact has to be read *before* it
+/// (`k8s-admin`, 2026-09-18).
+pub fn picking(containers: Option<usize>) -> bool {
+    containers.is_some_and(|many| many > 1)
+}
+
 /// **Fail open, in one line: a probe may never be the reason a permitted action is marked**
 /// (NOTES § D229 ruling 4). Everything but a `No` — a yes, a review k8rs could not get an answer
 /// out of, and a question that was never asked — is the ordinary key.
@@ -1974,6 +2098,36 @@ pub enum Offer {
         /// `X switch cluster`, promoted onto the line.
         switch: bool,
     },
+    /// **A list with rows in it that `/` or `n` narrowed to none** (`screens/states.md` § The
+    /// filter hides every row). **Not [`Offer::Filter`]**: that one is a kind that genuinely has
+    /// no objects, and the two say different things to the reader and offer different keys.
+    ///
+    /// **It is the one footer on this page that can afford `esc`'s own word**, and it affords it
+    /// out of keys that have nothing to act on — **but not the same keys on both panes, which is
+    /// what this doc said before [`Offer::Hidden::browsing`] was added under it** (`k8s-admin`,
+    /// 2026-09-18; NOTES § D216 — nothing mechanical reads a comment). `s scale` and `r restart`
+    /// go from both, because nothing is selected. `↑↓ move` and `⏎ open` go from the **browser
+    /// only**; Alerts keeps them, and the field below carries the reason. `esc clear filter`
+    /// arrives in the room that leaves, in the picker's own wording for the same state rather
+    /// than a second vocabulary for it.
+    Hidden {
+        /// `X switch cluster`, promoted onto the line — **read by the browser's arm and not by
+        /// Alerts'**, which has no room left for it (see the literals in [`App::footer`]).
+        switch: bool,
+        /// **`esc` is about to clear the namespace rather than the text** —
+        /// [`Filters::clears`]'s answer, so this line names the field that key really empties.
+        namespace: bool,
+        /// **Which pane is empty, because the two do not offer the same keys**
+        /// (`screens/states.md` § The filter hides every row, `k8s-admin`, 2026-09-18).
+        ///
+        /// Alerts keeps `↑↓ move` and `⏎ open` — § *Nothing is broken*'s own reasoning, that the
+        /// sidebar's rows are still there to move across and that Alerts is where a reader lands;
+        /// the browser drops them, § *An empty kind in the browser*'s own, that the cursor is
+        /// already inside one kind's table and an empty table is nothing to move across. **A
+        /// mistyped filter would otherwise leave the screen with the most wrong in the cluster
+        /// offering fewer keys than the clean one.**
+        browsing: bool,
+    },
     /// **Rows to move across and open, and no mutating key** — the states `screens/widgets.md`
     /// § 2a's closed mode list groups as *ordinary, mutations withheld*: nothing is selected, the
     /// link is down or the login has expired, no time on the page can be trusted, or writes are
@@ -1990,18 +2144,46 @@ pub enum Offer {
 }
 
 impl App {
-    /// **`q` — refused while a write is in flight**, and only then (NOTES § D12,
-    /// `screens/dialogs.md` § *While the call is running*). Quitting mid-`PATCH` would leave the
-    /// audit log holding an attempt with no result.
+    /// **`q` — refused while a write is in flight, and not a command at all while a filter is
+    /// being typed** (NOTES § D12, `screens/dialogs.md` § *While the call is running*,
+    /// `screens/widgets.md` § 2b). Quitting mid-`PATCH` would leave the audit log holding an
+    /// attempt with no result; `q` typed into a filter is the letter `q`, which is why the typing
+    /// footer names `⏎` and `esc` and nothing else.
+    ///
+    /// **The two are not the same answer wearing one word.** A write in flight *refuses* the key
+    /// and says so; typing has not refused anything, it has taken the whole keyboard as text —
+    /// which is why the caller asks this before routing a key rather than drawing anything from
+    /// it.
     pub fn may_quit(&self) -> bool {
-        self.changing.is_none()
+        self.changing.is_none() && self.typing.is_none()
     }
 
-    /// **`X` — unbound while a modal is open, and while a write is in flight** (NOTES § D12,
-    /// § D16). Switching clusters under an open confirmation is how a dialog ends up naming an
-    /// object on a cluster it was never read from.
+    /// **`X` — unbound while a modal is open, while a write is in flight, and while a filter is
+    /// being typed** (NOTES § D12, § D16, `screens/widgets.md` § 2b). Switching clusters under an
+    /// open confirmation is how a dialog ends up naming an object on a cluster it was never read
+    /// from; `X` is also an ordinary capital letter, and a reader typing one into `/` is not asking
+    /// to leave the cluster.
     pub fn may_switch_cluster(&self) -> bool {
-        self.modal.is_none() && self.changing.is_none()
+        self.modal.is_none() && self.changing.is_none() && self.typing.is_none()
+    }
+
+    /// **The buffer `/` or `n` has focus on, or `None` while nothing is being typed** — the one
+    /// place [`Self::typing`] becomes a field, so the footer's label, `esc`'s word and the keys
+    /// that edit it cannot pick different halves of [`Filters`] (`screens/widgets.md` § 2b).
+    pub fn typed(&self) -> Option<&Input> {
+        match self.typing? {
+            Typing::Text => Some(&self.filters.text),
+            Typing::Namespace => Some(&self.filters.namespace),
+        }
+    }
+
+    /// [`Self::typed`], for the keys that edit it — every printable one through [`Input::push`]
+    /// and `⌫` through [`Input::pop`].
+    pub fn typed_mut(&mut self) -> Option<&mut Input> {
+        match self.typing? {
+            Typing::Text => Some(&mut self.filters.text),
+            Typing::Namespace => Some(&mut self.filters.namespace),
+        }
     }
 
     /// **A switch was made, and nothing the reader did on the old cluster survives it in [`App`] or
@@ -2046,8 +2228,14 @@ impl App {
     /// audit log and an empty pane both land here as *not `Act`*, which is invariant 2's
     /// *unreachable, not merely unbound* — the bar `--read-only` is held to — instead of a banner
     /// over live keys.
+    /// **And no key is a command while a filter is being typed** (`screens/widgets.md` § 2b):
+    /// `s` and `r` are letters a filter can legitimately hold, the typing footer names neither,
+    /// and *a key that is not on the line cannot be pressed either* is this method's whole job.
     pub fn may_mutate(&self, offer: Offer) -> bool {
-        self.modal.is_none() && self.changing.is_none() && matches!(offer, Offer::Act)
+        self.modal.is_none()
+            && self.changing.is_none()
+            && self.typing.is_none()
+            && matches!(offer, Offer::Act)
     }
 
     /// **The footer — the keys valid right now, and the right-aligned zone beside them**
@@ -2145,12 +2333,35 @@ impl App {
     /// ([`Picker::inert`]). Empty everywhere else, and read by that one arm.
     pub fn footer(
         &self,
-        detail: bool,
+        containers: Option<usize>,
         offer: Offer,
         refused: Refused,
-        changing: &str,
+        cut: &str,
         contexts: &[Choice],
     ) -> (Cow<'static, str>, &'static str) {
+        // **Typing answers before every other arm, because while a filter has focus the ordinary
+        // key set is not valid at all** (`screens/widgets.md` § 2b — *the footer is fully
+        // replaced, not curated*). It is the in-flight line's move for the opposite reason: there
+        // the keys are real and inactionable, here they are not keys.
+        //
+        // **The combination with any arm below is unreachable rather than merely undrawn**, and
+        // this is stated for the reason the modal arms below state the same thing: `?`, `X`, `s`
+        // and `⏎`-into-Detail are all characters while a filter has focus, so nothing can open
+        // over a typing session — and if Phase 12's wiring ever slips, the honest line to draw is
+        // the one that says how to get out of the mode the reader is in.
+        if let Some(field) = self.typing {
+            // **`esc`'s second word follows the field with focus, and drops to `cancel` once that
+            // field's own buffer is empty** — the picker's own rule, on the field the reader is
+            // looking at rather than on a global order (NOTES § D264 rulings 27 and 31).
+            let leave = match self.typed().is_some_and(Input::is_empty) {
+                true => "cancel".to_owned(),
+                false => format!("clear {}", field.label()),
+            };
+            return (
+                Cow::Owned(format!("{}: {cut}  ⏎ done  esc {leave}", field.prompt())),
+                "",
+            );
+        }
         // **`Help` is the one modal that keeps `q quit` — except over a call in flight, when the
         // key it names is refused** (`screens/help.md` § *While the call is running*,
         // `screens/widgets.md` § 2a). It is dropped and not marked `q no quit`: the `no` this
@@ -2209,6 +2420,19 @@ impl App {
                 };
                 return (Cow::Owned(keys), "");
             }
+            // **The container picker's closed set** (`screens/detail.md` § Choosing a container).
+            // Every row can be landed on — a container is always pickable — so `⏎` is never inert
+            // here and there is no `/` on this box to clear.
+            Some(Modal::ContainerPick(_)) if picking(containers) => {
+                return (Cow::Borrowed("↑↓ move  ⏎ pick  esc cancel"), "");
+            }
+            // **Nothing left to pick, so the box is not drawn and it offers nothing** — the pod
+            // went away under the open picker, or its snapshot has not landed yet (§ The pod
+            // disappears while the picker is open, § The logs tab, before the container list is
+            // known). What the reader is looking at is the logs tab, so the logs tab's own footer
+            // is what falls through below. **No second way out is named**: `esc` closes this modal
+            // exactly as it closes the tab, which is what makes one word honest for both.
+            Some(Modal::ContainerPick(_)) => {}
             // **`esc` alone, and `X` is not on it** — `X` cannot fire under a modal (NOTES § D16
             // ruling 1), so the body's *"X takes you back"* is read after dismissing.
             Some(Modal::Unconnected { before, .. }) => {
@@ -2218,12 +2442,20 @@ impl App {
         }
         // **Exhaustive on both enums on purpose**: a fifth tab or a fourth view is a compile
         // error here rather than a screen that quietly draws the wrong keys.
-        let keys = match (detail, self.tab, self.view) {
-            (true, Tab::Logs, _) => "[ ] tabs  f follow  c container  esc back  ? all keys  q quit",
-            (true, Tab::Describe | Tab::Yaml | Tab::Events, _) => {
+        let keys = match (containers, self.tab, self.view) {
+            // **`c container` is on this line only where there is more than one answer**
+            // (`screens/detail.md` § Choosing a container: *a key that does nothing is a bug
+            // already shipped once here*). One container, and a pod whose snapshot has not
+            // reached the store yet, draw the same line — k8rs does not know of a second
+            // container in either case, and guessing is what the header's own vitals refuse.
+            (Some(many), Tab::Logs, _) if picking(Some(many)) => {
+                "[ ] tabs  f follow  c container  esc back  ? all keys  q quit"
+            }
+            (Some(_), Tab::Logs, _) => "[ ] tabs  f follow  esc back  ? all keys  q quit",
+            (Some(_), Tab::Describe | Tab::Yaml | Tab::Events, _) => {
                 "[ ] tabs  esc back  ? all keys  q quit"
             }
-            (false, _, View::Analysis(_)) => "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+            (None, _, View::Analysis(_)) => "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
             // **One line replaces the whole footer, and only on the two modes that name `s` and
             // `r`** — `screens/dialogs.md` § *While the call is running* and its § *Detail tabs
             // and Analysis keep their own footer, not this line*, NOTES § D20. The guard sits
@@ -2237,22 +2469,59 @@ impl App {
             // glance as `⏎ open?` and every other key on every footer carries a label. `↑↓ move`
             // and `⏎ open` stay, because *navigation stays free* is the one thing this state
             // promises and dropping them to buy the name more room would hide it.
-            (false, _, View::Alerts | View::Resources(_)) if self.changing.is_some() => {
+            (None, _, View::Alerts | View::Resources(_)) if self.changing.is_some() => {
                 return (
-                    Cow::Owned(format!(
-                        "↑↓ move  ⏎ open  ? keys  ·  changing {changing} first"
-                    )),
+                    Cow::Owned(format!("↑↓ move  ⏎ open  ? keys  ·  changing {cut} first")),
                     "",
                 );
             }
             // **The seven lines `screens/states.md` draws, as seven literals** ([`Offer`]).
-            (false, _, View::Alerts | View::Resources(_)) => match offer {
+            (None, _, View::Alerts | View::Resources(_)) => match offer {
                 // **`s` and `r` are on none of these six and are never marked `no` on one**
                 // ([`Offer`]): nothing here asked `may_i` anything.
                 Offer::Nothing { switch: false } => "? all keys  q quit",
                 Offer::Nothing { switch: true } => "X switch cluster  ? all keys  q quit",
                 Offer::Filter { switch: false } => "/ filter  ? all keys  q quit",
                 Offer::Filter { switch: true } => "X switch cluster  / filter  ? all keys  q quit",
+                // **Six more literals** (`screens/states.md` § The filter hides every row). Two
+                // things vary and a third is deliberately absent. `esc`'s own word follows the
+                // field it is about to clear — the picker's wording for this state, not a second
+                // vocabulary. **Alerts keeps the cursor keys and the browser drops them**, each
+                // following its own zero-row precedent ([`Offer::Hidden::browsing`]).
+                //
+                // **And `X switch cluster` is not on Alerts' two** — `screens/states.md` § The
+                // filter hides every row carries both the arithmetic and the reason, and this
+                // file keeps no second copy of either (CLAUDE.md § A decision is written once).
+                Offer::Hidden {
+                    namespace: false,
+                    browsing: false,
+                    ..
+                } => "↑↓ move  ⏎ open  / filter  esc clear filter  ? all keys  q quit",
+                Offer::Hidden {
+                    namespace: true,
+                    browsing: false,
+                    ..
+                } => "↑↓ move  ⏎ open  / filter  esc clear namespace  ? all keys  q quit",
+                Offer::Hidden {
+                    switch: false,
+                    namespace: false,
+                    browsing: true,
+                } => "/ filter  esc clear filter  ? all keys  q quit",
+                Offer::Hidden {
+                    switch: true,
+                    namespace: false,
+                    browsing: true,
+                } => "X switch cluster  / filter  esc clear filter  ? all keys  q quit",
+                Offer::Hidden {
+                    switch: false,
+                    namespace: true,
+                    browsing: true,
+                } => "/ filter  esc clear namespace  ? all keys  q quit",
+                Offer::Hidden {
+                    switch: true,
+                    namespace: true,
+                    browsing: true,
+                } => "X switch cluster  / filter  esc clear namespace  ? all keys  q quit",
                 Offer::Move { switch: false } => "↑↓ move  ⏎ open  / filter  ? all keys  q quit",
                 Offer::Move { switch: true } => {
                     "↑↓ move  ⏎ open  X switch cluster  / filter  ? all keys  q quit"
@@ -2305,8 +2574,51 @@ impl App {
     /// connected to go back to, so the answer is `true` and the modal is left as it was for the
     /// loop to exit over. `esc` on the startup failure reopens the picker it came from — two
     /// presses, never a dead end.
+    /// **While a filter is being typed `esc` acts on the field that has focus, and that is a
+    /// different rule from the one above rather than an exception to it** (`screens/widgets.md`
+    /// § 2b). The buffer `/` or `n` opened is not empty → it is emptied, the list re-widens and
+    /// typing stays open on it; it is already empty → typing closes and the *other* field is left
+    /// exactly as it was. The reader is looking at one field and `esc`'s own word beside it names
+    /// that one; a global order here would clear a field that is not on screen.
+    /// **A detail tab open over the list is `esc back`, and it clears no filter** — the filter is
+    /// exactly what `screens/widgets.md` § 2b draws surviving that press, because Detail is drawn
+    /// *over* a view and going back is not going somewhere else. `containers` is that fact, the
+    /// same value [`App::footer`] is handed and for the same reason: *whether* a tab is open is
+    /// `crate::ui::Screen::detail`'s and this file cannot see it (`k8s-admin`, 2026-09-18 — this
+    /// method had the `None`-modal arm and not the fact, so `esc` out of Detail cleared the filter
+    /// the page promises survives it).
+    ///
+    /// **A container picker with nothing left to pick is not a level, and this is where it stops
+    /// existing.** The box is not drawn once the pod's containers have gone
+    /// (`screens/detail.md` § The pod disappears while the picker is open) and the footer under it
+    /// is the logs tab's — so a press this method spent closing an invisible modal was a key that
+    /// visibly did nothing, which is the defect that whole section exists to avoid. It is dropped
+    /// here rather than counted, and the press goes on to do what the drawn footer promises.
+    ///
+    /// **What this method cannot tell the caller afterwards, and the caller must therefore ask
+    /// before pressing** (`k8s-admin`, 2026-09-18). Both rows leave [`App::modal`] `None`:
+    ///
+    /// - a **drawn** picker was cancelled — its footer said `esc cancel`, so the detail tab
+    ///   behind it stays open;
+    /// - an **undrawn** one was dropped — the footer the reader was looking at was the logs tab's
+    ///   own `esc back`, so the tab closes.
+    ///
+    /// `modal.is_some()` before the call is true in both, so it is not the discriminator either.
+    /// [`picking`] is, and it is `pub` for exactly this: **ask it before the press**, and close
+    /// the detail tab only where it answered `false`. A caller that read `modal` instead closes
+    /// the tab out from under a picker the reader had just cancelled.
     #[must_use = "`true` is the startup picker's `esc`, which ends the run"]
-    pub fn escape(&mut self) -> bool {
+    pub fn escape(&mut self, containers: Option<usize>) -> bool {
+        if matches!(self.modal, Some(Modal::ContainerPick(_))) && !picking(containers) {
+            self.modal = None;
+        }
+        if self.typing.is_some() {
+            match self.typed_mut() {
+                Some(buffer) if !buffer.is_empty() => buffer.clear(),
+                _ => self.typing = None,
+            }
+            return false;
+        }
         match self.modal.take() {
             Some(Modal::ContextPick(mut picker)) if !picker.filter.is_empty() => {
                 picker.filter.clear();
@@ -2321,8 +2633,17 @@ impl App {
                 ..
             }) => self.modal = Some(Modal::ContextPick(picker)),
             Some(_) => {}
-            None if self.filters.text.is_empty() => self.filters.namespace.clear(),
-            None => self.filters.text.clear(),
+            // **A detail tab is open, so this press is `esc back` and the filters are untouched**
+            // (`screens/widgets.md` § 2b). The caller closes the tab; `App` holds no field for it.
+            None if containers.is_some() => {}
+            // **Narrow to wide, and the order is [`Filters::clears`]'s so the footer that names
+            // the field and the key that empties it are one answer** (`screens/states.md` § The
+            // filter hides every row).
+            None => match self.filters.clears() {
+                Some(Typing::Text) => self.filters.text.clear(),
+                Some(Typing::Namespace) => self.filters.namespace.clear(),
+                None => {}
+            },
         }
         false
     }
@@ -2334,6 +2655,12 @@ impl App {
     /// they were reading — the group is a disclosure triangle, not a destination — and re-opening
     /// the kind already open leaves it too. Resetting on every press was this method's first
     /// draft and it threw away the cursor of the pane it had not touched.
+    ///
+    /// **Both filters go with the cursor, and for the same reason** (`screens/widgets.md` § 2b):
+    /// `web` typed for Alerts' cards means nothing against a ConfigMap table, and `pay` typed for
+    /// one kind's rows is not a claim about the next kind the sidebar opens. **A list drawn *over*
+    /// another one is not this** — Detail, Help, every dialog and the container picker keep both
+    /// fields, because none of them is a different list and none of them comes through here.
     ///
     /// A [`NavItem::Header`] cannot be passed here by a cursor that only ever walks
     /// [`selectable`]'s answer; it is matched anyway, doing nothing, because *unreachable* and
@@ -2351,6 +2678,12 @@ impl App {
         }
         if self.view != before {
             self.content = Cursor::default();
+            self.filters = Filters::default();
+            // **The session goes with the buffer it was typing into.** Leaving it open would put
+            // focus on a field that had just been emptied under it, on a list it was never about
+            // — and every printable key would still be text, on a screen whose footer says
+            // otherwise (`k8s-admin`, 2026-09-18).
+            self.typing = None;
         }
     }
 
@@ -2524,13 +2857,27 @@ pub fn container_state(state: Option<&ContainerState>) -> (String, Option<String
 /// count and is drawn as none rather than as its absolute value. **A container the kubelet has not
 /// reported on has no count at all**, which is not a zero it chose.
 pub fn restarts(status: Option<&ContainerSnapshot>) -> String {
+    match restart_count(status) {
+        counted if counted.is_empty() => counted,
+        counted => format!(", {counted}"),
+    }
+}
+
+/// **`3 restarts`, or nothing at all** — the same count [`restarts`] glues onto the end of a
+/// sentence, without the comma that glues it there.
+///
+/// **One source and two spellings, rather than two counts.** The container picker draws this in a
+/// column of its own (`screens/detail.md` § Choosing a container) — `running        3 restarts` —
+/// where a leading comma is punctuation attached to nothing, and describe draws it at the end of a
+/// line where it is not.
+pub fn restart_count(status: Option<&ContainerSnapshot>) -> String {
     match status
         .map(|container| usize::try_from(container.restarts).unwrap_or(0))
         .unwrap_or(0)
     {
         0 => String::new(),
-        1 => ", 1 restart".to_owned(),
-        counted => format!(", {counted} restarts"),
+        1 => "1 restart".to_owned(),
+        counted => format!("{counted} restarts"),
     }
 }
 

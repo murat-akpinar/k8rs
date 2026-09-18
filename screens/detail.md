@@ -231,18 +231,18 @@ what it saw.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│   ┌ payments/web-7d9f4 — pick a container ─────────────────────┐   │
-│   │                                                            │   │
-│   │  ▸ app                   running                           │   │
-│   │    sidecar-envoy         running        3 restarts         │   │
-│   │    init-migrate          done                              │   │
-│   │                                                            │   │
-│   │  sidecar-envoy restarted 3 times. ⇧p on it shows           │   │
-│   │  the log from just before its last crash.                  │   │
-│   │                                                            │   │
-│   │         [ ⏎ pick ]       [ esc cancel ]                    │   │
-│   │                                                            │   │
-│   └────────────────────────────────────────────────────────────┘   │
+│   ┌ payments/web-7d9f4 — pick a container ──────────────────────┐  │
+│   │                                                             │  │
+│   │ ▸ app                                  running              │  │
+│   │   sidecar-envoy                        running   3 restarts │  │
+│   │   init-migrate                         done                 │  │
+│   │                                                             │  │
+│   │  sidecar-envoy restarted 3 times. ⇧p shows the log from     │  │
+│   │  before that restart, if the kubelet still has it.          │  │
+│   │                                                             │  │
+│   │               [ ⏎ pick ]       [ esc cancel ]               │  │
+│   │                                                             │  │
+│   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app                        │
@@ -251,11 +251,20 @@ what it saw.
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-Same list-picker shape as [the cluster picker](context.md#the-picker) —
-`▸` for the row that would open, one line per entry, a state word instead of
-a tag column. **Restart count is shown next to a container that has one**,
-because that is exactly the signal that makes `⇧p` worth pressing, and the
-line under the list spells out which key does it and on which container.
+**Drawn to the renderer's own layout, not the shape this section used to
+draw** — measured off the built box
+(`reports/2026-09-18-filter-and-container-picker.md` §§ 1–3): the name is
+flexible and takes whatever the row has left; the state word and the
+restart count are fixed-width columns, each sized to the *widest* value
+either one holds anywhere in the list, pinned toward the right edge. This is
+[the cluster picker](context.md#the-picker)'s own tag-column shape, read
+literally rather than by analogy — "the row is three slots, left to right,
+and only the first one is flexible" is true of this box too, `▸` and the
+name where the picker has a bare name, the state word and the restart count
+together where it has one fixed-width tag. **Restart count is shown next to
+a container that has one**, because that is exactly the signal that makes
+`⇧p` worth pressing, and the line under the list spells out which key does
+it and on which container.
 
 **A single-container pod has nothing to pick, so the picker is not offered
 at all** — invariant: a key that does nothing is a bug already shipped once
@@ -266,6 +275,188 @@ here.
 | Header line | `container: app ▾   previous log: off` | `container: app   previous log: off` — no `▾`, nothing opens |
 | Footer | `… c container …` | `c container` is gone from the footer |
 | `c` | opens the picker above | not bound; there is only ever one answer |
+
+**Restart hints never claim a crash, and never promise the log is still
+there.** A restart is not always a crash — `exitCode: 0` under
+`restartPolicy: Always` restarts a container that asked to stop on purpose —
+and `kubectl logs --previous` can 404 once the kubelet has rotated the old
+log out from under it. *"…shows the log from before that restart, if the
+kubelet still has it"* is the wording every mockup on this page now uses
+for that key, in place of the old *"the log from just before its last
+crash"*, which claimed both things this paragraph just ruled out. This is
+the one wording change on this page R4.4 asks for; the same false claim
+still stands in [help.md](help.md)'s own key map (*"logs, with the log from
+before a crash"*) and in this file's own logs-tab mockup, above — both are
+the same defect in a different place and belong to a box that can touch
+those files, not this one.
+
+**More containers than the box shows scroll under `↑`/`↓`, but this box does
+not grow with the terminal the way the cluster picker's does — it is capped
+the way `Confirm`, `Refused` and `Gone` already are**
+([widgets.md § 5](widgets.md#5-the-modal-layer)), because it is drawn the
+same way they are: a small nested box centred over the frame, not
+`ContextPick`'s own full-width shape that "grows with the terminal rather
+than stopping at a fixed dialog height"
+([context.md § More contexts than fit](context.md#more-contexts-than-fit)) —
+that sentence describes a different box and does not transfer here just
+because both are pickers. **24 is the ceiling either way**
+([widgets.md § 5](widgets.md#5-the-modal-layer)), so the number to count is
+how many rows this box's own fixed chrome leaves under it, not whether a
+taller terminal buys more — nothing is taller than the floor this page
+draws at, which is the contradiction a fifth-container "on a narrower
+terminal" parenthesis used to hide.
+
+Counted off the mockup above, line by line and never the three that are the
+list itself: the header; the outer frame's top and bottom border; the blank
+row inside the outer frame before the nested box and the one after it; the
+nested box's own top and bottom border; the blank row inside the nested box
+before the list; the blank row between the list and the restart hint; the
+hint's own two lines; the blank row between the hint and the buttons; the
+button row; the blank row after the buttons; the log strip's two separators
+and its one command line; and the footer. **Eighteen rows that are never
+the list** — leaves **six** for it before the 24-row ceiling is reached.
+Three, as the mockup above draws, is comfortable.
+
+**A seventh container is what puts a `Scrollbar` on the list's right
+edge — and, measured, that column used to be the widest row's own last
+one, not a reserved one of its own**
+(`reports/2026-09-18-filter-and-container-picker.md` § 3): `10 restarts`
+drew as `10 restart`, its final character silently the scrollbar's own
+paint. **The list now reserves that column before the state word and the
+restart count are measured, whenever it is going to scroll at all** — one
+column narrower to work with, so nothing the row draws can ever sit where
+the scrollbar is about to be, the same reasoning
+[widgets.md § 2](widgets.md#2-element--widget) already gives for drawing a
+`Scrollbar` only once content exceeds the viewport, extended to the column
+budget the row math itself uses rather than only to whether the widget
+appears at all. Six containers with restarts, one scrolled out of view:
+
+```
+   ┌ payments/web-7d9f4 — pick a container ──────────────────────┐
+   │                                                            ║│
+   │ ▸ app                            not started               ║│
+   │   migrate                        failed        10 restarts ║│
+   │   sidecar-0                      failed         4 restarts ║│
+   │   sidecar-1                      failed         4 restarts ║│
+   │   sidecar-2                      failed         4 restarts ║│
+   │   sidecar-3                      failed         4 restarts ║│
+   │                                                            ║│
+   │ migrate restarted 10 times. ⇧p shows the log from before   ║│
+   │ that restart, if the kubelet still has it.                 ║│
+   │                                                            ║│
+   │              [ ⏎ pick ]       [ esc cancel ]               ║│
+   │                                                            ║│
+   └─────────────────────────────────────────────────────────────┘
+```
+
+Six or seven containers on one pod is not the ordinary case — three or four
+already is — but it is a real one (a sidecar per concern is how a service
+mesh, a log shipper and a metrics exporter add up), and the number above is
+what a review checks any width against rather than a drawing.
+
+**A container name too long for its column is a second call site of the
+cluster picker's own name-slot cut, not a new one** — front-cut 6, one `…`,
+no word to walk back to, because a name is one token
+([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)):
+`istio-proxy` and `istio-proxy-metrics` would otherwise draw identically at a
+narrow enough column, the same collision two ARN-named contexts already
+motivate that rule for. **This is the name's own column giving way to a
+name too long for it; the next section is the opposite direction — a state
+word long enough to try to take the name's column instead.**
+
+### When a container's own state is what does not fit
+
+`views::container_state` returns *"needs a ConfigMap or Secret that does
+not exist"* for `CreateContainerConfigError` — 47 columns, measured
+against a real capture
+(`reports/2026-09-18-filter-and-container-picker.md` § 1). Handed to the
+row math as written, the state word is what `word` is computed from, so a
+single container in this state pushed `slot` — the name's own column —
+negative, clamped to **one** column, and drew two containers with no
+readable name at all: `▸     running` and `      needs a ConfigMap or
+Secret that does not exist`, neither `trigger` nor `bystander` anywhere on
+the row.
+
+**The name never gives way — a picker exists to name things — so the state
+word does instead, and it is the state that was already going to run long
+before this box ever meets a screen this narrow.** The name column is
+guaranteed a floor of **20 columns** regardless of how long any state word
+in the list is — comfortable for the names already on this page
+(`sidecar-envoy` is 13, `istio-proxy-metrics` is 19) and a name that still
+does not fit it front-cuts the same as always, above. Once that floor is
+spent, whatever room the restart-count column and the two gaps leave is
+what the state word gets, and a state word wider than that gives way —
+back-cut at a word boundary, one `…`, the same shape
+[widgets.md § 7](widgets.md#7-text-that-came-from-the-api) already gives
+the Alerts card's own evidence line, because both are a sentence a reader
+loses nothing from losing the tail of: the object's own `describe` tab has
+the whole reason, one `esc` and one `d` away, the same way a card's full
+evidence is one `⏎` away.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│   ┌ payments/web-7d9f4 — pick a container ──────────────────────┐  │
+│   │                                                             │  │
+│   │ ▸ trigger                running                 3 restarts │  │
+│   │   bystander              needs a ConfigMap or…   3 restarts │  │
+│   │                                                             │  │
+│   │  trigger restarted 3 times. ⇧p shows the log from before    │  │
+│   │  that restart, if the kubelet still has it.                 │  │
+│   │                                                             │  │
+│   │               [ ⏎ pick ]       [ esc cancel ]               │  │
+│   │                                                             │  │
+│   └─────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl logs web-7d9f4 -n payments -c trigger                    │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move   ⏎ pick   esc cancel                                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Both names read in full. `bystander`'s own reason is cut, not guessed at or
+dropped — `needs a ConfigMap or…` is still enough of the sentence that a
+reader who has met the plain-language translation once already recognises
+it, and the whole of it is one keypress away.
+
+### The pod disappears while the picker is open
+
+The same watch that lets [dialogs.md § The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open)
+catch a deleted pod under a Confirm dialog is already running under this
+picker too — it is a `Modal` like any other, and the pod it is about can stop
+existing while it is up. This is **not** a second `Gone` variant: picking a
+container is not a pending mutation, so the reassurance a Confirm's `Gone`
+carries — *"Nothing was changed"* — has nothing to reassure about here, and a
+modal that said it anyway would raise a question ("changed what?") nobody
+asked. The picker instead closes itself and hands back to exactly the state
+[§ No logs yet, no previous run, and the pod disappearing mid-stream](#no-logs-yet-no-previous-run-and-the-pod-disappearing-mid-stream)
+below already draws for the same fact reaching the logs tab directly: the
+`--- stream ended: pod deleted ---` marker in the pane, the same one-sentence
+explanation, and the same pointer to the replacement through `esc` then
+`⏎`. One fact, reached two ways, is one screen, not two — a picker-shaped
+"already gone" box would be a second sentence for something this page
+already says correctly.
+
+### The logs tab, before the container list is known
+
+The Resources browser's `Table` and the permanent Pod watch behind
+`rules::PodSnapshot` are two different streams — a Table row names a pod the
+moment discovery's own `LIST` returns it; the matching `PodSnapshot`,
+containers included, lands whenever the permanent watch's own event for that
+pod is processed, which is not the same instant. A row can be on screen,
+selectable, and opened before the store holds a snapshot for it.
+
+Detail treats that gap exactly like the single-container row it already
+draws: `c container` is not offered and the header carries no `▾`, because
+k8rs does not yet know there is more than one container to pick from any
+more than it would for a pod that only ever has one. The container name
+itself is blank rather than guessed — the same rule the header's own vitals
+already follow ([widgets.md § 1a](widgets.md#1a-the-header-row)) — until
+`PodSnapshot` answers, at which point the ordinary rules take over: one
+container keeps the header exactly as it was, more than one gains `▾` and
+`c` and the picker above becomes reachable.
 
 ### No logs yet, no previous run, and the pod disappearing mid-stream
 

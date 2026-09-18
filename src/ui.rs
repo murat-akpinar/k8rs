@@ -46,7 +46,9 @@ use crate::analysis::{Badge, Report, Row as ReportRow};
 use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, Tag};
 use crate::rules::{ContainerSnapshot, Finding, ObjectId, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
-use crate::views::{self, App, Card, NavItem, Offer, Pane, Refused, Tab, View};
+use crate::views::{
+    self, App, Card, Cursor, Filters, Input, NavItem, Offer, Pane, Refused, Tab, Typing, View,
+};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
@@ -81,6 +83,13 @@ const PAD: u16 = 2;
 /// from being read as one token** (`screens/resources.md` § Browsing every namespace, the clip
 /// point). One column would satisfy that rule; two is what every mockup on both screens draws.
 const GAP: usize = 2;
+
+/// **The gap between the facts on the at-rest filter line** — `filter: "web"   esc clears it`,
+/// read off `screens/widgets.md` § A committed filter is drawn at rest, too. **Three and not
+/// [`GAP`]**: that one is the gap between two columns of a table, and this row is a run of
+/// independent short facts, which is the same three columns `screens/detail.md`'s own container
+/// block puts between a name and the word after it.
+const FILTER_GAP: &str = "   ";
 
 /// **The gutter a band's glyph sits in — two columns whether or not there is a glyph**, so a
 /// banded row and a plain one start at the same column (`screens/alerts.md`,
@@ -173,6 +182,38 @@ const MODAL_MARGIN: &str = "  ";
 /// **The two lines § Scale draws its consequence on** — and the test for whether a `Confirm` box
 /// can stay at [`CONFIRM_BOX`] (`screens/dialogs.md` § Scale, *the box draws these as two lines*).
 const CONSEQUENCE_LINES: usize = 2;
+
+/// **The columns the container picker guarantees a name, whatever its state word costs**
+/// (`screens/detail.md` § When a container's own state is what does not fit).
+///
+/// **Twenty, and it is `tui-designer`'s number rather than a round one**: measured against the
+/// names that page's own mockups draw — `sidecar-envoy` is 13 and `istio-proxy-metrics` is 19, so
+/// the floor clears the longest of them by a column, and a name past it front-cuts the way every
+/// name on this product does rather than disappearing. It is a floor and not a width: an ordinary
+/// pod, whose state words are `running` and `done`, gives the name far more than this.
+///
+/// **What it is measured *against* is the failure it prevents**, not the names alone: with the
+/// name column taken as the plain remainder, one `CreateContainerConfigError` container — 47
+/// columns of translated state — left it at **one** column, and `front(name, 1, "…")` draws
+/// nothing at all (`reports/2026-09-18-filter-and-container-picker.md` § 1).
+const NAME_FLOOR: usize = 20;
+
+/// **The rows the zero-match sentence is drawn on** (`screens/states.md` § The filter hides every
+/// row, which draws it on one).
+///
+/// **Three and not one, measured against the longest sentence a real screen can build**: the kind
+/// plural is the server's word and both filter values are the reader's, so
+/// `No validatingadmissionpolicybindings match "payments-web" in a namespace like
+/// "openshift-cluster-node-tuning-operator".` is 129 columns — three rows of a 53-column pane —
+/// and every character of it is a fact the reader needs. Past that the values are longer than
+/// anybody types on purpose, and what is drawn is marked.
+const MATCH_LINES: usize = 3;
+
+/// **The two lines the container picker's restart hint is drawn on** — `screens/detail.md`
+/// § Choosing a container draws it on exactly two, and the eighteen fixed rows that file counts
+/// are counted with both of them. It is a ceiling as well as a drawing: the rows left for the list
+/// are what this leaves, so a hint that grew would take the list with it.
+const HINT_LINES: usize = 2;
 
 /// **The rows a nested box has between its own borders**, at the 80×24 floor this product is
 /// drawn to (`screens/widgets.md` § 5). § Restart's paused variant and § Drain both land on
@@ -872,6 +913,22 @@ fn found(alerts: &Pane<Vec<Card>>) -> &[Card] {
     }
 }
 
+/// **The containers `c` picks between, in `spec` order** — empty where no detail tab is open, and
+/// empty where one is open over a pod whose `crate::rules::PodSnapshot` has not reached the store
+/// yet (`screens/detail.md` § The logs tab, before the container list is known).
+///
+/// **One read, so the logs header's `▾`, the footer's `c container` and the picker's own box
+/// cannot disagree about whether there is anything to pick.** A pod deleted under an open picker
+/// arrives here as the same emptiness a single-container pod does, which is what closes the box
+/// (§ The pod disappears while the picker is open) — there is no second fact to carry and no
+/// second `Gone` to draw.
+fn containers<'a>(screen: &Screen<'a>) -> &'a [(&'a str, Option<&'a ContainerSnapshot>)] {
+    match screen.detail.map(|open| open.logs) {
+        Some(Pane::Ready(logs) | Pane::Denied(_, logs)) => logs.pod.containers,
+        _ => &[],
+    }
+}
+
 // --- WHAT A FRAME IS DRAWN FROM END ---
 
 // --- THE FRAME START ---
@@ -1022,31 +1079,52 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let dim = screen.fg(theme::DIM);
     let row = indented(area);
     let offer = offered(app, screen);
-    let (line, quit) = app.footer(
-        screen.detail.is_some(),
-        offer,
-        screen.refused,
-        "",
-        screen.contexts,
-    );
-    let keys = match &app.changing {
-        Some(object) => {
-            let room = usize::from(row.width).saturating_sub(width(&line));
+    let picks = screen.detail.map(|_| containers(screen).len());
+    let (line, quit) = app.footer(picks, offer, screen.refused, "", screen.contexts);
+    let room = usize::from(row.width).saturating_sub(width(&line));
+    // **Two arms interpolate one caller-cut string and never both in one frame** — a filter has
+    // focus, or a write is on the wire. `s` is a character while a filter is being typed, so a
+    // mutation cannot be started from inside one, and `/` is not on the in-flight line.
+    let (keys, caret) = match (app.typing, &app.changing) {
+        // **The buffer gives way and the two hints never do** (`screens/widgets.md` § 2b): `⏎
+        // done  esc clear filter` is what says how to leave, and a buffer that pushed it off the
+        // line would answer *what did I type* at the cost of *how do I get out*. Front-cut, so
+        // the cursor stays the last column drawn — [`shortened`], the same end a name gives way
+        // from and the same end a shell's own line editor keeps.
+        (Some(field), _) => {
+            let shown = shortened(app.typed().map_or("", Input::text), room);
+            let caret = width(field.label()) + width(": ") + width(&shown);
+            let line = app
+                .footer(picks, offer, screen.refused, &shown, screen.contexts)
+                .0;
+            (line, Some(caret))
+        }
+        (None, Some(object)) => (
             app.footer(
-                screen.detail.is_some(),
+                picks,
                 offer,
                 screen.refused,
                 &name_cut(object.namespace.as_deref(), &object.name, room),
                 screen.contexts,
             )
-            .0
-        }
-        None => line,
+            .0,
+            None,
+        ),
+        (None, None) => (line, None),
     };
     let [left, right] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(width(quit) as u16)]).areas(row);
     frame.render_widget(Paragraph::new(Line::styled(quit, dim)), right);
     frame.render_widget(Paragraph::new(Line::styled(keys, dim)), left);
+    // **The cursor is the terminal's own and not a drawn character** (`screens/widgets.md` § 2b)
+    // — it is the only thing on this frame that says *the keyboard is going here*, and a `_` in a
+    // footer is a character a filter could legitimately contain. **Clamped into the row it
+    // belongs to**, because a cursor outside its `Rect` is a cursor in somebody else's line.
+    if let Some(caret) = caret {
+        let at = u16::try_from(caret).unwrap_or(u16::MAX);
+        let last = left.x.saturating_add(left.width.saturating_sub(1));
+        frame.set_cursor_position((left.x.saturating_add(at).min(last), left.y));
+    }
 }
 
 /// **Which footer shape this frame is in** ([`Offer`]) — the one place a screen becomes one, so the
@@ -1082,6 +1160,18 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
     if screen.detail.is_some() {
         return Offer::Move { switch: false };
     }
+    // **`/` and `n` are read here as well as in the pane, because the two have to agree about
+    // whether there is a row to act on** (`screens/states.md` § The filter hides every row): a
+    // footer offering `⏎ open` over a list a filter emptied is the broken promise this value
+    // exists to refuse, and `crate::views::App::may_mutate` is handed the same answer.
+    // **Only a list that *has* rows can reach [`Offer::Hidden`]** — a kind with no objects in it
+    // is [`Offer::Filter`]'s state and says something else entirely, and a healthy Alerts pane is
+    // `○ nothing is broken`'s.
+    let hidden = |browsing| Offer::Hidden {
+        switch,
+        namespace: app.filters.clears() == Some(Typing::Namespace),
+        browsing,
+    };
     let rows = match app.view {
         View::Analysis(_) => return Offer::Move { switch: false },
         View::Alerts => match screen.alerts {
@@ -1095,7 +1185,12 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
             // **Both answers are read the same way, and a refusal is not one of the reasons a key
             // is withheld** ([`Link`]): `Pane::Denied` carries whatever did come back, and a
             // namespace-scoped developer's cards are as selectable as anybody's.
-            Pane::Ready(cards) | Pane::Denied(_, cards) => !cards.is_empty(),
+            Pane::Ready(cards) | Pane::Denied(_, cards) => {
+                if !cards.is_empty() && shown_cards(app, cards).is_empty() {
+                    return hidden(false);
+                }
+                !cards.is_empty()
+            }
         },
         View::Resources(_) => match screen.browser {
             Pane::Loading => return Offer::Nothing { switch },
@@ -1105,7 +1200,12 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
             Pane::Ready(table) | Pane::Denied(_, table) if table.rows.is_empty() => {
                 return Offer::Filter { switch };
             }
-            Pane::Ready(_) | Pane::Denied(..) => true,
+            Pane::Ready(table) | Pane::Denied(_, table) => {
+                if shown_rows(app, table).is_empty() {
+                    return hidden(true);
+                }
+                true
+            }
         },
     };
     // **Four reasons, one line, and none of them a `Refused` mark**: nothing selected, and the
@@ -1387,6 +1487,15 @@ fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, scr
             refused(frame, body, *sent, fault, said.as_deref(), screen);
         }
         views::Modal::Gone { object, recreated } => gone(frame, body, object, *recreated, screen),
+        // **Nothing to pick is the box not being drawn at all** (`screens/detail.md` § The pod
+        // disappears while the picker is open): the pod went away under it, or its snapshot has
+        // not landed. What is left on screen is the logs tab [`content`] has already drawn — the
+        // stream's own ended marker — which is the one screen that fact already had.
+        views::Modal::ContainerPick(at) => {
+            if let Some(open) = screen.detail.filter(|_| containers(screen).len() > 1) {
+                container_pick(frame, body, at, open, screen);
+            }
+        }
         views::Modal::ContextPick(picker) => pick(frame, body, picker, screen),
         views::Modal::Unconnected {
             to,
@@ -2016,6 +2125,191 @@ fn pick(frame: &mut Frame, body: Rect, picker: &views::Picker, screen: &Screen) 
     scrollbar(frame, list, shown.len(), first, screen);
 }
 
+/// **The container picker** (`screens/detail.md` § Choosing a container, and when there is nothing
+/// to choose) — the same nested box every dialog is drawn in, centred over the body.
+///
+/// **Not [`pick`]'s shape, and that is the section's own ruling**: the cluster picker's box grows
+/// with the terminal, this one is capped at [`MODAL_ROWS`] the way `Confirm`, `Refused` and `Gone`
+/// are. The number to count is therefore what this box's own chrome leaves under that cap, which
+/// is what the list length below is derived from rather than written down — six rows with the
+/// restart hint drawn, which is the figure that file counts off its own mockup.
+///
+/// **Top to bottom**: the list, the sentence that says which container `⇧p` is worth pressing on,
+/// and the buttons, each a blank row from the next. The hint is left out where no container has
+/// restarted, because there is then nothing for it to point at.
+///
+/// **The restart count is measured off what is about to be drawn, the name is guaranteed
+/// [`NAME_FLOOR`] columns, and the state word takes what those two leave** — the reverse of the
+/// order this doc gave before the blocker below was found, and the inline comment beside the
+/// arithmetic has said so since (`k8s-admin`, 2026-09-18; NOTES § D216 — nothing mechanical
+/// reads a comment).
+///
+/// **The name gives way only to its own column and never to the state's**: a name past what the
+/// row has left front-cuts, `screens/widgets.md` § 7's sixth cut at its second call site, because
+/// `istio-proxy` and `istio-proxy-metrics` differ at the tail. A **state word** past what the name
+/// leaves back-cuts at a word boundary instead — two directions, two reasons, and
+/// `screens/detail.md` § When a container's own state is what does not fit rules which gives way
+/// to which: a picker exists to name things.
+///
+/// **`⏎` is never inert here**: every row is a container and every container can be picked, which
+/// is why this box has no dim button and no `/` of its own to clear.
+fn container_pick(frame: &mut Frame, body: Rect, at: &Cursor, open: &Detail, screen: &Screen) {
+    let rows = containers(screen);
+    let columns = room(CROWDED_BOX);
+    let text = screen.fg(theme::TEXT);
+    let anchors: Vec<Option<&str>> = rows.iter().map(|(name, _)| Some(*name)).collect();
+    let selected = at.selected(&anchors);
+
+    // **The state word is [`crate::views::container_state`]'s and the count is
+    // [`crate::views::restart_count`]'s** — describe's own two, so one pod cannot be said to be
+    // running on one screen and waiting on another.
+    let said: Vec<(String, String)> = rows
+        .iter()
+        .map(|(_, status)| {
+            (
+                views::container_state(status.map(|held| &held.state)).0,
+                views::restart_count(*status),
+            )
+        })
+        .collect();
+    // **The container the hint is about is the one with the most restarts, and the first of them
+    // where two tie** — that is the signal that makes `⇧p` worth pressing, and naming the
+    // selected row instead would put the key on whatever the cursor happens to be resting on.
+    let worst = rows
+        .iter()
+        .filter_map(|(name, status)| status.map(|held| (*name, held.restarts)))
+        .filter(|(_, count)| *count > 0)
+        .reduce(|best, next| if next.1 > best.1 { next } else { best });
+    let hint = worst.map(|(name, count)| {
+        let times = match count {
+            1 => "once".to_owned(),
+            count => format!("{count} times"),
+        };
+        // **Neither half of this sentence claims more than it knows** (`screens/detail.md`
+        // § Choosing a container, `k8s-admin` 2026-09-18). A restart is not a crash — `exitCode:
+        // 0` under `restartPolicy: Always` restarts a container that asked to stop — and
+        // `--previous` 404s once the kubelet has rotated the old log away, so the log is offered
+        // conditionally rather than promised. The same false wording still stands in
+        // `screens/help.md` and this file's own logs-tab header; both belong to a box that may
+        // touch them.
+        let said = |name: &str| {
+            format!(
+                "{name} restarted {times}. ⇧p shows the log from before that restart, if the \
+                 kubelet still has it."
+            )
+        };
+        // **The name is shortened to what [`HINT_LINES`] leaves, and the sentence is cut at
+        // `HINT_LINES` besides** — the security gate's *sizes are bounded* row, on this box's own
+        // height. `k8s::IDENTIFIER` allows 512 bytes and the API's own 63 is not this renderer's
+        // guarantee; a name that pushed this sentence to ten rows would push the list out of the
+        // box rather than merely read badly. Cutting the *name* keeps `⇧p` — the half that says
+        // what to do — where cutting the sentence would take it.
+        let room = (HINT_LINES * columns).saturating_sub(width(&said("")));
+        indent(
+            cut(&said(&shortened(name, room)), columns, HINT_LINES),
+            MODAL_MARGIN,
+            text,
+        )
+    });
+
+    // The blank above the list, the one below it, the buttons and the blank under them — plus the
+    // hint and its own blank row wherever there is one.
+    let fixed = 4 + hint.as_ref().map_or(0, |hint| hint.len() + 1);
+    let most = MODAL_ROWS.saturating_sub(fixed).max(1);
+    let listed = rows.len().clamp(1, most);
+    let first = (selected.unwrap_or_default() + 1).saturating_sub(listed);
+
+    // **The scrollbar's column is reserved before anything is measured into it** — it is drawn
+    // over the box's own last column, which the widest row was already occupying: `10 restarts`
+    // drew as `10 restart`, its last character silently the widget's paint
+    // (`reports/2026-09-18-filter-and-container-picker.md` § 3). Reserved only when the list
+    // actually scrolls, which is the same condition [`scrollbar`] draws on, so a short list is one
+    // column wider exactly as before.
+    let columns = columns.saturating_sub(usize::from(rows.len() > listed));
+
+    // **The two fixed columns are measured off what is about to be drawn, and the name's is what
+    // is left — with a floor.** `crate::views::container_state` translates
+    // `CreateContainerConfigError` into *needs a ConfigMap or Secret that does not exist*, 47
+    // columns, and its `Waiting` fall-through keeps the kubelet's own reason, bounded only by
+    // `k8s::IDENTIFIER`'s 512 bytes. Measured as written, one container in that state took the
+    // name column to [`slot`'s old `.max(1)`] and drew two rows with **no name on them at all**,
+    // the restart count clipped by the box with no mark
+    // (`reports/2026-09-18-filter-and-container-picker.md` § 1). **A picker exists to name
+    // things, so the name never gives way to the state; the state gives way to the name**
+    // ([`NAME_FLOOR`], `screens/detail.md` § When a container's own state is what does not fit).
+    let counted = said.iter().map(|(_, seen)| width(seen)).max().unwrap_or(0);
+    let around = width(MARKER) + NAMES_GAP + NAMES_GAP + counted;
+    let widest = said.iter().map(|(word, _)| width(word)).max().unwrap_or(0);
+    let slot = columns
+        .saturating_sub(around + widest)
+        .max(NAME_FLOOR.min(columns.saturating_sub(around).max(1)));
+    let word = columns.saturating_sub(around + slot);
+    // **Back-cut at a word boundary behind one `…`, which is [`cut`] at one line** — the shape
+    // the Alerts card's evidence already takes, and legitimate for the same reason: this is a
+    // sentence whose tail a reader loses nothing by losing, because `d describe` has the whole of
+    // it one `esc` away.
+    let said: Vec<(String, String)> = said
+        .into_iter()
+        .map(|(state, seen)| {
+            let state = match width(&state) > word {
+                true => cut(&state, word, 1).join(""),
+                false => state,
+            };
+            (state, seen)
+        })
+        .collect();
+
+    let mut lines = vec![Line::raw("")];
+    lines.extend((first..rows.len()).take(listed).map(|nth| {
+        let (state, seen) = &said[nth];
+        let marker = match Some(nth) == selected {
+            true => MARKER.to_owned(),
+            false => " ".repeat(width(MARKER)),
+        };
+        Line::styled(
+            format!(
+                "{MODAL_MARGIN}{marker}{}{}{seen}",
+                slotted(&shortened(rows[nth].0, slot), slot + NAMES_GAP),
+                slotted(state, word + NAMES_GAP),
+            ),
+            text,
+        )
+    }));
+    lines.push(Line::raw(""));
+    if let Some(hint) = hint {
+        lines.extend(hint);
+        lines.push(Line::raw(""));
+    }
+    lines.push(
+        Line::from(vec![
+            Span::styled("[ ⏎ pick ]", focused(screen)),
+            Span::raw(BUTTON_GAP),
+            Span::styled("[ esc cancel ]", text),
+        ])
+        .centered(),
+    );
+    lines.push(Line::raw(""));
+
+    // **The title is the pod, cut the way every other surface naming an object cuts one**
+    // ([`name_cut`]), with the box's own room measured off what follows it rather than restated.
+    let about = " — pick a container";
+    let title = format!(
+        "{}{about}",
+        name_cut(
+            open.object.namespace.as_deref(),
+            &open.object.name,
+            columns.saturating_sub(width(about)),
+        )
+    );
+    let inner = boxed(frame, body, CROWDED_BOX, &title, lines, screen);
+    let list = Rect {
+        y: inner.y + 1,
+        height: u16::try_from(listed).unwrap_or(u16::MAX),
+        ..inner
+    };
+    scrollbar(frame, list, rows.len(), first, screen);
+}
+
 /// **A list with more rows than it is drawn in, marked down its right-hand column**
 /// (`screens/widgets.md` § 2: a `Scrollbar`, drawn **only** once the content is taller than the
 /// viewport — a permanent one in a short list is noise). `first` is the first row drawn.
@@ -2552,6 +2846,232 @@ fn caveats(frame: &mut Frame, area: Rect, screen: &Screen, said: Option<&str>, k
     rest
 }
 
+/// **The cards `/` and `n` leave** — the one place the Alerts list is narrowed, read by the pane
+/// and by [`offered`] alike (`screens/widgets.md` § 2b).
+///
+/// **`pub` because the key router is the other caller** ([`offered`]'s reason, one function over):
+/// `crate::views::Cursor::follow` is documented as taking the anchors *the pane draws*, on every
+/// filter keystroke, and this is the only thing that produces them. A router that could not call
+/// it would either move the cursor over the unfiltered list — the highlight and `⏎` on different
+/// objects, which is invariant 2's *explicitly selected object* defeated — or re-derive the
+/// filter in `main.rs`, which is the second copy of a shared read NOTES § D103 exists about.
+///
+/// **What `/` matches is what a card's own fields say, and that is *not* the whole of what the
+/// card draws** (`k8s-admin`, 2026-09-18). Matched: the identity line as [`name`] spells it, and
+/// the title, the evidence **and the remedy** of every finding filed under that owner. **Not
+/// matched, and each for a reason:** the `· 3 of 5 pods` fragment and the `4 min ago` age, which
+/// [`identity`] composes at draw time out of counts and a clock rather than reading off the card
+/// — so `/3 of 5` finds nothing, measured. Making them matchable means matching a string this
+/// file builds per frame against a moment that moves, which is a filter whose answer changes
+/// while nobody types.
+///
+/// **[`shown_rows`] is not this rule at a different type**, and the two docs say so separately
+/// on purpose: it matches every cell the server sent, including the `priority: 1` columns
+/// [`grid`] does not draw.
+///
+/// **The remedy is the half this function missed, and the omission had a justification that was
+/// itself the defect** (`tester`, 2026-09-18). This doc read *not a finding's `kubectl` line,
+/// neither of which is on screen for the reader to have been typing at* — true of
+/// `Finding::kubectl_cmd`, which no card draws, and false of [`crate::rules::Finding::action`],
+/// which [`lines`] draws on **every** card behind its `→`. Measured: a card showing
+/// `→ raise limits.memory, or find the leak` answered `/raise limits` with *No problems match
+/// "raise limits"* — a list narrowed away from a string the reader could read on screen, which is
+/// the one thing a filter may not do.
+///
+/// **`n` is the owner's namespace and not a string in the fields**, so a node card is refused by
+/// any namespace filter rather than matched by a name that happens to hold one.
+pub fn shown_cards<'a>(app: &App, cards: &'a [Card]) -> Vec<&'a Card> {
+    cards
+        .iter()
+        .filter(|card| {
+            let named = name(card.owner.namespace.as_deref(), &card.owner.name);
+            let mut fields = vec![named.as_str()];
+            for finding in &card.findings {
+                fields.push(&finding.title);
+                fields.push(&finding.evidence);
+                fields.push(&finding.action);
+            }
+            app.filters
+                .matches(card.owner.namespace.as_deref(), &fields)
+        })
+        .collect()
+}
+
+/// **The table rows `/` and `n` leave** — [`shown_cards`]'s other half, over the browser's own
+/// answer.
+///
+/// **`pub` for [`shown_cards`]'s reason** — the key router needs the anchors the pane draws.
+///
+/// **Every cell the server printed, which is more than the reader sees** — the `priority: 1`
+/// columns [`grid`] drops are matched too, so `/worker3` finds a pod by the node it runs on with
+/// no `NODE` column on screen (measured, `k8s-admin` 2026-09-18). That is deliberate and it is
+/// **not** [`shown_cards`]' rule: a table row *is* the object, every cell of it came from the
+/// object's own printer, and a column the printer marked wide is still that object's — where a
+/// card is a composition this file makes and only the parts it was handed can be matched. The two
+/// docs are separate because the rules are.
+///
+/// `n` is [`crate::k8s::Row::namespace`], so a cluster-scoped row is refused by a namespace
+/// filter here exactly as a node card is one pane over.
+pub fn shown_rows<'a>(app: &App, table: &'a crate::k8s::Table) -> Vec<&'a crate::k8s::Row> {
+    table
+        .rows
+        .iter()
+        .filter(|row| {
+            let cells: Vec<&str> = row.cells.iter().map(String::as_str).collect();
+            app.filters.matches(row.namespace.as_deref(), &cells)
+        })
+        .collect()
+}
+
+/// **`filter: "web"   esc clears it`** — the one line that says a list is narrowed once the cursor
+/// has left the footer (`screens/widgets.md` § A committed filter is drawn at rest, too). It
+/// returns the pane left under it, the way [`banner`] does, and takes nothing at all where there
+/// is nothing to say.
+///
+/// **Not drawn while a filter is being typed**, because the footer is already saying it live, and
+/// not drawn over the zero-match sentence, which already names what was typed in a whole sentence
+/// — both are that section's own rulings, and the second is why this takes a `Rect` back rather
+/// than being folded into [`caveats`].
+///
+/// **Calm: dim, and none of the four reserved glyphs** (`screens/README.md` § the five rules,
+/// item 4). A narrowed list is neither a severity nor a connection problem.
+///
+/// **`esc clears it` while one field is set, and no hint at all once both are** — measured, and
+/// the opposite of this row's first draft (`reports/2026-09-18-filter-and-container-picker.md`
+/// § 4): the labels alone cost 10 and 18 columns, so a hint naming which field `esc` reaches
+/// first leaves two real values two columns to share on a 53-column row. **The hint is
+/// recoverable by reopening `/` or `n`, whose own footer names `esc` again; what the reader typed
+/// is written down nowhere else**, so the hint is what goes.
+///
+/// **The namespace half is labelled `namespace like:`** ([`Typing::prompt`]), because a bare
+/// `namespace:` one row under the title's own `ns: payments` reads as a second scope rather than
+/// a substring filter.
+fn narrowed(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) -> Rect {
+    if app.typing.is_some() || !app.filters.any() {
+        return area;
+    }
+    let set: Vec<(Typing, &Input)> = [
+        (Typing::Text, &app.filters.text),
+        (Typing::Namespace, &app.filters.namespace),
+    ]
+    .into_iter()
+    .filter(|(_, held)| !held.is_empty())
+    .collect();
+    // **The hint is what gives way, and it gives way before either value does** — measured, not
+    // reasoned (`reports/2026-09-18-filter-and-container-picker.md` § 4). `filter: ""` and
+    // `namespace like: ""` cost 10 and 18 columns before either holds a character; with the gap
+    // between them and `esc clears filter` and its own gap, two real values are left fighting
+    // over **two** columns of the 53 this row has — `/ kube` beside `n kube-sys`, eight typed
+    // characters, already over by one with the hint on the line. **What the reader typed is
+    // written down nowhere else; `/` or `n` reopens typing on the field that holds it, and the
+    // footer there names `esc` again.** `?` is *not* a second carrier and this comment claimed it
+    // was: `screens/help.md`'s own row reads `esc   back / close` and says nothing about a filter
+    // (`k8s-admin`, 2026-09-18). The hint goes because it is the half that can be got back. It
+    // shows only while a single field is set, where there is one thing `esc` could mean and
+    // `esc clears it` needs to name nothing further.
+    let hint = match set.len() {
+        1 => Some("esc clears it"),
+        _ => None,
+    };
+    let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    let row = padded(top);
+    let room = usize::from(row.width)
+        .saturating_sub(hint.map_or(0, |hint| width(hint) + FILTER_GAP.len()));
+    // **What gives way after that is the *value*, and never the label that says which field it
+    // is.** A run front-cut whole would eat `filter:` first and leave a quoted string belonging to
+    // nobody, which is worse than the overflow it was fixing.
+    //
+    // **Silent below the threshold and exact at it**, the rule this page already states for the
+    // dropped-lines line: whole while the row holds them, and only then each value cut to an equal
+    // share of what the labels, their quotes and the gaps leave. `kube` beside `kube-sys` fits
+    // with the hint gone; only a value nobody types on purpose reaches the share.
+    let quoted = |field: &Typing, text: &str| format!("{}: \"{text}\"", field.prompt());
+    let whole: Vec<String> = set
+        .iter()
+        .map(|(field, held)| quoted(field, held.text()))
+        .collect();
+    let joined = whole.join(FILTER_GAP);
+    let values = if width(&joined) <= room {
+        joined
+    } else {
+        let fixed: usize = set
+            .iter()
+            .map(|(field, _)| width(&quoted(field, "")))
+            .sum::<usize>()
+            + FILTER_GAP.len() * (set.len() - 1);
+        let each = (room.saturating_sub(fixed) / set.len()).max(width(CUT));
+        set.iter()
+            .map(|(field, held)| quoted(field, &shortened(held.text(), each)))
+            .collect::<Vec<String>>()
+            .join(FILTER_GAP)
+    };
+    let said = match hint {
+        Some(hint) => format!("{values}{FILTER_GAP}{hint}"),
+        None => values,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::styled(said, screen.fg(theme::DIM))),
+        row,
+    );
+    rest
+}
+
+/// **A filter that hides every row is a third reason a list can be empty** — not `○ nothing is
+/// broken`, which is a verdict on the cluster, and not an empty kind, which is a fact about the
+/// kind (`screens/states.md` § The filter hides every row).
+///
+/// **It names what was typed**, because the reader typed it a keystroke ago and may have mistyped
+/// it, and it draws **none of the four reserved glyphs**: it carries no severity and it is not a
+/// connection or trust problem (`screens/README.md` § the five rules, item 4).
+///
+/// **The noun is the pane's own**: `problems` on Alerts, which has no one kind to name and which
+/// `screens/resources.md` already calls problems on this same product, and the kind's own plural
+/// in the browser.
+///
+/// **The filter text needs no strip here** — it is [`crate::views::Input`]'s, which refused every
+/// control character and bounded the length on the way in (invariant 9), and it is the only class
+/// of string on this screen that never came off the API at all.
+fn hidden(frame: &mut Frame, area: Rect, screen: &Screen, noun: &str, filters: &Filters) {
+    // **Three sentences and no fourth** (`screens/states.md` § The filter hides every row). *No
+    // filter set at all* is not one of them and cannot reach here — a list with no filter over it
+    // has not been narrowed, so both callers ask [`shown_cards`]/[`shown_rows`] first — and the
+    // `(true, true)` arm is written out rather than folded into the namespace one, where it would
+    // have printed `a namespace like ""` if anything ever did reach it (`k8s-admin`, 2026-09-18).
+    // **Its own sentence names no value, because there is none to name**: a
+    // `crate::views::Filters::matches` that answered no to everything would land here, and *what
+    // was typed* would then be a claim about a reader who typed nothing.
+    let said = match (filters.text.is_empty(), filters.namespace.is_empty()) {
+        (false, true) => format!("No {noun} match \"{}\".", filters.text.text()),
+        (true, false) => format!(
+            "No {noun} match a namespace like \"{}\".",
+            filters.namespace.text()
+        ),
+        (false, false) => format!(
+            "No {noun} match \"{}\" in a namespace like \"{}\".",
+            filters.text.text(),
+            filters.namespace.text()
+        ),
+        (true, true) => format!("No {noun} match the filter."),
+    };
+    let dim = screen.fg(theme::DIM);
+    // **The measure is the pane, as [`empty`]'s is**: this is one sentence of dim text in the slot
+    // a card or a table row would have taken, not the several paragraphs [`BLOCK`] is set for.
+    //
+    // **And it is cut at [`MATCH_LINES`], which is the security gate's *sizes are bounded* row and
+    // not tidiness** (`tester`, 2026-09-18). Both values here are a whole
+    // [`crate::k8s::IDENTIFIER`] — 512 bytes each, which `crate::views::Input` allows because a
+    // delete can legitimately ask for that much. Wrapped and handed to [`centred`], such a filter
+    // filled the pane and was clipped by the `Rect` **mid-token, with no `…` and no closing
+    // quote**: the silent truncation `screens/widgets.md` § 7 forbids by name, on the one sentence
+    // whose whole job is to say exactly what the reader typed. [`cut`] is the same marked cut the
+    // card's evidence, the at-rest line and the picker's restart hint already make.
+    let lines = cut(&said, usize::from(area.width), MATCH_LINES)
+        .into_iter()
+        .map(|line| Line::styled(line, dim).centered())
+        .collect();
+    centred(frame, area, lines);
+}
+
 /// **The rows a banner may spend over a pane that has content of its own** — everything but
 /// [`FLOOR`]. One function because five panes draw a refusal over something, and a budget computed
 /// per pane is how two of them come to disagree about what a list is owed.
@@ -2756,6 +3276,22 @@ fn padded(area: Rect) -> Rect {
 /// selected card in view, so `↓` reaches a tall card's action rather than scrolling past it
 /// (`screens/widgets.md` § 4).
 fn alerts(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, cards: &[Card]) {
+    // **A filter that hid every card is its own screen and not an empty list**
+    // (`screens/states.md` § The filter hides every row). A list that was empty before the filter
+    // was typed is not this: there was nothing for `/` to hide, so whatever that pane already
+    // said — `○ nothing is broken`, or a refusal's banner over no cards — is still the true one.
+    let left = shown_cards(app, cards);
+    if left.is_empty() && !cards.is_empty() {
+        return hidden(frame, padded(area), screen, "problems", &app.filters);
+    }
+    let cards = left;
+    // **And no line over a pane with no card under it either** — a refusal that came back with
+    // nothing has no list for a filter to have narrowed, so saying one was narrowed would be a
+    // claim about rows that are not there (the same rule [`browser`] applies one pane over).
+    let area = match cards.is_empty() {
+        true => area,
+        false => narrowed(frame, area, app, screen),
+    };
     let area = padded(area);
     let region = usize::from(area.width);
     let mut drawn: Vec<Vec<Line>> = cards
@@ -2960,12 +3496,7 @@ fn browser(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, kind: Opti
         _ => None,
     };
     let area = caveats(frame, area, screen, denial, FLOOR + HEADING);
-    let [head, _, body] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .areas(area);
+    let [head, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
     // **The title is padded and the table is not**, which is what both mockups draw: the
     // selection marker is the table's own gutter and sits at the pane's left edge, exactly where
     // the sidebar's does (`screens/resources.md`, `screens/widgets.md` § 2's indent rule). A
@@ -2973,14 +3504,40 @@ fn browser(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, kind: Opti
     // screen.
     heading(frame, padded(head), screen, kind);
     let scoped = scope(kind, screen).is_some();
+    let table = match screen.browser {
+        Pane::Loading => None,
+        Pane::Ready(table) | Pane::Denied(_, table) => Some(table),
+    };
+    let left = table
+        .map(|table| shown_rows(app, table))
+        .unwrap_or_default();
+    // **The filter hid every row of a kind that has them** (`screens/states.md` § The filter hides
+    // every row) — which is never the same state as a kind that genuinely has none, and never
+    // reached while the pane has not answered.
+    let vanished = table.is_some_and(|table| !table.rows.is_empty()) && left.is_empty();
+    // **The filter line joins the title row it belongs with — and only over rows it could have
+    // narrowed.** The zero-match state draws none, which is that section's own ruling: its
+    // sentence already names what was typed, and a banner above it would be the same two facts
+    // said twice. **A pane with nothing under it draws none either**, which is the same rule read
+    // the other way (`tester`, 2026-09-18): a filter set while the first LIST is still in flight
+    // drew `filter: "web"   esc clears it` over *reading the cluster…*, claiming a list had been
+    // narrowed when no list had arrived — and under a footer that names no `esc`, because
+    // `Offer::Nothing` is what a pane with nothing to show answers.
+    let rest = if vanished || left.is_empty() {
+        rest
+    } else {
+        narrowed(frame, rest, app, screen)
+    };
+    let [_, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(rest);
     match screen.browser {
+        _ if vanished => hidden(frame, padded(body), screen, plural(kind), &app.filters),
         Pane::Loading => note(frame, body, screen, false, None),
         // **A refusal draws whatever did come back and never the empty sentence below**, which is
         // [`banner`]'s rule one line up: *we were not allowed to look* is not *there is nothing*.
         // A refusal that came back with no rows at all draws the banner and an empty grid.
-        Pane::Denied(_, table) => grid(frame, body, app, screen, table, scoped),
+        Pane::Denied(_, table) => grid(frame, body, app, screen, table, &left, scoped),
         Pane::Ready(table) if table.rows.is_empty() => empty(frame, body, screen, kind),
-        Pane::Ready(table) => grid(frame, body, app, screen, table, scoped),
+        Pane::Ready(table) => grid(frame, body, app, screen, table, &left, scoped),
     }
 }
 
@@ -3082,6 +3639,7 @@ fn grid(
     app: &App,
     screen: &Screen,
     table: &crate::k8s::Table,
+    rows: &[&crate::k8s::Row],
     scoped: bool,
 ) {
     let kept: Vec<(usize, String)> = table
@@ -3104,7 +3662,7 @@ fn grid(
     // makes `None == None` not a match — `table-deployments` was captured with
     // `?includeObject=None` and every row in it lands there.
     let cards = found(screen.alerts);
-    let marks: Vec<Option<&Card>> = table.rows.iter().map(|row| about(cards, row)).collect();
+    let marks: Vec<Option<&Card>> = rows.iter().map(|row| about(cards, row)).collect();
     // **A table nobody has a finding in spends no columns on an empty gutter**, so an unmarked
     // kind draws exactly the columns it drew before Alerts bled through at all. Once one row is
     // marked every row reserves the gutter, marked or not, or the names step in and out by two.
@@ -3122,8 +3680,7 @@ fn grid(
             if nth == 0 {
                 return Constraint::Min(header + (gutter as u16));
             }
-            let widest = table
-                .rows
+            let widest = rows
                 .iter()
                 .map(|row| row.cells.get(*at).map_or(0, |cell| width(cell) as u16))
                 .max()
@@ -3132,8 +3689,7 @@ fn grid(
         })
         .collect();
 
-    let rows: Vec<Row> = table
-        .rows
+    let drawn: Vec<Row> = rows
         .iter()
         .zip(&marks)
         .map(|(row, card)| {
@@ -3166,11 +3722,15 @@ fn grid(
     // The anchor is the row's `uid` and never its name (`crate::views::Cursor`) — `None` on every
     // row of a Table fetched with `?includeObject=None`, which the cursor falls back to its index
     // for rather than following a string.
-    let anchors: Vec<Option<&str>> = table.rows.iter().map(|row| row.uid.as_deref()).collect();
+    let anchors: Vec<Option<&str>> = rows.iter().map(|row| row.uid.as_deref()).collect();
     let at = app.content.selected(&anchors);
     // **The line is about the row the cursor is on, not about every marked one** (NOTES § D251):
     // one per marked row would be a second list competing with the table above it.
-    let selected = at.and_then(|nth| table.rows.get(nth).zip(marks.get(nth).copied().flatten()));
+    let selected = at.and_then(|nth| {
+        rows.get(nth)
+            .copied()
+            .zip(marks.get(nth).copied().flatten())
+    });
     let (area, under) = match selected {
         // **Right under the last row, and never off the bottom of the pane.** The table takes the
         // height it needs up to two lines short of the pane, so a short kind draws the mockup's
@@ -3178,7 +3738,7 @@ fn grid(
         // the table gets none and only the line is drawn; no pane the frame lays out is that
         // short, the floor being 80×24 and this body thirteen.
         Some(pair) => {
-            let tall = u16::try_from(table.rows.len() + 1).unwrap_or(u16::MAX);
+            let tall = u16::try_from(rows.len() + 1).unwrap_or(u16::MAX);
             let [top, _, line, _] = Layout::vertical([
                 Constraint::Length(tall.min(area.height.saturating_sub(2))),
                 Constraint::Length(1),
@@ -3192,7 +3752,7 @@ fn grid(
     };
     let mut state = TableState::default().with_selected(at);
     frame.render_stateful_widget(
-        Table::new(rows, widths)
+        Table::new(drawn, widths)
             .header(
                 Row::new(kept.iter().enumerate().map(|(nth, (_, header))| {
                     // The header moves over the gutter with the cells, or `NAME` sits two columns

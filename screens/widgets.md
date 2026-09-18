@@ -197,6 +197,7 @@ more column from the name beside it.
 | Footer | `Paragraph` of `Span`s | — | rebuilt per frame from the current mode; there is no stored footer |
 | Dialogs, help, container picker | `Clear` → `Block::bordered()` → content | `Modal` enum in the view state | §5 |
 | Typed-name input (delete / drain) | `Paragraph` + `Frame::set_cursor_position` | `String` + byte cursor | no input widget exists in ratatui and one line does not need one |
+| Filter / namespace typing, in the footer (Alerts, Resources) | `Paragraph` + `Frame::set_cursor_position` | the `Input` `/`/`n` already own ([`views::Filters`]) | same mechanism as the typed-name input above, not a second one — [§ 2b](#2b-typing-into-a-filter) |
 | Empty · loading · disconnected | centered `Paragraph` | — | same frame, different content pane — never a different screen |
 | Banner above a list (disconnected · namespace scope) | two to eight `Line`s above the normal list | — | one slot, two occupants: the list stays visible and the banner says what is wrong with it — stale data, or a check that could not run ([states.md](states.md)). Disconnected **while** scoped drops the scope explanation (the header still says `ns: payments`) and keeps the *"one node check is off"* line, which is the half a reader cannot infer from anywhere else |
 
@@ -467,14 +468,360 @@ the file that owns it, cited here rather than copied:
 | Detail — yaml tab, a Secret with keys | ordinary, anchor always present, adds `v reveal` — the pair's own named exception applies (above): `q quit` alone | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
 | Empty kind in the browser | ordinary, narrowed to what there is an object to act on — anchor still present | [states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser) |
 | Still loading | ordinary, narrowed to the anchor alone — nothing exists yet to move a cursor across | [states.md § Still loading](states.md#still-loading) |
+| Alerts, a filter hides every row | ordinary, `↑↓ move` and `⏎ open` kept (the sidebar's own precedent, [states.md § Nothing is broken](states.md#nothing-is-broken)), `s scale`/`r restart` dropped, `esc clear filter` gained | [states.md § The filter hides every row](states.md#the-filter-hides-every-row) |
+| Resources, a filter hides every row | ordinary, narrowed to `/ filter` and the anchor, `esc clear filter` gained — the empty-kind-in-the-browser shape, above, not Alerts' | [states.md § The filter hides every row](states.md#the-filter-hides-every-row) |
 | Disconnected · login expired · clock skew · namespace-scoped · nothing-is-broken · the audit log could not be opened | ordinary, mutations withheld, anchor always present | [states.md](states.md), each state's own mockup |
 | While a call is running, over Alerts or Resources | not a modal — see the rule above | [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
+| Alerts / Resources, typing into `/` or `n` | not a modal, and not curated either — the whole line is replaced, the same move as the row above for a different reason | [§ 2b](#2b-typing-into-a-filter) |
 | Confirm · Restart · Delete (typed name) · The cluster said no · Already gone · Drain | modal — closed local set, no anchor | [dialogs.md](dialogs.md) |
 | The cluster picker, at `X` and at startup | modal — closed local set, no anchor; `esc` itself reads `quit` at startup, or `clear filter` on either variant while `/` holds text, in place of `cancel` or `quit` ([NOTES § D264 ruling 27](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)); **`⏎` itself drops from the line — not merely dimmed like a refused `s`/`r` — on a shadowed row and with no row selected**, because there `⏎` is not refused, it is inert; **a list with no row showing counts as having no landable row, the same as one with every row undefined: `↑↓ move` drops from the line too**, leaving `/ filter  esc cancel` alone for a kubeconfig with no contexts left in it at all, or `/ filter  esc clear filter` where the cause is a filter that hides every row instead, `esc`'s word still following the same rule — there is nowhere for either moving key to go ([NOTES § D264 rulings 16, 18 and 27](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13), `context.md` §§ The picker, No row is both current and landable, The filter hides every row, The kubeconfig has no contexts at all) | [context.md](context.md) |
 | A picked context that did not connect (`Unconnected`) | modal — closed local set, no anchor; `esc dismiss` mid-session, `esc back to the list` at startup — the same two words `Before::leave` returns, never a third spelling for the button and the footer | [context.md § When the new cluster does not work](context.md#when-the-new-cluster-does-not-work) |
 | The container picker | modal — closed local set, no anchor | [detail.md § Choosing a container, and when there is nothing to choose](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose) |
 | The secret-reveal modal | modal — closed local set (`esc close`) | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
 | The help modal (`?`) | its own fixed footer — the one modal keeping `q quit`, never `? all keys` — except while a call is running underneath it, when `q quit` itself drops and two of its sixteen body rows carry a `paused` clause instead | [help.md](help.md) |
+
+## 2b. Typing into a filter
+
+`/` and `n` on Alerts and Resources open the same kind of typing session the
+cluster picker already has — one `Input` with focus, live-narrowing the list
+on every keystroke — and until now nothing said what the footer looks like
+while it runs, or what `esc` and `⏎` do in it: `views::Filters` existed with
+no typing state anywhere in `views.rs` or `ui.rs`, and the reader could not
+tell whether `esc` was about to clear a filter or leave the screen because the
+filter itself was drawn nowhere (`backlog.md`, found by `k8s-admin`,
+2026-09-13; NOTES § D266 ruling 3). This section closes that gap by reusing
+[context.md § The picker](context.md#the-picker)'s own words and mechanism
+rather than inventing a second vocabulary — `Filters::text` and the picker's
+own filter already share one `holds()` (NOTES § D264 ruling 7) — and departs
+from it only where the picker's shape genuinely cannot answer: a picker has
+nothing to do besides move, filter and choose a row; Alerts and Resources are
+where `s`, `r`, `l`, `d` and `y` live, and typing has to leave those keys
+exactly where it found them.
+
+**Opening.** `/` opens typing on [`Filters::text`], `n` on
+[`Filters::namespace`] — the same two fields this page already has, never a
+third. Either opens with whatever that field already holds, cursor at the
+end, so pressing `/` again on an already-filtered list edits the filter
+rather than starting it over. Only one of the two can have focus at once:
+pressing `n` while `/` already has it does not switch focus — `n` is a
+printable character like any other, and is appended to the buffer that
+already has focus, the same as every other letter (below).
+
+**While a filter has focus, every printable key is text and nothing else is
+a command.** `s`, `r`, `l`, `d`, `y`, `[`, `]`, `q`, `X`, `tab`, `?` are all
+letters or symbols this filter can legitimately contain, so all of them are
+appended rather than bound — `?` cannot open Help here for the same reason
+`q` cannot quit: both are just characters while a filter has focus, not
+commands. There is nothing to draw for *Help while typing*, because that
+combination cannot happen, not because it was left out. `⌫` removes one
+character
+([`Input::pop`] — one `char`, never one byte); nothing else edits the
+buffer, because [`Input`] has no notion of a cursor anywhere but the end —
+the same shape the typed-name field on a delete already has
+([dialogs.md § Delete](dialogs.md#delete--the-name-has-to-be-typed-and-nothing-is-checked-first)).
+`↑` / `↓` still move the selection over whatever rows the live-narrowed list
+is currently showing, exactly as they do outside typing — the picker already
+proves this does not collide with a letter key, because an arrow is never
+one.
+
+**The footer is fully replaced, not curated, while a filter has focus** — the
+same move the in-flight-call footer already makes, for a different reason
+(above): the ordinary key set is not valid right now, so naming it would be a
+promise this state cannot keep. It shows the word [help.md](help.md) already
+teaches for the key being used — its own `/ n   filter · namespace` row —
+the text typed so far, and the cursor:
+
+```
+filter: payments_  ⏎ done  esc clear filter
+```
+```
+namespace like: pay_  ⏎ done  esc clear namespace
+```
+
+Empty, the second half of `esc`'s word changes, for the same reason the
+picker's own does
+([context.md § The picker](context.md#the-picker),
+[NOTES § D264 rulings 27 and 31](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)):
+
+```
+filter: _  ⏎ done  esc cancel
+```
+```
+namespace like: _  ⏎ done  esc cancel
+```
+
+The cursor is [`Frame::set_cursor_position`], the same mechanism [§2](#2-element--widget)
+already names for the delete dialog's typed-name field — not a drawn
+character. The trailing `_` above is this page's own stand-in for it, the
+same convention every other typed-input mockup on this page already uses.
+
+**A buffer long enough to run past the label and the hints keeps the cursor
+in view by losing its own front, not by losing the hints.** `⏎ done  esc
+clear filter` is what tells the reader the two keys that get them out; a
+buffer that grew past the ceiling and pushed them off the line would answer
+*what did I type* at the cost of *how do I leave*, which is the wrong trade
+on the one line that is also the only way out. So the label and the hints
+stay fixed width and the typed text is what gives way — front-cut, one `…`,
+the cursor always the last character shown, the same shape a shell's own
+line editor already uses when a command outgrows the terminal. Realistic
+filters never reach it (`IDENTIFIER`'s 512-byte bound is a beginner's
+safety rail, not a length anyone types on purpose), so this is named once
+here for completeness and not drawn as its own mockup.
+
+**`esc` while typing acts on the field that has focus — the field the reader
+is looking at, not a global order.** The buffer `/` or `n` opened is not
+empty → `esc` empties it, the list re-widens to whatever now matches, and
+typing stays open on it, footer and all; that buffer is already empty →
+`esc` closes the typing session and returns to the ordinary footer, leaving
+the *other* field exactly as it was. This is a genuine branch on which
+field has focus, and it costs nothing extra to write, because the typing
+state is what this box adds in the first place — there is no existing
+global-order method to reuse here the way the at-rest case below already
+has one, so a focus-aware rule is not a second rule competing
+with a first one, it is the only one this state needs. The footer's own
+word already follows the field with focus, exactly as drawn above: `esc
+clear filter` while typing `/` with something in it, `esc clear namespace`
+while typing `n` with something in it, `esc cancel` on either once its own
+buffer is empty. One key is never spelled two ways in one frame, which is
+why the word changes with the state instead of staying `cancel` throughout.
+
+**`esc` outside typing is the same method, and today nothing on screen says
+so.** `App::escape`'s `None`-modal arm runs with **no modal open and no
+typing session either** — at rest, on an ordinary Alerts or Resources
+screen, `esc` already clears a committed filter one field at a time, exactly
+as above, and did before this box existed. This is [backlog.md:2538](../backlog.md)'s
+own complaint in a second place: a key that is genuinely bound and does
+something is drawn nowhere. **It is not added to the ordinary at-rest
+footer** — measured, not assumed: `↑↓ move  ⏎ open  s scale  r restart  /
+filter  ? all keys  q quit` is 65 columns, both `s`/`r` refused already
+reaches 71 ([§ 2a](#2a-the-footer)), and the shortest honest label,
+`esc clear filter`, costs 18 more with its gap — 89 in the worst case,
+against the same 76 ceiling every other footer on this page answers to.
+There is no wording short enough to fit the compound case, so `esc`'s
+filter-clearing joins `l logs`, `d describe`, `y view as YAML` and
+`ctrl-d delete` in the bucket [§ 2a](#2a-the-footer) already has for a key
+that is bound, real, and not the one this crowded line spends room naming —
+discoverable the same way those are, and named on the pane itself
+([§ A committed filter is drawn at rest, too, below](#a-committed-filter-is-drawn-at-rest-too)), not repeated a
+second time on a line that cannot afford it. **The one footer that *can*
+afford it is [states.md § The filter hides every row](states.md#the-filter-hides-every-row)'s**:
+`⏎ open`, `s scale` and `r restart` are already gone there because nothing
+is selected, which is exactly the room `esc clear filter` needs — and it is
+the same wording the picker's own equivalent state already uses, so the two
+screens stop being two vocabularies for one fact.
+
+**`⏎` commits and returns to browsing — it does not open the selected row.**
+This is the one place typing here departs from the picker on purpose: the
+picker's `⏎` can only ever mean *choose this row*, because choosing a row is
+the whole of what the picker is for. Alerts and Resources are where `s` and
+`r` live, and a `⏎` that jumped to Detail every time a filter was confirmed
+would make *narrow the list, then act on a row in it* impossible without
+opening Detail and coming back first. `⏎` here means *stop typing, keep what
+was typed*; the ordinary footer's own `⏎ open` returns the moment typing
+ends, and pressed again, on a row, it opens exactly as it always does.
+
+**Leaving typing changes nothing about the list itself.** The filter was
+already live while it was being typed — that is what let the reader watch
+the list narrow one keystroke at a time, the same as the picker's own list —
+so committing is a footer change, not a fetch or a second pass over the
+rows. The cursor was already following the narrowed list throughout
+([`Cursor::follow`]), so it does not move when typing ends either.
+
+**A filter is kept over anything drawn *on top of* the list it narrows, and
+cleared the moment the list itself changes underneath it — two different
+facts, and the first draft of this section only had the first one.** Detail,
+Help, every dialog on [dialogs.md](dialogs.md) and the container picker have
+no `/ filter` or `n namespace` on their own closed footers, but none of them
+touch `App::filters` to get there — Detail in particular is drawn *over*
+whatever view was already open, never a fourth [`View`], precisely so that
+going back needs no state re-derived to return to. So a filter set before
+`⏎` opens Detail, before `?` opens Help, or before a dialog or the container
+picker opens on the selected row is simply not drawn for as long as that
+screen is — and the list is exactly as narrow as it was the moment any of
+them closes.
+
+**Analysis is not one of these, and neither is a different kind within
+Resources — both are the list *changing*, not something drawn over it, and
+both clear both filters.** `web` typed for Alerts' cards means nothing
+against a ConfigMap table; `pay` typed for one kind's rows is not a claim
+about the next kind the sidebar opens. `App::open` — the one method every
+sidebar selection already goes through, `NavItem::Kind` and `NavItem::Report`
+included — is where this belongs: it already resets `App::content`'s cursor
+when `self.view` actually changes, for the same reason (`src/views.rs`), and
+it did not yet reset `App::filters` alongside it — filed as its own defect,
+*`App::open` keeps the filter across views*
+(`reports/2026-09-13-phase-11-close-family-read.md` line 96). One `View`
+change, from anywhere to anywhere, clears both fields; re-opening the
+*same* kind or the *same* top-level view is not a change (`self.view !=
+before` is already the test) and touches neither.
+
+`/ web` on Alerts, `⏎` to open the one card it leaves, `esc` back from
+Detail — the filter is still there because Detail is an overlay, not a
+different list:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  filter: "web"   esc clears it                │
+│  RESOURCES         │                                               │
+│   workloads        │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   network          │    Containers exceeded their memory limit and │
+│   storage          │    were killed by the kernel (OOMKilled)      │
+│   config           │    limit 256Mi · exit 137 · 47 restarts       │
+│   cluster          │    → raise limits.memory, or find the leak    │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│                                               │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                              │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+is what is on screen right before `⏎`, and it is what is on screen again the
+instant `esc` returns from Detail — `shop/api` and `node-3` from
+[alerts.md](alerts.md)'s own three-card mockup stay gone, because `web` still
+does not hold either of them, and the `filter: "web"` line above the one
+remaining card is [§ A committed filter is drawn at rest, too](#a-committed-filter-is-drawn-at-rest-too),
+below — without it this was exactly backlog.md:2538's own complaint one
+level up: a reader back from Detail sees one card and an ordinary footer,
+with nothing on screen saying the list is narrowed at all. Opening
+`workloads → statefulsets` from here, or pressing `⏎` on `ANALYSIS →
+capacity`, drops `filter: "web"` outright — a different list, not an
+overlay.
+
+### A committed filter is drawn at rest, too
+
+Typing draws the filter in the footer, [above](#2b-typing-into-a-filter); the moment
+typing ends, that line reverts to the ordinary footer and, until now,
+nothing else on either screen said the list was narrowed at all —
+[backlog.md:2538](../backlog.md)'s exact complaint, and it is real whether
+or not the footer could also afford `esc clear filter`
+([§ 2b](#2b-typing-into-a-filter)):
+a reader cannot tell a short list from a filtered one, or `esc`'s next
+target, from anything on screen once the cursor leaves the footer.
+
+**Resources already draws a title row with room in it — `deployments  ns:
+payments` — and a filter joins it as a second row underneath, not a third
+segment crammed onto the first.** Measured before deciding: the widest
+realistic case — a long kind plural, a scoped namespace, and both filters
+set — is `validatingadmissionpolicybindings   ns: openshift-cluster-node-tuning-operator   filter: "pay"   namespace like: "prod"`,
+which does not fit the 57-column content pane at the 80×24 floor even
+before either filter joins it. One line trying to hold four independent
+facts is the wrong shape regardless of the filter question, so the filter
+gets the same slot [§ 2](#2-element--widget) already names for a pane-level
+fact that is not a per-row property — *"Banner above a list… one slot, two
+occupants"* — as a third occupant, drawn calm (dim, no glyph: this is
+neither a severity nor a connection problem, [README rule
+4](README.md#the-five-rules-every-screen-obeys)), directly under the title
+row it is already grouped with:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  deployments          ns: payments            │
+│  RESOURCES         │  filter: "web"   esc clears it                │
+│▸  workloads        │                                               │
+│     deployments  12│    NAME      READY  UP-TO-DATE  AVAILABLE  AGE│
+│     statefulsets  3│▸ ● web       3/5    5           3          12d│
+│     daemonsets    5│                                               │
+│     pods         84│                                               │
+│     jobs          7│                                               │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │                                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get deployments -n payments                              │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**`filter: "web"` is not an arbitrary example — it is the one value that
+actually survives against the row drawn beside it.** `views::holds` matches
+only what a row draws, and this row draws `web` in its `NAME` cell and
+nothing that holds `pay`; a scoped `ns: payments` in the *title* is not a
+cell `deployments`' own row redraws, `Filters::text`'s own contract
+(`src/views.rs` § THE TWO FILTERS). A filter value that could
+not have produced the row shown beside it would be exactly the kind of claim
+this page forbids everywhere else it draws a command or a count.
+
+**The namespace half of this line is never called `namespace:` on its
+own** — measured beside the title row's own `ns: payments`, a bare
+`namespace:` reads as a second scope changing, not a substring filter over
+rows already held, and an operator has no reason to expect the difference
+just from two labels stacked one row apart
+(`reports/2026-09-18-filter-and-container-picker.md` § 4). The zero-match
+sentence already had the fix — *"a namespace like `pay`"* — so the label
+takes the same word: `namespace like:`, never `namespace:`, here, in the
+typing footer above, and nowhere else on this page a third spelling could
+grow back from.
+
+**`esc clears it` is this line's own way out, named where the fact already
+lives, so no `?`/help row has to carry it and the footer's own budget
+argument above is untouched — the crowded line still cannot afford it, this
+uncrowded one already could.** It shows only while one field is set — there
+is only one thing `esc` could mean then, so `esc clears it` needs to name
+nothing further.
+
+**Measured, not assumed, and the first draft of this row got it backwards:
+once both fields are set, the hint is never shown at all — not reworded,
+dropped — and it is the hint that gives way, never the values.** `filter:
+""` and `namespace like: ""` alone already cost 10 and 18 columns before
+either holds a character; add the 3-column gap between them and a hint
+naming which one `esc` reaches first (`esc clears filter`, 18 columns) with
+its own gap, and two real values are fighting over **two columns**,
+combined, on the 53-column row this pane actually has
+(`reports/2026-09-18-filter-and-container-picker.md` § 4) — `/ kube` beside
+`n kube-sys`, eight typed characters between them, already clears the
+ceiling by one column with the hint still on the line, and no value that
+means anything fits in two. **The hint is what a reader can find again by
+pressing `?` or reopening `/`/`n`; what they typed is not written down
+anywhere else** — so it is the hint that gives way first, unconditionally
+once both fields hold something, not the values, the opposite of what the
+first draft of this row did. Both values are shown in full instead — `kube`
+and `kube-sys` fit inside the 22 columns two full values now split between
+them without any hint on the line at all:
+
+```
+filter: "kube"   namespace like: "kube-sys"
+```
+
+Only a value long enough to still overrun that room front-cuts, the same
+way the typing footer's own growing buffer already does
+([§ 2b](#2b-typing-into-a-filter)), because it is the same value drawn
+twice, once live and once at rest, not two strings with two rules; the
+eleven closed cuts of [§ 7](#7-text-that-came-from-the-api) do not govern
+it either way, because a typed filter is never API text.
+
+**Alerts has no title row to join, so the same line opens one of its own,
+above the first card** — the exact line already drawn a section above, in
+`/ web`'s own mockup: `filter: "web"   esc clears it`, alone when only `/`
+is set; `filter: "web"   namespace like: "pay"` — the hint already gone —
+when both are. It costs one row out of the card list's own budget while it
+is drawn, the same way a disconnected banner already does, and nothing
+while no filter is set — silent below the threshold, exact at it, the rule
+this page already states for the dropped-lines line
+([detail.md § When the buffer fills](detail.md#when-the-buffer-fills-the-dropped-lines-line)).
+
+**The zero-match state does not repeat this line** — [states.md § The filter
+hides every row](states.md#the-filter-hides-every-row)'s own sentence
+already names what was typed, in a full sentence, in the same slot a card or
+a table row would otherwise occupy, and that state's own footer already
+carries `esc clear filter` on the crowded line, because nothing else is
+competing for it there. A `filter: "web"` banner above a sentence that
+already says `"web"` and a footer that already says `esc` would be the same
+two facts said three times. This line is for the case that sentence cannot
+cover: rows are still showing, and nothing else said why there are fewer of
+them.
 
 ## 3. Where the state lives
 
@@ -697,6 +1044,12 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   1. The Alerts card's evidence line, capped at three wrapped lines with `…`
      at the cut
      ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall)).
+     **The container picker's own state word is a second call site of this
+     same cut**, word-boundary walk-back and all — not one `⏎` away but one
+     `esc` then `d` away, on the object's own `describe` tab, which is the
+     same *the reader loses nothing but a keypress* reasoning one hop
+     longer ([detail.md § When a container's own state is what does not
+     fit](detail.md#when-a-containers-own-state-is-what-does-not-fit)).
   2. The Resources browser's one-line summary under the table, whose name
      gives way to the sentence around it and is marked the same way
      ([resources.md § The line under the table](resources.md#the-line-under-the-table)).
@@ -748,7 +1101,13 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
 
   6. The cluster picker's own name slot, where a fleet of contexts named
      after one cloud provider's naming convention share a long prefix and
-     differ only near the end.
+     differ only near the end. **The container picker's own name column is a
+     second call site of this same rule, not a twelfth cut** — it is drawn as
+     the same list-picker shape on purpose
+     ([detail.md § Choosing a container](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose)),
+     a flexible name column beside a fixed state column, and a pod that runs
+     two sidecars of the same base image (`istio-proxy`, `istio-init`) is the
+     same *shares a prefix, differs at the tail* shape a fleet of contexts is.
   7. The same row's own server-line label, in front of the address it
      introduces.
   8. The one-context sentence's own name, when there is only one row to say
