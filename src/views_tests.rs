@@ -32,6 +32,31 @@ fn now() -> Time {
     at(1_000_000)
 }
 
+/// **Every state the detail slot can be in** — what a footer sweep has to walk if it is claiming
+/// something about *every* mode (NOTES § D270; `tester`, 2026-09-18: the which-pods step was in
+/// none of them, so nothing held it to the width, the anchor pair, or the in-flight rule).
+const SLOTS: [Detailing; 3] = [
+    Detailing::Closed,
+    Detailing::Tabs {
+        containers: 2,
+        from_step: false,
+    },
+    Detailing::Pods,
+];
+
+/// **A detail tab open over the view, or nothing** — over a pod with two containers, so that *a
+/// tab is open* and *there is something to pick* stay one answer apart rather than being spelled
+/// at every call.
+fn opened(detail: bool) -> Detailing {
+    match detail {
+        true => Detailing::Tabs {
+            containers: 2,
+            from_step: false,
+        },
+        false => Detailing::Closed,
+    }
+}
+
 fn id(kind: ObjectKind, namespace: Option<&str>, name: &str, uid: Option<&str>) -> ObjectId {
     ObjectId {
         kind,
@@ -1182,7 +1207,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     app.modal = Some(Modal::Confirm(dialog(None)));
 
     assert!(
-        !app.escape(None),
+        !app.escape(Detailing::Closed),
         "an esc with no startup picker open ended the run"
     );
     assert!(app.modal.is_none(), "esc did not close the modal");
@@ -1193,7 +1218,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     );
 
     assert!(
-        !app.escape(None),
+        !app.escape(Detailing::Closed),
         "an esc with no startup picker open ended the run"
     );
     assert!(
@@ -1207,7 +1232,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     );
 
     assert!(
-        !app.escape(None),
+        !app.escape(Detailing::Closed),
         "an esc with no startup picker open ended the run"
     );
     assert!(
@@ -1225,7 +1250,7 @@ fn escape_clears_the_namespace_scope_when_no_text_filter_is_set() {
         app.filters.namespace.push(character);
     }
     assert!(
-        !app.escape(None),
+        !app.escape(Detailing::Closed),
         "an esc with no startup picker open ended the run"
     );
     assert!(app.filters.namespace.is_empty());
@@ -1750,7 +1775,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
         if let Some(Modal::ContextPick(picker)) = &mut switching.modal {
             picker.filter.push('s');
         }
-        assert!(!switching.escape(None));
+        assert!(!switching.escape(Detailing::Closed));
         assert!(
             matches!(
                 &switching.modal,
@@ -1759,7 +1784,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
             "{connection:?}: esc closed the picker with a filter still typed into it"
         );
         assert!(
-            !switching.escape(None),
+            !switching.escape(Detailing::Closed),
             "{connection:?}: esc on X's picker ended the run"
         );
         assert!(switching.modal.is_none(), "esc did not cancel the picker");
@@ -1773,12 +1798,12 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
         picker.filter.push('s');
     }
     assert!(
-        !starting.escape(None),
+        !starting.escape(Detailing::Closed),
         "esc over a typed filter quit at startup"
     );
     let before = starting.clone();
     assert!(
-        starting.escape(None),
+        starting.escape(Detailing::Closed),
         "esc on the startup picker did not end the run"
     );
     assert_eq!(
@@ -1806,7 +1831,10 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
         }
     };
     let mut app = failed(Connection::Never);
-    assert!(!app.escape(None), "esc on a failure ended the run");
+    assert!(
+        !app.escape(Detailing::Closed),
+        "esc on a failure ended the run"
+    );
     assert!(
         matches!(
             &app.modal,
@@ -1819,7 +1847,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
     // or a switch had already failed** (NOTES § D264 ruling 15) — the way back is `X`.
     for connection in [live(), dropped()] {
         let mut dismissed = failed(connection.clone());
-        assert!(!dismissed.escape(None), "{connection:?}");
+        assert!(!dismissed.escape(Detailing::Closed), "{connection:?}");
         assert!(
             dismissed.modal.is_none(),
             "{connection:?}: esc did not dismiss the failure"
@@ -2390,7 +2418,7 @@ fn esc_while_typing_empties_the_focused_field_then_closes_the_session() {
         ..App::default()
     };
 
-    assert!(!app.escape(None));
+    assert!(!app.escape(Detailing::Closed));
     assert!(app.filters.namespace.is_empty(), "`n` was not emptied");
     assert_eq!(
         app.filters.text.text(),
@@ -2399,7 +2427,7 @@ fn esc_while_typing_empties_the_focused_field_then_closes_the_session() {
     );
     assert_eq!(app.typing, Some(Typing::Namespace), "typing closed early");
 
-    assert!(!app.escape(None));
+    assert!(!app.escape(Detailing::Closed));
     assert_eq!(app.typing, None, "typing stayed open over an empty buffer");
     assert_eq!(
         app.filters.text.text(),
@@ -2522,7 +2550,15 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
             tab,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]);
+        let (keys, quit) = app.footer(opened(detail), BOTH, Refused::default(), "", &[]);
+        // **The which-pods step is a mode of this slot too** — one line, whatever view it was
+        // opened over and whatever tab was last on (`screens/detail.md` § Picking a pod).
+        let (stepping, stepped) = app.footer(Detailing::Pods, BOTH, Refused::default(), "", &[]);
+        assert_eq!(
+            (stepping.as_ref(), stepped),
+            ("↑↓ move  ⏎ open  esc back  ? all keys  q quit", ""),
+            "{view:?} · the which-pods step · {tab:?}"
+        );
         assert_eq!(
             (keys.as_ref(), quit),
             (expected, ""),
@@ -2655,19 +2691,23 @@ fn the_anchor_pair_ends_every_ordinary_footer() {
                     [restart.then_some(&Verdict::No)],
                     [None],
                 );
-                let (keys, quit) = app.footer(detail.then_some(2), offer, refused, "", &[]);
-                assert!(
-                    keys.ends_with("? all keys  q quit"),
-                    "{view:?} · {tab:?} · detail {detail} · {offer:?} — {keys:?} has no anchor pair"
-                );
-                assert_eq!(quit, "", "an ordinary footer grew a right-hand zone");
-                // **`ui::indented`'s own ceiling at the 80×24 floor**, measured the way ratatui
-                // measures — `↑↓`, `⏎` and `·` are not one byte each.
-                let columns = ratatui::text::Span::raw(keys.as_ref()).width();
-                assert!(
-                    columns <= 76,
-                    "{keys:?} is {columns} columns, past ui::indented's ceiling at the floor"
-                );
+                // **Every state of the detail slot, the which-pods step included** — a sweep
+                // that claims something about every footer has to walk every mode (NOTES § D270).
+                for open in SLOTS.into_iter().chain([opened(detail)]) {
+                    let (keys, quit) = app.footer(open, offer, refused, "", &[]);
+                    assert!(
+                        keys.ends_with("? all keys  q quit"),
+                        "{view:?} · {tab:?} · {open:?} · {offer:?} — {keys:?} has no anchor pair"
+                    );
+                    assert_eq!(quit, "", "an ordinary footer grew a right-hand zone");
+                    // **`ui::indented`'s own ceiling at the 80×24 floor**, measured the way
+                    // ratatui measures — `↑↓`, `⏎` and `·` are not one byte each.
+                    let columns = ratatui::text::Span::raw(keys.as_ref()).width();
+                    assert!(
+                        columns <= 76,
+                        "{keys:?} is {columns} columns, past ui::indented's ceiling at the floor"
+                    );
+                }
             }
         }
     }
@@ -2682,10 +2722,10 @@ fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    let (keys, quit) = app.footer(None, BOTH, Refused::default(), "", &[]);
+    let (keys, quit) = app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[]);
     assert_eq!((keys.as_ref(), quit), ("? or esc to close", "q quit"));
     assert!(
-        !app.footer(None, BOTH, Refused::default(), "", &[])
+        !app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
             .0
             .contains("all keys"),
         "the footer still pointed at a screen the reader is already on"
@@ -2820,11 +2860,12 @@ fn the_picker_and_its_failure_each_say_the_keys_valid_inside_them() {
                 modal: Some(modal.clone()),
                 ..App::default()
             };
-            for detail in [false, true] {
+            // Every state of the detail slot, the which-pods step included (NOTES § D270).
+            for open in SLOTS {
                 assert_eq!(
-                    app.footer(detail.then_some(2), BOTH, Refused::default(), "", contexts),
+                    app.footer(open, BOTH, Refused::default(), "", contexts),
                     (Cow::Borrowed(expected), ""),
-                    "{modal:?}"
+                    "{modal:?} · {open:?}"
                 );
             }
         }
@@ -2848,11 +2889,13 @@ fn help_is_the_footer_whatever_it_was_opened_from() {
             modal: Some(Modal::Help),
             ..App::default()
         };
-        assert_eq!(
-            app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]),
-            (Cow::Borrowed("? or esc to close"), "q quit"),
-            "{view:?} · detail {detail} · {tab:?}"
-        );
+        for open in SLOTS.into_iter().chain([opened(detail)]) {
+            assert_eq!(
+                app.footer(open, BOTH, Refused::default(), "", &[]),
+                (Cow::Borrowed("? or esc to close"), "q quit"),
+                "{view:?} · {open:?} · {tab:?}"
+            );
+        }
     }
 }
 
@@ -2866,15 +2909,17 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(None, BOTH, Refused::default(), "", &[]).0,
+        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+            .0,
         "? or esc to close"
     );
     assert!(
-        !app.escape(None),
+        !app.escape(Detailing::Closed),
         "an esc with no startup picker open ended the run"
     );
     assert_eq!(
-        app.footer(None, BOTH, Refused::default(), "", &[]).0,
+        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+            .0,
         "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
     );
 }
@@ -2950,11 +2995,13 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         ),
     ] {
         assert_eq!(
-            app.footer(None, BOTH, Refused::default(), "", &[]).0,
+            app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+                .0,
             expected
         );
         assert_eq!(
-            app.footer(None, BOTH, Refused::default(), "", &[]).1,
+            app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+                .1,
             "",
             "a dialog grew the right-hand zone only `?` has"
         );
@@ -2962,7 +3009,17 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         // replaced test pinned: a dialog is opened from a detail pane as readily as from a list,
         // and a footer that fell through for one of them would fall through for both.
         assert_eq!(
-            app.footer(Some(2), BOTH, Refused::default(), "", &[]).0,
+            app.footer(
+                Detailing::Tabs {
+                    containers: 2,
+                    from_step: false,
+                },
+                BOTH,
+                Refused::default(),
+                "",
+                &[]
+            )
+            .0,
             expected
         );
     }
@@ -2992,9 +3049,15 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
             ..App::default()
         };
         assert!(
-            app.footer(None, BOTH, Refused::default(), "payments/web", &[])
-                .0
-                .ends_with("? all keys  q quit"),
+            app.footer(
+                Detailing::Closed,
+                BOTH,
+                Refused::default(),
+                "payments/web",
+                &[]
+            )
+            .0
+            .ends_with("? all keys  q quit"),
             "{view:?} — nothing is running and the ordinary footer went"
         );
 
@@ -3002,7 +3065,7 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
         let no = |refused: bool| refused.then_some(&Verdict::No);
         for (scale, restart) in [(false, false), (true, false), (false, true), (true, true)] {
             let refused = Refused::of("deployments", [no(scale); 2], [no(restart)], [None]);
-            let (keys, quit) = app.footer(None, BOTH, refused, "payments/web", &[]);
+            let (keys, quit) = app.footer(Detailing::Closed, BOTH, refused, "payments/web", &[]);
             assert_eq!(
                 (keys.as_ref(), quit),
                 (
@@ -3039,42 +3102,37 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
         (View::Alerts, true, Tab::Yaml),
         (View::Resources(1), true, Tab::Events),
     ] {
-        let mut app = App {
+        let app = App {
             view,
             tab,
             ..App::default()
         };
-        let ordinary = app
-            .footer(
-                detail.then_some(2),
-                BOTH,
-                Refused::default(),
-                "payments/web",
-                &[],
-            )
-            .0;
+        // **The which-pods step keeps its own footer too, losing exactly `q quit`** — the same as
+        // the detail tabs and Analysis. `screens/dialogs.md` names those two and not this step,
+        // and the test that page states is whether a call on the wire makes anything on the line
+        // false: the step's line names no mutating key, so nothing on it is (NOTES § D270).
+        for open in [opened(detail), Detailing::Pods] {
+            let mut app = app.clone();
+            let ordinary = app
+                .footer(open, BOTH, Refused::default(), "payments/web", &[])
+                .0;
 
-        app.changing = Some(dialog(None).object);
-        let (keys, quit) = app.footer(
-            detail.then_some(2),
-            BOTH,
-            Refused::default(),
-            "payments/web",
-            &[],
-        );
-        assert_eq!(
-            format!("{keys}  q quit"),
-            ordinary,
-            "{view:?} · detail {detail} · {tab:?} — more than the one word gave way"
-        );
-        assert_eq!(
-            quit, "",
-            "a mode that keeps its own footer grew a second zone"
-        );
-        assert!(
-            !keys.contains("quit") && !keys.contains("changing"),
-            "{view:?} · detail {detail} · {tab:?} — {keys:?}"
-        );
+            app.changing = Some(dialog(None).object);
+            let (keys, quit) = app.footer(open, BOTH, Refused::default(), "payments/web", &[]);
+            assert_eq!(
+                format!("{keys}  q quit"),
+                ordinary,
+                "{view:?} · {open:?} · {tab:?} — more than the one word gave way"
+            );
+            assert_eq!(
+                quit, "",
+                "a mode that keeps its own footer grew a second zone"
+            );
+            assert!(
+                !keys.contains("quit") && !keys.contains("changing"),
+                "{view:?} · {open:?} · {tab:?} — {keys:?}"
+            );
+        }
     }
 }
 
@@ -3089,15 +3147,22 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
 fn the_in_flight_arm_is_changings_and_never_the_names() {
     let mut app = App::default();
     assert_eq!(
-        app.footer(None, BOTH, Refused::default(), "payments/web", &[])
-            .0,
+        app.footer(
+            Detailing::Closed,
+            BOTH,
+            Refused::default(),
+            "payments/web",
+            &[]
+        )
+        .0,
         "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
         "a name alone turned the in-flight footer on"
     );
 
     app.changing = Some(dialog(None).object);
     assert_eq!(
-        app.footer(None, BOTH, Refused::default(), "", &[]).0,
+        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+            .0,
         "↑↓ move  ⏎ open  ? keys  ·  changing  first",
         "an empty name turned the in-flight footer off"
     );
@@ -3116,13 +3181,13 @@ fn help_over_a_call_in_flight_drops_the_quit_it_cannot_promise() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(None, BOTH, Refused::default(), "", &[]),
+        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[]),
         (Cow::Borrowed("? or esc to close"), "q quit"),
         "help's ordinary footer changed"
     );
 
     app.changing = Some(dialog(None).object);
-    let (keys, quit) = app.footer(None, BOTH, Refused::default(), "", &[]);
+    let (keys, quit) = app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[]);
     assert_eq!(
         keys.as_ref(),
         "? or esc to close",
@@ -3170,7 +3235,13 @@ fn a_modal_keeps_its_own_closed_set_even_with_a_call_running_under_it() {
             changing: Some(running.clone()),
             ..App::default()
         };
-        let (keys, quit) = app.footer(None, BOTH, Refused::default(), "payments/web", &[]);
+        let (keys, quit) = app.footer(
+            Detailing::Closed,
+            BOTH,
+            Refused::default(),
+            "payments/web",
+            &[],
+        );
         assert_eq!((keys.as_ref(), quit), (expected, ""), "{modal:?}");
         assert!(
             !keys.contains("changing"),
@@ -3265,14 +3336,16 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
             modal,
             ..App::default()
         };
-        let (keys, quit) = app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]);
-        let width = ratatui::text::Span::raw(keys.as_ref()).width()
-            + usize::from(!quit.is_empty())
-            + ratatui::text::Span::raw(quit).width();
-        assert!(
-            width <= 66,
-            "{keys:?} + {quit:?} is {width} columns, past the 66 the mockups draw"
-        );
+        for open in SLOTS.into_iter().chain([opened(detail)]) {
+            let (keys, quit) = app.footer(open, BOTH, Refused::default(), "", &[]);
+            let width = ratatui::text::Span::raw(keys.as_ref()).width()
+                + usize::from(!quit.is_empty())
+                + ratatui::text::Span::raw(quit).width();
+            assert!(
+                width <= 66,
+                "{keys:?} + {quit:?} is {width} columns, past the 66 the mockups draw"
+            );
+        }
         seen += 1;
     }
     assert_eq!(seen, 16, "a mode stopped being measured");
@@ -3378,7 +3451,7 @@ fn the_list_footer_marks_the_keys_this_login_may_not_use() {
                         scalable,
                         restartable,
                     };
-                    let (keys, quit) = app.footer(None, offer, refused, "", &[]);
+                    let (keys, quit) = app.footer(Detailing::Closed, offer, refused, "", &[]);
                     assert_eq!(
                         (keys.as_ref(), quit),
                         (expected.as_str(), ""),
@@ -3582,11 +3655,13 @@ fn a_refused_delete_changes_no_footer() {
                 view,
                 ..App::default()
             };
-            assert_eq!(
-                app.footer(detail.then_some(2), BOTH, refused, "", &[]),
-                app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]),
-                "{view:?} · detail {detail}"
-            );
+            for open in SLOTS.into_iter().chain([opened(detail)]) {
+                assert_eq!(
+                    app.footer(open, BOTH, refused, "", &[]),
+                    app.footer(open, BOTH, Refused::default(), "", &[]),
+                    "{view:?} · {open:?}"
+                );
+            }
         }
     }
 }
@@ -3678,12 +3753,18 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
             modal,
             ..App::default()
         };
-        assert_eq!(
-            app.footer(detail.then_some(2), BOTH, all, "", &[]),
-            app.footer(detail.then_some(2), BOTH, Refused::default(), "", &[]),
-            "{:?} · detail {detail} · {tab:?}",
-            app.view
-        );
+        // **This table's own rows and the which-pods step, never every slot** — the whole claim
+        // is about the footers that name neither `s` nor `r`, and a list footer is not one of
+        // them; sweeping `Detailing::Closed` over Alerts in here would be asserting the opposite
+        // of what `screens/widgets.md` § 2a says a marked list draws.
+        for open in [opened(detail), Detailing::Pods] {
+            assert_eq!(
+                app.footer(open, BOTH, all, "", &[]),
+                app.footer(open, BOTH, Refused::default(), "", &[]),
+                "{:?} · {open:?} · {tab:?}",
+                app.view
+            );
+        }
         seen += 1;
     }
     assert_eq!(seen, 14, "a footer stopped being measured");
@@ -3699,7 +3780,7 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
 #[test]
 fn a_filter_being_typed_replaces_the_whole_footer() {
     let ask = |app: &App, cut: &str| {
-        app.footer(None, BOTH, Refused::default(), cut, &[])
+        app.footer(Detailing::Closed, BOTH, Refused::default(), cut, &[])
             .0
             .into_owned()
     };
@@ -3745,7 +3826,7 @@ fn a_filter_being_typed_replaces_the_whole_footer() {
 fn the_footer_over_a_filter_that_hides_every_row_names_the_field_esc_clears() {
     let app = App::default();
     let ask = |offer| {
-        app.footer(None, offer, Refused::default(), "", &[])
+        app.footer(Detailing::Closed, offer, Refused::default(), "", &[])
             .0
             .into_owned()
     };
@@ -3827,12 +3908,18 @@ fn c_container_is_offered_only_where_there_is_something_to_choose() {
     };
 
     assert_eq!(
-        ask(Some(2)),
+        ask(Detailing::Tabs {
+            containers: 2,
+            from_step: false,
+        }),
         "[ ] tabs  f follow  c container  esc back  ? all keys  q quit"
     );
     for many in [0, 1] {
         assert_eq!(
-            ask(Some(many)),
+            ask(Detailing::Tabs {
+                containers: many,
+                from_step: false,
+            }),
             "[ ] tabs  f follow  esc back  ? all keys  q quit",
             "{many} containers still offered a picker"
         );
@@ -3855,10 +3942,19 @@ fn the_container_picker_offers_three_keys_and_none_once_the_pod_has_gone() {
             .into_owned()
     };
 
-    assert_eq!(ask(Some(3)), "↑↓ move  ⏎ pick  esc cancel");
+    assert_eq!(
+        ask(Detailing::Tabs {
+            containers: 3,
+            from_step: false,
+        }),
+        "↑↓ move  ⏎ pick  esc cancel"
+    );
     for many in [0, 1] {
         assert_eq!(
-            ask(Some(many)),
+            ask(Detailing::Tabs {
+                containers: many,
+                from_step: false,
+            }),
             "[ ] tabs  f follow  esc back  ? all keys  q quit",
             "a picker with {many} containers kept a footer of its own"
         );
@@ -3884,7 +3980,10 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
     };
 
     let mut app = picking();
-    assert!(!app.escape(Some(3)));
+    assert!(!app.escape(Detailing::Tabs {
+        containers: 3,
+        from_step: false,
+    }));
     assert_eq!(app.modal, None);
     assert_eq!(
         app.filters.text.text(),
@@ -3894,9 +3993,18 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
 
     // **Nothing left to pick: the invisible modal goes, and the press does the visible thing in
     // the same press.** What that is depends on what is drawn under it — a logs tab is still open
-    // for `Some(0)`/`Some(1)`, so this press is the `esc back` its footer promises and the filter
+    // for `Tabs(0)`/`Tabs(1)`, so this press is the `esc back` its footer promises and the filter
     // is untouched; with no tab at all it is the ordinary at-rest `esc`.
-    for containers in [Some(0), Some(1)] {
+    for containers in [
+        Detailing::Tabs {
+            containers: 0,
+            from_step: false,
+        },
+        Detailing::Tabs {
+            containers: 1,
+            from_step: false,
+        },
+    ] {
         let mut app = picking();
         assert!(!app.escape(containers));
         assert_eq!(app.modal, None, "{containers:?}");
@@ -3908,7 +4016,7 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
     }
 
     let mut app = picking();
-    assert!(!app.escape(None));
+    assert!(!app.escape(Detailing::Closed));
     assert_eq!(app.modal, None);
     assert!(
         app.filters.text.is_empty(),
@@ -3927,8 +4035,26 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
 #[test]
 fn only_picking_tells_a_cancelled_picker_from_a_dropped_one() {
     // The predicate is what the two rows differ on, and it is what the caller can reach.
-    assert!(picking(Some(2)) && picking(Some(9)));
-    for none in [None, Some(0), Some(1)] {
+    assert!(
+        picking(Detailing::Tabs {
+            containers: 2,
+            from_step: false,
+        }) && picking(Detailing::Tabs {
+            containers: 9,
+            from_step: false,
+        })
+    );
+    for none in [
+        Detailing::Closed,
+        Detailing::Tabs {
+            containers: 0,
+            from_step: false,
+        },
+        Detailing::Tabs {
+            containers: 1,
+            from_step: false,
+        },
+    ] {
         assert!(
             !picking(none),
             "{none:?} has nothing to pick and said it had"
@@ -3944,7 +4070,21 @@ fn only_picking_tells_a_cancelled_picker_from_a_dropped_one() {
         ..App::default()
     };
 
-    for containers in [Some(3), Some(1), Some(0), None] {
+    for containers in [
+        Detailing::Tabs {
+            containers: 3,
+            from_step: false,
+        },
+        Detailing::Tabs {
+            containers: 1,
+            from_step: false,
+        },
+        Detailing::Tabs {
+            containers: 0,
+            from_step: false,
+        },
+        Detailing::Closed,
+    ] {
         let mut app = open();
         assert!(app.modal.is_some(), "both rows start with a modal open");
         assert!(!app.escape(containers));
@@ -3956,7 +4096,7 @@ fn only_picking_tells_a_cancelled_picker_from_a_dropped_one() {
         // spends the press on itself, an undrawn one lets it through to what was drawn under it.
         assert_eq!(
             !app.filters.text.is_empty(),
-            picking(containers) || containers.is_some(),
+            picking(containers) || containers != Detailing::Closed,
             "{containers:?}: what the press reached does not follow `picking`"
         );
     }
@@ -3977,7 +4117,20 @@ fn esc_out_of_a_detail_tab_leaves_the_filter_where_it_was() {
         ..App::default()
     };
 
-    for containers in [Some(0), Some(1), Some(4)] {
+    for containers in [
+        Detailing::Tabs {
+            containers: 0,
+            from_step: false,
+        },
+        Detailing::Tabs {
+            containers: 1,
+            from_step: false,
+        },
+        Detailing::Tabs {
+            containers: 4,
+            from_step: false,
+        },
+    ] {
         let mut app = filtered();
         assert!(!app.escape(containers));
         assert_eq!(
@@ -3989,9 +4142,9 @@ fn esc_out_of_a_detail_tab_leaves_the_filter_where_it_was() {
 
     // And with no tab open it is the ordinary at-rest `esc`, narrow to wide.
     let mut app = filtered();
-    assert!(!app.escape(None));
+    assert!(!app.escape(Detailing::Closed));
     assert!(app.filters.text.is_empty() && !app.filters.namespace.is_empty());
-    assert!(!app.escape(None));
+    assert!(!app.escape(Detailing::Closed));
     assert!(app.filters.namespace.is_empty());
 }
 
@@ -4686,11 +4839,12 @@ fn the_confirm_word_is_the_same_one_the_footer_and_the_button_use() {
         ..App::default()
     };
     assert!(
-        app.footer(None, BOTH, Refused::default(), "", &[])
+        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
             .0
             .contains(armed.confirm()),
         "the footer does not name the button's own word: {:?}",
-        app.footer(None, BOTH, Refused::default(), "", &[]).0
+        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+            .0
     );
 }
 
@@ -4922,4 +5076,258 @@ fn the_next_step_is_per_coverage_and_only_three_faults_have_one() {
         assert!(next.contains("guess payments and"), "{next:?}");
         assert!(!next.chars().any(unprintable), "{next:?}");
     }
+}
+
+// --- WHICH POD OF A GROUP, AND THE SLOT THAT HOLDS THE STEP ---
+
+/// `screens/detail.md` § Picking a pod — **the count and the rows under it are one list.**
+///
+/// [`Card::affected`] is the numerator of `3 of 5 pods` and [`Card::pods`] is what the step draws
+/// a row of each; a second scan for either is how a card comes to say `3 pods` over four rows.
+/// The rule it carries is NOTES § D39's: distinct over the **whole** `ObjectId`, uid included, and
+/// only `Pod`-kind objects counted at all.
+#[test]
+fn the_pod_count_and_the_rows_the_step_draws_are_one_scan() {
+    let owner = id(ObjectKind::Deployment, Some("payments"), "web", Some("u-w"));
+    let pod = |name: &str, uid: &str| id(ObjectKind::Pod, Some("payments"), name, Some(uid));
+    let findings = vec![
+        finding(Severity::Critical, owner.clone(), pod("web-a", "u-a"), None),
+        // **The same name, a different uid: a pod deleted and recreated is two objects**, which is
+        // the whole reason distinct is the id and not the name.
+        finding(Severity::Warn, owner.clone(), pod("web-a", "u-a2"), None),
+        // A second finding about a pod already counted adds no row and no count.
+        finding(Severity::Warn, owner.clone(), pod("web-a", "u-a"), None),
+        // An object that is not a pod is neither counted nor listed (NOTES § D39).
+        finding(
+            Severity::Warn,
+            owner.clone(),
+            id(
+                ObjectKind::ReplicaSet,
+                Some("payments"),
+                "web-7d9",
+                Some("u-r"),
+            ),
+            None,
+        ),
+    ];
+
+    let built = cards(&findings, &[], &now());
+    let [card] = &built[..] else {
+        panic!("one owner is one card: {built:?}");
+    };
+    assert_eq!(
+        card.pods()
+            .iter()
+            .map(|pod| (pod.name.as_str(), pod.uid.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![("web-a", Some("u-a")), ("web-a", Some("u-a2"))],
+        "the step would draw a row the count does not know about"
+    );
+    assert_eq!(
+        card.affected,
+        card.pods().len(),
+        "`3 of 5 pods` and the rows under it disagree"
+    );
+}
+
+/// `screens/detail.md` § Picking a pod — **the step's own closed set: five keys, and no `/`.**
+///
+/// That section refuses a filter by name — a picker over one card's own pods is already narrower
+/// than the list D3 was written to shrink — and it names no tab key either, because there is no
+/// tab to be on until a pod is chosen. **Whatever view it was opened over**, since the step is
+/// drawn over a view and not instead of one.
+#[test]
+fn the_which_pods_step_offers_five_keys_and_never_a_filter() {
+    for view in [View::Alerts, View::Resources(2), View::Analysis(1)] {
+        for tab in Tab::ALL {
+            let app = App {
+                view,
+                tab,
+                ..App::default()
+            };
+            let (keys, quit) = app.footer(Detailing::Pods, BOTH, Refused::default(), "", &[]);
+            assert_eq!(
+                (keys.as_ref(), quit),
+                ("↑↓ move  ⏎ open  esc back  ? all keys  q quit", ""),
+                "{view:?} · {tab:?}"
+            );
+        }
+    }
+}
+
+/// `screens/detail.md` § Picking a pod — **nothing is pickable *inside* the step.**
+///
+/// [`picking`] answers *is there a container to choose between*, and the step has no object and
+/// therefore no container. A value that said yes here would put `c container` on a footer with no
+/// tab under it and open a picker over nothing.
+#[test]
+fn the_step_is_not_a_container_picker() {
+    assert!(!picking(Detailing::Pods));
+    assert!(!picking(Detailing::Closed));
+    for many in [0, 1] {
+        assert!(
+            !picking(Detailing::Tabs {
+                containers: many,
+                from_step: false,
+            }),
+            "{many}"
+        );
+    }
+    for many in [2, 40] {
+        assert!(
+            picking(Detailing::Tabs {
+                containers: many,
+                from_step: false,
+            }),
+            "{many}"
+        );
+    }
+}
+
+/// `screens/widgets.md` § 2b, `screens/detail.md` § Picking a pod — **a filter survives `esc` back
+/// from the step**, exactly as it survives `esc` back from a detail tab: the step is drawn *over*
+/// the view whose filter it is, so going back is not going somewhere else.
+#[test]
+fn esc_out_of_the_which_pods_step_leaves_the_filter_where_it_was() {
+    let filtered = || App {
+        filters: Filters {
+            text: buffer("web"),
+            namespace: buffer("pay"),
+        },
+        ..App::default()
+    };
+
+    let mut app = filtered();
+    assert!(!app.escape(Detailing::Pods));
+    assert_eq!(
+        app.filters,
+        filtered().filters,
+        "`esc back` cleared a filter the step was drawn over"
+    );
+
+    // And with the step closed it is the ordinary at-rest `esc`, narrow to wide.
+    let mut app = filtered();
+    assert!(!app.escape(Detailing::Closed));
+    assert!(app.filters.text.is_empty() && !app.filters.namespace.is_empty());
+}
+
+/// `screens/alerts.md` § A card with more than one finding — **newer first, and *no drawable age*
+/// last**, which is the half of the sort every derived ordering available here gets backwards.
+///
+/// It is asserted on [`recency`] itself because two lists now share it — the card list and the
+/// which-pods step's rows — and a copy in either would be the one that drifts (NOTES § D69).
+#[test]
+fn recency_puts_the_newer_first_and_the_ageless_last() {
+    let old = at(10);
+    let new = at(20);
+    assert_eq!(recency(Some(&new), Some(&old)), Ordering::Less);
+    assert_eq!(recency(Some(&old), Some(&new)), Ordering::Greater);
+    assert_eq!(
+        recency(None, Some(&old)),
+        Ordering::Greater,
+        "an ageless row sorted above one with an age"
+    );
+    assert_eq!(recency(Some(&old), None), Ordering::Less);
+    assert_eq!(recency(None, None), Ordering::Equal);
+}
+
+/// `screens/detail.md` § A group of one pod, or none at all — **`⏎` opens the step only where
+/// there is a group**, and it puts the step's cursor back at the top when it does (NOTES § D270).
+///
+/// **The three shapes that are not a group**: a node card counts no pods, a bare pod's card is the
+/// pod itself, and `affected == 1` leaves one candidate. A node card reached the step and rendered
+/// **zero rows** under a footer promising `↑↓ move  ⏎ open` — *"a key that does nothing is a bug
+/// already shipped once here"* (`tester`, 2026-09-18).
+#[test]
+fn enter_opens_the_step_only_where_the_card_is_about_two_pods_or_more() {
+    let owner = id(ObjectKind::Deployment, Some("payments"), "web", Some("u-w"));
+    let pod = |name: &str| id(ObjectKind::Pod, Some("payments"), name, Some(name));
+    let of = |owner: ObjectId, pods: &[&str], total| Card {
+        findings: pods
+            .iter()
+            .map(|name| finding(Severity::Critical, owner.clone(), pod(name), None))
+            .collect(),
+        affected: pods.len(),
+        owner,
+        total,
+    };
+
+    let mut app = App::default();
+    assert!(
+        app.pick_pods(&of(owner.clone(), &["web-a", "web-b"], Some(5))),
+        "two pods of five is the group this step exists for"
+    );
+
+    // A node card: `affected == 0`, so `Card::count` is `None` and there is nothing to list.
+    let node = id(ObjectKind::Node, None, "node-3", Some("u-n"));
+    let mut cordoned = of(node.clone(), &[], None);
+    cordoned
+        .findings
+        .push(finding(Severity::Warn, node.clone(), node, None));
+    assert!(!app.pick_pods(&cordoned), "a node card has no pods to pick");
+
+    // A bare pod: `owner == object`, so nothing owns it and there is no group to speak of.
+    let bare = pod("broken-pending");
+    let mut alone = of(bare.clone(), &[], None);
+    alone
+        .findings
+        .push(finding(Severity::Critical, bare.clone(), bare, None));
+    assert!(!app.pick_pods(&alone), "a bare pod is its own card");
+
+    // One pod, however many findings name it: `⏎` opens that pod directly.
+    assert!(
+        !app.pick_pods(&of(owner.clone(), &["web-a"], Some(5))),
+        "one candidate is not a group"
+    );
+}
+
+/// `screens/detail.md` § Picking a pod — **the step's cursor starts at the top of the group it was
+/// opened on, never where the last group left it** (NOTES § D270).
+///
+/// [`App::open`] resets [`App::content`] on a view change; nothing resets [`App::pods`] between two
+/// cards of one view. Landing on row 7 of card A, `esc`, then opening card B left
+/// [`Cursor::follow`] missing A's anchor and falling back to `select(self.index)` — **row 7 of a
+/// different group, with `⏎` armed on it** (`tester`, 2026-09-18, measured).
+#[test]
+fn opening_the_step_on_a_second_card_does_not_inherit_the_first_cards_row() {
+    let owner = id(ObjectKind::Deployment, Some("payments"), "web", Some("u-w"));
+    let group = |names: &[&str]| Card {
+        findings: names
+            .iter()
+            .map(|name| {
+                finding(
+                    Severity::Critical,
+                    owner.clone(),
+                    id(ObjectKind::Pod, Some("payments"), name, Some(name)),
+                    None,
+                )
+            })
+            .collect(),
+        affected: names.len(),
+        owner: owner.clone(),
+        total: Some(40),
+    };
+    let first = group(&["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]);
+    fn anchors(card: &Card) -> Vec<Option<&str>> {
+        card.pods()
+            .into_iter()
+            .map(|pod| Some(pod.name.as_str()))
+            .collect()
+    }
+
+    let mut app = App::default();
+    assert!(app.pick_pods(&first));
+    let keys = anchors(&first);
+    app.pods.select(7, &keys);
+    assert_eq!(app.pods.selected(&keys), Some(7));
+
+    // A second card, whose names the first card's anchor does not appear in.
+    let second = group(&["b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7"]);
+    assert!(app.pick_pods(&second));
+    let keys = anchors(&second);
+    assert_eq!(
+        app.pods.selected(&keys),
+        Some(0),
+        "the step opened on row 7 of a group the reader had not looked at"
+    );
 }

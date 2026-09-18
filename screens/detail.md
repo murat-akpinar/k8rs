@@ -84,6 +84,516 @@ Before this round both pairs drew the identical heading —
 `openshift-cluster-node-tuning-operator/tuned-metrics-` — naming neither pod
 by the one thing that told them apart.
 
+## Picking a pod, before Detail has one
+
+D3 files one card per owner, not one per pod
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)) — a
+Deployment with three sick pods out of five is one card, `payments/web  ·  3
+of 5 pods`. `⏎` on that card cannot open Detail the way it does on a bare
+pod's card: Detail's four tabs are about one concrete object, and the card
+names an owner, not a pod. **On a grouped finding, `⏎` first lists which pods
+of the group are affected, then opens the one you pick** — the closing rule
+[the logs tab used to carry alone](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+and this section is where it is actually designed. The same step sits behind
+the browser's own `● web has 3 pods with problems — ⏎ to see`
+([resources.md § The line under the table](resources.md#the-line-under-the-table)) —
+one mechanism, reached from two screens, because both sentences name the same
+fact about the same card.
+
+This is not a small floating box like [the container
+picker](#choosing-a-container-and-when-there-is-nothing-to-choose). A
+container picker chooses among at most a handful of rows with short state
+words; this step can face D3's own founding number — a DaemonSet's pods on a
+40-node cluster, which is at least 40 findings, one `Finding::object` per
+pod, folded into one card by `Finding::owner`
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)) — and it
+has to hold the full pinned block beside the list, which [the next
+section](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+shows can already run past the whole 13-row body of an ordinary tab on its
+own, one block alone. A box capped the way `Confirm`, `Refused` and `ContainerPick` are
+([widgets.md § 5](widgets.md#5-the-modal-layer)) has no room for either. So
+this step is drawn **in the exact slot Detail already owns** — the same
+sidebar, the same header, the content pane handed the same way `screen.detail`
+already takes it "over the view, not instead of one," so `esc` goes back to
+that view exactly as it already does for an open Detail (`fn detail`'s own
+doc comment). What differs from an ordinary Detail is only the head row and
+the body's content: no tab row, no underline — there is no tab to be on until
+an object is chosen — and a `List` where a tab's `Paragraph` would be.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web  ·  3 of 5 pods — pick a pod    │
+│  RESOURCES         │  Containers exceeded their memory limit and   │
+│   workloads        │  were killed by the kernel (OOMKilled)        │
+│   network          │  limit 256Mi · exit 137 · 47 restarts         │
+│   storage          │  → raise limits.memory, or find the leak      │
+│   config           │                                               │
+│  ANALYSIS          │▸ ● web-7d9f4bc86d-m3p1q   Containers…         │
+│   capacity      1 ▲│  ● web-7d9f4bc86d-x2k9p   Containers…         │
+│   certificates  30d│  ● web-7d9f4bc86d-t8g2r   Container image is… │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Every row above is one line — the trailing fact **back-cuts** at a word
+boundary the same way [the container picker's own state word
+already does](#when-a-containers-own-state-is-what-does-not-fit) when it
+does not fit; it does not wrap the way the pinned block's own prose does,
+because a `List` row is one line and two facts on two lines would read as
+two rows. **The two facts drawn here are real titles, cut** —
+`"Containers exceeded their memory limit and were killed by the kernel
+(OOMKilled)"` and `"Container image is not usable, so the container never
+started (ErrImagePull)"`, the same two strings this file already quotes in
+full elsewhere, cut at this pane's own room the same way any title this
+long already has to be. No fact drawn on this page is ever the whole
+sentence; see the bullet below for the range.
+
+- **The head row keeps the owner's identity and adds `Card::count()`'s own
+  fragment** — `payments/web` (or the bare `node-3` shape, though a
+  cluster-scoped owner never reaches this step, [below](#a-group-of-one-pod-or-none-at-all--there-is-no-step))
+  plus `  ·  3 of 5 pods`, exactly the string the Alerts card and the
+  browser's own summary line already draw
+  ([`Card::count`](../src/views.rs)) — plus a fixed `— pick a pod` tail that
+  never gives way, the same protected-tail reasoning
+  [resources.md § When it does not fit](resources.md#when-it-does-not-fit-the-name-gives-way--and-now-it-says-so)
+  already gives `⏎ to see`: the identity is what fronts a cut, never the
+  instruction. Where the denominator is not readable, this reads `payments/web
+  · 3 pods — pick a pod`, `Card::count()`'s own other form, unchanged.
+- **The pinned block comes first, and there is exactly one of it — the
+  card's own deciding finding, not a stack of every finding the card
+  holds.** It is chosen by the identical two keys
+  [alerts.md § A card with more than one finding](alerts.md#a-card-with-more-than-one-finding)
+  already uses to pick which finding a stacked card draws on its face:
+  [`Card::severity`](../src/views.rs) (the worst present) and, where more
+  than one finding shares it, [`Card::newest`](../src/views.rs)'s own
+  tie-break (NOTES §
+  [D246 ruling 4](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)).
+  Showing anything else here would mean this step drew a different finding
+  than the `⏎` that opened it just showed on the card face — a second,
+  disagreeing answer to "what is wrong here", which is worse than showing a
+  stack, not merely smaller than one. **The rest of the card's findings are
+  not lost — they are why the rows underneath say what they do**: every pod
+  row's own trailing fact is that pod's own worst finding's title, so a
+  reader chasing a specific one of a DaemonSet's 38 findings picks the pod
+  it is about rather than scrolling a stack to find it. **Title, evidence
+  and action draw, identity does not** — the one place this block differs
+  from the four-part shape [the next
+  section](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+  otherwise keeps whole, and on purpose: this step's own head row already
+  carries the owner and the count a block's identity line would repeat, so
+  repeating it a second time two lines down would be the redundant kind of
+  pinned text this file elsewhere argues against, not a second fact.
+- **Every row is `▸ ` (the cursor, when selected) plus the pod's own
+  severity glyph plus its name, flexible, front-cut the way [the container
+  picker's own name column already is](widgets.md#7-text-that-came-from-the-api)
+  when two pods share a long owner-generated prefix** — the exact collision
+  [the heading section above](#the-heading-when-the-name-does-not-fit) already
+  draws for two rollouts of one Deployment. **The trailing fact is that pod's
+  own worst finding's title**, back-cut at a word boundary the same way [the
+  container picker's own state word already gives way](#when-a-containers-own-state-is-what-does-not-fit) —
+  not the raw reason (`OOMKilled` stays a card's job to translate, invariant
+  14, and this fact is that translation, already done).
+  **The floor this cut gives way at is 20 columns, and no real title is
+  drawn whole against it — none is.** Every distinct `Finding::title`
+  `rules::analyze` produces over the committed captures runs 37 to 82
+  columns, most in the high 60s to 90s
+  (`reports/2026-09-18-the-which-pods-step.md` § 1) — the two 17-column
+  strings this page used to justify the number by (`ran out of memory`,
+  `image pull failed`) were never real, and the mockups below are fixed to
+  match: a fact is two or three words and a `…` at this pane's own width,
+  every time, the same honest floor [the container picker's own state
+  word](#when-a-containers-own-state-is-what-does-not-fit) already draws
+  cut, not a whole sentence this column was ever wide enough to hold.
+- **Rows sort by severity band, then name — never recency.** Recency
+  already decided which *card* the reader is looking at before this step
+  ever opened; using it again here would re-sort the whole list under a
+  reader mid-scan of the 12 rows the pane shows at once, because every
+  restart of any one of a DaemonSet's 38 pods moves that pod's own
+  timestamp. `Cursor::follow` keeps *which pod* is selected, not *which
+  row* a reader's eye was on, so a list that moves under the cursor is a
+  list a reader cannot work through. Name is what holds still — the fact
+  every row already leads with, cut or not — so a reader who remembers a
+  pod by name can predict where it sits. Where the band ties, rows are stably
+  ordered by name; **this replaces the earlier promise of nothing**, which
+  was more pessimistic than a stable sort already is. Recency still
+  decides which finding represents a pod that carries more than one — the
+  same tie-break the pinned block above is chosen by, one function
+  ([`decides`](../src/ui.rs)) reused for both — this is only the order the
+  *rows* fall in, one level up from that.
+- **The command log strip carries over unchanged.** Moving the cursor here
+  runs nothing — no `kubectl` command exists for "look at a list k8rs already
+  holds" — so the strip still shows whatever last ran, blank on a fresh
+  session, and gains its next line only once a row is opened or a write is
+  confirmed elsewhere. The mockup above draws that blank case.
+- **The footer is `↑↓ move  ⏎ open  esc back  ? all keys  q quit`**, four
+  words this product already uses — `↑↓ move` and `⏎ open` are the Alerts and
+  Resources footers' own words
+  ([alerts.md](alerts.md), [resources.md](resources.md)), `esc back` is
+  Detail's own ([the logs tab's footer](#the-logs-tab)) — assembled, not
+  invented. **No `/` filter is offered.** A picker over a card's own pods is
+  already narrower than the list D3 was written to shrink, and adding a key
+  nothing here asked for is the invariant this file exists to avoid; a filter
+  for a 40-pod group is `backlog.md`'s to raise, not this box's to build.
+
+### A group of one pod, or none at all — there is no step
+
+**`Card::count()` returns `None` for exactly the two shapes this step has
+nothing to offer**: `affected == 0` — every node card, and any finding whose
+own `object` is not a pod at all (N1–N3, W1, W2) — and the bare-pod card,
+where `owner == object` and D246 ruling 2 already rules there is no group to
+speak of. Both reach [`Card::count`](../src/views.rs)'s `None`, and both
+already draw `⏎` opening the card's own object directly, unaffected by this
+box — this section adds a step only where one is real, it does not take one
+away.
+
+**`affected == 1` is a third shape, and `Card::count()` does not mark it —
+it reads `1 of 5 pods`, a real, non-`None` string.** A card can hold more
+than one finding (the Alerts face's own `1 more problem — ⏎ to see`) while
+still naming only one pod-kind `object` between them — one finding about the
+sick pod, a second about the Deployment's own readiness with no pod named at
+all — and `affected` counts distinct pod objects across every finding on the
+card, not findings. Whichever way a card arrives at `affected == 1`, there is
+still only one candidate, and **the same rule this product already applies
+to a single-container pod decides it**: *"a key that does nothing is a bug
+already shipped once here"*
+([§ Choosing a container](#choosing-a-container-and-when-there-is-nothing-to-choose)).
+`⏎` skips this step and opens that one pod's Detail directly, with every
+finding the card holds — not only the one naming that pod — pinned there
+exactly as [the next
+section](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+describes. **That equivalence is this shape's own, not a wider one.** The
+next section pins the findings about the object a tab is open on, plus any
+that name no pod at all — never the whole card — and on a card where
+`affected ≤ 1` there is no *other* pod for a finding to be about, so "every
+finding the card holds" and "every finding about that one pod" name the same
+set. They stop being the same set the moment `affected ≥ 2`, which is
+exactly the case this step exists for. A group only exists, and this step
+only appears, where `affected ≥ 2` — `Card::count()` reading `n of m pods`
+or `n pods` with `n ≥ 2`.
+
+### More pods than the pane shows
+
+The list is a `List` like the sidebar's own — the pinned block's own lines
+([there is exactly one block](#picking-a-pod-before-detail-has-one), never a
+stack) as unselectable rows ahead of the selectable ones (the pods), `↑↓`
+skipping the
+former exactly as it already skips a sidebar group heading
+([widgets.md § 2](widgets.md#2-element--widget)) — so it inherits
+`ListState`'s own guarantee for free: the selected row is always kept on
+screen, the same escape hatch the Alerts card list already relies on when a
+stack of banners eats into its row budget
+([alerts.md § The height](alerts.md#the-height)). A `Scrollbar` appears once
+the list is taller than the room left for it, the same rule as any other
+overflowing pane ([widgets.md § 2](widgets.md#2-element--widget)) — never
+before.
+
+There is no fixed number of pods this pane promises to show without
+scrolling, for the same reason [the next
+section](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+gives for the ordinary tabs: the pinned block is not capped here either, so
+how many rows are left for the list depends on how long the card's own
+deciding finding is. What is fixed is the reach: `↓` gets to any pod in
+the group, however many there are.
+
+**Counted, not guessed, for one real shape.** The content pane is 16 rows
+([the arithmetic below](#the-arithmetic)); this step spends one on the head
+row, leaving **15** for the `List`. A log-shipper DaemonSet reading `38 of 40
+pods` holds at least 38 findings, one per pod — and pins its **one**
+deciding finding, not 38 of them, with an empty evidence line — a title that
+wraps to one line
+at 53 columns, an action that does too — spends 2 rows on the block and 1 on
+the blank separator: **15 − 3 = 12** rows left for pods before the bar
+appears. A taller block leaves fewer; the OOM example earlier, at 4 rows
+(title 2, evidence 1, action 1) plus its separator, leaves 10 — which is why
+its own three pods drew with room to spare and no bar at all.
+
+```
+   payments/log-shipper  ·  38 of 40 pods — pick a pod   ║
+   Nodes without enough memory refused to run this Pod   ║
+   → free up memory on these nodes, or lower the request ║
+                                                         ║
+ ▸ ● log-shipper-abc12   Nodes without enough memory…    ║
+   ● log-shipper-bcd23   Nodes without enough memory…    ║
+   ● log-shipper-cde34   Nodes without enough memory…    ║
+   ● log-shipper-def45   Nodes without enough memory…    ║
+   ● log-shipper-efg56   Nodes without enough memory…    ║
+   ● log-shipper-fgh67   Nodes without enough memory…    ║
+   ● log-shipper-ghi78   Nodes without enough memory…    ║
+   ● log-shipper-hij89   Nodes without enough memory…    ║
+   ● log-shipper-ijk90   Nodes without enough memory…    ║
+   ● log-shipper-jkl01   Nodes without enough memory…    ║
+   ● log-shipper-klm12   Nodes without enough memory…    ║
+   ● log-shipper-lmn23   Nodes without enough memory…    ║
+```
+
+Every row's fact is the block's own title, cut the same way any title this
+long is — a scheduling failure reads identically across every pod it hits,
+so twelve real, distinct pods legitimately carry one repeated fact, not a
+placeholder standing in for twelve different ones. Twelve pod rows, all
+drawn — the bar appears because 38 pods do not fit in 12, not because this
+mockup ran out of room to draw them. **The bar runs the
+full height of the `List`, block rows included, not only past the
+selectable ones** — the block and its blank separator are still rows of the
+same `List` [the section above](#more-pods-than-the-pane-shows) already
+calls them, and a `Scrollbar` tracks the widget's own content, not a filter
+over which of its rows a reader can land on; a bar that started three rows
+down would be answering a different, narrower question no scrollbar on this
+product has ever been asked. `↓` from the twelfth pod scrolls the thirteenth
+into view the same way `ListState` already promises everywhere else on this
+product, and the thumb reflects **15 of the list's 41 rows** visible — 3
+unselectable (title, action, separator) plus 38 pods — not 12 of 38, because
+the fraction is rows of the list on screen over rows of the list, and the
+block rows are never left out of either side of it. (Shown here without the
+frame around it — the fixed chrome is the same as the ordinary case above,
+and it is the list's own row count that changes.)
+
+### A pod that disappears while this list is open
+
+**Not the same fact as [the container picker's own pod-disappearing
+case](#the-pod-disappears-while-the-picker-is-open).** There, the *whole*
+object the picker was about was gone, so the picker had nothing left to be
+about and closed itself. Here the object this step is about is the **card**,
+not any one pod in it — the permanent Pod watch behind `rules::PodSnapshot`
+is what feeds this list too, and it can drop one row out of many while the
+rest of the group is still real. **One pod vanishing removes one row**,
+`ListState` moving the selection to a neighbour the same way any live list on
+this product already handles a row leaving from under the cursor; the count
+in the head row (`Card::count()`, recomputed from the same snapshot) drops
+with it, and nothing else about the step changes. **This step does not
+auto-close itself down to a single remaining row** — closing it out from
+under a reader who has not pressed anything would be a second surprise this
+box does not need to invent, and the "nothing to pick" rule above only ever
+governs what `⏎` does when the step is *opened*, not what a list already open
+does when its count changes under it. Only the group reaching **zero** — the
+last pod gone, which the same rule that filed the card in the first place has
+by then almost certainly also un-filed it — closes the step and hands back to
+the view beneath, the same `esc`-shaped return every other exit from this
+step already uses; there is no second `Gone` to draw, for the same reason the
+container picker's own case gives: picking a pod is not a pending mutation,
+so there is nothing to reassure the reader about.
+
+## Every finding about this object pinned at the top of every tab
+
+**All four tabs draw it, not only logs.** The rule below used to sit at the
+end of [§ The logs tab](#the-logs-tab), headed only "Rules for this screen,"
+and never said which screen that meant — an omission `ui.rs` could not
+guess, and the fix is this section, not a caption. The reason is in the rule
+itself: *"you never lose the reason you opened the object"* is a promise
+about the **object**, not about whichever tab happens to be open when you
+arrive at it. A reader who opens `describe` first, or switches to `yaml`
+mid-read, has not stopped needing to know why they are looking at
+`payments/web-7d9f4` at all.
+
+**And it is a promise about that one object, not about every finding the
+card behind it holds.** A tab pins the findings whose own `Finding::object`
+*is* the pod it is open on, plus any finding on the card that names no pod
+at all — an owner-level, W1/W2-shaped one, which has no more specific object
+to prefer. A DaemonSet card built from a rule that fires once per pod holds
+one `Finding::object` per pod and one shared `Finding::owner`
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)); opening
+pod #7's own Detail pins the finding **about pod #7**, never the other 37.
+[§ A pod's own findings, not the whole card's](#a-pods-own-findings-not-the-whole-cards),
+below, is where this is worked through.
+
+**What "pinned" means here, settled once.** The closing rules this section
+replaces said, in the same breath, that a card's finding or findings "stay
+visible at the top" and that each one "wraps to the pane and **scrolls with
+it** rather than being pinned." Both cannot be literally true of a fixed
+chrome row the way `fn detail`'s own name/tab-row/underline trio is — a
+truly fixed block big enough to hold a controller's whole message would
+shrink the space left for the tab it sits on top of, and [the arithmetic
+below](#the-arithmetic) shows one block alone can already exceed the entire
+body. **The second reading wins, and it is the only one that can be built:**
+the block or blocks are the **first lines of the tab's own scrollable body**,
+drawn before the log lines, the `describe` text, the YAML or the events —
+visible at the top the instant the tab is opened, at scroll offset zero,
+which is what "stays visible" actually means and is all the rule needs — and
+they scroll away exactly like everything below them once the reader scrolls
+past them, the same single `Paragraph`/offset every tab already draws
+([widgets.md § 4](widgets.md#4-scrolling)). Nothing about `fn detail`'s own
+three truly-pinned rows — the object's name, the tab row, its underline —
+changes; the block or blocks are not a fourth one, they are the top of the
+part that already scrolls.
+
+**Each block is the card's own four parts, not a smaller copy of them.**
+Identity, title and action wrap at the same 53-column width the card's own
+region does — this pane's own heading section already measures that figure
+off this exact width — so the same caps an author already writes to there
+hold here without being re-derived: title stays inside three lines, action
+inside five, because both are k8rs's own words and both were already bounded
+at this width before this screen existed. **Only evidence differs, and this
+is the one place it is not cut.** [Alerts.md § The
+height](alerts.md#the-height) caps it at three wrapped lines with `…`
+because a controller's message can run past any card; this is where the rest
+of it is — drawn in full, however many lines that takes, which is why there
+is no fixed cap on a block's own height to state here that would not be a
+guess. **The four parts, not three, is a tab's own rule** — the one place
+this page pins a block with the identity line left out is [the which-pods
+step](#picking-a-pod-before-detail-has-one), and only because that step's own
+head row already says what the identity line would; an ordinary tab's own
+heading names one pod, never the owner or the count, so nothing there already
+carries what the identity line says and it stays.
+
+### The arithmetic
+
+**16 rows in the content pane** ([alerts.md § The
+height](alerts.md#the-height)'s own count for the 80×24 floor: 1 header + 1
+top border + 16 body + 1 divider + 2 command log + 1 divider + 1 footer + 1
+bottom border), **less 3 for `fn detail`'s own pinned trio** — the object's
+name, the tab row, its underline, each a `Constraint::Length(1)` before the
+open tab's own `Constraint::Min(0)` — **leaves 13 rows for the open tab's own
+body** at 80×24. That 13 is what a block or blocks are drawn against.
+
+A single block's own worst case is unbounded — `1 (identity) + ≤3 (title) +
+E (evidence) + ≤5 (action)`, and `E` has no ceiling this file can honestly
+name. What is bounded is what a real block costs, measured off text this
+file has already drawn or already cited a real measurement for. **A stack
+of two or three here is [§ A pod's own findings, not the whole
+card's](#a-pods-own-findings-not-the-whole-cards) own case, not this page's
+disproven "every finding the card holds" one**: a single pod carrying two
+or three findings of its own — the ordinary way a stack happens at all,
+since a tab never pins a finding about a different pod.
+
+| Stack | Rows | Against the 13-row body |
+|---|---|---|
+| 1 block, the OOM finding [the which-pods step](#picking-a-pod-before-detail-has-one) draws — here **with** its identity line, which that step's own mockup leaves out for the one reason given above (identity 1 + title 2 + evidence 1 + action 1) | 5 | 8 rows of real tab content still visible at scroll offset 0 |
+| 2 blocks of that size + 1 blank separator | 11 | 2 rows visible |
+| 3 blocks of that size + 2 separators | 17 | none — the reader scrolls before seeing one line the tab itself drew |
+| 1 block, a title and action at typical length but evidence 9 lines wrapped (`identity 1 + title 2 + evidence 9 + action 1`) | 13 | none — the block alone exactly fills the body |
+| 1 block, every part at its own cap (`1 + 3 + 9 + 5`) | 18 | negative — this block alone is taller than the whole body |
+
+Nine wrapped lines of evidence is not invented for this table: it is two
+lines past the seven this file already measures for a real `runc` error
+([alerts.md § The height](alerts.md#the-height), *"a container whose
+`command` names a path that is not in the image carries containerd's whole
+`runc` error, which is 7 wrapped lines"*) — a controller's own message
+reaching nine is well inside the range this codebase has already put a
+number on, not a worst case dreamed up to make a point. **The honest
+conclusion is that this page promises no fixed number of rows for a stacked
+block against the body's own budget, on purpose** — the same conclusion
+[alerts.md](alerts.md#every-count-this-card-can-have) already reaches for a
+row it has not designed, stated here instead of guessed at: a reader who
+opens the logs tab of a pod with two or three findings of its own may need
+to scroll before the first log line, and that is the true cost of never
+cutting the evidence this
+screen exists to show in full.
+
+### When the stack is taller than a Loading or Empty tab has anything of its own
+
+**Measured against the built tree, not reasoned about**
+(`reports/2026-09-18-the-which-pods-step.md` § 4): two findings on one
+pod — a real shape, not invented, `default/broken-crashloop` and
+`default/broken-hostpath` both produce it on the committed captures — where
+the second quotes the `runc` error this file already measures at 7 wrapped
+lines reaches **14 rows** against the 13-row body. What was actually drawn
+was worse than the arithmetic above admits to: `still loading`, `no logs
+yet` and `none right now` were **erased**, not shortened, because they were
+never drawn at all — the block's own layout claimed every row the tab had
+and left nothing for them. The block was then **itself cut with no mark**,
+its last words gone mid-quote, and the pane carried no scroll offset, so
+the rest was not merely off-screen, it was unreachable. `still loading` and
+`none right now` are then the same frame but for which tab is marked
+open — the very failure
+[PRIOR-ART § C2](../PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)
+is tagged **covered** in this repo for having avoided.
+
+**The fix reuses what this product already has, in the shape it already
+has it.** [`floor`](../src/ui.rs) is one line — `area.height.saturating_sub(FLOOR)`
+— and `banner` already spends it reserving room *below* a fixed message;
+the block gets the identical cap spent the other way, reserving room
+*below itself*: **at most `body.height − FLOOR` rows for the block**, the
+rest given to whatever comes after it. A block that fits does not notice —
+the OOM example throughout this section is 5 rows against 13, nowhere near
+the cap. A block that does not fit is **not silently clipped**: it carries
+the same `Scrollbar` [every other overflowing pane already
+draws](widgets.md#2-element--widget), and `app.scroll` — [the same offset
+every free-text pane on these four tabs already
+has](widgets.md#4-scrolling) — reaches every line the block holds, block
+included, exactly as it already reaches the rest of a long log stream.
+Nothing is discarded to make the block fit; it is deferred behind a scroll
+a reader can see is there.
+
+**The sentence stops being centred the moment a block leads it, and takes
+the `FLOOR` rows the cap guarantees it instead.** Centring text inside a
+region whose top edge moves every time a block grows or shrinks is not a
+position this file can compute honestly; the fixed alternative is what
+erased the sentence in the first place. So `no logs yet`, `none right now`
+and `reading the cluster…` draw as ordinary left-aligned lines directly
+under the block — the same shape a real log line or a `describe` field
+already takes there — never further than `FLOOR` rows below whatever of
+the block is showing. **This is what keeps loading and empty two frames
+and not one**: the cap guarantees the sentence is never more than a
+short, bounded scroll away, and it is drawn — in full, its own words, never
+paraphrased into the block's — every single time, which is the property
+that was missing, not merely a taller pane. (Denied was never the pair
+these two collapsed into, and stays a third, for the separate reason two
+paragraphs down.) Where there is no block at all
+— a healthy pod opened straight from the browser, nothing filed against it
+— the sentence is not capped against anything and centres exactly as
+[states.md](states.md) already draws it; this section changes nothing
+there.
+
+**Denied is not this shape, and this round changes nothing about it.** A
+refused or failed pane's own sentence is a fixed banner, drawn *before* any
+block or content, off the exact `floor(area)` helper above — `logs`'
+`Pane::Denied` arm already reserves the banner's own room first and hands
+only what is left to the block and the stream beneath it. A pinned finding
+explains why the object was worth opening; it does not know why *this*
+read failed, and the read's own reason — the verb, the resource, the next
+step — draws whole and first, never behind a scroll a block could push it
+past. Nothing here reopens that.
+
+### A pod's own findings, not the whole card's
+
+**A tab pins the findings whose own `object` is the pod it is open on, plus
+any card finding that names no pod at all — never the whole card.**
+`Finding::object` is what the rule looked at, and most rules name the pod
+they found something wrong with; a W1/W2-shaped finding names the owner
+itself instead, with no pod in it to prefer, and that kind pins on every
+pod's own tab because there is no more specific object for it to be about.
+A DaemonSet card built from 38 crashlooping pods holds at least 38 findings
+— one `Finding::object` per pod, one shared `Finding::owner`, folded by
+`views::cards` into the single card D3 exists to keep short
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)) — and
+opening pod #7's own Detail pins the finding **about pod #7**, not the other
+37. Nothing about that tab claims to speak for the group; [the which-pods
+step](#picking-a-pod-before-detail-has-one) it was opened from already did,
+and its own rows are where the other 37 pods' reasons are — each one's own
+trailing fact.
+
+**One finding pins one block — the ordinary case, and every mockup on this
+page before this section drew it that way without saying so.** Where a
+card's own `N more problems — ⏎ to see`
+([alerts.md § A card with more than one finding](alerts.md#a-card-with-more-than-one-finding))
+fired because *this same pod* carries a second finding — the same pod, a
+different reason — both pin on that pod's own tab, in that same section's
+own order: worst severity first, the most recent breaking a tie between
+equals, never only the one the card face led with. Where the extra findings
+are about *other* pods in the group instead, they do not: a card can read `N
+more problems` for any `N` and a reader who opens one pod's Detail still
+sees exactly the findings that pod earned, however large `N` is. **This is
+the condition [§ A group of one pod, or none at all](#a-group-of-one-pod-or-none-at-all--there-is-no-step)
+already relies on, stated in full**: at `affected ≤ 1` there is no *other*
+pod for a finding to be about, so every finding the card holds and every
+finding about that one pod are the same set — that section's own sentence
+stays true word for word. They stop being the same set at `affected ≥ 2`,
+and a tab pins the narrower one.
+
+That marker is still what promises this: *"⏎ leads somewhere real"* is
+that page's own phrase for it, and a Detail tab that dropped every finding
+that pod earned but the one drawn would be pointing the marker at nothing —
+the promise was always about the object the marker leads to, not about the
+group it was found in.
+
 ## The logs tab
 
 ### The buffer: 2 MB retained, 5,000 lines, 4,096 bytes per line
@@ -590,40 +1100,19 @@ $ kubectl logs web-7d9f4 -n payments -c app -f
 14:25:03  --- stream ended: pod deleted ---
 ```
 
-Rules for this screen:
-
-- **Log streams are attacker-controlled text: an open pane retains at most
-  2 MB, oldest lines dropped first — up to 5,000 lines in the common case,
-  fewer if they run long; a single line is cut at 4,096 bytes and marked.**
-  Control characters are stripped before any of the three bounds is applied.
-  [§ The logs tab](#the-logs-tab) has the arithmetic and the wording; this
-  line used to promise a bound with no number, which is how a bound stays
-  unbuilt.
-- **Every finding filed against this object's owner stays visible at the
-  top — you never lose the reason you opened the object, and a card that had
-  more than one to speak of does not lose the one it did not lead with either**
-  ([alerts.md § A card with more than one finding](alerts.md#a-card-with-more-than-one-finding)).
-  A single-finding card, still the ordinary case, pins one block; a card that
-  fired that page's `N more problems — ⏎ to see` pins all of them, stacked in
-  the same order the card face would have drawn them one at a time — the
-  card's own severity first, the most recent breaking a tie between equals.
-  **Left open here, and worth its own pass rather than a guess**: the exact
-  row cost of a second or third stacked block against this pane's own height
-  budget, which this file has not derived — the same honesty
-  [alerts.md](alerts.md#every-count-this-card-can-have) already uses for a row
-  it has not designed yet (*"not yet designed... nothing here should be read
-  as promising one"*).
-- **Each block draws its finding's evidence in full**, and it is the only place
-  that does. The Alerts card caps it at three wrapped lines with `…`, because a
-  controller's verbatim message runs past any card
-  ([alerts.md § the height](alerts.md#the-height)); this is where the rest of it
-  is, and the cut is only honest because this screen exists. Each block wraps to
-  the pane and **scrolls with it** rather than being pinned — a nine-line quote
-  pinned above a log pane leaves no log pane.
-- On a grouped finding, `⏎` first lists *which* pods of the group are affected,
-  then opens the one you pick. **The pinned block or blocks are on that step
-  too**, for the same reason: the full message must never be two keypresses
-  away, or the card's `…` is pointing at nothing the reader can find.
+**Log streams are attacker-controlled text: an open pane retains at most
+2 MB, oldest lines dropped first — up to 5,000 lines in the common case,
+fewer if they run long; a single line is cut at 4,096 bytes and marked.**
+Control characters are stripped before any of the three bounds is applied.
+[§ The buffer](#the-buffer-2-mb-retained-5000-lines-4096-bytes-per-line) above
+has the arithmetic and the wording; this used to promise a bound with no
+number, which is how a bound stays unbuilt. The pinned finding block every
+tab draws, and the step that picks a pod before any tab opens at all, are
+designed in their own sections now —
+[§ Picking a pod, before Detail has one](#picking-a-pod-before-detail-has-one)
+and [§ Every finding about this object pinned at the top of every tab](#every-finding-about-this-object-pinned-at-the-top-of-every-tab) —
+rather than as a coda to this one tab, which is what left the question of
+which tabs draw them, and which findings, unanswered in the first place.
 
 ## The describe tab
 

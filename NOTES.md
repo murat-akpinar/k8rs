@@ -291,6 +291,7 @@ its line moving with it.
 - [D267](#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17) — nothing builds on the dev machine: the gate, the sweep and the binary move to the test host
 - [D268](#d268--the-footer-key-box-a-filter-nobody-could-see-a-picker-whose-name-column-the-cluster-could-erase-and-an-esc-that-meant-two-things-2026-09-18) — the footer-key box: a filter nobody could see, a picker whose name column the cluster could erase, and an `esc` that meant two things
 - [D269](#d269--the-per-key-offer-a-key-a-kind-has-not-got-leaves-the-line-and-the-browser-was-asking-about-a-kind-word-with-the-group-thrown-away-2026-09-18) — the per-key offer: a key a kind has not got leaves the line, and the browser was asking about a kind word with the group thrown away
+- [D270](#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18) — the which-pods box: a block is about the object the surface is about, a stack that erased the pane's own sentence, and a row order that would not hold still
 
 ## Why it exists — where the gap is
 
@@ -23577,3 +23578,141 @@ asserted by nothing: every fixture used a one-card list, where the two are the s
 `backlog.md`: the ReplicaSet card whose owner is unresolved (it offers `s` where a Deployment reverts
 the change, and hides the `r` that would have fixed it, and `Card` cannot tell unresolved from bare
 behind a frozen `k8s.rs`), and `ctrl-d` on a Node, which no test asserts until Phase 12 wires a key.
+
+### D270 — the which-pods box: a block is about the object the surface is about, a stack that erased the pane's own sentence, and a row order that would not hold still (2026-09-18)
+
+Phase 12's third box — `⏎` on a grouped card lists which pods are affected, opens the one you pick,
+and the findings you opened the object for stay at the top. Three screen rounds, one test round, one
+operator round, four blockers. The screen had to be designed first: `screens/detail.md` had left the
+layout open in writing — *"worth its own pass rather than a guess"* — and contradicted itself where
+it had not, saying in one breath that a block *"stays visible at the top"* and two bullets later that
+it *"scrolls with it rather than being pinned"*.
+
+**1. "Pinned" is the top of the body, not a fourth fixed row.** The second reading wins and is the
+only one that can be built: the blocks are the first lines of the tab's own already-scrolling body,
+at offset zero when it opens, scrolling away with everything under them. `ui::detail`'s three
+`Constraint::Length(1)` rows — name, tab row, underline — are unchanged. A truly fixed block would
+shrink the tab it sits on, and § The arithmetic measures one block alone at up to 18 rows against a
+13-row body.
+
+**2. A block is about the object the surface is about — and the literal rule was unbuildable.** The
+shipped sentence was *"every finding filed against this object's **owner**"*, with *"a card that
+fired `N more problems` pins **all of them**"*. A card about 38 sick pods holds **at least 38
+findings**, one per pod ([D3](#d3--findings-group-by-owner-not-by-pod) files by owner;
+`Finding::object` is the pod). Both surfaces broke on it, and only one half was measured before the
+PM asked for the other:
+
+- **the step pins one block** — the card's `decides` finding, no identity line. Drawn one per
+  finding, the `38 of 40` log-shipper measured **38 identical blocks over one pod row**: the step's
+  whole job pushed off the pane. The page's own arithmetic (`15 − 3 = 12`) and both its mockups
+  already said one; the phrase *"block or blocks"* was the outlier.
+- **a tab pins the findings about the object it is open on** — that pod's own, plus any on the card
+  naming no pod (W1/W2-shaped). Measured before the fix: pod #7's logs tab drew blocks about pods
+  000/001/002 and pushed #7's own finding off the pane. The rule's own stated reason is *"you never
+  lose the reason you opened **the object**"*, and the object is pod #7.
+
+Where `affected <= 1` — every card the page draws or reasons about — the two readings are the same
+set, so the group-of-one sentence stays true word for word. That is why the defect survived design.
+
+**3. Blocks lead the centred states; a refused pane keeps its own sentence.** All four tabs are
+`Pane::Loading` the instant Detail opens, which is exactly the moment the promise is about, so
+leaving the blocks out there would have made it false on every first frame. `Pane::Denied` is the
+exception and not an oversight: a 403 naming the verb, the resource and the next step is the one
+thing a pinned finding cannot substitute for.
+
+**4. The stack that erased the pane's own sentence, and the third state that stopped existing.**
+`leads` clamped to `area.height` and returned a zero-height remainder, so on a pod carrying two
+findings — `default/broken-crashloop` and `default/broken-hostpath` both do, over the committed
+captures — the tab's sentence was **gone**, the block was **itself cut with no mark**, and the
+`Paragraph` had no offset, so the rest was **unreachable**. Measured: the *still loading* frame and
+the *nothing to show* frame came out byte-identical but for which tab was marked open, which reverses
+`PRIOR-ART § C2` — tagged **covered** in this repo on the strength of *"Three states, not two:
+loading · empty · denied"*. The page now rules it: the block takes at most `body.height − FLOOR`
+rows, a block that does not fit gets a `Scrollbar` and `App::scroll` reaches every line, and the
+sentence stops centring once a block precedes it but is always drawn whole. Nothing discarded, only
+deferred behind a mark the reader can see. **The doc comment that recorded the old behaviour as a
+deliberate priority claimed a PM ruling that was never made** — worse than the
+[D216](#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)
+class it belongs to, because an invented citation cannot be checked against anything.
+
+**5. The row order holds still, so severity then name and recency decides nothing.** Rows were
+severity, then recency, then (stably) namespace/name. On the 38-crashlooping-pods group this step
+exists for, every restart of any pod moves that pod's stamp and the list re-sorts under a reader
+scanning 12 visible rows of 38 — `Cursor::follow` protects their selection, not where their eye was.
+Recency already decided which *card* they are looking at; re-applying it to row order buys nothing
+and costs the one list this product asks an operator to **work** rather than glance at. `decides` is
+untouched: which finding represents a pod carrying more than one is a different question, one level
+down.
+
+**6. One scan, one predicate, one comparator.** `Card::pods()` is the single definition of *distinct
+over the whole `ObjectId`, uid included* ([D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)),
+and `cards()` sets `affected` from it rather than keeping a second copy — the count and the rows it
+draws cannot disagree. `views::recency` is extracted so the card list and the pod rows share one
+*ageless-last* comparator. And a **reachability predicate** sits beside `views::picking` for that
+one's exact reason: without it a node card (`affected == 0`) rendered a step with zero rows under a
+footer promising `↑↓ move  ⏎ open` — *a key that does nothing*, which the page itself forbids — and a
+router re-deriving the rule is [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+second copy.
+
+**7. `Detailing` carries that the tabs were reached from the step, because the freeze lands first.**
+`todo.md` § Phase 12 freezes `ui.rs` and `views.rs` at its close, and the `main.rs` wiring box that
+needs this is later in the same phase — the shape
+[D266](#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)
+and [D246](#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+ruling 3 both already paid for, arriving one layer up. `Detail::card` is not the discriminator: it is
+`Some` for a Detail reached through the step *and* for one reached by `⏎` straight onto a bare-pod
+card. The state gains the capacity now; **what `esc` does with it is the wiring box's to settle with
+`tui-designer`**, and is deliberately not decided here. Without it that box's only options were a
+private flag in `main.rs` about what `views.rs`'s state means, or reopening a frozen file.
+
+**8. The step keeps its own footer while a call is on the wire, losing exactly `q quit`.**
+`screens/dialogs.md` names the detail tabs and Analysis and not this step, which is why it came back
+undecided. That page's own test is whether a call on the wire makes anything on the line false: the
+step's line names no mutating key, so nothing on it is.
+
+**9. Two column budgets defended by arguments that did not hold.** `FACT_FLOOR = 20` was justified
+against `ran out of memory` and `image pull failed` at 17 columns — **neither string exists in
+`rules.rs`**; both are mockup words. Every distinct title `rules::analyze` produces over the
+committed captures runs **37 to 82 columns**, most in the high 60s–90s, **none at or under 20**: no
+real fact is ever drawn whole and every pod row carries a `…`. The number stands, the reasoning moved
+to the page against the measured range. And the step's list was laid out at **55** columns where the
+head row and every tab use **53**, so the block ran into the frame and a finding's title *rewrote
+itself* when the reader pressed `⏎` from the step into the tab.
+
+**10. The fix for ruling 4 reintroduced ruling 4, one column narrower, and a narrow re-read is what
+caught it.** The rewritten `leads` took the scrollbar's column off the **block** rather than out of a
+margin the block already reserved — and `identity` builds its line to **exactly** the region it was
+given whenever the finding has a drawable age, so *every identity line of every block on every tab*
+lost its last column the moment the block overflowed, which is the only moment that path exists for:
+`1014 days ago` → `1014 days ag`, unmarked. `pod_pick` had solved the identical problem correctly in
+the same turn, by drawing the bar in a `PAD` margin the rows already keep, and `leads` now does the
+same. **The gates could not see it because the two tests partitioned the space so that neither stood
+on the intersection**: one asserted the block's right edge on a *one-finding* card, where it never
+overflows; the other overflowed a *two-finding* card and asserted the sentence, the bar and the
+scroll, but nothing about the right edge. One line in the second test catches it. **The same round
+also had an `assert_ne!` that proved nothing** — it compared two different *tabs*, so the tab-marker
+row alone made them differ and it would have passed with both sentences erased; it compares two
+states of one tab now, and `Pane::Denied`, drawn correctly all along but asserted nowhere, is pinned.
+And the sentence's rows are now `max(said.len(), FLOOR)` rather than the constant: `FLOOR = 3` fit
+three of the four sentences and cut the fourth — `views::NO_EVENTS`, two lines at 53 — losing exactly
+the half that says *why*, silently. Raising the constant was the wrong fix, since `banner` shares it
+with screens this box never touched.
+
+**11. What the gates could not have found, and what one of them cost.** `just check` was green and
+the sweep clean (103 mutants, 93 caught, 10 unviable naming types, **0 missed**) before either review
+read it. Every blocker above came from rendering frames and reading the two files together. Two tests
+could not have caught their own subjects: one asserted the scrollbar's **track**, which geometry
+satisfies whatever the content length, where the claim is the **thumb**; one was three `println!`s and
+no assertion at all. `tester` also leaked an orphaned `rustc` for thirteen minutes after killing its
+parent and misread a retry wrapper's exit code for an `rm`'s — [D185](#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)
+from the inside, reported rather than quietly fixed, which is the only reason it is here.
+
+**Deferred to `backlog.md`, measured:** the **node** or the restart count in the pod row instead of
+the title — the operator review's strongest recommendation, since *which machines* and not *which
+pod* is the question on a grouped failure, but `Finding` carries no node and `rules.rs` is frozen; a
+`/` filter on the step; `worst_first`'s quadratic ceiling (3 pods 3.3 ms, 38 pods 6.9 ms, 5000 pods
+2.0 s — not measurable at D3's founding number, so a named ceiling and nothing more); and the fact
+that **no committed capture produces a card with `affected >= 2`**, so every test of this screen
+stands on a hand-built `Card` and the phase close cannot reach the screen from the binary. That last
+one needs a capture trip — a Deployment or DaemonSet with at least two pods failing for two different
+reasons — and it is the PM's.

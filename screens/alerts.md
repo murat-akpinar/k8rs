@@ -747,15 +747,26 @@ the same escape hatch [the cap already relies on](#how-wide-a-card-is-and-how-ta
 for the banner case — this is a narrower version of a bound the file already
 accepts, not a new one.
 
-**The full group is pinned on the detail view, in the same order this page
-sorts a card's findings** — worst severity first, most recent breaking a tie
-between equals. That ordering is settled here because a reader who saw one
-order on the card face and a different one behind `⏎` would have learned
-nothing to rely on; the exact drawn layout of a second and third stacked
-block is [detail.md](detail.md)'s to design, not yet done there
-([detail.md § The logs tab](detail.md#the-logs-tab)), and this page's marker
-is a promise that `⏎` leads somewhere real, not a claim about how many rows
-it costs.
+**The ordering rule is one rule, reused everywhere detail.md needs it — not
+a promise that the whole group ends up pinned in one place.** Worst
+severity first, most recent breaking a tie between equals is what decides
+which finding this card draws on its own face, and the identical rule
+decides which finding [detail.md § Picking a pod, before Detail has
+one](detail.md#picking-a-pod-before-detail-has-one) pins as the group's own
+deciding finding, and the order a pod's own findings pin in once
+[detail.md § Every finding about this object pinned at the top of every
+tab](detail.md#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+opens on it. **A pod's own tab pins that pod's own findings, never the
+whole card's** — a DaemonSet card built from 38 crashlooping pods is 38
+findings, and opening pod #7 pins pod #7's, not the other 37; those 37 are
+what the which-pods step's own rows are for, each carrying its own pod's
+worst finding's title. Both sections' own arithmetic is worked out there,
+and what it delivers is not a row count either — neither finds a fixed
+number of rows to promise a stack against, and says so on purpose, the same
+honesty this page's own stable sort keeps for a tie neither severity nor
+recency breaks. This page's marker was always a promise that `⏎` leads
+somewhere real, never a promise about how many rows that costs or how much
+of the group arrives pinned with it.
 
 ## The cordon card, with and without its clock
 

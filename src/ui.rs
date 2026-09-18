@@ -47,7 +47,8 @@ use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, Tag};
 use crate::rules::{ContainerSnapshot, Finding, ObjectId, ObjectKind, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
 use crate::views::{
-    self, App, Card, Cursor, Filters, Input, NavItem, Offer, Pane, Refused, Tab, Typing, View,
+    self, App, Card, Cursor, Detailing, Filters, Input, NavItem, Offer, Pane, Refused, Tab, Typing,
+    View,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use ratatui::Frame;
@@ -140,6 +141,12 @@ const MARKER: &str = "▸ ";
 /// The centred zone of the header row (`screens/widgets.md` § 1a).
 const NAME: &str = "k8rs";
 
+/// **`reading the cluster…`, spelled once** — [`note`] centres it on a pane with nothing else on
+/// it, and [`sentence`] builds the identical words left-flush under a block that leads them
+/// (`screens/detail.md` § When the stack is taller than a Loading or Empty tab has anything of its
+/// own). Two spellings of one sentence is how the two frames come to differ in a word.
+const WAITING: &str = "reading the cluster…";
+
 /// **The only thing k8rs shortens on purpose, and it is always visible where it happened**
 /// (`screens/widgets.md` § 7). One character on every cut, so the mark a reader learns is one mark
 /// — but for the command log strip's, which is [`STRIP_CUT`] and says why.
@@ -197,6 +204,25 @@ const CONSEQUENCE_LINES: usize = 2;
 /// columns of translated state — left it at **one** column, and `front(name, 1, "…")` draws
 /// nothing at all (`reports/2026-09-18-filter-and-container-picker.md` § 1).
 const NAME_FLOOR: usize = 20;
+
+/// **The columns a pod row's trailing fact keeps, however long the names beside it are**
+/// (`screens/detail.md` § Picking a pod, before Detail has one).
+///
+/// **[`NAME_FLOOR`]'s argument from the other side.** There the state gives way to the name,
+/// because a picker exists to name things; here the name already takes only what it needs — that
+/// page's own mockup puts the fact three columns after the longest name — so what needs a floor is
+/// the fact. Without one, a 47-column pod name leaves it three columns and a `…`, which is a mark
+/// with no sentence behind it.
+///
+/// **Twenty, and no real fact is ever drawn whole against it — none is.** The two 17-column
+/// strings this number was first justified by were mockup words `rules.rs` does not produce. Every
+/// distinct `Finding::title` `rules::analyze` actually produces over the committed captures runs
+/// **37 to 82 columns**, most in the high 60s to 90s (`k8s-admin`, 2026-09-18,
+/// `reports/2026-09-18-the-which-pods-step.md` § 1, and `screens/detail.md` § Picking a pod, which
+/// carries the range). So this is the floor a back-cut gives way at, not a width any sentence
+/// fits: a fact is two or three words and a `…`, the same honest shape [`container_pick`]'s own
+/// state word already draws cut.
+const FACT_FLOOR: usize = 20;
 
 /// **The rows the zero-match sentence is drawn on** (`screens/states.md` § The filter hides every
 /// row, which draws it on one).
@@ -666,13 +692,16 @@ pub struct Screen<'a> {
     /// [`crate::views::Pane`] cannot carry, and the one that decides whether k8rs is in a position
     /// to offer a write at all.
     pub link: Link,
-    /// **The object a detail tab is open on, and what each of its four fetches answered** —
-    /// `None` when nothing is open (`screens/detail.md`).
+    /// **What the detail slot is showing, or `None` when nothing is open** (`screens/detail.md`).
     ///
     /// **A detail is drawn *over* whatever view is open, which is why it is an `Option` here and
     /// not a fourth [`View`]**: `esc` goes back to the pane the reader came from, and a view that
     /// had to be re-derived to go back to would be a second place holding where they were.
-    pub detail: Option<&'a Detail<'a>>,
+    ///
+    /// **Two things can be in it and it is one value, never two `Option`s** ([`Detailed`], PM
+    /// ruling 2026-09-18): the four tabs over one object, or the step that asks which pod of a
+    /// group to open them on. Two fields could both be `Some`, which is a screen nothing can draw.
+    pub detail: Option<Detailed<'a>>,
     /// **The kubeconfig's contexts, while the picker is open** — [`crate::k8s::contexts`]' answer,
     /// read once when it opened and the same list every `crate::views::Picker` method was handed.
     /// Empty when nothing is picking.
@@ -794,6 +823,29 @@ pub enum Link {
     Expired,
 }
 
+/// **What the detail slot holds — the four tabs, or the step before there is an object to draw
+/// them on** (`screens/detail.md` § Picking a pod, before Detail has one).
+///
+/// **The step is not a [`crate::views::Modal`], and that section rules out the box rather than
+/// leaving it unsaid**: a modal is capped at [`MODAL_ROWS`], and one pinned block can already
+/// exceed the whole body on its own (§ The arithmetic). So it is drawn in the slot Detail already
+/// owns, over the view and not instead of one — which is what keeps `esc` the same press for both.
+#[derive(Clone, Copy)]
+pub enum Detailed<'a> {
+    /// **One object's four tabs, and whether `⏎` reached them through the which-pods step** —
+    /// carried for the key router, which has no other way to tell a tab reached that way from one
+    /// reached straight off a card (`crate::views::Detailing::Tabs`, NOTES § D270). Nothing on
+    /// this screen draws from it.
+    Tabs {
+        open: &'a Detail<'a>,
+        from_step: bool,
+    },
+    /// **The card whose pods are being picked between** — the whole card, because the step draws
+    /// its owner, its [`crate::views::Card::count`] fragment, its findings and its pods, and a
+    /// slice of any one of those would be a second place holding what a card already is.
+    Pods(&'a Card),
+}
+
 /// **What the four detail tabs were answered**, one field per tab (`screens/detail.md`).
 ///
 /// **Typed values and not sentences, which is the opposite of what [`Screen`]'s own doc says
@@ -816,7 +868,33 @@ pub struct Detail<'a> {
     /// Which object, for the line above the tab row. **An id and not a name**, so the
     /// `namespace/name` spelling is [`name`]'s one answer and not a second one
     /// (`screens/README.md` § the five rules).
+    ///
+    /// **[`pinned`] matches it against [`crate::rules::Finding::object`] exactly, uid included**,
+    /// so this has to be built from [`crate::views::Card::pods`]' own entry and never from the
+    /// cursor's anchor, which is the pod's *name* ([`crate::views::App::pods`]). Built from the
+    /// name, every match fails and the tab silently pins **nothing** — no panic, no mark, and no
+    /// test of this file goes red, because this file is handed the id it is told to draw. Both
+    /// reviews raised it and it is the wiring box's to get right (`tester` and `k8s-admin`,
+    /// 2026-09-18).
     pub object: &'a ObjectId,
+    /// **The card this object is filed under, whose findings about *this object* are pinned at the
+    /// top of every tab** (`screens/detail.md` § Every finding about this object pinned at the top
+    /// of every tab) — `None` for an object Alerts has no card about, which is every healthy row
+    /// the browser opens.
+    ///
+    /// **The whole card and not [`crate::views::Card::findings`]**, because a pinned block is the
+    /// card's own four parts and the first of them is its identity line — the owner, the `n of m
+    /// pods` fragment, the band and the age, none of which a finding carries on its own.
+    ///
+    /// **Carrying the card is not pinning the card**: [`pinned`] draws only the findings filed
+    /// against [`Detail::object`], plus any that name no pod at all (§ A pod's own findings, not
+    /// the whole card's). The card is here for the identity line and for the group's own count,
+    /// not as a list of what to draw.
+    ///
+    /// **All four tabs draw it, not only logs** — that section's own correction: *"you never lose
+    /// the reason you opened the object"* is a promise about the object and not about whichever
+    /// tab happens to be open.
+    pub card: Option<&'a Card>,
     /// The logs tab's stream and everything the header line over it says.
     pub logs: &'a Pane<Logs<'a>>,
     /// **The describe tab's own fresh, unpruned read** — never the watch store, which is pruned
@@ -960,9 +1038,33 @@ fn found(alerts: &Pane<Vec<Card>>) -> &[Card] {
 /// (§ The pod disappears while the picker is open) — there is no second fact to carry and no
 /// second `Gone` to draw.
 fn containers<'a>(screen: &Screen<'a>) -> &'a [(&'a str, Option<&'a ContainerSnapshot>)] {
-    match screen.detail.map(|open| open.logs) {
+    match tabbed(screen).map(|open| open.logs) {
         Some(Pane::Ready(logs) | Pane::Denied(_, logs)) => logs.pod.containers,
         _ => &[],
+    }
+}
+
+/// **The four tabs, where that is what the slot holds** — the which-pods step has no object and
+/// therefore no container, no tab and no scroll, so every reader of a tab's own state asks through
+/// here rather than unwrapping the slot itself.
+fn tabbed<'a>(screen: &Screen<'a>) -> Option<&'a Detail<'a>> {
+    match screen.detail {
+        Some(Detailed::Tabs { open, .. }) => Some(open),
+        _ => None,
+    }
+}
+
+/// **What the detail slot is, in the terms the keys are decided in**
+/// ([`crate::views::Detailing`]) — read in one place so the footer, `esc` and the container picker
+/// cannot come to disagree about what is open.
+fn detailing(screen: &Screen) -> Detailing {
+    match screen.detail {
+        None => Detailing::Closed,
+        Some(Detailed::Tabs { from_step, .. }) => Detailing::Tabs {
+            containers: containers(screen).len(),
+            from_step,
+        },
+        Some(Detailed::Pods(_)) => Detailing::Pods,
     }
 }
 
@@ -1116,8 +1218,8 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let dim = screen.fg(theme::DIM);
     let row = indented(area);
     let offer = offered(app, screen);
-    let picks = screen.detail.map(|_| containers(screen).len());
-    let (line, quit) = app.footer(picks, offer, screen.refused, "", screen.contexts);
+    let open = detailing(screen);
+    let (line, quit) = app.footer(open, offer, screen.refused, "", screen.contexts);
     let room = usize::from(row.width).saturating_sub(width(&line));
     // **Two arms interpolate one caller-cut string and never both in one frame** — a filter has
     // focus, or a write is on the wire. `s` is a character while a filter is being typed, so a
@@ -1132,13 +1234,13 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
             let shown = shortened(app.typed().map_or("", Input::text), room);
             let caret = width(field.label()) + width(": ") + width(&shown);
             let line = app
-                .footer(picks, offer, screen.refused, &shown, screen.contexts)
+                .footer(open, offer, screen.refused, &shown, screen.contexts)
                 .0;
             (line, Some(caret))
         }
         (None, Some(object)) => (
             app.footer(
-                picks,
+                open,
                 offer,
                 screen.refused,
                 &name_cut(object.namespace.as_deref(), &object.name, room),
@@ -1610,7 +1712,7 @@ fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, scr
         // not landed. What is left on screen is the logs tab [`content`] has already drawn — the
         // stream's own ended marker — which is the one screen that fact already had.
         views::Modal::ContainerPick(at) => {
-            if let Some(open) = screen.detail.filter(|_| containers(screen).len() > 1) {
+            if let Some(open) = tabbed(screen).filter(|_| containers(screen).len() > 1) {
                 container_pick(frame, body, at, open, screen);
             }
         }
@@ -2877,9 +2979,12 @@ fn value<'a>(badge: Option<&'a Badge>, screen: &Screen) -> Vec<Span<'a>> {
 fn content(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     // **A detail is drawn over the view, not instead of one** ([`Screen::detail`]): the view
     // underneath is still what `esc` goes back to, so it is not cleared and not consulted.
-    if let Some(open) = screen.detail {
-        detail(frame, area, app, screen, open);
-        return;
+    match screen.detail {
+        Some(Detailed::Tabs { open, .. }) => return detail(frame, area, app, screen, open),
+        // **The step before Detail has an object**, drawn in the same slot and over the same view
+        // (`screens/detail.md` § Picking a pod, before Detail has one).
+        Some(Detailed::Pods(card)) => return pod_pick(frame, area, app, screen, card),
+        None => {}
     }
     match app.view {
         View::Resources(nth) => browser(frame, area, app, screen, screen.kinds.get(nth)),
@@ -3239,7 +3344,7 @@ fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool, first: Op
         budget = budget.saturating_sub(lines.len());
     }
     let measure = usize::from(BLOCK);
-    let waiting = ["reading the cluster…".to_owned()];
+    let waiting = [WAITING.to_owned()];
     let handed = if !healthy && screen.note.is_empty() {
         &waiting[..]
     } else {
@@ -3448,51 +3553,291 @@ fn alerts(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, cards: &[Ca
 /// (`screens/alerts.md` § What each part is, § A card with more than one finding).
 ///
 /// **A card holds every finding filed under one owner and draws the one that decides it**
-/// ([`decides`]), so the sentence under the glyph is the sentence that glyph is about. The rest
-/// are one `⏎` away, where the whole group is pinned (`screens/detail.md`).
+/// ([`decides`]), so the sentence under the glyph is the sentence that glyph is about.
+///
+/// **The rest are one `⏎` away, and not as one pinned group** (`screens/alerts.md` § A card with
+/// more than one finding's own closing, corrected 2026-09-18): `⏎` reaches the which-pods step,
+/// whose rows carry the other pods' own worst findings, and the tab it opens pins the findings
+/// filed against *that* pod ([`pinned`]). This marker promises `⏎` leads somewhere real; it never
+/// promised how much of the group arrives pinned with it.
 fn lines<'a>(card: &Card, screen: &Screen, region: usize) -> Vec<Line<'a>> {
-    let mut drawn = vec![identity(card, screen, region)];
-    let body = region.saturating_sub(2);
-    let Some(finding) = decides(card, screen.now) else {
+    let mut drawn = vec![identity(card, None, screen, region)];
+    let held: Vec<&Finding> = card.findings.iter().collect();
+    let Some(finding) = decides(&held, screen.now) else {
         return drawn;
     };
-
-    let text = screen.fg(theme::TEXT);
-    let dim = screen.fg(theme::DIM);
-    drawn.extend(indent(wrapped(&finding.title, body), "  ", text));
-    // **Left out when there is none, never drawn blank** — a blank line is a hole in the middle
-    // of a card (`crate::rules::Finding::evidence`).
-    if !finding.evidence.is_empty() {
-        drawn.extend(indent(
-            cut(&finding.evidence, body, EVIDENCE_LINES),
-            "  ",
-            dim,
-        ));
-    }
-    // **The action is never cut**: a fix the reader cannot finish reading is not a fix. Its
-    // continuations indent under the text rather than under the arrow.
-    let mut action = wrapped(&finding.action, region.saturating_sub(4)).into_iter();
-    if let Some(first) = action.next() {
-        drawn.push(Line::from(vec![
-            Span::styled("  → ", screen.fg(theme::ACCENT)),
-            Span::styled(first, text),
-        ]));
-        drawn.extend(indent(action.collect(), "    ", text));
-    }
+    drawn.extend(said(finding, screen, region, Some(EVIDENCE_LINES), "  "));
     // **The fifth part: one line, a plain count, no glyph** (`screens/alerts.md` § A card with
     // more than one finding). It is dim like the evidence — a pointer, not an instruction — and
     // it has no empty form: a single-finding card draws no placeholder. A glyph here would ask
     // whose severity it carries, when the answer is on the line above and cannot be worse.
+    //
+    // **It never appears on a pinned block**, which is what [`said`] not drawing it says: the
+    // marker points *at* the block, and drawing it inside one points the reader at what they are
+    // already looking at (NOTES § D270).
     if card.findings.len() > 1 {
         let hidden = card.findings.len() - 1;
         let problems = if hidden == 1 { "problem" } else { "problems" };
         drawn.push(Line::styled(
             format!("  {hidden} more {problems} — ⏎ to see"),
-            dim,
+            screen.fg(theme::DIM),
         ));
     }
     drawn.push(Line::default());
     drawn
+}
+
+/// **One finding's three parts — what happened, the evidence, what to do** — under whichever
+/// identity line the caller drew, or under none.
+///
+/// **One renderer for a card's own block and for a pinned one, because they are one block**
+/// (NOTES § D270). A second copy is two readings of one finding, which is
+/// [D103](../NOTES.md)'s own defect class.
+///
+/// **`evidence` is the whole of what differs**: `Some(n)` is the Alerts card's `n`-line cut
+/// ([`EVIDENCE_LINES`], `screens/alerts.md` § The height), `None` is the pinned block's full text
+/// — *"the one place it is not cut"*, and the only thing that redeems the card's `…`
+/// (`screens/detail.md` § Every finding about this object pinned at the top of every tab).
+/// **Unbounded is not unbounded in bytes**: `crate::rules::Finding::evidence` quotes a controller
+/// message that `k8s::clean` already cut at `k8s::FREE_TEXT`, so the worst case is that many
+/// columns of wrapped
+/// text and not a cluster's whole object — every free-text piece a rule quotes went through that
+/// cap on the way in, so what a block can be asked to wrap is a small multiple of 4096 bytes and
+/// never the object a `fieldValidation` refusal hands back (NOTES § D217).
+fn said<'a>(
+    finding: &Finding,
+    screen: &Screen,
+    region: usize,
+    evidence: Option<usize>,
+    under: &'static str,
+) -> Vec<Line<'a>> {
+    let body = region.saturating_sub(width(under));
+    let text = screen.fg(theme::TEXT);
+    let dim = screen.fg(theme::DIM);
+    let mut drawn = indent(wrapped(&finding.title, body), under, text);
+    // **Left out when there is none, never drawn blank** — a blank line is a hole in the middle
+    // of a card (`crate::rules::Finding::evidence`).
+    if !finding.evidence.is_empty() {
+        let quoted = match evidence {
+            Some(most) => cut(&finding.evidence, body, most),
+            None => wrapped(&finding.evidence, body),
+        };
+        drawn.extend(indent(quoted, under, dim));
+    }
+    // **The action is never cut**: a fix the reader cannot finish reading is not a fix. Its
+    // continuations indent under the text rather than under the arrow.
+    let arrow = format!("{under}→ ");
+    let mut action = wrapped(&finding.action, region.saturating_sub(width(&arrow))).into_iter();
+    if let Some(first) = action.next() {
+        drawn.push(Line::from(vec![
+            Span::styled(arrow.clone(), screen.fg(theme::ACCENT)),
+            Span::styled(first, text),
+        ]));
+        // Measured off the arrow that was just drawn, never restated as a literal: the
+        // continuation starts under the action's own first word wherever the block hangs.
+        drawn.extend(indent(action.collect(), &" ".repeat(width(&arrow)), text));
+    }
+    drawn
+}
+
+/// **The findings filed against the object this tab is open on, each as its own four parts, worst
+/// first** — the lines that lead a detail tab's own scrolling body
+/// (`screens/detail.md` § Every finding about this object pinned at the top of every tab).
+///
+/// **They are the first lines of the body and not a fourth pinned chrome row**, which is that
+/// section's own ruling: one block can already outgrow the 13 rows [`detail`]'s three pinned rows
+/// leave, so a truly fixed block would shrink the tab it sits on top of. They scroll away like
+/// everything below them once the reader scrolls past them, and *at scroll offset zero* is all
+/// *"stays visible"* has ever needed to mean.
+///
+/// **This object's findings, not the whole card's** (§ A pod's own findings, not the whole card's;
+/// NOTES § D270). The rule's own reason is *"you never lose the reason you opened **the
+/// object**"*, and a card is filed under an owner: a DaemonSet card built from a rule that fires
+/// once per pod holds one [`Finding::object`] per pod (NOTES § D3), so pinning the card would put
+/// 37 blocks about pods the reader did not choose ahead of the one they did. **Measured, not
+/// reasoned**: before this filter, opening pod #7 of a 38-pod group drew blocks about pods 000,
+/// 001 and 002 and pod #7's own finding was off the bottom of the pane (`dev-ui`, 2026-09-18).
+///
+/// **Plus every finding that names no pod at all** — the owner-level, W1/W2 shape, whose `object`
+/// is the workload itself. It has no more specific object to prefer, so it is about this pod as
+/// much as any other and pins on every one of their tabs.
+///
+/// **At `affected <= 1` the two sets are the same set**, which is why § A group of one pod's own
+/// sentence — *"with every finding the card holds — not only the one naming that pod — pinned
+/// there"* — is still true word for word: there is no other pod for a finding to be about.
+///
+/// **`None` is an object Alerts has no card about** — every healthy row the browser opens — and it
+/// pins nothing rather than an empty frame.
+fn pinned<'a>(open: &Detail, screen: &Screen, region: usize) -> Vec<Line<'a>> {
+    let Some(card) = open.card else {
+        return Vec::new();
+    };
+    let mine: Vec<&Finding> = card
+        .findings
+        .iter()
+        .filter(|finding| finding.object == *open.object || finding.object.kind != ObjectKind::Pod)
+        .collect();
+    blocks(card, &mine, screen, region, true)
+}
+
+/// **The one block the which-pods step leads with** — the card's deciding finding, drawn without
+/// its identity line (`screens/detail.md` § Picking a pod, before Detail has one).
+///
+/// **One block and not one per finding, which is that section's own arithmetic read off it rather
+/// than reasoned about** (`dev-ui`, 2026-09-18; PM's to rule): § More pods than the pane shows
+/// counts a log-shipper DaemonSet at `38 of 40 pods` as *"one block … spends 2 rows on the block
+/// and 1 on the blank separator: 15 − 3 = 12 rows left for pods"*, and both mockups on that page
+/// draw one block over a multi-finding group. Drawn one per finding, that same card measured
+/// **one** pod row instead of twelve, every block identical — the step's whole job, *which pod*,
+/// pushed off the pane by 38 copies of one sentence. The tab's own section is the opposite and
+/// says so explicitly, which is why the two are separate functions and not one flag.
+///
+/// **It is [`decides`]' finding, so the block here and the card face the reader pressed `⏎` on are
+/// the same sentence.**
+fn leading<'a>(card: &Card, screen: &Screen, region: usize) -> Vec<Line<'a>> {
+    let held: Vec<&Finding> = card.findings.iter().collect();
+    match decides(&held, screen.now) {
+        Some(finding) => blocks(card, &[finding], screen, region, false),
+        None => Vec::new(),
+    }
+}
+
+/// **The blocks themselves, with a blank row between them** — one renderer, because a card's own
+/// block and a pinned one are one block (NOTES § D270).
+///
+/// **Worst severity first, the most recent breaking a tie** — `screens/alerts.md`'s own order for
+/// a stacked card, so that a reader who saw one order on the card sees the same one a keypress
+/// later. The comparator's recency half is [`views::recency`] and not a second copy of it.
+///
+/// **`named` is the identity line, and the one place it is off is the which-pods step**, whose own
+/// head row already carries the owner and the count it would repeat. An ordinary tab's heading
+/// names one pod and never the owner, so nothing there already says it and it stays — **and the
+/// band and the age on it are that block's own finding's**, never the card's, or a `▲` finding
+/// draws under a `●` and the stack claims every part of it is as bad as the worst.
+fn blocks<'a>(
+    card: &Card,
+    findings: &[&Finding],
+    screen: &Screen,
+    region: usize,
+    named: bool,
+) -> Vec<Line<'a>> {
+    let mut held = findings.to_vec();
+    held.sort_by(|a, b| {
+        a.severity
+            .cmp(&b.severity)
+            .then_with(|| views::recency(drawable(a, screen.now), drawable(b, screen.now)))
+    });
+    // **The body hangs under the identity line's own gutter, or under nothing where there is no
+    // identity line** — two columns of indent with nothing above them to indent under is a margin
+    // the head row does not have.
+    let under = match named {
+        true => "  ",
+        false => "",
+    };
+    let mut drawn: Vec<Line> = Vec::new();
+    for finding in held {
+        if !drawn.is_empty() {
+            drawn.push(Line::default());
+        }
+        if named {
+            drawn.push(identity(card, Some(finding), screen, region));
+        }
+        drawn.extend(said(finding, screen, region, None, under));
+    }
+    drawn
+}
+
+/// **The pinned blocks over a pane that has no scrolling body of its own, and the pane's own
+/// sentence under them** — a tab whose fetch has not answered, and the two calm states (`no logs
+/// yet`, `none right now`). `false` where there was no block, so the caller draws exactly what it
+/// drew before.
+///
+/// **All four tabs are `Pane::Loading` the instant Detail opens**, which is exactly the moment
+/// *"you never lose the reason you opened the object"* is about — so leaving these arms out made
+/// the promise false for every first frame (NOTES § D270).
+///
+/// **`said` is handed over rather than described, and that is what makes the sentence whole by
+/// construction** (`k8s-admin`, 2026-09-18, `reports/2026-09-18-the-which-pods-step.md` § 10; PM
+/// ruling: the property, not the constant). Reserving a fixed [`FLOOR`] left one row after a
+/// headline and a blank, and `crate::views::NO_EVENTS` is two lines at this width — so the half
+/// that says *why* was cut, from a `Paragraph` with no offset and no [`CUT`]. The rows reserved
+/// are the rows the caller's own sentence takes, never fewer than `FLOOR`, so a longer sentence
+/// costs the block a row instead of losing its own end.
+///
+/// **The block takes what is left, and a block past it scrolls rather than being clipped**
+/// (`screens/detail.md` § When the stack is taller than a Loading or Empty tab has anything of its
+/// own). Clamped to the whole pane instead, a 14-row stack erased `still loading` and `none right
+/// now` outright, cut itself with no mark, and carried no offset — the collapse PRIOR-ART § C2 is
+/// tagged *covered* for avoiding.
+///
+/// **The bar draws in the pane's own right margin and never out of the block's width**, which is
+/// [`pod_pick`]'s shape and is why this takes the *unpadded* pane. Taken off the block, it made
+/// every identity line on an overflowing block one column short with no `…` — [`identity`] lays
+/// its line out to exactly `region` whenever the finding has a drawable age, so `1014 days ago`
+/// drew as `1014 days ag` (`k8s-admin`, 2026-09-18, § 8). That is the same invariant, one column
+/// instead of four, in the path this function exists for.
+fn leads(
+    frame: &mut Frame,
+    area: Rect,
+    above: &[Line],
+    said: &[Line],
+    app: &App,
+    screen: &Screen,
+) -> bool {
+    let keeps = u16::try_from(said.len()).unwrap_or(u16::MAX).max(FLOOR);
+    let most = area.height.saturating_sub(keeps);
+    if above.is_empty() || most == 0 {
+        return false;
+    }
+    let tall = u16::try_from(above.len()).unwrap_or(u16::MAX).min(most);
+    let [held, rest] = Layout::vertical([Constraint::Length(tall), Constraint::Min(0)]).areas(area);
+    // **The block keeps the pane's own two-column reading margin and the bar draws in the right
+    // one**, so the block's width is the width `pinned` wrapped to whether it overflows or not.
+    let at = scrolled(frame, padded(held), app.scroll, false, above.to_vec());
+    let [_, margin] = Layout::horizontal([Constraint::Min(0), Constraint::Length(PAD)]).areas(held);
+    // [`scrollbar`] draws nothing where the content fits, so there is no *does it overflow* flag
+    // here: a second condition could only agree with it or be wrong.
+    scrollbar(frame, margin, above.len(), at, screen);
+    frame.render_widget(Paragraph::new(Text::from(said.to_vec())), padded(rest));
+    true
+}
+
+/// **A pane's own sentence as the rows it takes, left-flush** — the same words [`note`] and
+/// [`calmly`] centre on a pane with nothing above them (`screens/detail.md` § When the stack is
+/// taller than a Loading or Empty tab has anything of its own).
+///
+/// **It stops being centred the moment a block precedes it, and that is the ruling rather than a
+/// compromise**: centring inside a region whose top edge moves every time a block grows or shrinks
+/// is not a position this file can compute honestly, and the fixed alternative is what erased the
+/// sentence. Drawn in full, in its own words — never paraphrased into the block's — which is the
+/// property that keeps *loading* and *empty* two frames and not one.
+///
+/// **Built by the caller and handed to [`leads`], so the rows it needs and the rows it gets are
+/// one number.** Described to `leads` instead, they were two, and the longer of the four sentences
+/// lost its second line.
+fn sentence<'a>(
+    screen: &Screen,
+    columns: usize,
+    headline: Option<&str>,
+    said: &str,
+) -> Vec<Line<'a>> {
+    let mut lines: Vec<Line> = Vec::new();
+    if let Some(headline) = headline {
+        lines.push(calm(screen, headline));
+        lines.push(Line::default());
+    }
+    lines.extend(set(said, columns, screen.fg(theme::DIM)));
+    lines
+}
+
+/// **A finding's timestamp, but only where [`Finding::age`] would draw one** — the test every
+/// recency comparison on this product applies, so a stamp past `rules::age`'s skew allowance
+/// cannot win an order it would then draw no age for (NOTES § D246 ruling 4).
+fn drawable<'a>(finding: &'a Finding, now: &Time) -> Option<&'a Time> {
+    finding
+        .age(now)
+        .is_some()
+        .then_some(finding.timestamp.as_ref())?
 }
 
 /// **Which of a card's findings the four parts above are drawn from** — the card's own severity,
@@ -3510,11 +3855,18 @@ fn lines<'a>(card: &Card, screen: &Screen, region: usize) -> Vec<Line<'a>> {
 ///
 /// **A hidden finding can never be worse than the drawn one**, which is what lets [`lines`]' count
 /// of the rest carry no severity of its own.
-fn decides<'a>(card: &'a Card, now: &Time) -> Option<&'a Finding> {
-    let worst = card.severity();
+///
+/// **It takes a set of findings and not a card, because the which-pods step asks the same question
+/// one level down** (NOTES § D270): a pod row's glyph and its trailing fact are *that
+/// pod's own* worst finding under this identical rule, so [`pod_pick`] calls this with the
+/// findings naming one pod and [`lines`] calls it with all of them. Writing the rule twice is how
+/// a card and the row that opens it come to disagree about which finding either is about.
+fn decides<'a>(findings: &[&'a Finding], now: &Time) -> Option<&'a Finding> {
+    let worst = findings.iter().map(|finding| finding.severity).min()?;
     let at_worst = || {
-        card.findings
+        findings
             .iter()
+            .copied()
             .filter(move |finding| finding.severity == worst)
     };
     at_worst()
@@ -3534,9 +3886,23 @@ fn decides<'a>(card: &'a Card, now: &Time) -> Option<&'a Finding> {
 /// **A run of ageless cards is this rule applied more than once**, not a second layout: nothing
 /// here looks at a neighbouring card, so an ageless one gets the whole 51 columns and its name
 /// ends where the name ends.
-fn identity<'a>(card: &Card, screen: &Screen, region: usize) -> Line<'a> {
-    let (colour, signal) = theme::band(card.severity());
-    let age = card.age(screen.now);
+///
+/// **`finding` is which block this line heads, and it decides the band and the age — never the
+/// name or the count, which are the card's on every one of them** (`screens/detail.md` § Every
+/// finding pinned at the top of every tab). `None` is the Alerts card's own row, where the band is
+/// the card's worst and the age is [`Card::age`]'s newest *drawable* — two answers for the whole
+/// card, which is right for one row about it and wrong for a stack of blocks under it.
+fn identity<'a>(
+    card: &Card,
+    finding: Option<&Finding>,
+    screen: &Screen,
+    region: usize,
+) -> Line<'a> {
+    let (colour, signal) = theme::band(finding.map_or_else(|| card.severity(), |it| it.severity));
+    let age = match finding {
+        Some(finding) => finding.age(screen.now),
+        None => card.age(screen.now),
+    };
     let measured = age.as_deref().map_or(0, width);
     let body = region.saturating_sub(GUTTER);
     let room = if measured == 0 {
@@ -3586,7 +3952,7 @@ fn name(namespace: Option<&str>, name: &str) -> String {
 }
 
 /// Wrapped lines under a fixed prefix, which is how a card's body indents.
-fn indent<'a>(text: Vec<String>, prefix: &'static str, style: Style) -> Vec<Line<'a>> {
+fn indent<'a>(text: Vec<String>, prefix: &str, style: Style) -> Vec<Line<'a>> {
     text.into_iter()
         .map(|line| Line::styled(format!("{prefix}{line}"), style))
         .collect()
@@ -4221,12 +4587,202 @@ fn detail(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Deta
         head,
     );
     tabs(frame, row, under, app, screen);
+    // **Every tab leads with the card's findings, and at the card's own width** — the identity,
+    // title and action wrap where a card's do, which is this pane less its reading margin
+    // (`screens/detail.md` § Every finding about this object pinned at the top of every tab).
+    // Built once here, so the four tabs cannot come to draw four widths.
+    //
+    // **A tab drawing a centred state instead of a body leads with them too** ([`leads`],
+    // NOTES § D270): all four tabs are `Pane::Loading` the instant Detail opens, which is exactly
+    // the moment *"you never lose the reason you opened the object"* is about.
+    let above = pinned(open, screen, usize::from(padded(body).width));
     match app.tab {
-        Tab::Logs => logs(frame, body, app, screen, open.logs),
-        Tab::Describe => describe(frame, body, app, screen, open),
-        Tab::Yaml => yaml(frame, body, app, screen, open),
-        Tab::Events => events(frame, body, app, screen, open.events),
+        Tab::Logs => logs(frame, body, app, screen, open.logs, above),
+        Tab::Describe => describe(frame, body, app, screen, open, above),
+        Tab::Yaml => yaml(frame, body, app, screen, open, above),
+        Tab::Events => events(frame, body, app, screen, open.events, above),
     }
+}
+
+/// **Which pod of a group to open Detail on** (`screens/detail.md` § Picking a pod, before Detail
+/// has one) — the step `⏎` reaches on a card whose findings name two or more pods.
+///
+/// **A head row and a `List`, where an open tab has a name row, a tab row and an underline.**
+/// There is no tab to be on until an object is chosen, so neither the row nor its rule is drawn;
+/// everything else — the sidebar, the header, the command log strip, `esc` — is the ordinary
+/// detail screen's, which is what that section means by *the exact slot Detail already owns*.
+///
+/// **The pinned blocks are unselectable rows of the same `List` the pods are rows of**, which is
+/// the sidebar's own mechanism for its section headings ([`views::selectable`]): `↑↓` skips them
+/// and `ListState` keeps the selected pod on screen for free. **So the scrollbar spans the whole
+/// list, block rows included** — a bar tracks its widget's own content, not a filter over which of
+/// its rows a reader can land on.
+///
+/// **No `/` filter**, which that section refuses by name: a picker over one card's own pods is
+/// already narrower than the list D3 was written to shrink.
+fn pod_pick(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, card: &Card) {
+    let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    let top = padded(head);
+    // **`— pick a pod` never gives way and the identity fronts the cut**, the protected tail
+    // `screens/resources.md` § *When it does not fit* already gives `⏎ to see`: the instruction is
+    // not what a reader is trying to tell two objects apart by. The count fragment is
+    // [`Card::count`]'s own string and is not spelled a second time here.
+    let about = " — pick a pod";
+    let count = card
+        .count()
+        .map_or_else(String::new, |count| format!("  ·  {count}"));
+    let room = usize::from(top.width).saturating_sub(width(about) + width(&count));
+    let named = name_cut(card.owner.namespace.as_deref(), &card.owner.name, room);
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            format!("{named}{count}{about}"),
+            screen.fg(theme::TEXT),
+        )),
+        top,
+    );
+
+    let picked = worst_first(card, screen.now);
+    // **The list keeps the head row's own right margin and spends its left one on the marker**, so
+    // the block and the rows are the same 53 columns the head row is and the same 53
+    // `screens/alerts.md` § The columns measures a card against. Taking the whole pane instead put
+    // this one screen's text against the frame and — worse — rewrapped a finding's own title
+    // between the step and the tab `⏎` opens from it (`k8s-admin`, 2026-09-18,
+    // `reports/2026-09-18-the-which-pods-step.md` § 5).
+    //
+    // **`MARKER`'s columns are not reserved by `List` when nothing is selected** — measured on a
+    // card with no pod rows at all — so they are subtracted here as a width and the rows a
+    // selection shifts are the widget's own business (`crate::views::App::pick_pods` is what
+    // keeps that card from reaching this function).
+    let [body, margin] =
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(PAD)]).areas(body);
+    let region = usize::from(body.width).saturating_sub(width(MARKER));
+    let (lines, anchors) = listed(card, &picked, screen, region);
+    // **The bar draws in the margin the rows already reserved, so no row gives up a column for
+    // it** — which is what keeps this pane's own wrap width fixed whether it scrolls or not, and
+    // is why there is no second pass here (`reports/2026-09-18-filter-and-container-picker.md`
+    // § 3 is the defect from the other side: a bar painted *over* a row).
+    //
+    // **And no *does it scroll* flag beside it**: [`scrollbar`] already answers that from the
+    // content and the rows it is given, and a second condition here could only ever agree with it
+    // or be wrong.
+    let tall = lines.len();
+    let picks = views::selectable(&anchors, Option::is_some);
+    let keys: Vec<Option<&str>> = picks.iter().map(|at| anchors[*at]).collect();
+    let at = app
+        .pods
+        .selected(&keys)
+        .and_then(|nth| picks.get(nth))
+        .copied();
+    let mut state = ListState::default().with_selected(at);
+    frame.render_stateful_widget(
+        List::new(lines.into_iter().map(ListItem::new).collect::<Vec<_>>())
+            .highlight_symbol(MARKER)
+            // The same pairing the sidebar and the browser use: the fill and the mark together,
+            // because `PANEL` degrades to nothing at sixteen colours and `▸` is what carries the
+            // selection there (`theme.rs`).
+            .highlight_style(Style::new().bg(ink(theme::PANEL, screen.depth))),
+        body,
+        &mut state,
+    );
+    // **Read back off the widget and not computed here** — `List` decides its own offset from the
+    // selection, and a second arithmetic for it is a thumb that disagrees with the rows under it.
+    scrollbar(frame, margin, tall, state.offset(), screen);
+}
+
+/// **A card's pods, worst first, each with the finding that decides its row** — the order
+/// `screens/detail.md` § Picking a pod fixes, which is `screens/alerts.md`'s own severity-then-
+/// recency one level down.
+///
+/// **[`decides`] answers both halves of a row at once**: the glyph is that finding's band and the
+/// trailing fact is its title, so a row cannot show one pod's severity beside another's sentence.
+///
+/// **Then the name, never recency** (`tui-designer`, 2026-09-18, on `k8s-admin`'s recommendation;
+/// NOTES § D270). Recency already decided which *card* the reader is looking at before this step
+/// opened; used again here it re-sorts the list under a reader mid-scan, because every restart of
+/// any one of a DaemonSet's 38 pods moves that pod's own stamp. [`Cursor::follow`] keeps *which
+/// pod* is selected, not *which row* an eye was on. The name is what holds still, and it is what
+/// every row already leads with. **Recency still decides which finding represents a pod that
+/// carries more than one** — that is [`decides`], one level down, and it is untouched.
+fn worst_first<'a>(card: &'a Card, now: &Time) -> Vec<(&'a ObjectId, &'a Finding)> {
+    let mut picked: Vec<(&ObjectId, &Finding)> = card
+        .pods()
+        .into_iter()
+        .filter_map(|pod| {
+            let mine: Vec<&Finding> = card
+                .findings
+                .iter()
+                .filter(|finding| finding.object == *pod)
+                .collect();
+            decides(&mine, now).map(|finding| (pod, finding))
+        })
+        .collect();
+    picked.sort_by(|a, b| {
+        a.1.severity
+            .cmp(&b.1.severity)
+            .then_with(|| a.0.name.cmp(&b.0.name))
+    });
+    picked
+}
+
+/// **The which-pods list as rows and the anchors the cursor follows**, built together so a row and
+/// the pod it opens cannot come apart.
+///
+/// **The blocks come first and carry no anchor**, which is what makes `↑↓` skip them
+/// ([`views::selectable`]); they are drawn without an identity line, the one place a block on this
+/// product is not the card's whole four parts, because the head row two lines up already says the
+/// owner and the count it would repeat.
+///
+/// **The name takes the columns it needs and the fact takes what is left** — which is what that
+/// section's own mockup draws, the fact three columns after the longest name rather than pushed to
+/// an edge. **Until the name would leave the fact nothing**: past [`FACT_FLOOR`] the name
+/// front-cuts too, [`container_pick`]'s [`NAME_FLOOR`] argument read from the other side. The fact
+/// **back-cuts at a word boundary behind one `…`**, legitimate for that picker's own reason: the
+/// whole sentence is one `⏎` away, on the card this step was opened from.
+fn listed<'a, 'p>(
+    card: &Card,
+    picked: &[(&'p ObjectId, &Finding)],
+    screen: &Screen,
+    region: usize,
+) -> (Vec<Line<'a>>, Vec<Option<&'p str>>) {
+    let mut lines = leading(card, screen, region);
+    let mut anchors: Vec<Option<&str>> = lines.iter().map(|_| None).collect();
+    if !lines.is_empty() {
+        lines.push(Line::default());
+        anchors.push(None);
+    }
+    let around = GUTTER + NAMES_GAP;
+    let longest = picked
+        .iter()
+        .map(|(pod, _)| width(&pod.name))
+        .max()
+        .unwrap_or(0);
+    // **The fact's floor is what the name is capped against, and it is why there is no
+    // *the fact did not fit at all* case to draw** — `region` is at least 55 at the 80×24 floor
+    // [`draw`] refuses to go below, so `most` is at least 50 and `room` is never under
+    // [`FACT_FLOOR`]. Measured rather than assumed: every `>` here was a surviving mutant until a
+    // test stood on the boundary (`just mutants-diff`, 2026-09-18).
+    let most = region.saturating_sub(around);
+    let slot = longest.min(most.saturating_sub(FACT_FLOOR));
+    let room = region.saturating_sub(around + slot);
+    let text = screen.fg(theme::TEXT);
+    for (pod, finding) in picked {
+        let (colour, signal) = theme::band(finding.severity);
+        let mut spans = vec![
+            Span::styled(glyph(signal), screen.fg(colour)),
+            Span::styled(slotted(&shortened(&pod.name, slot), slot + NAMES_GAP), text),
+        ];
+        // **Whole where it fits and back-cut behind one `…` where it does not** — never the
+        // silent clip `screens/widgets.md` § 7 forbids, and never a bare mark: `room` is at least
+        // [`FACT_FLOOR`], so there is always a word in front of the `…`.
+        //
+        // **No `width(title) > room` branch in front of it**, which was one until a mutation run
+        // showed `>=` there changed nothing (2026-09-18): [`cut`] at one line already hands back a
+        // text that fits unmarked, so the branch was an equivalent-mutant factory and not a rule.
+        spans.push(Span::styled(cut(&finding.title, room, 1).join(""), text));
+        lines.push(Line::from(spans));
+        anchors.push(Some(pod.name.as_str()));
+    }
+    (lines, anchors)
 }
 
 /// **The tab row and the underline under the open one**, drawn together because they are one
@@ -4291,7 +4847,7 @@ fn tabs(frame: &mut Frame, row: Rect, under: Rect, app: &App, screen: &Screen) {
 /// by ratatui's own `Wrap`. Two wrapping algorithms in one pane is two answers to *how tall is
 /// this*, and the offset is computed from the taller-or-shorter of them — so a followed stream
 /// pins to a bottom that is not the bottom. One algorithm, and the count is `len`.
-fn scrolled(frame: &mut Frame, area: Rect, offset: u16, follow: bool, lines: Vec<Line>) {
+fn scrolled(frame: &mut Frame, area: Rect, offset: u16, follow: bool, lines: Vec<Line>) -> usize {
     let last = lines.len().saturating_sub(usize::from(area.height));
     let at = if follow {
         last
@@ -4302,6 +4858,9 @@ fn scrolled(frame: &mut Frame, area: Rect, offset: u16, follow: bool, lines: Vec
         Paragraph::new(Text::from(lines)).scroll((u16::try_from(at).unwrap_or(u16::MAX), 0)),
         area,
     );
+    // **The row the window starts on, handed back rather than recomputed** — [`leads`] draws a
+    // `Scrollbar` beside this pane and a second clamp is a thumb that disagrees with the text.
+    at
 }
 
 /// **One line of a document or a stream, wrapped without losing its own indentation.**
@@ -4375,14 +4934,26 @@ fn set<'a>(text: &str, columns: usize, style: Style) -> Vec<Line<'a>> {
 /// partial answer to the same arm that draws the ready one lets *we were not allowed to look*
 /// become *there is nothing*. Measured on 2026-09-06 — one was written, and the refused events
 /// pane drew `○  none right now` under its own banner.
-fn logs(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, pane: &Pane<Logs>) {
+fn logs(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    screen: &Screen,
+    pane: &Pane<Logs>,
+    above: Vec<Line>,
+) {
     match pane {
-        Pane::Loading => note(frame, area, screen, false, None),
+        Pane::Loading => {
+            let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
+            if !leads(frame, area, &above, &said, app, screen) {
+                note(frame, area, screen, false, None);
+            }
+        }
         Pane::Denied(said, held) => {
             let rest = banner(frame, area, screen, said, floor(area));
-            stream(frame, rest, app, screen, held);
+            stream(frame, rest, app, screen, held, above);
         }
-        Pane::Ready(held) => stream(frame, area, app, screen, held),
+        Pane::Ready(held) => stream(frame, area, app, screen, held, above),
     }
 }
 
@@ -4392,9 +4963,19 @@ fn logs(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, pane: &Pane<L
 /// § When the buffer fills draws: the dropped-lines line *"replaces the blank row above the
 /// content"*, and it says how many lines are gone from the top of what is left — a sentence that
 /// scrolled away with the content would be pointing at nothing.
-fn stream(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, logs: &Logs) {
-    let area = padded(area);
-    let region = usize::from(area.width);
+fn stream(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    screen: &Screen,
+    logs: &Logs,
+    above: Vec<Line>,
+) {
+    // **The pane is kept whole and padded where it is drawn into, never once at the top.** Padded
+    // here, `leads` was handed a rect that had already lost its margins and drew the block four
+    // columns narrower than it was wrapped for, with no mark on the cut — and it is the margin
+    // `leads` puts the scrollbar in (`k8s-admin` and `tester`, 2026-09-18).
+    let region = usize::from(padded(area).width);
     let text = screen.fg(theme::TEXT);
     let dim = screen.fg(theme::DIM);
 
@@ -4444,35 +5025,47 @@ fn stream(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, logs: &Logs
     let height = u16::try_from(top.len())
         .unwrap_or(u16::MAX)
         .min(area.height);
-    let [pinned, body] =
+    let [held, body] =
         Layout::vertical([Constraint::Length(height), Constraint::Min(0)]).areas(area);
-    frame.render_widget(Paragraph::new(Text::from(top)), pinned);
+    frame.render_widget(Paragraph::new(Text::from(top)), padded(held));
 
     // **Nothing has arrived is a state, not a hang** (PRIOR-ART § E1) — and it is not the same
     // screen as a stream that ended.
     if !logs.held.arrived() {
-        calmly(
-            frame,
-            body,
-            screen,
-            "no logs yet",
-            "Nothing has been written to this container's log yet.",
-        );
+        let said = "Nothing has been written to this container's log yet.";
+        let lines = sentence(screen, region, Some("no logs yet"), said);
+        if !leads(frame, body, &above, &lines, app, screen) {
+            calmly(frame, body, screen, "no logs yet", said);
+        }
         return;
     }
-    let lines: Vec<Line> = logs
-        .held
-        .lines()
-        .flat_map(|line| kept(line, region, text))
-        .collect();
-    scrolled(frame, body, app.scroll, app.following, lines);
+    // **The blocks lead the scrolling half and not the pinned one** — the header and the two
+    // admissions above them are claims about the whole buffer and would be pointing at nothing if
+    // they scrolled; the blocks are the top of what scrolls
+    // (`screens/detail.md` § Every finding about this object pinned at the top of every tab).
+    let mut lines = above;
+    lines.extend(logs.held.lines().flat_map(|line| kept(line, region, text)));
+    scrolled(frame, padded(body), app.scroll, app.following, lines);
 }
 
 /// **The describe tab: the object, then what happened to it** — two reads, one pane
 /// (`screens/detail.md` § The describe tab).
-fn describe(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Detail) {
+fn describe(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    screen: &Screen,
+    open: &Detail,
+    above: Vec<Line>,
+) {
     let (area, read) = match open.read {
-        Pane::Loading => return note(frame, area, screen, false, None),
+        Pane::Loading => {
+            let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
+            if !leads(frame, area, &above, &said, app, screen) {
+                note(frame, area, screen, false, None);
+            }
+            return;
+        }
         Pane::Denied(said, read) => (banner(frame, area, screen, said, floor(area)), read),
         Pane::Ready(read) => (area, read),
     };
@@ -4480,7 +5073,8 @@ fn describe(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &De
     let region = usize::from(area.width);
     let text = screen.fg(theme::TEXT);
     let dim = screen.fg(theme::DIM);
-    let mut lines: Vec<Line> = Vec::new();
+    // The card's findings lead this pane's own scrolling body, as they lead all four.
+    let mut lines: Vec<Line> = above;
     // **The identity block: `Pod · running · created 3 days ago`, and the pod's own reason
     // under it** — the raw word and the message in the same shape an event's row uses, which
     // is that file's point: one layout for *a word that explains a state*.
@@ -4584,25 +5178,40 @@ fn events(
     app: &App,
     screen: &Screen,
     pane: &Pane<crate::k8s::Happened>,
+    above: Vec<Line>,
 ) {
     let happened = match pane {
-        Pane::Loading => return note(frame, area, screen, false, None),
+        Pane::Loading => {
+            let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
+            if !leads(frame, area, &above, &said, app, screen) {
+                note(frame, area, screen, false, None);
+            }
+            return;
+        }
         // **A refusal draws whatever did come back and never the empty sentence below.** A read
         // that was refused and answered with nothing draws the banner and an empty pane, which is
         // the browser's own rule one region up.
         Pane::Denied(said, happened) => {
             let rest = banner(frame, area, screen, said, floor(area));
-            return rows_into(frame, rest, app, screen, happened);
+            return rows_into(frame, rest, app, screen, happened, above);
         }
         Pane::Ready(happened) => happened,
     };
     // **Empty is centred here and left-flush in describe**, because with nothing else sharing the
     // pane this is a whole-screen calm state like *nothing is broken*.
     if let Some(said) = views::no_events(happened) {
-        calmly(frame, area, screen, "none right now", said);
+        let lines = sentence(
+            screen,
+            usize::from(padded(area).width),
+            Some("none right now"),
+            said,
+        );
+        if !leads(frame, area, &above, &lines, app, screen) {
+            calmly(frame, area, screen, "none right now", said);
+        }
         return;
     }
-    rows_into(frame, area, app, screen, happened);
+    rows_into(frame, area, app, screen, happened, above);
 }
 
 /// The events list itself, under whatever was drawn above it — and, on a cut read, under the
@@ -4613,6 +5222,7 @@ fn rows_into(
     app: &App,
     screen: &Screen,
     happened: &crate::k8s::Happened,
+    above: Vec<Line>,
 ) {
     let area = padded(area);
     let region = usize::from(area.width);
@@ -4633,7 +5243,9 @@ fn rows_into(
     // *"the ten rows left once the heading takes its own two"*. The blank is the list's first
     // row, so it goes with the list.
     let mut top: Vec<Line> = Vec::new();
-    let mut lines: Vec<Line> = Vec::new();
+    // The card's findings lead this pane's own scrolling body, as they lead all four — under the
+    // cut-read heading, which pins above it for the reason that heading's own comment gives.
+    let mut lines: Vec<Line> = above;
     if happened.cut {
         top.extend(set(
             &format!("{}:", views::events_heading(happened)),
@@ -4721,17 +5333,36 @@ fn rows<'a>(happened: &crate::k8s::Happened, screen: &Screen, region: usize) -> 
 /// `k8s::clean` already removed everything `unprintable` refuses **except** `\n` and `\t`, which
 /// on this one pane print as themselves. A second strip here would collapse a ConfigMap's
 /// 20-line `Corefile` onto one line and call it the object.
-fn yaml(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Detail) {
+fn yaml(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    screen: &Screen,
+    open: &Detail,
+    above: Vec<Line>,
+) {
     let (area, document) = match open.yaml {
-        Pane::Loading => return note(frame, area, screen, false, None),
+        Pane::Loading => {
+            let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
+            if !leads(frame, area, &above, &said, app, screen) {
+                note(frame, area, screen, false, None);
+            }
+            return;
+        }
         Pane::Denied(said, document) => (banner(frame, area, screen, said, floor(area)), document),
         Pane::Ready(document) => (area, document),
     };
     let region = usize::from(area.width);
-    let mut lines: Vec<Line> = document
-        .lines()
-        .flat_map(|line| kept(line, region, screen.fg(theme::TEXT)))
-        .collect();
+    // **The blocks lead this body too, at this pane's own left edge** — they are k8rs's own prose
+    // and this tab has no reading margin to put them in, which is the same rule the document below
+    // them is drawn by. They were wrapped at the card's width, so they are two columns narrower
+    // than the pane and never wider.
+    let mut lines: Vec<Line> = above;
+    lines.extend(
+        document
+            .lines()
+            .flat_map(|line| kept(line, region, screen.fg(theme::TEXT))),
+    );
     // **`data: {}` is drawn exactly as the API returned it — there is nothing to mask because
     // there is nothing there** — and the sentence under it says so in a reader's words rather
     // than leaving an empty map to be interpreted.

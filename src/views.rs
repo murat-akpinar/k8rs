@@ -331,6 +331,28 @@ pub struct Card {
 }
 
 impl Card {
+    /// **Which pods this card is about** — the list [`Card::affected`] is the length of, and the
+    /// list `screens/detail.md` § *Picking a pod, before Detail has one* draws one row of each.
+    ///
+    /// **One scan, because there is one rule about what *distinct* means here** (NOTES § D39,
+    /// § D270): the number of distinct `object`s in the group whose kind is `Pod`,
+    /// **distinct over the whole `ObjectId`, uid included** — a `Vec` and a linear `contains`, not
+    /// a set of `group_key()`, which answers *which card* rather than *what is counted on it*.
+    /// [`cards`] sets `affected` from this and the which-pods step lists it; a second scan in the
+    /// renderer is how a count and the rows under it come to disagree.
+    ///
+    /// **In `analyze`'s order and not the step's** — which pod row comes first is severity, then
+    /// recency, and that needs the moment this method is not given ([`recency`]).
+    pub fn pods(&self) -> Vec<&ObjectId> {
+        let mut pods: Vec<&ObjectId> = Vec::new();
+        for finding in &self.findings {
+            if finding.object.kind == ObjectKind::Pod && !pods.contains(&&finding.object) {
+                pods.push(&finding.object);
+            }
+        }
+        pods
+    }
+
     /// **The worst thing on the card**, which is what the card is drawn as and what it sorts by.
     ///
     /// [`cards`] never builds an empty one, so the `unwrap_or` is unreachable rather than a
@@ -461,16 +483,10 @@ pub fn cards(findings: &[Finding], workloads: &[WorkloadSnapshot], now: &Time) -
     }
 
     for card in &mut cards {
-        // **Distinct is the whole `object`, uid included** — a `Vec` and a linear `contains`, not
-        // a set of `group_key()`, which answers *which card* rather than *what is counted on it*
-        // ([`Finding::object`], NOTES § D39).
-        let mut pods: Vec<&ObjectId> = Vec::new();
-        for finding in &card.findings {
-            if finding.object.kind == ObjectKind::Pod && !pods.contains(&&finding.object) {
-                pods.push(&finding.object);
-            }
-        }
-        card.affected = pods.len();
+        // **The scan is [`Card::pods`]'s and is not repeated here** — the count and the rows the
+        // which-pods step draws are the same list seen twice (NOTES § D270).
+        let counted = card.pods().len();
+        card.affected = counted;
         card.total = workloads
             .iter()
             .find(|workload| workload.id.group_key() == card.owner.group_key())
@@ -490,10 +506,28 @@ pub fn cards(findings: &[Finding], workloads: &[WorkloadSnapshot], now: &Time) -
 /// asks [`Card::newest`] rather than the raw field so that *no age* means the same thing here as
 /// on the screen (NOTES § D246 ruling 4).
 fn newest_first(a: &Card, b: &Card, now: &Time) -> Ordering {
-    match (
+    recency(
         a.newest(now).and_then(|f| f.timestamp.as_ref()),
         b.newest(now).and_then(|f| f.timestamp.as_ref()),
-    ) {
+    )
+}
+
+/// **Newer before older, and *no drawable age* last** — the recency half of every
+/// severity-then-recency sort this product draws, spelled once.
+///
+/// **`Option<Time>`'s derived `Ord` puts `None` first and `screens/alerts.md` wants an ageless row
+/// last inside its own band**, so it is written out rather than reached for (NOTES § D69) — and it
+/// is `pub` because the Alerts card list is not the only list on that rule: the which-pods step
+/// orders its pod rows the same way, one level down, and *"a reader who sees one order here and a
+/// different one on the object's own Detail a keypress later would have learned nothing to rely
+/// on"* (`screens/detail.md` § Picking a pod).
+///
+/// **What a caller passes is a *drawable* stamp and not a raw one**, which is the trap
+/// [`Card::newest`] already carries: a stamp past `rules::age`'s skew allowance draws no age, so
+/// sorting on it puts a card with a blank right edge at the top of its band (NOTES § D246
+/// ruling 4). This function cannot check that — it is handed the answer.
+pub fn recency(left: Option<&Time>, right: Option<&Time>) -> Ordering {
+    match (left, right) {
         (Some(left), Some(right)) => right.cmp(left),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
@@ -1838,6 +1872,28 @@ pub struct App {
     pub nav: Cursor,
     /// Where the content pane's cursor is — a card, a table row, or a report's answer.
     pub content: Cursor,
+    /// **Which pod of a group the which-pods step is on** (`screens/detail.md` § Picking a pod,
+    /// before Detail has one).
+    ///
+    /// **Its own field and not [`App::content`]'s**: the step is drawn *over* a view whose cursor
+    /// is still on the card the reader opened, and `esc` goes back to it — borrowing that cursor
+    /// would move the card underneath while a list of its pods is on screen.
+    ///
+    /// **Anchored on the pod's name and not on its uid**, which is the one place this file departs
+    /// from [`Cursor`]'s own rule and for [`Modal::ContainerPick`]'s reason: a pod deleted and
+    /// recreated under this list is a row that left and a row that arrived, which is what the
+    /// section's own *"one pod vanishing removes one row"* asks [`Cursor::follow`] to do.
+    ///
+    /// **What makes that safe is the store's key and not anything true of names.** [`Card::pods`]
+    /// is distinct over the whole `ObjectId`, uid included, so two rows *could* share a name — a
+    /// StatefulSet `web-0` stuck `Terminating` behind a finalizer beside its replacement, the
+    /// shape [`Card::count`]'s own doc already cites — and both would anchor `"web-0"`, leaving
+    /// the second unreachable. That shape does not arrive: `k8s.rs` keys the watch store on
+    /// `(namespace, name)`, so two live pod objects of one name cannot coexist in it
+    /// (`k8s-admin`, 2026-09-18, `reports/2026-09-18-the-which-pods-step.md` § 5). **If that key
+    /// ever gains the uid, this anchor has to gain it too**, and that sentence is the whole reason
+    /// this paragraph is here rather than a claim about names being unique.
+    pub pods: Cursor,
     /// `/` and `n`.
     pub filters: Filters,
     /// **Which filter is being typed into, or `None` for browsing** (`screens/widgets.md` § 2b).
@@ -2015,21 +2071,51 @@ impl Refused {
     }
 }
 
+/// **What the detail slot is showing, as far as the keys are concerned** — the input [`App`]
+/// cannot hold, because *what is open over the view* is `crate::ui::Screen::detail`'s and this
+/// file cannot see it ([`App::escape`]'s own reason for taking it).
+///
+/// **One value and not a count beside a flag** (NOTES § D270). A container count and
+/// *the which-pods step is open* as two fields can both be set, which is a screen nothing can
+/// draw — the same reason [`Modal`] is one enum and not a row of `Option`s, and the defect class
+/// this repo has paid most for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Detailing {
+    /// **Nothing is open over the view**, so the view's own keys are the live ones.
+    #[default]
+    Closed,
+    /// **One object's four tabs**, over a pod k8rs knows `containers` of. `0` and `1` are both
+    /// *there is nothing to pick*: a pod whose snapshot has not landed and a pod that only ever
+    /// has one draw the same screen, because guessing is what the header's own vitals refuse.
+    ///
+    /// **`from_step` is whether `⏎` reached these tabs through the which-pods step**, and it is
+    /// carried rather than drawn from (NOTES § D270). Nothing on this screen reads it yet: what
+    /// `esc` out of a tab reached that way should do is the wiring box's to settle with
+    /// `tui-designer`. **It is here now because `views.rs` freezes at this phase's close and that
+    /// box is later in the same phase** (`todo.md` § Phase 12), and without it the router's only
+    /// options are a private flag in `main.rs` about what this file's state means — D103's second
+    /// copy — or reopening a frozen file. [`crate::ui::Detail`] is not the discriminator: its
+    /// `card` is `Some` both for a tab reached through the step and for one reached by `⏎`
+    /// straight onto a bare-pod card.
+    Tabs { containers: usize, from_step: bool },
+    /// **Which pod of a group to open, before Detail has one**
+    /// (`screens/detail.md` § Picking a pod, before Detail has one). It carries no count: what
+    /// the step is about is the card, and the card is the renderer's.
+    Pods,
+}
+
 /// **Whether `c` has more than one answer, which is the whole of *is there anything to pick***
 /// (`screens/detail.md` § Choosing a container, and when there is nothing to choose).
 ///
 /// **One predicate, four readers, and the fourth is the key router** — [`App::footer`]'s logs
 /// line, its container-picker line, [`App::escape`]'s dropping of a picker that has nothing left
-/// in it, and the caller that has to decide what a press just meant. `None` is *no detail tab is
-/// open at all*, and `Some(0)`/`Some(1)` are *k8rs does not know of a second container*: a pod
-/// whose snapshot has not landed and a pod that only ever has one draw the same screen, because
-/// guessing is what the header's own vitals refuse.
+/// in it, and the caller that has to decide what a press just meant.
 ///
 /// **`pub` because [`App::escape`] cannot hand its answer back** — see that method's own doc:
 /// `modal` is `None` after the press either way, so the fact has to be read *before* it
 /// (`k8s-admin`, 2026-09-18).
-pub fn picking(containers: Option<usize>) -> bool {
-    containers.is_some_and(|many| many > 1)
+pub fn picking(open: Detailing) -> bool {
+    matches!(open, Detailing::Tabs { containers, .. } if containers > 1)
 }
 
 /// **Fail open, in one line: a probe may never be the reason a permitted action is marked**
@@ -2447,7 +2533,7 @@ impl App {
     /// ([`Picker::inert`]). Empty everywhere else, and read by that one arm.
     pub fn footer(
         &self,
-        containers: Option<usize>,
+        open: Detailing,
         offer: Offer,
         refused: Refused,
         cut: &str,
@@ -2537,7 +2623,7 @@ impl App {
             // **The container picker's closed set** (`screens/detail.md` § Choosing a container).
             // Every row can be landed on — a container is always pickable — so `⏎` is never inert
             // here and there is no `/` on this box to clear.
-            Some(Modal::ContainerPick(_)) if picking(containers) => {
+            Some(Modal::ContainerPick(_)) if picking(open) => {
                 return (Cow::Borrowed("↑↓ move  ⏎ pick  esc cancel"), "");
             }
             // **Nothing left to pick, so the box is not drawn and it offers nothing** — the pod
@@ -2556,20 +2642,31 @@ impl App {
         }
         // **Exhaustive on both enums on purpose**: a fifth tab or a fourth view is a compile
         // error here rather than a screen that quietly draws the wrong keys.
-        let keys = match (containers, self.tab, self.view) {
+        let keys = match (open, self.tab, self.view) {
+            // **The which-pods step's closed set, and it is the Analysis line word for word**
+            // (`screens/detail.md` § Picking a pod: *"four words this product already uses …
+            // assembled, not invented"*). **No `/` filter**, which that section refuses by name:
+            // a picker over one card's own pods is already narrower than the list D3 was written
+            // to shrink. The tab is not on it either — there is no tab to be on until a pod is
+            // chosen.
+            (Detailing::Pods, _, _) => "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
             // **`c container` is on this line only where there is more than one answer**
             // (`screens/detail.md` § Choosing a container: *a key that does nothing is a bug
             // already shipped once here*). One container, and a pod whose snapshot has not
             // reached the store yet, draw the same line — k8rs does not know of a second
             // container in either case, and guessing is what the header's own vitals refuse.
-            (Some(many), Tab::Logs, _) if picking(Some(many)) => {
+            (Detailing::Tabs { .. }, Tab::Logs, _) if picking(open) => {
                 "[ ] tabs  f follow  c container  esc back  ? all keys  q quit"
             }
-            (Some(_), Tab::Logs, _) => "[ ] tabs  f follow  esc back  ? all keys  q quit",
-            (Some(_), Tab::Describe | Tab::Yaml | Tab::Events, _) => {
+            (Detailing::Tabs { .. }, Tab::Logs, _) => {
+                "[ ] tabs  f follow  esc back  ? all keys  q quit"
+            }
+            (Detailing::Tabs { .. }, Tab::Describe | Tab::Yaml | Tab::Events, _) => {
                 "[ ] tabs  esc back  ? all keys  q quit"
             }
-            (None, _, View::Analysis(_)) => "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+            (Detailing::Closed, _, View::Analysis(_)) => {
+                "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
+            }
             // **One line replaces the whole footer, and only on the two modes that name `s` and
             // `r`** — `screens/dialogs.md` § *While the call is running* and its § *Detail tabs
             // and Analysis keep their own footer, not this line*, NOTES § D20. The guard sits
@@ -2583,14 +2680,16 @@ impl App {
             // glance as `⏎ open?` and every other key on every footer carries a label. `↑↓ move`
             // and `⏎ open` stay, because *navigation stays free* is the one thing this state
             // promises and dropping them to buy the name more room would hide it.
-            (None, _, View::Alerts | View::Resources(_)) if self.changing.is_some() => {
+            (Detailing::Closed, _, View::Alerts | View::Resources(_))
+                if self.changing.is_some() =>
+            {
                 return (
                     Cow::Owned(format!("↑↓ move  ⏎ open  ? keys  ·  changing {cut} first")),
                     "",
                 );
             }
             // **The lines `screens/states.md` draws, as literals** ([`Offer`]).
-            (None, _, View::Alerts | View::Resources(_)) => match offer {
+            (Detailing::Closed, _, View::Alerts | View::Resources(_)) => match offer {
                 // **`s` and `r` are on none of the lines before [`Offer::Act`] and are never
                 // marked `no` on one** ([`Offer`]): nothing here asked `may_i` anything.
                 Offer::Nothing { switch: false } => "? all keys  q quit",
@@ -2753,8 +2852,8 @@ impl App {
     /// the detail tab only where it answered `false`. A caller that read `modal` instead closes
     /// the tab out from under a picker the reader had just cancelled.
     #[must_use = "`true` is the startup picker's `esc`, which ends the run"]
-    pub fn escape(&mut self, containers: Option<usize>) -> bool {
-        if matches!(self.modal, Some(Modal::ContainerPick(_))) && !picking(containers) {
+    pub fn escape(&mut self, open: Detailing) -> bool {
+        if matches!(self.modal, Some(Modal::ContainerPick(_))) && !picking(open) {
             self.modal = None;
         }
         if self.typing.is_some() {
@@ -2780,7 +2879,10 @@ impl App {
             Some(_) => {}
             // **A detail tab is open, so this press is `esc back` and the filters are untouched**
             // (`screens/widgets.md` § 2b). The caller closes the tab; `App` holds no field for it.
-            None if containers.is_some() => {}
+            // **The which-pods step is the same press for the same reason** — it is drawn over the
+            // view, not instead of one, so `esc` goes back to a list whose filter is still the one
+            // the reader typed (`screens/detail.md` § Picking a pod).
+            None if open != Detailing::Closed => {}
             // **Narrow to wide, and the order is [`Filters::clears`]'s so the footer that names
             // the field and the key that empties it are one answer** (`screens/states.md` § The
             // filter hides every row).
@@ -2791,6 +2893,35 @@ impl App {
             },
         }
         false
+    }
+
+    /// **`⏎` on an Alerts card or a marked browser row — the which-pods step, or the object
+    /// itself** (`screens/detail.md` § A group of one pod, or none at all; NOTES § D270).
+    ///
+    /// **The predicate is here and not in the key router** for [`picking`]'s own reason: one
+    /// predicate, several readers — the Alerts card and the browser's own `⏎ to see` line reach
+    /// the same step — and a router that re-derives it is D103's second copy. A node card
+    /// (`affected == 0`) rendered a step with **zero rows** under a footer promising `↑↓ move  ⏎
+    /// open`, which is *"a key that does nothing is a bug already shipped once here"*, the rule
+    /// that page itself cites (`tester`, 2026-09-18).
+    ///
+    /// **Both halves of [`Card::count`]'s `None` and the group of one**: a node card counts no
+    /// pods, a bare pod's card is the pod itself, and `affected == 1` leaves one candidate — all
+    /// three open the object directly and none of them is a group.
+    ///
+    /// **The cursor is reset in the same call, which is the whole reason this is a method.** It is
+    /// the only cursor on this product with no reset rule of its own: [`App::open`] resets
+    /// [`App::content`] on a view change, and nothing resets [`App::pods`] between two cards of
+    /// one view. Landing on row 7 of card A, `esc`, then opening card B left [`Cursor::follow`]
+    /// missing A's anchor and falling back to `select(self.index)` — **row 7 of a different
+    /// group, with `⏎` armed on it** (`tester`, 2026-09-18, measured).
+    #[must_use = "the caller opens the step on `true` and the card's own object on `false`"]
+    pub fn pick_pods(&mut self, card: &Card) -> bool {
+        let group = card.count().is_some() && card.affected >= 2;
+        if group {
+            self.pods = Cursor::default();
+        }
+        group
     }
 
     /// **`⏎` on the sidebar** — a group opens or closes, anything else becomes the view.

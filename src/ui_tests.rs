@@ -2824,7 +2824,10 @@ fn the_audit_sentence_is_drawn_once_and_only_where_no_banner_carries_it() {
         let open = Open::new();
         let detail = open.open();
         let mut reading = screen(&alerts, &now);
-        reading.detail = Some(&detail);
+        reading.detail = Some(Detailed::Tabs {
+            open: &detail,
+            from_step: false,
+        });
         reading.writes = Writes::Unaudited(&dead);
         let drawn = render(&on(tab), &reading);
         assert_eq!(
@@ -3374,11 +3377,21 @@ fn a_mode_whose_footer_names_no_mutating_key_leaves_none_live() {
     };
     let analysis = screen(&live, &now);
     let mut over = screen(&live, &now);
-    over.detail = Some(&open);
+    over.detail = Some(Detailed::Tabs {
+        open: &open,
+        from_step: false,
+    });
+
+    let card = group();
+    let mut stepping = screen(&live, &now);
+    stepping.detail = Some(Detailed::Pods(&card));
 
     for (what, app, asked) in [
         ("Analysis", &reporting, &analysis),
         ("a detail tab", &app(), &over),
+        // **The which-pods step is a mode whose own footer names no mutating key**, so it may not
+        // leave one pressable behind it either (PRIOR-ART § G2).
+        ("the which-pods step", &app(), &stepping),
     ] {
         let offer = offered(app, asked);
         assert_eq!(
@@ -3387,7 +3400,7 @@ fn a_mode_whose_footer_names_no_mutating_key_leaves_none_live() {
             "{what} left a key live that its own footer never names — {offer:?}"
         );
         let (keys, _) = app.footer(
-            asked.detail.map(|_| containers(asked).len()),
+            detailing(asked),
             offer,
             Refused::default(),
             "",
@@ -5548,6 +5561,9 @@ fn paired<'a>(
 /// live for the length of a test.
 struct Open<'a> {
     object: ObjectId,
+    /// The card this object is filed under, whose findings every tab pins. `None` is the ordinary
+    /// tab test: a healthy object the browser opened, which Alerts has no card about.
+    card: Option<Card>,
     logs: Pane<Logs<'a>>,
     read: Pane<Described<'a>>,
     yaml: Pane<String>,
@@ -5560,6 +5576,7 @@ impl<'a> Open<'a> {
     fn new() -> Self {
         Open {
             object: id(ObjectKind::Pod, Some("payments"), "web-7d9f4"),
+            card: None,
             logs: Pane::Loading,
             read: Pane::Loading,
             yaml: Pane::Loading,
@@ -5571,6 +5588,7 @@ impl<'a> Open<'a> {
     fn open(&'a self) -> Detail<'a> {
         Detail {
             object: &self.object,
+            card: self.card.as_ref(),
             logs: &self.logs,
             read: &self.read,
             yaml: &self.yaml,
@@ -5592,7 +5610,10 @@ fn detailed(app: &App, open: &Detail) -> Buffer {
     let alerts = Pane::Ready(vec![oom()]);
     let now = later();
     let mut screen = screen(&alerts, &now);
-    screen.detail = Some(open);
+    screen.detail = Some(Detailed::Tabs {
+        open,
+        from_step: false,
+    });
     render(app, &screen)
 }
 
@@ -13083,4 +13104,1042 @@ fn a_container_name_too_wide_for_its_column_gives_up_its_front() {
         line.starts_with("    …"),
         "the cut is not marked at the front: {line:?}"
     );
+}
+
+// --- PICKING A POD, AND EVERY FINDING PINNED ON EVERY TAB ---
+
+/// One finding about one pod of `payments/web`, with a card's own three sentences.
+fn about(pod: &str, severity: Severity, title: &str, evidence: &str) -> Finding {
+    Finding {
+        object: id(ObjectKind::Pod, Some("payments"), pod),
+        ..finding(
+            severity,
+            title,
+            evidence,
+            "raise limits.memory, or find the leak",
+        )
+    }
+}
+
+/// **The grouped card `screens/detail.md` § Picking a pod draws** — three pods of a Deployment of
+/// five, two killed for memory and one that cannot pull its image.
+fn group() -> Card {
+    Card {
+        owner: id(ObjectKind::Deployment, Some("payments"), "web"),
+        findings: vec![
+            about(
+                "web-7d9f4bc86d-x2k9p",
+                Severity::Critical,
+                "ran out of memory",
+                "limit 256Mi · exit 137",
+            ),
+            about(
+                "web-7d9f4bc86d-m3p1q",
+                Severity::Critical,
+                "ran out of memory",
+                "limit 256Mi · exit 137",
+            ),
+            about(
+                "web-7d9f4bc86d-t8g2r",
+                Severity::Warn,
+                "image pull failed",
+                "registry refused the pull",
+            ),
+        ],
+        affected: 3,
+        total: Some(5),
+    }
+}
+
+/// The which-pods step at the 80×24 floor, drawn over an Alerts list holding the same card.
+fn stepping(app: &App, card: &Card) -> Buffer {
+    let alerts = Pane::Ready(vec![card.clone()]);
+    let now = now();
+    let mut screen = screen(&alerts, &now);
+    screen.detail = Some(Detailed::Pods(card));
+    render(app, &screen)
+}
+
+/// The detail tabs open **on one named pod** of a card Alerts holds. Which pod is not decoration:
+/// a tab pins the findings whose own `object` is this one (`screens/detail.md` § A pod's own
+/// findings, not the whole card's).
+fn pinned_on(tab: Tab, card: &Card, pod: &str) -> Buffer {
+    let mut open = Open::new();
+    open.object = id(ObjectKind::Pod, Some("payments"), pod);
+    open.card = Some(card.clone());
+    let held = open.open();
+    detailed(&on(tab), &held)
+}
+
+/// `screens/detail.md` § Picking a pod — **the head row, the block, the blank, and one row per
+/// pod**, in that order, with the cursor on a pod and never on a block.
+#[test]
+fn the_step_names_the_group_and_lists_one_row_per_pod() {
+    let card = group();
+    let drawn = stepping(&app(), &card);
+
+    // **The owner, `Card::count`'s own fragment, and a tail that never gives way** — the head row
+    // is the one place the identity is said, which is why the blocks below leave it out.
+    assert_eq!(
+        celled(&row(&drawn, "pick a pod")),
+        "  payments/web  ·  3 of 5 pods — pick a pod"
+    );
+
+    // One row per pod: the marker's two columns, the pod's own band glyph, its name, its own
+    // worst finding's title.
+    // **Rows fall in name order inside a band**, so `m3p1q` leads `x2k9p` and the cursor starts
+    // on it (`screens/detail.md` § Picking a pod, NOTES § D270).
+    assert_eq!(
+        celled(&row(&drawn, "m3p1q")),
+        "▸ ● web-7d9f4bc86d-m3p1q   ran out of memory"
+    );
+    assert_eq!(
+        celled(&row(&drawn, "x2k9p")),
+        "  ● web-7d9f4bc86d-x2k9p   ran out of memory"
+    );
+    // **A pod's glyph is that pod's own severity and not the card's**, or a list of three rows
+    // under one red dot says every pod is as bad as the worst.
+    assert_eq!(
+        celled(&row(&drawn, "t8g2r")),
+        "  ▲ web-7d9f4bc86d-t8g2r   image pull failed"
+    );
+
+    // **`↑↓` never lands on a block row**, the sidebar's own rule for its section headings: the
+    // marker is on a pod, and the blocks above it carry the same two blank columns every
+    // unselected row does.
+    assert_eq!(
+        rows(&drawn)
+            .iter()
+            .filter(|line| pane(line).starts_with("▸ "))
+            .count(),
+        1,
+        "more than one row wore the cursor\n{}",
+        rows(&drawn).join("\n")
+    );
+
+    assert_eq!(
+        row(&drawn, "↑↓ move").trim_end(),
+        "│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                                │"
+    );
+    assert!(!holds(&drawn, "/ filter"), "the step offered a filter");
+}
+
+/// `screens/detail.md` § Picking a pod — **a block on this step draws title, evidence and action
+/// and not the identity line**, because the head row two lines up already says the owner and the
+/// count it would repeat. This is the one place on the product a block is three parts.
+#[test]
+fn a_block_on_the_step_leaves_out_the_line_the_head_row_already_says() {
+    let card = group();
+    let drawn = stepping(&app(), &card);
+    let seen = rows(&drawn);
+
+    assert!(holds(&drawn, "limit 256Mi · exit 137"), "no evidence drawn");
+    assert!(holds(&drawn, "→ raise limits.memory"), "no action drawn");
+    assert_eq!(
+        seen.iter()
+            .filter(|line| line.contains("payments/web"))
+            .count(),
+        1,
+        "the owner was named twice on a screen that names it once\n{}",
+        seen.join("\n")
+    );
+}
+
+/// `screens/detail.md` § Every finding pinned at the top of every tab — **all four tabs, and the
+/// evidence drawn in full.**
+///
+/// The three-line `…` an Alerts card puts on the same evidence is redeemed here or it points at
+/// nothing, so both halves are asserted off one string: cut on the card, whole on every tab.
+#[test]
+fn every_tab_pins_the_card_and_is_the_one_place_the_evidence_is_not_cut() {
+    // **One token and not a phrase**: the assertion is about a *row* holding it, and a phrase
+    // long enough to be distinctive is long enough to land on a wrap boundary and be found on
+    // neither row.
+    let tail = "whereupon-it-gave-up-entirely";
+    let long = format!(
+        "limit 256Mi · exit 137 · 47 restarts · the controller went on at some considerable \
+         length about what it had tried, which node it had tried it on, and how long it waited \
+         before it {tail}"
+    );
+    let card = Card {
+        findings: vec![about(
+            "web-7d9f4bc86d-x2k9p",
+            Severity::Critical,
+            "ran out of memory",
+            &long,
+        )],
+        ..group()
+    };
+
+    let listed = render(&app(), &screen(&Pane::Ready(vec![card.clone()]), &now()));
+    assert!(
+        holds(&listed, "…") && !holds(&listed, tail),
+        "the card drew the evidence whole, so there is nothing for a tab to redeem"
+    );
+
+    for tab in Tab::ALL {
+        let drawn = pinned_on(tab, &card, "web-7d9f4bc86d-x2k9p");
+        assert!(
+            holds(&drawn, "ran out of memory"),
+            "{tab:?} lost the reason the object was opened"
+        );
+        assert!(
+            holds(&drawn, tail),
+            "{tab:?} cut the evidence the card's own `…` promised was one ⏎ away"
+        );
+        // **The identity line stays on a tab** — its heading names one pod and never the owner or
+        // the count, so nothing there already carries what this line says.
+        assert!(
+            holds(&drawn, "payments/web  ·  3 of 5 pods"),
+            "{tab:?} dropped the block's identity line"
+        );
+    }
+}
+
+/// `screens/detail.md` § A pod's own findings, not the whole card's — **a pod carrying two
+/// findings pins both, worst first, and neither carries the marker that points at the stack.**
+///
+/// **This is the `affected <= 1` guarantee, asserted** (NOTES § D270): where the card is
+/// about one pod, every finding the card holds and every finding about that pod are the same set,
+/// so § A group of one pod's *"with every finding the card holds … pinned there"* stays true word
+/// for word. It is the one shape where the narrowed predicate and the old one agree, which is what
+/// makes it the test that must not go red.
+#[test]
+fn a_pod_carrying_two_findings_pins_both_worst_first_and_neither_counts_the_rest() {
+    // **One pod carrying two findings**, which is the only way a stack happens on a tab at all:
+    // a finding about a *different* pod of the group does not pin here (`screens/detail.md` § A
+    // pod's own findings, not the whole card's). Two and not three, so the whole stack is inside
+    // the 13 rows a tab's body has at the floor and the order this asserts is not an artefact of
+    // where the pane ran out.
+    let card = Card {
+        findings: vec![
+            about(
+                "web-a",
+                Severity::Warn,
+                "image pull failed",
+                "registry said no",
+            ),
+            about("web-a", Severity::Critical, "ran out of memory", "exit 137"),
+        ],
+        affected: 1,
+        ..group()
+    };
+    let drawn = pinned_on(Tab::Logs, &card, "web-a");
+    let seen = rows(&drawn);
+    let at = |needle: &str| {
+        seen.iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", seen.join("\n")))
+    };
+
+    assert!(
+        at("ran out of memory") < at("image pull failed"),
+        "the warning was pinned above the critical\n{}",
+        seen.join("\n")
+    );
+    // **The fifth part is the card face's and never a block's** — `N more problems — ⏎ to see`
+    // points *at* this stack, and drawing it inside one points the reader at what they are
+    // already looking at.
+    assert!(
+        !holds(&drawn, "more problems"),
+        "a pinned block pointed at itself\n{}",
+        seen.join("\n")
+    );
+}
+
+/// `screens/detail.md` § Every finding pinned — **an object Alerts has no card about pins
+/// nothing**, which is every healthy row the browser opens `⏎` on.
+#[test]
+fn an_object_with_no_card_pins_nothing_and_the_tab_starts_where_it_always_did() {
+    let open = Open::new();
+    let held = open.open();
+    for tab in Tab::ALL {
+        let drawn = detailed(&on(tab), &held);
+        assert!(
+            !holds(&drawn, "payments/web  ·"),
+            "{tab:?} pinned a card this object has none of"
+        );
+    }
+}
+
+/// `screens/detail.md` § Picking a pod — **the name gives way from its front and the fact from its
+/// end**, the two cuts that section names, each behind a visible `…`.
+#[test]
+fn a_long_pod_name_and_a_long_fact_each_give_way_at_their_own_end() {
+    let long = "checkout-worker-service-canary-7d9f4bc86d-x2k9p";
+    let card = Card {
+        findings: vec![
+            about(
+                long,
+                Severity::Critical,
+                "Containers exceeded their memory limit and were killed by the kernel",
+                "limit 256Mi",
+            ),
+            about("web-2", Severity::Critical, "ran out of memory", "exit 137"),
+        ],
+        affected: 2,
+        ..group()
+    };
+    let drawn = stepping(&app(), &card);
+
+    // **Asserted as the whole row and not as two `contains`** — the name's 30 columns and the
+    // fact's 20 are `region − GUTTER − NAMES_GAP − FACT_FLOOR` and the floor itself, and a
+    // `contains` pair passes at 29 and 21 too (`just mutants-diff`, 2026-09-18: `+` for `*` in
+    // the gutter arithmetic survived exactly that).
+    //
+    // Two rollouts of one Deployment differ at the *end* of the name, so that is the end that
+    // stays — behind one `…`, never a silent clip; the fact keeps its start and says it was cut.
+    assert_eq!(
+        celled(&row(&drawn, "x2k9p")),
+        "▸ ● …ice-canary-7d9f4bc86d-x2k9p   Containers exceeded…"
+    );
+}
+
+/// `screens/detail.md` § More pods than the pane shows — **the bar's thumb spans the whole list,
+/// block rows included: 15 of 41, not 12 of 38.**
+///
+/// **The thumb and not the track** (`tester`, 2026-09-18). A `Scrollbar`'s track fills its column
+/// whatever content length it was handed, so a test that only looks for a glyph is satisfied by
+/// both answers and says nothing — rendered at 41 rows and at 38, every row carried one. What
+/// separates them is how many cells the thumb covers.
+#[test]
+fn the_bars_thumb_counts_the_block_rows_as_well_as_the_pods() {
+    let sentence = "Nodes without enough memory refused to run this Pod";
+    let many: Vec<Finding> = (0..38)
+        .map(|nth| {
+            about(
+                &format!("log-shipper-{nth:03}"),
+                Severity::Critical,
+                sentence,
+                "",
+            )
+        })
+        .collect();
+    let card = Card {
+        owner: id(ObjectKind::DaemonSet, Some("payments"), "log-shipper"),
+        findings: many,
+        affected: 38,
+        total: Some(40),
+    };
+    let seen = rows(&stepping(&app(), &card));
+
+    // The block is 2 rows and the blank under it a third, so the list is 41 rows and the pane
+    // shows 15 of them — `screens/detail.md`'s own figures for this exact card.
+    let thumb = seen.iter().filter(|line| line.contains('█')).count();
+    let track = seen
+        .iter()
+        .filter(|line| line.contains('█') || line.contains('║'))
+        .count();
+    assert_eq!(
+        track,
+        15,
+        "the bar did not span the list's own pane\n{}",
+        seen.join("\n")
+    );
+    assert_eq!(
+        thumb,
+        15 * 15 / 41,
+        "the thumb counts the pods and not the list: {thumb} cells\n{}",
+        seen.join("\n")
+    );
+
+    // **Nothing is painted over**: the bar took the margin the rows already reserve, so every row
+    // of the box still closes with its own border and none gave up a column.
+    for line in seen.iter().filter(|line| line.starts_with('│')) {
+        assert!(
+            line.ends_with('│'),
+            "the bar took the frame's own column: {line:?}"
+        );
+    }
+    assert!(seen.iter().any(|line| line.contains("log-shipper-000")));
+}
+
+/// The content pane's own cells of a row — the sidebar, the dividers and the frame's own border
+/// dropped — so a column assertion counts from the pane's left edge and stops at its right one.
+fn celled(line: &str) -> String {
+    pane(line).trim_end_matches('│').trim_end().to_owned()
+}
+
+/// The which-pods step and one pinned tab, printed whole, so a reader of the report can compare
+/// them with `screens/detail.md` § Picking a pod and § Every finding pinned line by line.
+/// `cargo test -- --nocapture`.
+#[test]
+fn the_which_pods_step_and_a_pinned_tab_at_the_floor() {
+    let card = group();
+    println!("{}\n", rows(&stepping(&app(), &card)).join("\n"));
+
+    let many: Vec<Finding> = (0..38)
+        .map(|nth| {
+            about(
+                &format!("log-shipper-{nth:03}"),
+                Severity::Critical,
+                "Nodes without enough memory refused to run this Pod",
+                "",
+            )
+        })
+        .collect();
+    let daemon = Card {
+        owner: id(ObjectKind::DaemonSet, Some("payments"), "log-shipper"),
+        findings: many,
+        affected: 38,
+        total: Some(40),
+    };
+    println!("{}\n", rows(&stepping(&app(), &daemon)).join("\n"));
+
+    let (pod, names) = declared_by("pending");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let lines = logged(&["14:23:41  listening on :8080", "14:23:44  GET /healthz 200"]);
+    let mut open = Open::new();
+    // **Opened on a pod the card is actually about**, which is the whole of what a tab pins now:
+    // the same `Open::new()` default drew an empty pane here, correctly (§ A pod's own findings,
+    // not the whole card's).
+    open.object = id(ObjectKind::Pod, Some("payments"), "web-7d9f4bc86d-x2k9p");
+    open.card = Some(card.clone());
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &lines,
+    });
+    let tabbed = detailed(&on(Tab::Logs), &open.open());
+    println!("{}", rows(&tabbed).join("\n"));
+
+    // **A canary, because three `println!`s cannot fail** — the same shape
+    // [`the_alerts_screen_at_the_floor`] ends on (`tester`, 2026-09-18). One line off each of the
+    // three frames: the step's own head row, the head row of the group too big to draw whole, and
+    // the block a tab pins.
+    assert!(holds(&stepping(&app(), &card), "— pick a pod"));
+    assert!(holds(&stepping(&app(), &daemon), "38 of 40 pods"));
+    assert!(holds(&tabbed, "payments/web  ·  3 of 5 pods"));
+}
+
+/// `screens/detail.md` § More pods than the pane shows — **the step leads with one block and the
+/// rest of the pane is the pods**, which is that section's own counted arithmetic: a log-shipper
+/// DaemonSet at `38 of 40 pods`, *"one block … spends 2 rows on the block and 1 on the blank
+/// separator: 15 − 3 = 12 rows left for pods"*.
+///
+/// **This is the assertion that fixes the reading** (`dev-ui`, 2026-09-18, PM's to rule): drawn one
+/// block per finding instead, the same card measured **one** pod row and 38 copies of one
+/// sentence above it — the step's whole job pushed off the pane.
+#[test]
+fn the_step_leads_with_one_block_and_spends_the_rest_of_the_pane_on_pods() {
+    let sentence = "Nodes without enough memory refused to run this Pod";
+    let many: Vec<Finding> = (0..38)
+        .map(|nth| {
+            about(
+                &format!("log-shipper-{nth:03}"),
+                Severity::Critical,
+                sentence,
+                "",
+            )
+        })
+        .collect();
+    let card = Card {
+        owner: id(ObjectKind::DaemonSet, Some("payments"), "log-shipper"),
+        findings: many,
+        affected: 38,
+        total: Some(40),
+    };
+    let drawn = stepping(&app(), &card);
+    let seen = rows(&drawn);
+
+    assert_eq!(
+        seen.iter()
+            .filter(|line| line.contains("log-shipper-"))
+            .count(),
+        12,
+        "the pane did not spend 15 − 3 rows on pods\n{}",
+        seen.join("\n")
+    );
+    // One block: the sentence appears once as a block and once per drawn pod row, never twice as
+    // a block. A row is a block's only when it does not name a pod.
+    assert_eq!(
+        seen.iter()
+            .filter(|line| line.contains(sentence) && !line.contains("log-shipper-"))
+            .count(),
+        1,
+        "the step pinned more than one block\n{}",
+        seen.join("\n")
+    );
+}
+
+/// `screens/alerts.md` § The columns, `screens/detail.md` § Every finding pinned — **a block's band
+/// and its age are that block's own finding's, never the card's.**
+///
+/// Read off the card, a stack of three drew three identical identity lines and put a `▲` finding
+/// under a `●` — a line claiming every part of the stack is as bad as its worst (`dev-ui`,
+/// 2026-09-18, measured before this was split).
+#[test]
+fn a_blocks_band_and_age_are_its_own_findings_and_not_the_cards() {
+    let card = Card {
+        findings: vec![
+            Finding {
+                timestamp: Some(ago(4 * 24 * 60 * 60)),
+                ..about("web-a", Severity::Critical, "ran out of memory", "exit 137")
+            },
+            Finding {
+                timestamp: Some(ago(180)),
+                ..about(
+                    "web-a",
+                    Severity::Warn,
+                    "image pull failed",
+                    "registry said no",
+                )
+            },
+        ],
+        affected: 1,
+        ..group()
+    };
+    let drawn = pinned_on(Tab::Logs, &card, "web-a");
+    let banded: Vec<String> = rows(&drawn)
+        .iter()
+        .filter(|line| line.contains("payments/web  ·"))
+        .map(|line| celled(line))
+        .collect();
+
+    assert_eq!(
+        banded.len(),
+        2,
+        "two findings pinned {} blocks",
+        banded.len()
+    );
+    assert!(
+        banded[0].starts_with("  ● ") && banded[1].starts_with("  ▲ "),
+        "a block wore the card's band instead of its own finding's: {banded:?}"
+    );
+    // **The age is the block's own finding's too.** `Card::age` is the newest drawable across the
+    // whole card, which is one answer — so read off the card these two blocks would both have said
+    // `3 min ago`, and the four-day-old one would have been dated by the other.
+    assert!(
+        banded[0].ends_with("4 days ago") && banded[1].ends_with("3 min ago"),
+        "a block wore the card's age instead of its own finding's: {banded:?}"
+    );
+}
+
+/// `screens/widgets.md` § 2 — **the bar appears once the list is taller than the room left for it,
+/// never before**, and **no row gives up a column when it does.**
+///
+/// The bar draws in the two-column right margin the rows already keep — the head row's own — so a
+/// fact sized to the exact width the pane leaves is drawn whole whether the list scrolls or not.
+/// That is what stops the same finding's title rewrapping between this step and the tab `⏎` opens
+/// from it (`k8s-admin`, 2026-09-18).
+#[test]
+fn the_bar_appears_only_once_the_list_overflows_and_costs_no_row_a_column() {
+    // 33 columns: `region(53) − GUTTER(2) − NAMES_GAP(3) − the 15-column names` — the whole of what
+    // a row has for its fact, at this pane's own fixed width.
+    let title = "nothing scheduled this Pod at all";
+    assert_eq!(width(title), 33, "the fixture is the boundary");
+    let step = |pods: usize| {
+        let findings: Vec<Finding> = (0..pods)
+            .map(|nth| {
+                about(
+                    &format!("log-shipper-{nth:03}"),
+                    Severity::Critical,
+                    title,
+                    "",
+                )
+            })
+            .collect();
+        let card = Card {
+            owner: id(ObjectKind::DaemonSet, Some("payments"), "log-shipper"),
+            findings,
+            affected: pods,
+            total: Some(40),
+        };
+        stepping(&app(), &card)
+    };
+    let barred = |drawn: &Buffer| {
+        rows(drawn)
+            .iter()
+            .any(|line| line.contains('█') || line.contains('║'))
+    };
+
+    // The block is 2 rows and the blank under it a third, so 12 pods fill the 15 the step leaves.
+    let drawn = step(12);
+    assert_eq!(
+        celled(&row(&drawn, "log-shipper-011")),
+        format!("  ● log-shipper-011   {title}")
+    );
+    assert!(
+        !barred(&drawn),
+        "a list that fits drew a bar over it\n{}",
+        rows(&drawn).join("\n")
+    );
+
+    let drawn = step(13);
+    assert!(
+        barred(&drawn),
+        "a list one row too tall drew no bar\n{}",
+        rows(&drawn).join("\n")
+    );
+    // **`starts_with` and not equality**: the bar's own glyph is in the margin beyond the row's
+    // text, which is the point — the fact is still whole at its full 33 columns.
+    let narrowed = celled(&row(&drawn, "log-shipper-000"));
+    assert!(
+        narrowed.starts_with(&format!("▸ ● log-shipper-000   {title}")),
+        "the bar cost a row a column it should have taken from the margin: {narrowed:?}"
+    );
+}
+
+/// `screens/detail.md` § Picking a pod — **the trailing fact is whole where it fits and back-cut
+/// where it does not**, at the exact column the floor leaves it.
+///
+/// A long name caps the name column at `region − GUTTER − NAMES_GAP − FACT_FLOOR`, so the fact has
+/// exactly [`FACT_FLOOR`] columns: a 20-column title draws whole and a 21-column one gives way
+/// (`just mutants-diff`, 2026-09-18 — `>` for `>=` here survived until this test).
+#[test]
+fn a_fact_that_exactly_fills_its_column_is_drawn_whole_and_one_column_more_gives_way() {
+    let long = "checkout-worker-service-canary-7d9f4bc86d-x2k9p";
+    let said = |title: &str| {
+        let card = Card {
+            findings: vec![about(long, Severity::Critical, title, "limit 256Mi")],
+            affected: 1,
+            ..group()
+        };
+        celled(&row(&stepping(&app(), &card), "x2k9p"))
+    };
+
+    assert_eq!(
+        width("the image is missing"),
+        20,
+        "the fixture is the boundary"
+    );
+    assert!(
+        said("the image is missing").ends_with("the image is missing"),
+        "a fact that fits exactly was cut: {:?}",
+        said("the image is missing")
+    );
+    assert_eq!(width("this image is missing"), 21);
+    // **It gives way at a word boundary and not at a character** — `cut` walks back to one, which
+    // is the same back-cut the container picker's state word takes, so the column it ends in is
+    // not the point; that it ends in a `…` and lost a word is.
+    assert!(
+        said("this image is missing").ends_with("this image is…"),
+        "a fact one column over did not give way: {:?}",
+        said("this image is missing")
+    );
+}
+
+/// `screens/detail.md` § Picking a pod — **rows sort by severity band and then by name, never by
+/// recency** (NOTES § D270).
+///
+/// **Recency is what this asserts is *not* used**: the newer finding arrives first and carries the
+/// later name, so a list ordered by recency and a list ordered by arrival both put it first, and
+/// only a name order puts it last. Every restart of any pod in a 38-pod group moves that pod's
+/// stamp, and a list that re-sorts under a reader mid-scan is one they cannot work through.
+#[test]
+fn rows_fall_in_name_order_inside_a_band_and_never_in_recency_order() {
+    let card = Card {
+        findings: vec![
+            Finding {
+                timestamp: Some(at(180)),
+                ..about("web-zulu", Severity::Critical, "newer", "exit 137")
+            },
+            Finding {
+                timestamp: Some(at(0)),
+                ..about("web-alpha", Severity::Critical, "older", "exit 137")
+            },
+            // A different band always wins, whatever the names do.
+            Finding {
+                timestamp: Some(at(90)),
+                ..about("web-aaa", Severity::Warn, "a warning", "nothing much")
+            },
+        ],
+        affected: 3,
+        ..group()
+    };
+    let seen = rows(&stepping(&app(), &card));
+    let at_row = |needle: &str| {
+        seen.iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", seen.join("\n")))
+    };
+    assert!(
+        at_row("web-alpha") < at_row("web-zulu"),
+        "the newer pod sorted above the earlier name\n{}",
+        seen.join("\n")
+    );
+    assert!(
+        at_row("web-zulu") < at_row("web-aaa"),
+        "a warning sorted above a critical on its name\n{}",
+        seen.join("\n")
+    );
+}
+
+/// `screens/alerts.md` § A card with more than one finding — **recency still orders the blocks a
+/// tab pins**, which is the one level down the step's own name order does not reach
+/// ([`decides`], `screens/detail.md` § Picking a pod's last clause).
+///
+/// **Two findings on one pod at one severity is what proves it** — with a band between them the
+/// severity key decides and recency is never asked (`just mutants-diff`, 2026-09-18: a `drawable`
+/// that always answered `None` survived every other test in this file).
+#[test]
+fn two_findings_on_one_pod_at_one_severity_pin_newest_first() {
+    let card = Card {
+        findings: vec![
+            Finding {
+                timestamp: Some(ago(4 * 24 * 60 * 60)),
+                ..about("web-a", Severity::Critical, "the older reason", "exit 137")
+            },
+            Finding {
+                timestamp: Some(ago(180)),
+                ..about("web-a", Severity::Critical, "the newer reason", "exit 139")
+            },
+        ],
+        affected: 1,
+        ..group()
+    };
+    let seen = rows(&pinned_on(Tab::Logs, &card, "web-a"));
+    let at_row = |needle: &str| {
+        seen.iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", seen.join("\n")))
+    };
+    assert!(
+        at_row("the newer reason") < at_row("the older reason"),
+        "the older finding pinned above the newer one\n{}",
+        seen.join("\n")
+    );
+}
+
+/// `screens/detail.md` § A pod's own findings, not the whole card's — **a tab pins the findings
+/// filed against the pod it is open on, and never the other 37.**
+///
+/// A DaemonSet card built from a rule that fires once per pod holds one `Finding::object` per pod
+/// and one shared `Finding::owner` (NOTES § D3). Opening pod #7 pins pod #7's finding; the other
+/// 37 pods' reasons are the which-pods step's own rows, each carrying its own.
+///
+/// **An owner-level finding pins on every pod's tab**, because it names no pod to prefer — the
+/// W1/W2 shape, the second half of the predicate and the one a `object ==` test alone would miss.
+#[test]
+fn a_tab_pins_the_findings_about_its_own_pod_and_the_owners_own_but_not_the_groups() {
+    let owner = id(ObjectKind::DaemonSet, Some("payments"), "log-shipper");
+    let mut findings: Vec<Finding> = (0..38)
+        .map(|nth| Finding {
+            owner: owner.clone(),
+            ..about(
+                &format!("log-shipper-{nth:03}"),
+                Severity::Critical,
+                "cannot be scheduled",
+                &format!("log-shipper-{nth:03} could not be placed on any node"),
+            )
+        })
+        .collect();
+    // The owner-level finding: its own `object` is the DaemonSet, so it names no pod at all.
+    findings.push(Finding {
+        owner: owner.clone(),
+        object: owner.clone(),
+        ..about(
+            "unused",
+            Severity::Warn,
+            "fewer pods are running than this DaemonSet asks for",
+            "38 of 40 not running",
+        )
+    });
+    let card = Card {
+        owner,
+        findings,
+        affected: 38,
+        total: Some(40),
+    };
+
+    let drawn = pinned_on(Tab::Logs, &card, "log-shipper-007");
+    let seen = rows(&drawn);
+
+    assert!(
+        holds(&drawn, "log-shipper-007 could not be placed"),
+        "the tab lost the reason its own pod was opened\n{}",
+        seen.join("\n")
+    );
+    assert!(
+        holds(&drawn, "fewer pods are running"),
+        "an owner-level finding names no pod to prefer and must pin on every pod's tab\n{}",
+        seen.join("\n")
+    );
+    for other in ["log-shipper-000", "log-shipper-006", "log-shipper-008"] {
+        assert!(
+            !holds(&drawn, &format!("{other} could not be placed")),
+            "{other}'s finding was pinned on log-shipper-007's tab\n{}",
+            seen.join("\n")
+        );
+    }
+    // **Two blocks, counted** — one per identity line — because *not the other 37* has to be a
+    // claim about how many pinned, not only about which three this loop happened to name.
+    //
+    // **Matched on the owner's name with a space after it**, which the heading
+    // `payments/log-shipper-007` does not have. The `·  38 of 40 pods` fragment is not on these
+    // lines to match on: [`identity`]'s own give-way order drops the count before the name clips,
+    // and this card's age takes the room (`screens/alerts.md` § The age, and what it costs the
+    // name) — unchanged by this box, and the reason a `· n of m` needle would have found nothing.
+    assert_eq!(
+        seen.iter()
+            .filter(|line| line.contains("payments/log-shipper "))
+            .count(),
+        2,
+        "the tab pinned a block per pod in the group\n{}",
+        seen.join("\n")
+    );
+}
+
+/// **A block on the logs tab is laid out at the pane's own width and drawn at it** — the one
+/// `leads` call site whose caller had already padded, so the block was drawn four columns narrower
+/// than it was wrapped for: the age's own `ago` and the title's last word gone, with **no `…`
+/// anywhere** (`tester` and `k8s-admin`, 2026-09-18, independently).
+///
+/// **It lands on exactly the pods this step exists for.** An `ImagePullBackOff` or `Pending` pod
+/// has never written a log line, logs is the tab `⏎` lands on, and on them this branch is
+/// permanent rather than the moment before a stream starts.
+#[test]
+fn a_block_over_a_log_that_never_started_is_drawn_at_the_width_it_was_wrapped_for() {
+    let card = Card {
+        findings: vec![about(
+            "web-7d9f4bc86d-x2k9p",
+            Severity::Critical,
+            "The image could not be pulled from the registry at all",
+            "registry refused the pull",
+        )],
+        affected: 1,
+        ..group()
+    };
+    let (pod, names) = declared_by("pending");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let empty = crate::k8s::LogLines::default();
+    let mut open = Open::new();
+    open.object = id(ObjectKind::Pod, Some("payments"), "web-7d9f4bc86d-x2k9p");
+    open.card = Some(card);
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &empty,
+    });
+    let drawn = detailed(&on(Tab::Logs), &open.open());
+    let seen = rows(&drawn);
+
+    // **The identity line keeps its whole age.** Cut four columns short it read `1014 days`, which
+    // is a different fact, not a shortened one — and nothing said it had been cut.
+    let identity = celled(&row(&drawn, "payments/web  ·"));
+    assert!(
+        identity.ends_with("ago"),
+        "the block was drawn narrower than it was laid out for: {identity:?}"
+    );
+    // **The title is drawn whole**, over as many rows as it wraps to. Four columns short it lost
+    // its last word with nothing to say so — the silent cut `screens/widgets.md` § 7 forbids.
+    let said = words(
+        &seen
+            .iter()
+            .map(|line| celled(line))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    assert!(
+        said.contains("The image could not be pulled from the registry at all"),
+        "a word went missing with no mark on it\n{}",
+        seen.join("\n")
+    );
+    // And the tab's own sentence is still there, under the block.
+    assert!(holds(&drawn, "no logs yet"), "{}", seen.join("\n"));
+}
+
+/// `screens/detail.md` § When the stack is taller than a Loading or Empty tab has anything of its
+/// own — **a block past the pane's room never erases the tab's own sentence, never cuts itself
+/// unmarked, and never puts a row out of reach.**
+///
+/// **Measured, not reasoned** (`k8s-admin`, 2026-09-18,
+/// `reports/2026-09-18-the-which-pods-step.md` § 4): clamped to the whole pane, `still loading` and
+/// `none right now` came out byte-identical but for which tab was marked open — which is exactly
+/// the collapse PRIOR-ART § C2 is tagged *covered* in this repo for avoiding.
+#[test]
+fn a_block_taller_than_the_pane_keeps_the_tabs_own_sentence_and_scrolls_for_the_rest() {
+    // Two findings on one pod, the second quoting a seven-line `runc` error — a real shape, and
+    // 14 rows against the 13 a tab's body has at the floor.
+    let tail = "and-then-it-gave-up-entirely";
+    let card = Card {
+        findings: vec![
+            about("web-a", Severity::Critical, "ran out of memory", "exit 137"),
+            about(
+                "web-a",
+                Severity::Critical,
+                "The container could not be started at all",
+                &format!(
+                    "starting container process caused: exec: \"/usr/local/bin/serve\": stat \
+                     /usr/local/bin/serve: no such file or directory, unknown, {tail}"
+                ),
+            ),
+        ],
+        affected: 1,
+        ..group()
+    };
+
+    let mut open = Open::new();
+    open.object = id(ObjectKind::Pod, Some("payments"), "web-a");
+    open.card = Some(card);
+    let held = open.open();
+
+    // **The sentence is drawn, in its own words** — this is the property that keeps loading and
+    // empty two frames and not one.
+    let loading = detailed(&on(Tab::Describe), &held);
+    assert!(
+        holds(&loading, "reading the cluster…"),
+        "the block erased the tab's own sentence\n{}",
+        rows(&loading).join("\n")
+    );
+    // **And a bar says the rest is there**, rather than the block ending mid-quote with no mark.
+    assert!(
+        rows(&loading)
+            .iter()
+            .any(|line| line.contains('█') || line.contains('║')),
+        "a block past the pane's room drew no scrollbar\n{}",
+        rows(&loading).join("\n")
+    );
+
+    // **`app.scroll` reaches every line of it** — nothing is discarded to make it fit, only
+    // deferred behind a mark the reader can see.
+    let scrolled = detailed(
+        &App {
+            tab: Tab::Describe,
+            scroll: 8,
+            ..App::default()
+        },
+        &held,
+    );
+    assert!(
+        holds(&scrolled, tail),
+        "the block's own tail was unreachable\n{}",
+        rows(&scrolled).join("\n")
+    );
+
+    // **The block's own right edge is the width it was wrapped at, bar or no bar.** [`identity`]
+    // lays its line out to exactly the region whenever the finding has a drawable age, so a block
+    // one column narrower loses `ago` off the end of every one of them — with no `…`, in the only
+    // state this path exists for (`k8s-admin`, 2026-09-18, § 8; the bar's column now comes off the
+    // pane's own margin, as `pod_pick` already took it).
+    // The bar's own glyph sits in the margin past the block's text, which is the point — so it is
+    // stripped before the block's own right edge is read.
+    let identity = celled(&row(&loading, "payments/web  ·"));
+    let block = identity.trim_end_matches(['█', '║']).trim_end();
+    assert!(
+        block.ends_with("ago"),
+        "the bar took its column out of the block: {identity:?}"
+    );
+
+    // **Loading and nothing-to-show are two frames of *one* tab.** Compared across two different
+    // tabs the marked tab row alone makes them differ, so that comparison would pass with both
+    // sentences erased — it is the two `holds` that pin PRIOR-ART § C2, and this is the
+    // comparison that adds anything (`k8s-admin`, 2026-09-18).
+    let mut empty = Open::new();
+    empty.object = id(ObjectKind::Pod, Some("payments"), "web-a");
+    empty.card = open.card.clone();
+    empty.events = Pane::Ready(crate::k8s::Happened::default());
+    let none = detailed(&on(Tab::Events), &empty.open());
+    let waiting = detailed(&on(Tab::Events), &held);
+    assert!(
+        holds(&none, "none right now"),
+        "the block erased the empty sentence\n{}",
+        rows(&none).join("\n")
+    );
+    assert!(holds(&waiting, "reading the cluster…"));
+    assert_ne!(
+        rows(&waiting),
+        rows(&none),
+        "one tab's still-loading and nothing-to-show came out the same frame"
+    );
+
+    // **And the empty sentence is drawn whole** — `views::NO_EVENTS` is two lines at this width,
+    // and a fixed three-row reservation spent one on the headline and one on the blank, cutting
+    // the half that says *why* with no mark (`k8s-admin`, 2026-09-18, § 10).
+    let said = words(
+        &rows(&none)
+            .iter()
+            .map(|line| celled(line))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    assert!(
+        said.contains(views::NO_EVENTS),
+        "the empty sentence lost the half that says why\n{}",
+        rows(&none).join("\n")
+    );
+
+    // **A refusal is the third state and this box changed nothing about it** — its banner is
+    // drawn before any block, off `floor`, and a pinned finding never explains why a read failed.
+    let mut denied = Open::new();
+    denied.object = id(ObjectKind::Pod, Some("payments"), "web-a");
+    denied.card = open.card.clone();
+    denied.events = Pane::Denied(
+        "you are not allowed to read this. Ask for `get` on events in payments.".to_owned(),
+        crate::k8s::Happened::default(),
+    );
+    let refused = detailed(&on(Tab::Events), &denied.open());
+    let told = words(
+        &rows(&refused)
+            .iter()
+            .map(|line| celled(line))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    assert!(
+        told.contains("Ask for `get` on events in payments."),
+        "a block pushed a refusal's own reason behind a scroll\n{}",
+        rows(&refused).join("\n")
+    );
+    assert_ne!(
+        rows(&refused),
+        rows(&none),
+        "denied and empty are one frame"
+    );
+    assert_ne!(
+        rows(&refused),
+        rows(&waiting),
+        "denied and still loading are one frame"
+    );
+}
+
+/// **The slot carries whether `⏎` reached these tabs through the which-pods step, and hands it to
+/// `crate::views::Detailing` unchanged** (NOTES § D270).
+///
+/// **Nothing on this screen draws from it and that is the point**: what `esc` out of a tab reached
+/// that way should do is the wiring box's to settle with `tui-designer`. It is carried now because
+/// `views.rs` freezes at this phase's close and that box is later in the same phase, and without
+/// it the router's only options are a private flag in `main.rs` about what `views.rs`'s state
+/// means or reopening a frozen file (`k8s-admin`, 2026-09-18).
+#[test]
+fn the_slot_carries_whether_the_tabs_were_reached_through_the_step() {
+    let open = Open::new();
+    let held = open.open();
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = later();
+
+    for from_step in [false, true] {
+        let mut screen = screen(&alerts, &now);
+        screen.detail = Some(Detailed::Tabs {
+            open: &held,
+            from_step,
+        });
+        assert_eq!(
+            detailing(&screen),
+            Detailing::Tabs {
+                containers: containers(&screen).len(),
+                from_step,
+            },
+            "the slot dropped how the tabs were reached"
+        );
+        // **And the footer is the same line either way** — the behaviour is not this box's.
+        let (keys, _) = App::default().footer(
+            detailing(&screen),
+            views::Offer::Move { switch: false },
+            Refused::default(),
+            "",
+            &[],
+        );
+        assert!(keys.contains("esc back"), "{keys:?}");
+    }
 }
