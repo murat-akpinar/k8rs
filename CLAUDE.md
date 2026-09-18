@@ -477,8 +477,15 @@ ssh ubuntu 'cd ~/k8rs-src && export PATH=$HOME/.cargo/bin:$PATH && just check'
 ```
 
 `~/k8rs-src` is never edited, since the next mirror deletes the edit. One command
-runs in it at a time. A mutation run there takes `CARGO_MUTANTS_JOBS=1`. A run
-longer than ten minutes goes to the background with its log on the host.
+runs in it at a time. A run longer than ten minutes goes to the background with
+its log on the host.
+
+**The one exception is the mutation sweep, and it runs here** — 82 s per mutant
+on the host, measured, against 136 mutants for one box. `just mutants-diff` and
+`just mutants` run on this machine at the default job count, and **the scratch is
+deleted when the sweep ends**: `rm -rf ~/.cache/k8rs-mutants`. Never point it
+inside the repo — the mirror would carry it over, the guards scan the tree, and
+cargo-mutants copies the tree per job.
 
 **Green tests are not the same as working software.** Something is *run* every
 box, and its output goes in the report — never report "done" for something that
