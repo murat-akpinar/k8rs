@@ -4587,11 +4587,13 @@ Goal: one binary, live and safe.
       the *which pods* step `screens/detail.md` draws
       ([D270](NOTES.md#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18) ·
       [reports/2026-09-18-the-which-pods-step.md](reports/2026-09-18-the-which-pods-step.md))
-- [ ] **What a caller hands `Screen` is stripped once, and the header's
+- [x] **What a caller hands `Screen` is stripped once, and the header's
       connection word comes from `Screen::link`** — `context`, `vitals`, `note`,
       `clock`, `--namespace` and the command log's own lines meet no strip on the
       way in, and a right-to-left override survives into `List`, `Table` and
       title cells
+      ([D271](NOTES.md#d271--the-strip-box-a-callers-promise-becomes-a-type-and-a-header-word-that-outlived-the-fact-it-described-2026-09-19) ·
+      [reports/2026-09-19-the-strip-and-the-connection-word.md](reports/2026-09-19-the-strip-and-the-connection-word.md))
 - [ ] **Four behaviours a key reaches that are wrong today**: `k` after
       following a log jumps to the top; `esc` closes a confirm whose check has
       not answered; `--context` appended last is what a cut command line drops

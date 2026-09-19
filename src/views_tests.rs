@@ -205,6 +205,196 @@ fn a_typed_line_stops_at_the_identifier_bound_however_much_is_pasted() {
     );
 }
 
+/// **Invariant 9 on the strings `ui::Screen` takes from its caller** (todo.md § Phase 12): the
+/// header's two zones, a note paragraph, the clock sentence, `--namespace` and a command-log line
+/// met no strip on the way in, and [`Stripped`] is the type that makes one unavoidable. What a
+/// test can hold is the transformation and the bound; that an *unstripped* value cannot reach the
+/// field is the private tuple field, which is the compiler's to hold and not this file's.
+///
+/// **It is `k8s::text` and not [`sanitize`], which differ on exactly one class** — a whitespace
+/// control character becomes one space instead of vanishing — and every value this wraps is one
+/// line, where removing a `\n` would glue two words into one.
+#[test]
+fn a_caller_cannot_hand_the_screen_a_string_that_was_not_stripped_and_bounded() {
+    // Every class `k8s::text` removes: a bidi override, ESC, NUL, DEL, a C1 control and a
+    // zero-width space — the same set `Input::push` refuses one keypress at a time.
+    assert_eq!(
+        Stripped::of("prod\u{202e}\u{1b}\u{0}\u{7f}\u{9b}\u{200b}-eu"),
+        "prod-eu",
+        "an unprintable character survived the strip"
+    );
+    // **And it is a comparison and not a formality** — `prod-eu` and `prod-eu-2` differ by one
+    // character, which is the whole reason the header front-cuts (`screens/widgets.md` § 1a).
+    assert_ne!(Stripped::of("prod-eu"), "prod-eu-2");
+
+    // **A break becomes one space and is not deleted**, which is the half `sanitize` does
+    // differently: a header zone, a note paragraph and a command-log line are each one line, so a
+    // deleted `\n` would read as one word and a kept one would forge a second row.
+    assert_eq!(Stripped::of("nodes 3/3\nnodes 9/9"), "nodes 3/3 nodes 9/9");
+    assert_eq!(
+        sanitize("nodes 3/3\nnodes 9/9"),
+        "nodes 3/3nodes 9/9",
+        "the two strips are two transformations, and this is the difference"
+    );
+
+    // **Bounded, which is the security gate's own row about sizes** — nothing between a 50MB
+    // annotation and one of these sentences has a length opinion of its own.
+    let marker = "… (shortened by k8rs)";
+    let huge = Stripped::of(&"c".repeat(FREE_TEXT * 2));
+    assert!(
+        huge.as_str().len() <= FREE_TEXT + marker.len(),
+        "a caller's string was held whole: {} bytes",
+        huge.as_str().len()
+    );
+    assert!(
+        huge.as_str().ends_with(marker),
+        "and the cut was silent: {:?}",
+        huge.as_str()
+    );
+
+    // **A blank line is one space as well, and that is what makes `ui::banner`'s split on
+    // `"\n\n"` permanently dead for a value of this type** (NOTES § D271). The clock sentence is
+    // one paragraph by design (`screens/states.md` § Your computer's clock is off) and
+    // `Pane::Denied`, which carries the *server's* sentence and is not one of these, keeps its
+    // break.
+    assert_eq!(
+        Stripped::of("your computer's clock is 4 minutes fast\n\nk8rs reads ages from it"),
+        "your computer's clock is 4 minutes fast k8rs reads ages from it",
+        "a paragraph break survived into a value that is one line"
+    );
+
+    // A value that already came through the ingest strip is untouched, which is what makes this a
+    // second door and not a second opinion.
+    let ingested = "ctx: prod-eu · ns: payments";
+    assert_eq!(Stripped::of(ingested), ingested);
+}
+
+/// **The command log's own lines are stripped by the type and no longer by three callers**
+/// (todo.md § Phase 12). [`Log::push`] is the single door every one of [`Log::ran`], [`Log::sent`]
+/// and [`Log::outcome`]'s rewrite goes through, so a fourth builder cannot arrive without it —
+/// which is the whole difference from the three promises this type's doc used to list.
+#[test]
+fn every_command_log_line_is_stripped_by_the_type_and_not_by_its_callers() {
+    let mut log = Log::default();
+    log.ran("$ kubectl get pod pay\u{1b}[2Jments\u{202e}".to_owned());
+    assert_eq!(
+        log.lines()[0],
+        "$ kubectl get pod pay[2Jments",
+        "a manifest line reached the strip unstripped"
+    );
+
+    // A line still waiting for its outcome, and the same line once it has one: both go through
+    // `push`, and the second is joined from two halves that have each already been through it
+    // rather than re-bounded as a whole ([`Stripped::assembled`]).
+    let mut running = Log::default();
+    running.sent("$ kubectl scale deployment/we\u{0}b --replicas=3".to_owned());
+    assert_eq!(
+        running.lines()[0],
+        "$ kubectl scale deployment/web --replicas=3   …"
+    );
+    running.outcome("rejected");
+    assert_eq!(
+        running.lines()[0],
+        "$ kubectl scale deployment/web --replicas=3   → rejected"
+    );
+
+    // **A newline is a space here and never a second row** — a command log line that broke in two
+    // would draw a command nobody ran on the strip's second line.
+    let mut broken = Log::default();
+    broken.ran("$ kubectl get pods\n$ kubectl delete pod web".to_owned());
+    assert_eq!(
+        broken.lines()[0],
+        "$ kubectl get pods $ kubectl delete pod web",
+        "a line the renderer draws one of held two"
+    );
+}
+
+/// **An outcome is never cut off a line that fitted while it was running** (`tester`, 2026-09-19).
+///
+/// [`Log::outcome`] rebuilds the line around the [`RUNNING`] mark, and `→ rejected` is longer than
+/// the mark it replaces — so a second [`Stripped::of`] over the result re-bounds a line that was
+/// inside [`FREE_TEXT`] a moment before, and the bytes a bound takes are the last ones: the
+/// outcome. What that drew was `→… (shortened by k8rs)`, an arrow pointing at k8rs's own
+/// shortening mark, which reads as an outcome and is not one.
+///
+/// **The assertion is the claim and not the arithmetic.** It reads *what became of the call*, which
+/// is the thing the bound may not swallow; a length assertion passes just as happily on a line that
+/// kept the arrow and lost the word. The `sent` line is asserted to sit exactly *at* the bound
+/// first, because a line that fitted with room to spare cannot fail either way.
+#[test]
+fn an_outcome_is_not_cut_off_a_line_that_fitted_while_it_was_running() {
+    let mut tight = Log::default();
+    tight.sent("y".repeat(FREE_TEXT - OUTCOME_GAP.len() - RUNNING.len()));
+    assert_eq!(
+        tight.lines()[0].as_str().len(),
+        FREE_TEXT,
+        "the line under test is not the one sitting at the bound"
+    );
+    tight.outcome("rejected");
+    let tail = tight.lines()[0].as_str().trim_start_matches('y');
+    println!("{tail:?}");
+    assert_eq!(
+        tail, "   → rejected",
+        "the outcome was cut off the line it belongs to"
+    );
+}
+
+/// **Three columns before an outcome, whatever the caller's line ends in** —
+/// `screens/widgets.md` § 2, and [`OUTCOME_GAP`] is the one place it is spelled.
+///
+/// **The strip substitutes rather than deletes** (NOTES § D198), so composing the gap *before*
+/// [`Log::push`] turned a caller's trailing break into a fourth column — and a kubectl line copied
+/// out of a file ends in `\n` (`tester`, 2026-09-19). Every spelling of the class is fed rather
+/// than the one that was reported (NOTES § D29): the three ASCII breaks, a run of two, and
+/// the plain trailing space that could always do this.
+///
+/// **Plus the four `k8s::text` deliberately keeps** (NOTES § D154, `k8s-admin`, 2026-09-19): NBSP,
+/// `\u{2028}`, `\u{2003}` and `\u{3000}` are `char::is_whitespace` and not
+/// `crate::k8s::unprintable`, so they reach [`Log::sent`] intact and it is `trim_end` alone that
+/// answers for them. They are the shapes the comment on that line was reasoned about rather than
+/// fed, which is the half of D29 a same-looking class hides.
+///
+/// **Both expectations are spelled out rather than built from [`OUTCOME_GAP`]**, because three
+/// columns is `screens/widgets.md` § 2's rule and an expectation built from the constant the code
+/// reads passes whatever that constant becomes.
+///
+/// **Both states are asserted, running and resolved.** The gap is drawn by `sent` and *kept* by
+/// `outcome`, and a fix that got one right while moving the other would pass a test that only read
+/// the first.
+#[test]
+fn the_gap_before_an_outcome_is_three_columns_whatever_the_line_ends_in() {
+    let ran = "$ kubectl get pods";
+    for tail in [
+        "", "\n", "\t", "\r", "\r\n", "\n\n", " ", "\u{a0}", "\u{2028}", "\u{2003}", "\u{3000}",
+    ] {
+        let mut log = Log::default();
+        log.sent(format!("{ran}{tail}"));
+        assert_eq!(
+            log.lines()[0],
+            "$ kubectl get pods   …",
+            "a line ending in {tail:?} drew a gap that is not three columns"
+        );
+        log.outcome("rejected");
+        assert_eq!(
+            log.lines()[0],
+            "$ kubectl get pods   → rejected",
+            "a line ending in {tail:?} lost the gap when its outcome arrived"
+        );
+    }
+
+    // **The other half of that asymmetry, measured rather than reasoned**: [`Log::ran`] expects no
+    // outcome, so it has no gap to defend and does not trim — and `k8s::text` keeps an NBSP
+    // (NOTES § D154). The two methods therefore differ over one, which is what the comment on
+    // `sent`'s `trim_end` now says (`k8s-admin`, 2026-09-19).
+    let mut kept = Log::default();
+    kept.ran(format!("{ran}\u{a0}"));
+    assert_eq!(
+        kept.lines()[0].as_str(),
+        format!("{ran}\u{a0}"),
+        "`ran` trimmed a character the ingest strip keeps"
+    );
+}
+
 /// **Invariant 9 on the one string that never met `k8s::text`** (NOTES § D246 ruling 5). A
 /// bracketed paste is one event and can carry an escape sequence straight into a buffer the
 /// renderer draws — `screens/widgets.md` § 7's *an escape sequence in a pod name reaches the
@@ -2159,7 +2349,7 @@ fn an_outcome_is_bounded_and_stripped_however_long_the_cluster_was() {
         "x".repeat(4859)
     );
     log.outcome(&whole_object);
-    let line = &log.lines()[0];
+    let line = log.lines()[0].as_str();
     println!("{line}");
     assert_eq!(
         line,
@@ -2246,7 +2436,9 @@ fn an_outcome_whose_line_was_dropped_writes_nothing() {
     }
     log.outcome("done");
     assert!(
-        !log.lines().iter().any(|line| line.contains("→ done")),
+        !log.lines()
+            .iter()
+            .any(|line| line.as_str().contains("→ done")),
         "an outcome was written onto a command it did not belong to"
     );
     assert_eq!(log.lines().len(), KEPT);

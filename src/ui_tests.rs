@@ -118,8 +118,8 @@ static UNOPENED: Pane<crate::k8s::Table> = Pane::Loading;
 fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
     Screen {
         depth: Depth::TrueColor,
-        vitals: "nodes 3/3",
-        context: "ctx: prod-eu · live",
+        vitals: Stripped::of("nodes 3/3"),
+        context: Stripped::of("ctx: prod-eu"),
         insecure: false,
         alerts,
         browser: &UNOPENED,
@@ -174,6 +174,20 @@ fn row(buffer: &Buffer, needle: &str) -> String {
         .into_iter()
         .find(|line| line.contains(needle))
         .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", rows(buffer).join("\n")))
+}
+
+/// [`row`], of the **body** only. **The header carries a `\u{26a0}` of its own under
+/// [`Link::Lost`] and [`Link::Expired`]** — `\u{26a0} disconnected, retrying`,
+/// `\u{26a0} login expired`, joined from [`Screen::link`] since Phase 12 — so a search for a
+/// banner's mark that read the whole frame would measure the header's column and never the
+/// banner's. (Under [`Link::Unconnected`] the mark is the *caller's*, inside the context zone, and
+/// reads the same way.)
+fn body_row(buffer: &Buffer, needle: &str) -> String {
+    rows(buffer)
+        .into_iter()
+        .skip(1)
+        .find(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("no body row holds {needle:?}\n{}", rows(buffer).join("\n")))
 }
 
 fn holds(buffer: &Buffer, needle: &str) -> bool {
@@ -297,7 +311,7 @@ fn a_line_inside_the_frame_never_reaches_the_border() {
     let now = now();
     let long =
         "$ kubectl get pods -n a-namespace-with-a-name-long-enough-to-run-past-the-edge --watch";
-    let log = [long.to_owned(), long.to_owned()];
+    let log = [Stripped::of(long), Stripped::of(long)];
     let mut wide = screen(&alerts, &now);
     wide.log = &log;
     let drawn = render(&app(), &wide);
@@ -322,8 +336,9 @@ fn a_line_inside_the_frame_never_reaches_the_border() {
 /// **`k8rs` is drawn only with two blank columns each side, and the boundary is where the
 /// mutants live.** At 80 columns the centred name starts at 38, so a left zone of 35 keeps it and
 /// one of 36 loses it; on the other side a context zone of 36 keeps it and one of 37 loses it —
-/// the whole zone, `admin` included, which is the header's to join and not the caller's. The
-/// name is the only zone that gives way — never the context.
+/// the whole zone, `live · admin` included, which is the header's to join and not the caller's
+/// (NOTES § D265 ruling 1, todo.md § Phase 12). The name is the only zone that gives way — never
+/// the context.
 #[test]
 fn the_name_needs_two_blank_columns_on_each_side() {
     let alerts = Pane::Ready(vec![oom()]);
@@ -332,7 +347,7 @@ fn the_name_needs_two_blank_columns_on_each_side() {
 
     let thirty_five = "n".repeat(35);
     let mut roomy = screen(&alerts, &now);
-    roomy.vitals = &thirty_five;
+    roomy.vitals = Stripped::of(&thirty_five);
     assert!(
         header(&roomy).contains("k8rs"),
         "a 35-column left zone fits"
@@ -340,22 +355,22 @@ fn the_name_needs_two_blank_columns_on_each_side() {
 
     let thirty_six = "n".repeat(36);
     let mut tight = screen(&alerts, &now);
-    tight.vitals = &thirty_six;
+    tight.vitals = Stripped::of(&thirty_six);
     assert!(!header(&tight).contains("k8rs"), "a 36-column one does not");
 
-    let last = format!("ctx: {}", "c".repeat(23));
+    let last = format!("ctx: {}", "c".repeat(16));
     let mut roomy = screen(&alerts, &now);
-    roomy.context = &last;
-    assert_eq!(width(&format!("{last} · admin")), 36);
+    roomy.context = Stripped::of(&last);
+    assert_eq!(width(&format!("{last} · live · admin")), 36);
     assert!(
         header(&roomy).contains("k8rs"),
         "a 36-column context still leaves two blanks"
     );
 
-    let over = format!("ctx: {}", "c".repeat(24));
+    let over = format!("ctx: {}", "c".repeat(17));
     let mut tight = screen(&alerts, &now);
-    tight.context = &over;
-    let zone = format!("{over} · admin");
+    tight.context = Stripped::of(&over);
+    let zone = format!("{over} · live · admin");
     assert_eq!(width(&zone), 37);
     let drawn = header(&tight);
     assert!(
@@ -389,7 +404,7 @@ fn the_name_is_dropped_when_the_row_fills_up() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let mut wide = screen(&alerts, &now);
-    wide.context = "ctx: a-very-long-context-name-indeed · ns: payments";
+    wide.context = Stripped::of("ctx: a-very-long-context-name-indeed · ns: payments");
     wide.writes = Writes::ReadOnly;
     wide.insecure = true;
     let drawn = render(&app(), &wide);
@@ -418,10 +433,10 @@ fn the_context_elides_its_name_and_never_its_tail() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let arn = "ctx: arn:aws:eks:eu-west-1:123456789012:cluster/production-eu \
-               · ns: payments · live";
-    let zone = format!("{arn} · read-only · ⚠ TLS not verified");
+               · ns: payments";
+    let zone = format!("{arn} · live · read-only · ⚠ TLS not verified");
     let mut screen = screen(&alerts, &now);
-    screen.context = arn;
+    screen.context = Stripped::of(arn);
     screen.writes = Writes::ReadOnly;
     screen.insecure = true;
     assert_eq!(width(&zone), 116, "wider than the row, by half again");
@@ -552,9 +567,9 @@ fn a_change_in_flight_survives_the_cut_the_clusters_own_name_does_not() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let arn = "ctx: arn:aws:eks:eu-west-1:123456789012:cluster/production-eu \
-               · ns: payments · live";
+               · ns: payments";
     let mut screen = screen(&alerts, &now);
-    screen.context = arn;
+    screen.context = Stripped::of(arn);
     screen.writes = Writes::ReadOnly;
     screen.insecure = true;
 
@@ -588,16 +603,22 @@ fn a_change_in_flight_survives_the_cut_the_clusters_own_name_does_not() {
 /// login, a skewed clock (NOTES § D265 ruling 6): `read-only` during a disconnect is when a reader
 /// is about to press something. A header that dropped the word whenever the link was not live, or
 /// whenever [`withheld`] held, went through every test until this loop (`tester`, R12 and R13).
+///
+/// **[`Link::Unconnected`] is in the loop for the permission word's sake as much as the connection
+/// one**: it is the state with no connection word, and dropping the *permission* word with it
+/// would be that same R12 failure one state over.
 #[test]
 fn the_header_says_what_this_run_may_do_after_the_callers_own_segments() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let mut seen = 0;
-    for (link, clock) in [
-        (Link::Live, None),
-        (Link::Lost, None),
-        (Link::Expired, None),
-        (Link::Live, Some(SKEWED)),
+    for (link, state, clock) in [
+        (Link::Connecting, Some("connecting…"), None),
+        (Link::Live, Some("live"), None),
+        (Link::Lost, Some("⚠ disconnected, retrying"), None),
+        (Link::Expired, Some("⚠ login expired"), None),
+        (Link::Unconnected, None, None),
+        (Link::Live, Some("live"), Some(SKEWED)),
     ] {
         for (writes, word, other) in [
             (Writes::Live, "admin", "read-only"),
@@ -611,18 +632,31 @@ fn the_header_says_what_this_run_may_do_after_the_callers_own_segments() {
             let mut screen = screen(&alerts, &now);
             screen.writes = writes;
             screen.link = link;
-            screen.clock = clock;
+            screen.clock = clock.map(Stripped::of);
             let drawn = rows(&render(&app(), &screen))[0].clone();
             let what = format!("{writes:?} · {link:?} · clock {clock:?}");
-            assert!(
-                drawn.ends_with(&format!("ctx: prod-eu · live · {word}")),
-                "{what}: {drawn:?}"
-            );
+            // **The connection word is the header's too, off [`Screen::link`]** — the caller's
+            // `ctx: prod-eu` carries none, so a header that read one out of the string would
+            // draw nothing here (todo.md § Phase 12).
+            let zone = match state {
+                Some(state) => format!("ctx: prod-eu · {state} · {word}"),
+                None => format!("ctx: prod-eu · {word}"),
+            };
+            assert!(drawn.ends_with(&zone), "{what}: {drawn:?}");
             assert!(!drawn.contains(other), "{what}: {drawn:?}");
+            // **[`Link::Unconnected`] joins no word at all, and the claim is that *none of the
+            // four* appears** — not that the row happens to be short (`screens/widgets.md` § 1a:
+            // *not a fifth connection word, and not a blank segment either*). The fault's own word
+            // lives in the caller's zone, which this screen's `ctx: prod-eu` does not carry.
+            if state.is_none() {
+                for never in ["live", "connecting", "disconnected", "login expired"] {
+                    assert!(!drawn.contains(never), "{what}: {never:?} in {drawn:?}");
+                }
+            }
             seen += 1;
         }
     }
-    assert_eq!(seen, 12, "a combination stopped being drawn");
+    assert_eq!(seen, 18, "a combination stopped being drawn");
 }
 
 /// **The tail keeps `screens/widgets.md` § 1a's order in all twelve combinations** — the
@@ -676,24 +710,24 @@ fn the_tail_keeps_the_zone_tables_order_whichever_of_its_facts_hold() {
     assert_eq!(seen, 12, "a combination stopped being drawn");
 }
 
-/// **An empty [`Screen::context`] joins nothing** — no leading ` · ` in front of the permission
-/// word, whatever follows it (NOTES § D265 ruling 7) — and **the startup picker's zone, which never
-/// reads the caller's string, is untouched by one**.
+/// **An empty [`Screen::context`] joins nothing** — no leading ` · ` in front of the connection
+/// and permission words, whatever follows them (NOTES § D265 ruling 7) — and **the startup
+/// picker's zone, which never reads the caller's string, is untouched by one**.
 #[test]
 fn an_empty_context_joins_nothing_in_front_of_the_tail() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     for (writes, insecure, running, zone) in [
-        (Writes::Live, false, false, "admin"),
+        (Writes::Live, false, false, "live · admin"),
         (
             Writes::ReadOnly,
             true,
             true,
-            "read-only · ⚠ TLS not verified · changing…",
+            "live · read-only · ⚠ TLS not verified · changing…",
         ),
     ] {
         let mut screen = screen(&alerts, &now);
-        screen.context = "";
+        screen.context = Stripped::of("");
         screen.writes = writes;
         screen.insecure = insecure;
         let app = if running {
@@ -711,7 +745,7 @@ fn an_empty_context_joins_nothing_in_front_of_the_tail() {
 
     let four = contexts_of(FOUR);
     let mut screen = pick_over(&alerts, &now, &[], &four);
-    screen.context = "";
+    screen.context = Stripped::of("");
     let drawn = rows(&render(&picking(&four, views::Connection::Never), &screen))[0].clone();
     assert!(
         drawn.trim_end().ends_with("  choose a cluster · admin"),
@@ -772,23 +806,31 @@ fn the_header_of_every_link_state_is_the_pages_own() {
             let link = match &page {
                 page if page.contains("disconnected") => Link::Lost,
                 page if page.contains("login expired") => Link::Expired,
+                page if page.contains("connecting") => Link::Connecting,
                 _ => Link::Live,
             };
             let (vitals, zone) = zones(&page);
-            let head = zone
+            let tail = zone
                 .strip_suffix(" · admin")
                 .unwrap_or_else(|| panic!("{section}: {zone:?} does not end on the word"));
+            // **The connection word comes off the page too, and the caller is handed what is in
+            // front of it** (todo.md § Phase 12): the header re-derives it from [`Screen::link`],
+            // so a header reading it out of the caller's string draws nothing where the page
+            // draws `connecting…`, `⚠ disconnected, retrying` or `⚠ login expired`.
+            let (head, state) = tail
+                .rsplit_once(" · ")
+                .unwrap_or_else(|| panic!("{section}: {tail:?} has no connection word"));
             for (writes, word) in [(Writes::Live, "admin"), (Writes::ReadOnly, "read-only")] {
                 let mut screen = screen(&alerts, &now);
-                screen.vitals = &vitals;
-                screen.context = head;
+                screen.vitals = Stripped::of(&vitals);
+                screen.context = Stripped::of(head);
                 screen.writes = writes;
                 screen.link = link;
                 let drawn = rows(&render(&app(), &screen))[0].clone();
                 println!("{section} · {writes:?}\n{drawn}");
                 assert_eq!(
                     zones(&drawn),
-                    (vitals.clone(), format!("{head} · {word}")),
+                    (vitals.clone(), format!("{head} · {state} · {word}")),
                     "{section} · {writes:?}: {drawn:?}"
                 );
                 assert!(
@@ -805,6 +847,83 @@ fn the_header_of_every_link_state_is_the_pages_own() {
     );
 }
 
+/// **What a caller assembles reaches a cell in its stripped form** (invariant 9, todo.md
+/// § Phase 12) — the two header zones, a note paragraph, the clock sentence, the namespace and a
+/// command-log line, each of which met no strip on the way in until `views::Stripped`.
+///
+/// **What is asserted is the substitution and not the removal, because the removal cannot be seen
+/// from here** — measured, not reasoned: a frame rendered with the strip turned off draws
+/// `pay[2Jments` for `pay\u{202e}\u{1b}[2Jments` exactly as one with it on does, because ratatui's
+/// `Buffer` discards a zero-width character as it writes the cell. **So a `TestBackend` assertion
+/// about control characters cannot fail**, and one written that way would be a green build proving
+/// nothing (NOTES § D26). `screens/widgets.md` § 7's *an escape sequence in a pod name reaches the
+/// terminal and rewrites it* is about the write to the real terminal, a layer below anything this
+/// file can render into. **That is the other half of why the guarantee is a type**: nothing at this
+/// level can catch its absence.
+///
+/// **A whitespace control character is visible, and that is the one this reads.** `k8s::text` turns
+/// a break into a single space rather than deleting it — a boundary deleted glues two words into
+/// one — so `pay\nments` draws `pay ments` through the strip and `payments` without it.
+///
+/// **Three frames, because no single one draws all six**: a list carries the clock banner, a pane
+/// that has not answered carries the note, the browser carries the namespace, and the header and
+/// the strip carry the rest of each.
+#[test]
+fn what_a_caller_assembles_reaches_a_cell_stripped() {
+    let now = now();
+    // **A token no fixture on any of these frames holds**, so the glued form below names this
+    // value and not a pod called `payments/web`.
+    let crafted = "kra\nken";
+    let clean = "kra ken";
+    let glued = "kraken";
+    let log = [Stripped::of(&format!("$ kubectl get pods -n {crafted}"))];
+
+    // The header's two zones, the command-log strip, and the clock sentence over a list.
+    let live = Pane::Ready(vec![oom()]);
+    let mut banner = screen(&live, &now);
+    banner.vitals = Stripped::of(&format!("nodes {crafted}"));
+    banner.context = Stripped::of(&format!("ctx: {crafted}"));
+    banner.clock = Some(Stripped::of(&format!("\u{26a0} your clock is {crafted}")));
+    banner.log = &log;
+
+    // A pane that has not answered, which is where the caller's paragraphs are drawn.
+    let loading = Pane::Loading;
+    let note = [Stripped::of(&format!(
+        "reading the cluster\u{2026} {crafted}"
+    ))];
+    let mut waiting = screen(&loading, &now);
+    waiting.note = &note;
+
+    // The browser's own title, which is the one place `--namespace` reaches a cell.
+    let kinds = [browsable("deployments", true)];
+    let ready = Pane::Ready(table("table-deployments"));
+    let mut browser = browsing(&ready, &kinds, &now);
+    browser.namespace = Some(Stripped::of(crafted));
+
+    let mut seen = 0;
+    for (what, app, screen) in [
+        ("the header, the clock and the strip", app(), &banner),
+        ("a pane that has not answered", app(), &waiting),
+        ("the browser's title", opened(), &browser),
+    ] {
+        let drawn = rows(&render(&app, screen));
+        println!("--- {what} ---\n{}\n", drawn.join("\n"));
+        for (n, line) in drawn.iter().enumerate() {
+            assert!(
+                !line.contains(glued),
+                "{what}: row {n} glued two words into one, so the break was deleted and not \
+                 substituted: {line:?}"
+            );
+            seen += line.matches(clean).count();
+        }
+    }
+    // **Every field is counted and not merely searched for** — occurrences and not rows, because
+    // the header's two zones share one row: vitals and context, the strip, the clock, the note and
+    // the browser's title are six, so a field that quietly stopped being drawn fails here instead
+    // of passing on a sibling's row.
+    assert_eq!(seen, 6, "a caller's string stopped reaching a cell");
+}
+
 /// **A vital gives way whole.** `screens/widgets.md` § 1a: *a vital that cannot be read is blank,
 /// never guessed* — and half of one is a guess with no marker on it. `nodes 3/3 (40s ago)` clipped
 /// to `nodes 3/3 (` reads as a complete count of three ready nodes out of three.
@@ -814,8 +933,8 @@ fn the_vitals_give_way_whole_and_never_half_a_number() {
     let now = now();
     let stale = "nodes 3/3 (40s ago)";
     let mut screen = screen(&alerts, &now);
-    screen.vitals = stale;
-    screen.context = "ctx: prod-eu · ns: payments · live";
+    screen.vitals = Stripped::of(stale);
+    screen.context = Stripped::of("ctx: prod-eu · ns: payments");
     screen.writes = Writes::ReadOnly;
     screen.insecure = true;
     let zone = "ctx: prod-eu · ns: payments · live · read-only · ⚠ TLS not verified";
@@ -830,7 +949,7 @@ fn the_vitals_give_way_whole_and_never_half_a_number() {
     );
     assert!(!header.contains("nodes"), "no half a vital: {header:?}");
 
-    screen.vitals = "nodes 3/3";
+    screen.vitals = Stripped::of("nodes 3/3");
     let drawn = render(&app(), &screen);
     assert!(
         rows(&drawn)[0].contains("nodes 3/3"),
@@ -843,9 +962,9 @@ fn the_command_log_draws_the_last_two_lines() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let log = [
-        "$ kubectl get certificatesigningrequests".to_owned(),
-        "$ kubectl get pods -A --watch".to_owned(),
-        "$ kubectl get nodes --watch".to_owned(),
+        Stripped::of("$ kubectl get certificatesigningrequests"),
+        Stripped::of("$ kubectl get pods -A --watch"),
+        Stripped::of("$ kubectl get nodes --watch"),
     ];
     let mut with_log = screen(&alerts, &now);
     with_log.log = &log;
@@ -906,12 +1025,11 @@ fn a_command_wider_than_the_strip_is_cut_where_the_reader_can_see_it() {
     let now = now();
     // 106 columns: an 18-column prefix, a 40-character Deployment-generated pod name, ` -n ` and
     // a 14-character namespace put the cut exactly on a token boundary.
-    let long = [
+    let long = [Stripped::of(
         "$ kubectl get pod checkout-api-canary-7d9f4bc86d-x2k9pqrst \
-         -n payments-prod0 -o yaml --show-managed-fields"
-            .to_owned(),
-    ];
-    assert_eq!(width(&long[0]), 106);
+         -n payments-prod0 -o yaml --show-managed-fields",
+    )];
+    assert_eq!(width(long[0].as_str()), 106);
     let mut with_log = screen(&alerts, &now);
     with_log.log = &long;
     let drawn = render(&app(), &with_log);
@@ -948,7 +1066,7 @@ fn a_command_wider_than_the_strip_is_cut_where_the_reader_can_see_it() {
 fn the_yaml_tabs_secret_line_is_cut_exactly_where_the_mockup_draws_it() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
-    let secret = [views::yaml_line(
+    let secret = [Stripped::of(&views::yaml_line(
         "secret",
         &ObjectId {
             kind: ObjectKind::Pod,
@@ -956,8 +1074,12 @@ fn the_yaml_tabs_secret_line_is_cut_exactly_where_the_mockup_draws_it() {
             name: "db-credentials".to_owned(),
             uid: None,
         },
-    )];
-    assert_eq!(width(&secret[0]), 77, "77 columns against the strip's 76");
+    ))];
+    assert_eq!(
+        width(secret[0].as_str()),
+        77,
+        "77 columns against the strip's 76"
+    );
     let mut with_log = screen(&alerts, &now);
     with_log.log = &secret;
     let drawn = render(&app(), &with_log);
@@ -980,10 +1102,10 @@ fn a_command_that_fits_the_strip_carries_no_mark() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     // 76 columns exactly, which is the whole of the strip at the floor.
-    let exact = [
-        "$ kubectl get pod checkout-api-canary-7d9f4bc86d-x2k9pqrst -n payments-prod0".to_owned(),
-    ];
-    assert_eq!(width(&exact[0]), 76);
+    let exact = [Stripped::of(
+        "$ kubectl get pod checkout-api-canary-7d9f4bc86d-x2k9pqrst -n payments-prod0",
+    )];
+    assert_eq!(width(exact[0].as_str()), 76);
     let mut with_log = screen(&alerts, &now);
     with_log.log = &exact;
     let drawn = render(&app(), &with_log);
@@ -1478,11 +1600,13 @@ fn the_bands_survive_a_sixteen_colour_terminal() {
 #[test]
 fn loading_empty_and_denied_are_three_different_screens() {
     let now = now();
-    let note = ["84 pods and 3 nodes checked, none of them is in trouble right now.".to_owned()];
+    let note = [Stripped::of(
+        "84 pods and 3 nodes checked, none of them is in trouble right now.",
+    )];
 
     let loading = Pane::Loading;
     let mut still = screen(&loading, &now);
-    let reading = ["reading the cluster… 2,140 pods".to_owned()];
+    let reading = [Stripped::of("reading the cluster… 2,140 pods")];
     still.note = &reading;
     let still = render(&app(), &still);
     assert!(holds(&still, "reading the cluster…"));
@@ -1502,8 +1626,8 @@ fn loading_empty_and_denied_are_three_different_screens() {
     // which would push the block off its own centre, and not nowhere, which runs two sentences
     // together.
     let two = [
-        "84 pods and 3 nodes checked.".to_owned(),
-        "Worth a look anyway:".to_owned(),
+        Stripped::of("84 pods and 3 nodes checked."),
+        Stripped::of("Worth a look anyway:"),
     ];
     let mut spaced = screen(&empty, &now);
     spaced.note = &two;
@@ -1889,8 +2013,22 @@ fn drawn_above(drawn: &Buffer) -> Vec<String> {
 /// character, so no rule here can tell the two apart — which is why [`against`] is pointed only at
 /// mockups that draw their sentences whole, and the capped ones are
 /// [`a_stack_of_caveats_never_takes_the_list_below_its_own_floor`]'s.
-fn fed(section: &str, nth: usize, from: usize) -> Vec<String> {
+fn fed(section: &str, nth: usize, from: usize) -> Vec<Stripped> {
+    paragraphs(section, nth, from)
+        .iter()
+        .map(|line| Stripped::of(line))
+        .collect()
+}
+
+/// The same paragraphs, still as `String`s — what a `Pane::Denied` reason and a clock sentence are
+/// built from, both of which are one string and not a list of them.
+fn paragraphs(section: &str, nth: usize, from: usize) -> Vec<String> {
     said_above(&mockups(section)[nth].pane).split_off(from)
+}
+
+/// The same paragraphs as the one string a banner is.
+fn joined(section: &str, nth: usize, from: usize) -> String {
+    paragraphs(section, nth, from).join("\n\n")
 }
 
 /// **What every one of the nine owes its own mockup**: the footer byte for byte, the paragraphs
@@ -1962,6 +2100,12 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     let reading = fed(section, 0, 0);
     let mut still = screen(&loading, &now);
     still.note = &reading;
+    // **The page's own connection word, now that [`header`] joins it from [`Screen::link`]** — this
+    // state is the moment before the first answer, which `screens/states.md` draws as
+    // `ctx: prod-eu · connecting… · admin`. Drawn at the default [`Link::Live`] the printed frame
+    // said `live` under a mockup that says otherwise (`tester`, 2026-09-19). The `nodes 3/3` half
+    // of that row is a separate, older gap and is not this box's.
+    still.link = Link::Connecting;
     against(section, 0, &app(), &still);
     seen.push((section, 0));
 
@@ -2006,7 +2150,7 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     let deployments = [browsable(plural, true)];
     let listed = Pane::Ready(table("table-deployments"));
     let mut narrowed = browsing(&listed, &deployments, &now);
-    narrowed.namespace = Some("payments");
+    narrowed.namespace = Some(Stripped::of("payments"));
     let mut browsing_typed = opened();
     browsing_typed.filters.text = filter("prodeu");
     against(section, 1, &browsing_typed, &narrowed);
@@ -2015,7 +2159,7 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // § The connection dropped — a stale card is still a selected object in principle, and k8rs
     // cannot ask whether a write would be allowed, so the two keys go rather than being marked.
     let section = "## The connection dropped";
-    let dropped = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let dropped = Pane::Denied(joined(section, 0, 0), vec![oom()]);
     let mut lost = screen(&dropped, &now);
     lost.link = Link::Lost;
     against(section, 0, &app(), &lost);
@@ -2023,7 +2167,7 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
 
     // § Your login expired — the one state on the page that promotes a key off `?`.
     let section = "## Your login expired";
-    let timed_out = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let timed_out = Pane::Denied(joined(section, 0, 0), vec![oom()]);
     let mut expired = screen(&timed_out, &now);
     expired.link = Link::Expired;
     against(section, 0, &app(), &expired);
@@ -2036,7 +2180,7 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // [`an_empty_alerts_list_says_nothing_is_broken_only_while_the_link_is_live`] asserts of a
     // `Pane::Ready` too (NOTES § D266).
     for (nth, link) in [(1, Link::Lost), (2, Link::Expired)] {
-        let went = Pane::Denied(fed(section, nth, 0).join("\n\n"), Vec::new());
+        let went = Pane::Denied(joined(section, nth, 0), Vec::new());
         let mut empty_and_gone = screen(&went, &now);
         empty_and_gone.link = link;
         against(section, nth, &app(), &empty_and_gone);
@@ -2069,17 +2213,17 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // go because an age that reads fresher than it is decides which card somebody acts on first.
     let section = "## Your computer's clock is off";
     let live = Pane::Ready(vec![oom()]);
-    let behind = fed(section, 0, 0).join("\n\n");
+    let behind = joined(section, 0, 0);
     let mut skewed = screen(&live, &now);
-    skewed.clock = Some(&behind);
+    skewed.clock = Some(Stripped::of(&behind));
     against(section, 0, &app(), &skewed);
     seen.push((section, 0));
 
     // § Ahead of the cluster — the other direction, and a second sentence rather than the same one
     // with a sign flipped: this one loses no times, it only makes them read large (NOTES § D177).
-    let ahead = fed(section, 1, 0).join("\n\n");
+    let ahead = joined(section, 1, 0);
     let mut fast = screen(&live, &now);
-    fast.clock = Some(&ahead);
+    fast.clock = Some(Stripped::of(&ahead));
     against(section, 1, &app(), &fast);
     seen.push((section, 1));
 
@@ -2104,7 +2248,7 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // (re-ruled 2026-09-12). This mockup read `read-only` once and this frame was fed
     // `Writes::ReadOnly` to match it, which is the wiring that section now names as the mistake.
     let section = "## You can only see some namespaces";
-    let scoped = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let scoped = Pane::Denied(joined(section, 0, 0), vec![oom()]);
     let partial = screen(&scoped, &now);
     against(section, 0, &app(), &partial);
     seen.push((section, 0));
@@ -2306,7 +2450,9 @@ fn the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key() {
     let mut asked = screen(&live, &now);
     asked.writes = Writes::ReadOnly;
     let mut skewed = screen(&live, &now);
-    skewed.clock = Some("⚠ This computer and the cluster disagree about the time by 11 minutes.");
+    skewed.clock = Some(Stripped::of(
+        "⚠ This computer and the cluster disagree about the time by 11 minutes.",
+    ));
     let mut lost = screen(&live, &now);
     lost.link = Link::Lost;
     let mut expired = screen(&live, &now);
@@ -2560,7 +2706,7 @@ fn a_namespace_scoped_login_that_may_act_keeps_its_keys() {
         vec![oom()],
     );
     let mut developer = screen(&scoped, &now);
-    developer.namespace = Some("payments");
+    developer.namespace = Some(Stripped::of("payments"));
     let drawn = render(&app(), &developer);
     println!("{}", rows(&drawn).join("\n"));
     assert_eq!(
@@ -2682,7 +2828,7 @@ fn the_dead_write_path_says_so_on_a_pane_that_draws_no_list() {
     let empty = Pane::Ready(Vec::new());
     let handed = fed("## Nothing is broken", 0, 1);
     assert!(
-        handed.len() == 2 && handed[1].starts_with("Worth a look anyway"),
+        handed.len() == 2 && handed[1].as_str().starts_with("Worth a look anyway"),
         "the fixture is the page's count and its pointer, in that order: {handed:?}"
     );
     let mut clean = screen(&empty, &now);
@@ -2696,7 +2842,7 @@ fn the_dead_write_path_says_so_on_a_pane_that_draws_no_list() {
         rows(&drawn).join("\n")
     );
     assert!(
-        body_text(&drawn).contains(&words(&handed[0])),
+        body_text(&drawn).contains(&words(handed[0].as_str())),
         "the count fits after the audit sentence and was not drawn whole:\n{}",
         rows(&drawn).join("\n")
     );
@@ -2737,8 +2883,8 @@ fn the_dead_write_path_says_so_on_a_pane_that_draws_no_list() {
     // The audit sentence is 8 lines, the one-line count and its blank are 2, and 11 is the budget
     // under the verdict, so exactly one row is left for the pointer.
     let short = [
-        "84 pods checked.".to_owned(),
-        "Worth a look anyway.".to_owned(),
+        Stripped::of("84 pods checked."),
+        Stripped::of("Worth a look anyway."),
     ];
     let mut tight = screen(&empty, &now);
     tight.note = &short;
@@ -2865,11 +3011,11 @@ fn a_stack_of_caveats_never_takes_the_list_below_its_own_floor() {
     let live = Pane::Ready(vec![oom()]);
     let dead = dead_log();
     let mut both = screen(&live, &now);
-    both.clock = Some(
+    both.clock = Some(Stripped::of(
         "⚠ This computer and the cluster disagree about the time by 11 minutes (this one is \
          behind), so recent times are missing and older ones can read smaller than they really \
          are.",
-    );
+    ));
     both.writes = Writes::Unaudited(&dead);
     let drawn = render(&app(), &both);
     println!("{}", rows(&drawn).join("\n"));
@@ -2950,9 +3096,9 @@ fn a_stack_of_caveats_never_takes_the_list_below_its_own_floor() {
 #[test]
 fn the_audit_sentence_gives_way_first_and_the_pane_s_own_reason_never_does() {
     let now = now();
-    let clock = fed("## Your computer's clock is off", 0, 0).join("\n\n");
-    let scoped = fed("## You can only see some namespaces", 0, 0).join("\n\n");
-    let expired = fed("## Your login expired", 0, 0).join("\n\n");
+    let clock = joined("## Your computer's clock is off", 0, 0);
+    let scoped = joined("## You can only see some namespaces", 0, 0);
+    let expired = joined("## Your login expired", 0, 0);
     let dead = dead_log();
     let audit_opens = "k8rs could not open its audit log";
 
@@ -2993,7 +3139,7 @@ fn the_audit_sentence_gives_way_first_and_the_pane_s_own_reason_never_does() {
     // § All three at once — the clock whole, the namespace banner started and marked where its
     // share ends, and the audit sentence absent because nothing is left for it.
     let mut all = screen(&denied, &now);
-    all.clock = Some(&clock);
+    all.clock = Some(Stripped::of(&clock));
     all.writes = Writes::Unaudited(&dead);
     let drawn = render(&app(), &all);
     println!("clock + namespace + audit\n{}\n", rows(&drawn).join("\n"));
@@ -3027,7 +3173,7 @@ fn the_audit_sentence_gives_way_first_and_the_pane_s_own_reason_never_does() {
 fn the_selected_card_is_drawn_under_a_stack_of_banners_on_every_index() {
     let now = now();
     let cards = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
-    let clock = fed("## Your computer's clock is off", 0, 0).join("\n\n");
+    let clock = joined("## Your computer's clock is off", 0, 0);
     let dead = dead_log();
     // The real pair, and one that spends the whole 13 so the list is at its 3-row floor whatever
     // width either sentence wraps to.
@@ -3037,7 +3183,7 @@ fn the_selected_card_is_drawn_under_a_stack_of_banners_on_every_index() {
         ("banners that spend all 13 rows", flood.as_str()),
     ] {
         let mut stacked = screen(&cards, &now);
-        stacked.clock = Some(&clock);
+        stacked.clock = Some(Stripped::of(&clock));
         stacked.writes = Writes::Unaudited(audit);
         for (nth, identity) in ["payments/web", "node-3"].into_iter().enumerate() {
             let mut moved = app();
@@ -3078,7 +3224,7 @@ fn the_audit_sentence_is_drawn_while_two_rows_are_left_and_absent_below_that() {
     let reason = filling(5);
     let denied = Pane::Denied(reason.clone(), vec![oom()]);
     let mut queued = screen(&denied, &now);
-    queued.clock = Some(&clock);
+    queued.clock = Some(Stripped::of(&clock));
     queued.writes = Writes::Unaudited(audit);
     let drawn = render(&app(), &queued);
     println!("{}", rows(&drawn).join("\n"));
@@ -3094,7 +3240,7 @@ fn the_audit_sentence_is_drawn_while_two_rows_are_left_and_absent_below_that() {
     let reason = filling(6);
     let denied = Pane::Denied(reason.clone(), vec![oom()]);
     let mut tighter = screen(&denied, &now);
-    tighter.clock = Some(&clock);
+    tighter.clock = Some(Stripped::of(&clock));
     tighter.writes = Writes::Unaudited(audit);
     let drawn = render(&app(), &tighter);
     println!("{}", rows(&drawn).join("\n"));
@@ -3175,7 +3321,9 @@ fn the_clock_line_hides_with_the_connection_and_the_audit_line_stays() {
     for (what, link) in [("disconnected", Link::Lost), ("expired", Link::Expired)] {
         let mut degraded = screen(&dropped, &now);
         degraded.link = link;
-        degraded.clock = Some("⚠ This computer and the cluster disagree about the time.");
+        degraded.clock = Some(Stripped::of(
+            "⚠ This computer and the cluster disagree about the time.",
+        ));
         degraded.writes = Writes::Unaudited(&dead);
         let drawn = render(&app(), &degraded);
         println!("{what}\n{}\n", rows(&drawn).join("\n"));
@@ -3207,7 +3355,9 @@ fn the_clock_line_is_drawn_above_the_pane_s_own_banner() {
         vec![oom()],
     );
     let mut both = screen(&scoped, &now);
-    both.clock = Some("⚠ This computer and the cluster disagree about the time by 11 minutes.");
+    both.clock = Some(Stripped::of(
+        "⚠ This computer and the cluster disagree about the time by 11 minutes.",
+    ));
     let drawn = render(&app(), &both);
     println!("{}", rows(&drawn).join("\n"));
     let lines = rows(&drawn);
@@ -3265,16 +3415,17 @@ fn a_marked_banner_spends_the_mark_once_and_hangs_the_rest_under_the_text() {
     let now = now();
 
     let section = "## The connection dropped";
-    let dropped = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let dropped = Pane::Denied(joined(section, 0, 0), vec![oom()]);
     let mut lost = screen(&dropped, &now);
     lost.link = Link::Lost;
     let drawn = render(&app(), &lost);
     println!("{}", rows(&drawn).join("\n"));
 
     // The column a needle starts at on its own row, pane side and counted in characters — `⚠` is
-    // three bytes and a byte offset would land inside it.
+    // three bytes and a byte offset would land inside it. [`body_row`] and not [`row`], because
+    // the header carries a `⚠` of its own under this link.
     let at = |needle: &str| {
-        let line = pane(&row(&drawn, needle));
+        let line = pane(&body_row(&drawn, needle));
         let byte = line.find(needle).expect("the row this needle was found by");
         line[..byte].chars().count()
     };
@@ -3307,13 +3458,13 @@ fn a_marked_banner_spends_the_mark_once_and_hangs_the_rest_under_the_text() {
     // line of its own whatever the width, and each one hanging at the same column. A renderer that
     // indented only a *continuation* draws every one of these back under the mark.
     let section = "## Your login expired";
-    let timed_out = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let timed_out = Pane::Denied(joined(section, 0, 0), vec![oom()]);
     let mut expired = screen(&timed_out, &now);
     expired.link = Link::Expired;
     let drawn = render(&app(), &expired);
     println!("{}", rows(&drawn).join("\n"));
     let at = |needle: &str| {
-        let line = pane(&row(&drawn, needle));
+        let line = pane(&body_row(&drawn, needle));
         let byte = line.find(needle).expect("the row this needle was found by");
         line[..byte].chars().count()
     };
@@ -3336,6 +3487,7 @@ fn a_marked_banner_spends_the_mark_once_and_hangs_the_rest_under_the_text() {
     assert_eq!(
         rows(&drawn)
             .iter()
+            .skip(1)
             .filter(|line| line.contains('\u{26a0}'))
             .count(),
         1,
@@ -3345,7 +3497,7 @@ fn a_marked_banner_spends_the_mark_once_and_hangs_the_rest_under_the_text() {
 
     // § You can only see some namespaces — no mark, so nothing is spent and nothing hangs.
     let section = "## You can only see some namespaces";
-    let scoped = Pane::Denied(fed(section, 0, 0).join("\n\n"), vec![oom()]);
+    let scoped = Pane::Denied(joined(section, 0, 0), vec![oom()]);
     let partial = screen(&scoped, &now);
     let drawn = render(&app(), &partial);
     println!("{}", rows(&drawn).join("\n"));
@@ -3625,7 +3777,7 @@ fn the_namespace_label_needs_both_the_flag_and_a_scope() {
     ] {
         let kinds = [browsable("deployments", namespaced)];
         let mut screen = browsing(&ready, &kinds, &now);
-        screen.namespace = scope;
+        screen.namespace = scope.map(Stripped::of);
         let drawn = render(&opened(), &screen);
         let title = row(&drawn, "deployments");
         assert_eq!(
@@ -3649,7 +3801,7 @@ fn a_namespace_label_that_does_not_fit_is_left_out_rather_than_clipped() {
     let ready = Pane::Ready(table("table-deployments"));
     let kinds = [browsable("deployments", true)];
     let mut screen = browsing(&ready, &kinds, &now);
-    screen.namespace = Some(long);
+    screen.namespace = Some(Stripped::of(long));
     let drawn = render(&opened(), &screen);
     println!("{}", rows(&drawn).join("\n"));
 
@@ -3669,7 +3821,7 @@ fn a_namespace_label_that_does_not_fit_is_left_out_rather_than_clipped() {
     // It still fits when the pane has room for it, or this test proves only that the label is
     // never drawn at all.
     let mut room = browsing(&ready, &kinds, &now);
-    room.namespace = Some("payments");
+    room.namespace = Some(Stripped::of("payments"));
     assert!(holds(&render(&opened(), &room), "ns: payments"));
 }
 
@@ -3690,7 +3842,7 @@ fn the_namespace_label_fits_to_the_pane_edge_and_not_one_column_past_it() {
     for (length, drawn) in [(fits, true), (fits + 1, false)] {
         let namespace = "n".repeat(length);
         let mut screen = browsing(&ready, &kinds, &now);
-        screen.namespace = Some(&namespace);
+        screen.namespace = Some(Stripped::of(&namespace));
         let buffer = render(&opened(), &screen);
         let title = row(&buffer, "deployments");
         // **`ns:` at all, not the whole label.** One column past the edge the label is drawn and
@@ -3731,7 +3883,7 @@ fn an_unscoped_row_is_prefixed_with_its_namespace_and_a_scoped_one_is_not() {
     );
 
     let mut scoped = browsing(&pods, &kinds, &now);
-    scoped.namespace = Some("kube-system");
+    scoped.namespace = Some(Stripped::of("kube-system"));
     let scoped = render(&opened(), &scoped);
     assert!(
         !holds(&scoped, "kube-system/"),
@@ -3854,7 +4006,7 @@ fn the_browser_has_the_same_three_answers_the_alerts_pane_has() {
         "that is the Alerts pane's claim about the cluster, not this kind's row count"
     );
     let mut scoped = browsing(&none, &kinds, &now);
-    scoped.namespace = Some("payments");
+    scoped.namespace = Some(Stripped::of("payments"));
     let scoped = render(&opened(), &scoped);
     assert!(holds(&scoped, "no deployments in payments"));
 
@@ -5254,8 +5406,8 @@ fn the_alerts_screen_at_the_floor() {
         ("versions", None),
     ];
     let log = [
-        "$ kubectl get pods -A --watch".to_owned(),
-        "$ kubectl get nodes --watch".to_owned(),
+        Stripped::of("$ kubectl get pods -A --watch"),
+        Stripped::of("$ kubectl get nodes --watch"),
     ];
     let mut screen = screen(&alerts, &now);
     screen.reports = &reports;
@@ -5276,7 +5428,7 @@ fn the_browser_screen_at_the_floor() {
         .into_iter()
         .map(|plural| browsable(plural, true))
         .collect();
-    let log = ["$ kubectl get deployments -n payments".to_owned()];
+    let log = [Stripped::of("$ kubectl get deployments -n payments")];
 
     for (fixture, at, namespace) in [
         ("table-deployments", 0, Some("payments")),
@@ -5284,7 +5436,7 @@ fn the_browser_screen_at_the_floor() {
     ] {
         let ready = Pane::Ready(table(fixture));
         let mut screen = browsing(&ready, &workloads, &now);
-        screen.namespace = namespace;
+        screen.namespace = namespace.map(Stripped::of);
         screen.log = &log;
 
         let mut app = App::default();
@@ -5311,7 +5463,7 @@ fn the_marked_browser_screen_at_the_floor() {
         .into_iter()
         .map(|plural| browsable(plural, true))
         .collect();
-    let log = ["$ kubectl get pods -A".to_owned()];
+    let log = [Stripped::of("$ kubectl get pods -A")];
     let mut screen = bleeding(&ready, &alerts, &kinds, &now);
     screen.log = &log;
 
@@ -5389,7 +5541,7 @@ fn rows_with_no_plain_column_draw_nothing_and_do_not_panic() {
 fn every_analysis_pane_at_the_floor() {
     let now = now();
     let alerts = Pane::Ready(Vec::new());
-    let log = ["$ kubectl get nodes -o json".to_owned()];
+    let log = [Stripped::of("$ kubectl get nodes -o json")];
     let reports = reported();
     let entries = entries(&reports);
     assert_eq!(reports.len(), 7, "seven reports, seven sidebar entries");
@@ -6808,8 +6960,8 @@ fn help_replaces_the_body_and_leaves_the_rest_of_the_frame_alone() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let log = [
-        "$ kubectl get statefulsets -A --watch".to_owned(),
-        "$ kubectl get daemonsets -A --watch".to_owned(),
+        Stripped::of("$ kubectl get statefulsets -A --watch"),
+        Stripped::of("$ kubectl get daemonsets -A --watch"),
     ];
     let mut screen = screen(&alerts, &now);
     screen.log = &log;
@@ -7358,8 +7510,8 @@ fn help_under_dead_writes_is_the_frame_the_screen_file_draws() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let log = [
-        "$ kubectl get statefulsets -A --watch".to_owned(),
-        "$ kubectl get daemonsets -A --watch".to_owned(),
+        Stripped::of("$ kubectl get statefulsets -A --watch"),
+        Stripped::of("$ kubectl get daemonsets -A --watch"),
     ];
     let helping = App {
         modal: Some(views::Modal::Help),
@@ -7467,18 +7619,22 @@ fn dead_writes_draw_no_mutating_key_whatever_is_refused_or_running() {
     assert_eq!(seen, 32, "a combination stopped being drawn");
 }
 
-/// The three fenced blocks of `screens/help.md` § *While the link is down, the login has expired,
-/// or the clock is off*, in its own order: **0** the lost link · **1** the expired login · **2**
-/// the clock.
+/// The four fenced blocks of `screens/help.md` § *While the link is down, still connecting, the
+/// login has expired, or the clock is off*, in its own order: **0** still connecting · **1** the
+/// lost link · **2** the expired login · **3** the clock.
+///
+/// **The heading is quoted, so a section renamed on the page fails here rather than drifting** —
+/// which is how it was caught: `screens/help.md` gained the connecting clause and renamed the
+/// heading with it, and [`fenced`] panicked with the old title (`tester`, 2026-09-19).
 fn mockup_held() -> Vec<String> {
     let blocks = fenced(
         "help.md",
-        "## While the link is down, the login has expired, or the clock is off",
+        "## While the link is down, still connecting, the login has expired, or the clock is off",
     );
     assert_eq!(
         blocks.iter().map(Vec::len).collect::<Vec<_>>(),
-        [1, 1, 1],
-        "that section no longer draws three headings"
+        [1, 1, 1, 1],
+        "that section no longer draws four headings"
     );
     blocks.into_iter().flatten().collect()
 }
@@ -7488,9 +7644,14 @@ fn mockup_held() -> Vec<String> {
 const SKEWED: &str = "⚠ This computer and the cluster disagree about the time.";
 
 /// **Help pauses *Changing things* for the link and the clock, and for nothing else on the body**
-/// (`screens/help.md` § While the link is down, the login has expired, or the clock is off, NOTES
-/// § D265 ruling 4): the heading rewritten, its three rows and the `X` row as the main mockup
-/// draws them, and **no permission clause under any of the three**, for all eight refusals.
+/// (`screens/help.md` § While the link is down, still connecting, the login has expired, or the
+/// clock is off, NOTES § D265 ruling 4): the heading rewritten, its three rows and the `X` row as
+/// the main mockup draws them, and **no permission clause under any of the four**, for all eight
+/// refusals.
+///
+/// **[`Link::Connecting`] is one of the four now that the page has written its row** (todo.md
+/// § Phase 12): it was grouped with [`Link::Live`] while no clause existed, so `?` promised `s`,
+/// `r` and `ctrl-d` over a link that had never answered.
 #[test]
 fn help_pauses_changing_things_while_the_link_or_the_clock_withholds_it() {
     let held = mockup_held();
@@ -7502,9 +7663,10 @@ fn help_pauses_changing_things_while_the_link_or_the_clock_withholds_it() {
     };
     let mut seen = 0;
     for (what, link, clock, heading) in [
-        ("lost", Link::Lost, None, &held[0]),
-        ("expired", Link::Expired, None, &held[1]),
-        ("clock", Link::Live, Some(SKEWED), &held[2]),
+        ("connecting", Link::Connecting, None, &held[0]),
+        ("lost", Link::Lost, None, &held[1]),
+        ("expired", Link::Expired, None, &held[2]),
+        ("clock", Link::Live, Some(SKEWED), &held[3]),
     ] {
         let expected: Vec<String> = mockup()
             .into_iter()
@@ -7521,7 +7683,7 @@ fn help_pauses_changing_things_while_the_link_or_the_clock_withholds_it() {
                 for delete in [false, true] {
                     let mut screen = screen(&alerts, &now);
                     screen.link = link;
-                    screen.clock = clock;
+                    screen.clock = clock.map(Stripped::of);
                     screen.refused = refusing(scale, restart, delete, "deployments");
                     let frame = rows(&render(&helping, &screen));
                     if !scale && !restart && !delete {
@@ -7537,7 +7699,7 @@ fn help_pauses_changing_things_while_the_link_or_the_clock_withholds_it() {
             }
         }
     }
-    assert_eq!(seen, 24, "a combination stopped being drawn");
+    assert_eq!(seen, 32, "a combination stopped being drawn");
 }
 
 /// **One reason is drawn, and it is the highest-ranked one that holds** — dead writes, then a call
@@ -7571,20 +7733,30 @@ fn help_draws_the_highest_ranked_reason_and_only_that_one() {
             off_heading,
         ),
         ("a call in flight", Writes::Live, true, Link::Lost, running),
-        ("the lost link", Writes::Live, false, Link::Lost, &held[0]),
+        // **A link still connecting outranks the clock**, which is the only rank it can be in:
+        // `ui::clock` answers `None` whenever the link is not `Live`, so a stale reading never
+        // competes with a link reason at all — connecting included (that section's first bullet).
+        (
+            "still connecting",
+            Writes::Live,
+            false,
+            Link::Connecting,
+            &held[0],
+        ),
+        ("the lost link", Writes::Live, false, Link::Lost, &held[1]),
         (
             "the expired login",
             Writes::Live,
             false,
             Link::Expired,
-            &held[1],
+            &held[2],
         ),
-        ("the clock", Writes::Live, false, Link::Live, &held[2]),
+        ("the clock", Writes::Live, false, Link::Live, &held[3]),
     ] {
         let mut screen = screen(&alerts, &now);
         screen.writes = writes;
         screen.link = link;
-        screen.clock = Some(SKEWED);
+        screen.clock = Some(Stripped::of(SKEWED));
         let mut app = if busy {
             changing(Some("payments"), "web")
         } else {
@@ -7600,6 +7772,12 @@ fn help_draws_the_highest_ranked_reason_and_only_that_one() {
 /// run-level facts, on an Alerts screen with a card to act on and nothing running, `s` and `r` are
 /// offered exactly when *Changing things* carries no clause (NOTES § D265 ruling 4). Asserted off
 /// the drawn row and not off [`withheld`], which both of them read.
+///
+/// **What it asserts is that the two agree, never which answer they agree on**, which is why every
+/// value of [`Link`] belongs in the loop — including [`Link::Unconnected`], for which
+/// `screens/help.md` writes no clause and `screens/context.md` § *After `esc dismiss`…* writes the
+/// reason: *"`s` and `r` do not appear, and nothing pauses them to get there"*. The count below is
+/// the one place that answer is recorded.
 #[test]
 fn help_says_changing_things_is_open_exactly_when_the_footer_offers_it() {
     let alerts = Pane::Ready(vec![oom()]);
@@ -7618,12 +7796,18 @@ fn help_says_changing_things_is_open_exactly_when_the_footer_offers_it() {
         Writes::ReadOnly,
         Writes::Unaudited("the audit log could not be opened"),
     ] {
-        for link in [Link::Live, Link::Lost, Link::Expired] {
+        for link in [
+            Link::Connecting,
+            Link::Live,
+            Link::Lost,
+            Link::Expired,
+            Link::Unconnected,
+        ] {
             for clock in [None, Some(SKEWED)] {
                 let mut screen = screen(&alerts, &now);
                 screen.writes = writes;
                 screen.link = link;
-                screen.clock = clock;
+                screen.clock = clock.map(Stripped::of);
                 let open = body_of(&rows(&render(&helping, &screen))).contains(&plain);
                 let act = matches!(offered(&app(), &screen), Offer::Act { .. });
                 assert_eq!(
@@ -7640,8 +7824,13 @@ fn help_says_changing_things_is_open_exactly_when_the_footer_offers_it() {
     }
     assert_eq!(
         seen,
-        (1, 17),
-        "one combination of eighteen leaves the keys live"
+        (3, 27),
+        "three combinations of thirty leave the keys live — a live run on a live link with no \
+         skew, and the two under `Link::Unconnected`, where nothing pauses them because nothing \
+         survived the switch to be selected (`screens/context.md` § After `esc dismiss`, on a \
+         switch that failed with a cluster already live). Unreachable, and for that section's own \
+         reason rather than for want of a clause. `Link::Connecting` is no longer one of them: \
+         `screens/help.md` has written its row (todo.md § Phase 12)"
     );
 }
 
@@ -7653,8 +7842,8 @@ fn the_refused_key_map_is_what_the_help_screen_draws() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let log = [
-        "$ kubectl get statefulsets -A --watch".to_owned(),
-        "$ kubectl get daemonsets -A --watch".to_owned(),
+        Stripped::of("$ kubectl get statefulsets -A --watch"),
+        Stripped::of("$ kubectl get daemonsets -A --watch"),
     ];
     let mut unmarked = screen(&alerts, &now);
     unmarked.log = &log;
@@ -8129,8 +8318,8 @@ fn every_footer_on_the_screen_it_belongs_to() {
     let now = now();
     let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
     let log = [
-        "$ kubectl get statefulsets -A --watch".to_owned(),
-        "$ kubectl get daemonsets -A --watch".to_owned(),
+        Stripped::of("$ kubectl get statefulsets -A --watch"),
+        Stripped::of("$ kubectl get daemonsets -A --watch"),
     ];
 
     let show = |title: &str, buffer: &Buffer| {
@@ -8390,8 +8579,8 @@ fn every_dialog_on_the_screen_it_belongs_to() {
     let now = now();
     let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
     let log = [
-        "$ kubectl get statefulsets -A --watch".to_owned(),
-        "$ kubectl scale deployment/web --replicas=3 -n payments".to_owned(),
+        Stripped::of("$ kubectl get statefulsets -A --watch"),
+        Stripped::of("$ kubectl scale deployment/web --replicas=3 -n payments"),
     ];
     let mut plain = screen(&alerts, &now);
     plain.log = &log;
@@ -8502,16 +8691,16 @@ fn mockup_dialog(nth: usize) -> Vec<String> {
 }
 
 /// The Alerts screen a dialog is opened over, with a real command log under it.
-fn opened_over<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time, log: &'a [String]) -> Screen<'a> {
+fn opened_over<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time, log: &'a [Stripped]) -> Screen<'a> {
     let mut screen = screen(alerts, now);
     screen.log = log;
     screen
 }
 
-fn logged_pair() -> [String; 2] {
+fn logged_pair() -> [Stripped; 2] {
     [
-        "$ kubectl get statefulsets -A --watch".to_owned(),
-        "$ kubectl scale deployment/web --replicas=3 -n payments".to_owned(),
+        Stripped::of("$ kubectl get statefulsets -A --watch"),
+        Stripped::of("$ kubectl scale deployment/web --replicas=3 -n payments"),
     ]
 }
 
@@ -9584,7 +9773,7 @@ const PAGE_LOG: &str = "$ kubectl config get-contexts";
 fn pick_over<'a>(
     alerts: &'a Pane<Vec<Card>>,
     now: &'a Time,
-    log: &'a [String],
+    log: &'a [Stripped],
     contexts: &'a [Choice],
 ) -> Screen<'a> {
     let mut screen = screen(alerts, now);
@@ -9598,8 +9787,8 @@ fn picked_at(height: u16, app: &App, contexts: &[Choice]) -> (Vec<String>, Vec<S
     let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
     let now = now();
     let log = [
-        "$ kubectl get daemonsets -A --watch".to_owned(),
-        views::GET_CONTEXTS.to_owned(),
+        Stripped::of("$ kubectl get daemonsets -A --watch"),
+        Stripped::of(views::GET_CONTEXTS),
     ];
     let screen = pick_over(&alerts, &now, &log, contexts);
     let drawn = rows(&render_at(MIN_WIDTH, height, app, &screen));
@@ -9924,7 +10113,7 @@ fn a_fleet_of_arn_named_contexts_is_told_apart_by_the_tail_of_each_name() {
     );
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
-    let log = [views::GET_CONTEXTS.to_owned()];
+    let log = [Stripped::of(views::GET_CONTEXTS)];
     let frame = rows_of(&render(
         &moved(&rows, live(), 1, ""),
         &pick_over(&alerts, &now, &log, &rows),
@@ -10746,18 +10935,25 @@ fn failure_box(modal: views::Modal) -> (Vec<String>, Vec<String>) {
 /// **`header` is the zone as a page draws it, `admin` and all, and the caller hands over only
 /// what comes before that word**: [`header`] joins it on (NOTES § D265 ruling 1), so a page's zone
 /// handed over whole would draw it twice.
+///
+/// **The link is [`Link::Unconnected`] in every one of these, which is the whole of what a caller
+/// owes this frame** (todo.md § Phase 12): the zone handed over already ends in the *fault's* word,
+/// and any other value of [`Link`] joins a second connection word behind it — measured, with
+/// `Link::Live`, as `ctx: staging · ⚠ not allowed · live · admin` against this page's own row
+/// (`tester`, 2026-09-19).
 fn failed_under(modal: views::Modal, header: &str, vitals: &str) -> (Vec<String>, Vec<String>) {
     let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
     let now = now();
     let log = [
-        "$ kubectl get daemonsets -A --watch".to_owned(),
-        views::GET_CONTEXTS.to_owned(),
+        Stripped::of("$ kubectl get daemonsets -A --watch"),
+        Stripped::of(views::GET_CONTEXTS),
     ];
     let mut screen = pick_over(&alerts, &now, &log, &[]);
-    screen.context = header
-        .strip_suffix(" · admin")
-        .unwrap_or_else(|| panic!("{header:?} does not end on the word a live run's header joins"));
-    screen.vitals = vitals;
+    screen.context = Stripped::of(header.strip_suffix(" · admin").unwrap_or_else(|| {
+        panic!("{header:?} does not end on the word a live run's header joins")
+    }));
+    screen.vitals = Stripped::of(vitals);
+    screen.link = Link::Unconnected;
     let app = App {
         modal: Some(modal),
         ..App::default()
@@ -10827,6 +11023,93 @@ fn both_refusals_are_the_screen_files_boxes() {
             "the footer"
         );
         against_page_header(&frame[0], &block[0]);
+    }
+}
+
+/// **The frame `esc` reveals, once a mid-session switch has failed** — `screens/context.md`
+/// § *After `esc dismiss`, on a switch that failed with a cluster already live*, whose header and
+/// footer are that page's own (todo.md § Phase 12).
+///
+/// **The claim is that dismissing the box changes nothing about the header**, so the two frames
+/// are compared with each other as well as with the page: [`header`] read
+/// `crate::views::Modal::Unconnected` until 2026-09-19, which made the fault's word end when the
+/// box did — `ctx: staging · ⚠ not allowed · live · admin` the frame after `esc`, two connection
+/// words over a cluster k8rs never reached
+/// (`reports/2026-09-19-the-strip-and-the-connection-word.md` § M1). Asserted as *the same row*
+/// and not as *a row 36 columns wide*: a geometry assertion passes whichever word is in it.
+///
+/// **`X switch cluster` is on the footer and `↑↓ move` / `⏎ open` are not** — the page's own line,
+/// read off the page: nothing survived the switch to move a cursor across, and `X` is the only way
+/// out ([`offered`] answers `Nothing { switch: true }`).
+///
+/// **The body is the caller's and is not asserted here**: its sentence comes in on
+/// [`Screen::note`], which the turn that wires `main.rs` writes. What is fed is a note and a
+/// command-log line so the frame is the shape the page draws, not a bare one.
+///
+/// **The mockup is fetched by its own `###` heading and not as the fourth block of the `##`
+/// section it sits in** ([`fenced`] runs a section to the next `##`, so a `###` addresses exactly
+/// its own fences): an index would have gone on passing against a *different* drawing the day
+/// somebody adds a fence above it, and `mockup_held` had its heading renamed under it this same
+/// afternoon.
+#[test]
+fn the_frame_behind_a_dismissed_failure_keeps_the_faults_word_and_the_way_back() {
+    let blocks = fenced(
+        "context.md",
+        "### After `esc dismiss`, on a switch that failed with a cluster already live",
+    );
+    assert_eq!(blocks.len(), 1, "that section no longer draws one frame");
+    let page = &blocks[0];
+    let zone = page[0].trim();
+    let alerts: Pane<Vec<Card>> = Pane::Loading;
+    let now = now();
+    // **Nothing survived the switch** (that page's § What happens on `⏎`, step 1): the store was
+    // dropped the moment `⏎` was pressed, so the pane is `Loading` and the note is all the body
+    // has.
+    let note = [Stripped::of("⚠ Not connected to the cluster right now.")];
+    let log = [Stripped::of(
+        "$ kubectl --context staging get pods -A --watch   → not allowed",
+    )];
+    let mut screen = screen(&alerts, &now);
+    screen.context = Stripped::of(zone.strip_suffix(" · admin").expect("the page's own word"));
+    screen.vitals = Stripped::of("");
+    screen.note = &note;
+    screen.log = &log;
+    screen.link = Link::Unconnected;
+
+    let dismissed = rows(&render(&app(), &screen));
+    let open = App {
+        modal: Some(views::Modal::Unconnected {
+            to: Some("staging".to_owned()),
+            before: views::Before::Connected(Some("prod-eu".to_owned())),
+            sent: true,
+            fault: Fault::Refused,
+            said: None,
+            coverage: Coverage::Cluster,
+            renewal: None,
+        }),
+        ..App::default()
+    };
+    let with_box = rows(&render(&open, &screen));
+    println!("--- the page ---\n{}\n", page.join("\n"));
+    println!("--- esc dismiss ---\n{}\n", dismissed.join("\n"));
+    assert_eq!(
+        with_box[0], dismissed[0],
+        "the header changed when the box closed"
+    );
+    against_page_header(&dismissed[0], &page[0]);
+    assert_eq!(
+        unframed(&dismissed[22]),
+        unframed(&page[page.len() - 2]),
+        "the footer"
+    );
+    // **One connection word in the slot, and it is the fault's** — a header that joined `live`
+    // behind it reads as a connected cluster that is also not allowed.
+    for never in ["live", "connecting", "disconnected", "login expired"] {
+        assert!(
+            !dismissed[0].contains(never),
+            "{never:?} was joined behind the fault's word: {:?}",
+            dismissed[0]
+        );
     }
 }
 
@@ -11570,7 +11853,7 @@ fn a_kind_too_long_for_the_sidebar_gives_way_from_its_front_and_two_kinds_stay_t
 fn a_running_call_and_its_answer_are_two_rows_and_the_command_gives_way_first() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
-    let strip = |lines: &[String]| {
+    let strip = |lines: &[Stripped]| {
         let mut logged = screen(&alerts, &now);
         logged.log = lines;
         unframed(&row(&render(&app(), &logged), "$ kubectl"))
@@ -11615,16 +11898,25 @@ fn a_running_call_and_its_answer_are_two_rows_and_the_command_gives_way_first() 
 
 /// **`○  nothing is broken` needs the link** (`screens/states.md` § Alerts had already found
 /// nothing, and then the link went; NOTES § D266). The same empty list, the same paragraphs,
-/// three links: the headline on the live one and on no other.
+/// five links: the headline on the live one and on no other. **[`Link::Connecting`] is one of the
+/// five** and is the claim its own doc makes — *nothing is broken* is a verdict on a list that has
+/// answered, and on that frame none has (todo.md § Phase 12). **So is [`Link::Unconnected`]**, for
+/// that page's own reason one file over: *"k8rs has not read this cluster's health even once"*
+/// (`screens/context.md` § After `esc dismiss`, on a switch that failed with a cluster already
+/// live) — the strongest claim this product makes, on a cluster it never reached.
 #[test]
 fn an_empty_alerts_list_says_nothing_is_broken_only_while_the_link_is_live() {
     let now = now();
     let empty = Pane::Ready(Vec::new());
-    let counted = ["84 pods and 3 nodes checked, none of them is in trouble right now.".to_owned()];
+    let counted = [Stripped::of(
+        "84 pods and 3 nodes checked, none of them is in trouble right now.",
+    )];
     for (link, calm) in [
+        (Link::Connecting, false),
         (Link::Live, true),
         (Link::Lost, false),
         (Link::Expired, false),
+        (Link::Unconnected, false),
     ] {
         let mut quiet = screen(&empty, &now);
         quiet.note = &counted;
@@ -12268,7 +12560,7 @@ fn the_filter_line_is_not_drawn_over_a_pane_with_no_rows_to_have_narrowed() {
     let mut app = opened();
     app.filters.text = filter("web");
 
-    let reading = ["reading the cluster… 2,140 pods".to_owned()];
+    let reading = [Stripped::of("reading the cluster… 2,140 pods")];
     for (what, browser) in [
         ("a pane that has not answered", Pane::Loading),
         (
@@ -12446,7 +12738,7 @@ fn the_filter_line_sits_under_the_browser_title_and_not_on_it() {
     let kinds = [browsable("deployments", true)];
     let listed = Pane::Ready(table("table-deployments"));
     let mut screen = browsing(&listed, &kinds, &now);
-    screen.namespace = Some("payments");
+    screen.namespace = Some(Stripped::of("payments"));
     let mut app = opened();
     app.filters.text = filter("broken");
     let drawn = render(&app, &screen);

@@ -323,7 +323,7 @@ empty:
   this cluster again"*; the command-log strip carries `→ login expired` on
   its own line; and `?`'s own *Changing things* heading already reads
   *"paused — renew your login, then press X"*
-  ([help.md § While the link is down…](help.md#while-the-link-is-down-the-login-has-expired-or-the-clock-is-off)).
+  ([help.md § While the link is down…](help.md#while-the-link-is-down-still-connecting-the-login-has-expired-or-the-clock-is-off)).
   `esc clear filter` and `↑↓ move`/`⏎ open` have no such second carrier —
   clearing a filter the reader typed themselves into is said nowhere else on
   this screen, and the cursor pair is this section's own bullet above,

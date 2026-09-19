@@ -275,22 +275,33 @@ reads the answer in the one place every other key's reason already lives on
 this screen, rather than a second sentence squeezed into a footer that has
 never carried one.
 
-## While the link is down, the login has expired, or the clock is off
+## While the link is down, still connecting, the login has expired, or the clock is off
 
-Three more run-level reasons `offered` withholds `s` and `r` for
-(`views::Offer::Move`) — `Screen::link` off `Live`, either way, and a clock
-this page cannot trust — and Help drew none of them: the ordinary *Changing
-things* block, live keys and all, over a run where none of the three could
-actually be pressed
+Four more run-level reasons `offered` withholds `s` and `r` for
+(`views::Offer::Move`) — `Screen::link` off `Live`, in any of its three other
+values, and a clock this page cannot trust — and Help drew none of them: the
+ordinary *Changing things* block, live keys and all, over a run where none of
+the four could actually be pressed
 ([D265 ruling 4](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+**`Link::Connecting` is the new one, added after ruling 4 shipped** — and
+the read is `k8s-admin`'s: while k8rs does not yet know what the cluster
+looks like, the conservative answer to *"may I scale the thing under the
+cursor"* is no, the same answer a lost link or an expired login already give
+for the same reason — k8rs cannot ask a cluster it has not yet heard back
+from any more than it can ask one it has stopped hearing from
+(todo.md § Phase 12).
 
 **Same mechanism as [§ While the call is
 running](#while-the-call-is-running)'s own — the heading rewritten, its
 five rows unchanged beneath it, one reason drawn — not restated here**
 ([D262](../NOTES.md#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12)).
-**The `X` row is not rewritten for any of the three** — nothing about a
-lost link, an expired login or the clocks disagreeing stops a cluster
-switch, so only *Changing things* changes:
+**The `X` row is not rewritten for any of the four** — nothing about a
+still-connecting link, a lost link, an expired login or the clocks
+disagreeing stops a cluster switch, so only *Changing things* changes:
+
+```
+  Changing things (paused while k8rs reads the cluster)
+```
 
 ```
   Changing things (paused while disconnected, retrying)
@@ -317,14 +328,19 @@ switch, so only *Changing things* changes:
   link or an expired login — the watch can drop, or a token can expire,
   while a `PATCH` is still on the wire — and there its clause wins,
   because it is the one of the four that also pauses `X` ([§ While the
-  call is running](#while-the-call-is-running)). `Link::Lost` and
-  `Link::Expired` are two values of the one field `Screen::link`, never
-  both true at once, so there is nothing to rank between them. The clock
-  ranks last because `ui::clock` reads `None` whenever the link is not
-  `Live`, so a stale reading never gets to compete with a link reason at
-  all.
+  call is running](#while-the-call-is-running)); a call cannot be in
+  flight while still connecting, because nothing is selected yet for it to
+  run against. `Link::Connecting`, `Link::Lost` and `Link::Expired` are
+  three values of the one field `Screen::link`, never more than one true
+  at once, so there is nothing to rank between them. The clock ranks last
+  because `ui::clock` reads `None` whenever the link is not `Live`, so a
+  stale reading never gets to compete with a link reason at all —
+  connecting included.
 - **The words are the header's and the banners' own, not reinvented
-  here.** `disconnected, retrying` is [states.md § The connection
+  here.** "reads the cluster" is [states.md § Still
+  loading](states.md#still-loading)'s own body sentence — *"reading the
+  cluster… 2,140 pods"* — worn down to what fits this row; `disconnected,
+  retrying` is [states.md § The connection
   dropped](states.md#the-connection-dropped)'s own header pointer;
   "renew your login" and "press X" are [states.md § Your login
   expired](states.md#your-login-expired)'s own words — *"Renew it, then
@@ -343,7 +359,7 @@ switch, so only *Changing things* changes:
   23](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)'s
   own phrasing for a reader already inside the TUI, and today it is the
   only thing that actually re-reads the clock.
-- **A permission-refused clause never lands on top of one of these three**,
+- **A permission-refused clause never lands on top of one of these four**,
   the same reconciliation [§ While the call is
   running](#while-the-call-is-running) already states for itself: whichever
   reason's heading is drawn is what a reader presses against, and

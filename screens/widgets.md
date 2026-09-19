@@ -72,6 +72,26 @@ body → Layout::horizontal([
   [NOTES § D249](../NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)).
   `prod-eu` and `prod-eu-2` differ by one character, which is why the cut is
   marked rather than silent.
+- **"Connection state" is `Screen::link`'s four words, and one frame does not
+  use them at all.** `connecting…`, `live`, `⚠ disconnected, retrying` and `⚠
+  login expired` are what the zone draws whenever there is a connection —
+  arriving, live or recently lost — for one of them to describe. **A mid-session
+  switch that has been refused, has expired or has otherwise failed leaves
+  nothing for any of the four to describe**, from the moment its own box
+  first draws through however long the reader leaves it dismissed: the slot
+  instead carries the fault's own short word, the same one
+  [context.md § When the new cluster does not
+  work](context.md#when-the-new-cluster-does-not-work) writes into the box
+  itself (`⚠ not allowed` for a `Refused`) — not a fifth connection word, and
+  not a blank segment either, for as long as nothing is connected
+  ([context.md § After `esc dismiss`, on a switch that failed with a cluster
+  already live](context.md#after-esc-dismiss-on-a-switch-that-failed-with-a-cluster-already-live),
+  `reports/2026-09-19-the-strip-and-the-connection-word.md` § M1). **This
+  is a session fact, not a modal one — it does not end when the box
+  closes.** The startup picker's own failure is not this case: dismissing it
+  reopens the picker itself, whose header reads `choose a cluster`, not a
+  context name at all ([context.md § Opening at
+  startup](context.md#opening-at-startup)).
 - **The centred name is dropped first when the row fills up.** It is the only
   zone carrying no information; on the disconnected and namespace-scoped
   screens it is already gone. Order of sacrifice: name, then vitals, never the

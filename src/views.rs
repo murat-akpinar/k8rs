@@ -14,22 +14,28 @@
 //! paid once on the way in so no renderer has to remember it, which is what [`crate::rules`]'s and
 //! [`crate::analysis`]'s own module docs already promise.
 //!
-//! **Two classes did *not* arrive that way, and each is handled in one method.** What the user
-//! types is [`Input`] — bounded in length, **and** refused a [`crate::k8s::unprintable`]
-//! character, reusing the ingest strip's own predicate rather than a second list
-//! (NOTES § D246 ruling 5). What the *cluster* says about a mutation is [`Log::outcome`], whose
-//! word comes from `ops::Performed::plainly` and therefore from the server: NOTES § D217 measured
-//! one of those handing back the whole object that was sent, 4859 bytes on a trivial Deployment,
-//! and that is the security gate's *a Secret value never enters the command log* row. It spends
-//! [`crate::k8s::text`] itself ([`SAID`]).
+//! **Strings that did *not* arrive that way are what [`Stripped`] and [`Input`] are for, and each
+//! is a type rather than a rule.** What the user types is [`Input`] — bounded in length, **and**
+//! refused a [`crate::k8s::unprintable`] character, reusing the ingest strip's own predicate rather
+//! than a second list (NOTES § D246 ruling 5). What a *caller* builds for the screen is
+//! [`Stripped`] — a header zone, a note paragraph, a command-log line — whose only constructor a
+//! caller can reach spends [`crate::k8s::text`], so an unstripped one does not compile. What the
+//! *cluster* says about a mutation is [`Log::outcome`], whose word comes from
+//! `ops::Performed::plainly` and so from the server: NOTES § D217 measured one of those handing
+//! back the whole object that was sent, 4859 bytes on a trivial Deployment, and that is the
+//! security gate's *a Secret value never enters the command log* row. It spends
+//! [`crate::k8s::text`] itself at the far tighter [`SAID`].
 //!
 //! **It was one method until 2026-09-07 and this paragraph said so** — the second was found by
 //! reading who the obvious caller of `outcome` would be (`k8s-admin`, 2026-09-07). **A third came
 //! down with the driver's sentences** (NOTES § D264 ruling 1): a namespace typed on the command
 //! line reaches [`scope`] and [`next_step`] inside a [`Coverage`] and never met `k8s::text`, and
-//! [`sanitize`] is the driver's own strip over it, moved with them. That is the whole of invariant
-//! 9 inside this file: three calls, three functions, every one naming `k8s.rs`'s own predicate
-//! rather than a second list.
+//! [`sanitize`] is the driver's own strip over it, moved with them. **The later two were calls
+//! somebody had to remember to write, which is why Phase 12 gave that class a type of its own**
+//! (todo.md § Phase 12) — [`Input`] always was one: [`sanitize`] stays for the driver's documents,
+//! and every string a caller *assembles* for `ui::Screen` goes through [`Stripped`] instead.
+//! **Not every string that reaches `ui.rs`, which is what this said and is not true** — that type's
+//! own doc names the exceptions and `ui::Screen`'s lists them (`k8s-admin`, 2026-09-19).
 //!
 //! **Nothing here sorts a rendered string back into values** (NOTES § D245,
 //! `screens/analysis.md` § 3, PRIOR-ART § F1). The browser keeps the order the server sent; the
@@ -48,7 +54,9 @@
 )]
 
 use crate::analysis::Row as ReportRow;
-use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, IDENTIFIER, Tag, text, unprintable};
+use crate::k8s::{
+    Address, Browsable, Choice, Coverage, FREE_TEXT, Fault, IDENTIFIER, Tag, text, unprintable,
+};
 use crate::ops::Verdict;
 use crate::rules::{
     ContainerSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot, Severity,
@@ -113,6 +121,97 @@ pub enum Pane<T> {
 }
 
 // --- LOADED, EMPTY AND DENIED ARE THREE THINGS END ---
+
+// --- WHAT A CALLER BUILT START ---
+
+/// **One line of display text that has been through the ingest strip — and the only shape
+/// `ui::Screen` will take one in** (invariant 9, `screens/widgets.md` § 7).
+///
+/// **The guarantee is the private field, not a doc comment.** [`Stripped::of`] is the only way to
+/// make one from outside this file and it strips, so a caller *cannot* hand the renderer a
+/// right-to-left override. [`Stripped::assembled`] is the inside half and joins values that have
+/// each already been through the strip; `Default` is the empty string, which is every strip's own
+/// fixed point. That is the bar [`crate::k8s::Table`] already meets on the ingest side — one
+/// `k8s::ingest` door, and no `Deserialize` to walk round it — and the bar a paragraph could not
+/// meet: `ui.rs`'s module doc claimed every string reaching that file had been stripped while five
+/// `ui::Screen` fields and this file's own [`Log`] took a bare `&str` (todo.md § Phase 12).
+///
+/// **What this type covers is the strings a caller *assembles*, and a reader here must not read it
+/// as *everything `ui.rs` draws*** (`k8s-admin`, 2026-09-19). `ui::Screen`'s own doc is the list of
+/// what is left over — `ui::Writes::Unaudited`'s sentence, `ui::Screen::reports`' labels, the
+/// server's own words inside [`Pane::Denied`], and the four `String`s [`Dialog`] hands the
+/// renderer through [`Modal`] — and **why each is safe without one, and which box owes it a type,
+/// is written there and not here**, because a reason kept twice is a reason that goes stale in one
+/// of the two (CLAUDE.md § A decision is written once). What a reader of this type needs is that
+/// the list exists and is not this type's.
+///
+/// **[`crate::k8s::text`] and not [`sanitize`], which are two transformations and not one.** Every
+/// value this wraps is **one line** — a header segment, a note paragraph, a command-log line — so a
+/// `\n` that is *removed* glues two words into one while a `\n` that becomes a space does not. That
+/// is `k8s::text`'s own split, and `k8s.rs`'s reason for treating an event message as a cell rather
+/// than a document (NOTES § D198). It is also the half that **bounds**, which is the security
+/// gate's *sizes are bounded* row and not a nicety: nothing between a 50 MB annotation and one of
+/// these sentences has a length opinion of its own. [`crate::k8s::FREE_TEXT`] is reused rather than
+/// re-picked, because a sentence is what every one of these is — and it is why a value that already
+/// came through ingest is unchanged here (`k8s_tests.rs`'s
+/// `sanitize_cannot_act_on_anything_the_ingest_strip_left`).
+///
+/// **A blank line does not survive this, and the asymmetry it leaves is deliberate**
+/// (NOTES § D271): `k8s::text` turns a `\n\n` into one space, so `ui::banner`'s split on `"\n\n"`
+/// is permanently dead for `ui::Screen::clock` — which `screens/states.md` § *Your computer's clock
+/// is off* writes as one paragraph per direction anyway — while it stays live for
+/// [`Pane::Denied`], which is not one of these. The clock sentence is k8rs's own; a refusal carries
+/// the server's.
+///
+/// **It owns its string, and that is the borrow deciding the shape rather than a preference.** The
+/// strip allocates, so there is no `&str` for a caller to lend: the four scalar fields on
+/// `ui::Screen` hold a `Stripped` by value and the two slices borrow one the caller already keeps
+/// in a `Vec`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Stripped(String);
+
+impl Stripped {
+    /// **The only constructor reachable from outside this file**, so there is one answer to *was
+    /// this stripped* and it is *yes*.
+    pub fn of(value: &str) -> Self {
+        let mut value = value.to_owned();
+        text(&mut value, FREE_TEXT);
+        Self(value)
+    }
+
+    /// **A line joined from parts this file has already stripped** — the command log's resolved
+    /// line, whose command came out of [`Log::push`] and whose word came out of
+    /// [`crate::k8s::text`] at [`SAID`].
+    ///
+    /// **Private, so [`Stripped::of`] is still the only door from outside this file** — which is
+    /// where a string nobody has stripped comes from. What this skips is the *bound*, and skipping
+    /// it is the whole point: `k8s::text` over an already-stripped line can only shorten it, and
+    /// `→ rejected` is longer than the [`RUNNING`] mark it replaces, so re-spending it cut the
+    /// outcome off a line that fitted while it was still running (`tester`, 2026-09-19).
+    ///
+    /// **What the gate's *sizes are bounded* row is about is a caller's unbounded string, and one
+    /// cannot reach this**: every part joined here was bounded where it entered — the line at
+    /// [`crate::k8s::FREE_TEXT`] by [`Log::push`], the word at [`SAID`].
+    fn assembled(value: String) -> Self {
+        Self(value)
+    }
+
+    /// What it holds — safe to print by construction.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// **So a reader may ask what a line says without unwrapping it.** Comparison is not construction
+/// and opens nothing: the only ways a `Stripped` on the left came to exist are [`Stripped::of`]
+/// and, inside this file, [`Stripped::assembled`] over values that had already been through it.
+impl PartialEq<&str> for Stripped {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+// --- WHAT A CALLER BUILT END ---
 
 // --- WHAT THE USER TYPES START ---
 
@@ -1512,16 +1611,22 @@ const SAID: usize = 32;
 /// manifest rather than a feed (NOTES § D233 ruling 3).
 ///
 /// **Display text.** k8rs never executes a line of this and nothing in it is fed back into a
-/// process (the security gate). **Three of the four strings that reach this type were stripped
-/// before they got here**, exactly as this file's module doc promises: the manifest arrives
-/// through `main.rs`'s own `sanitize`, a read line's names came through `k8s::text` at ingest,
-/// and a mutation's line was stripped once by `ops::Record::of`. **The fourth is
-/// [`Log::outcome`]'s word, and it is stripped and bounded here**, because the caller that method
-/// is written for hands over whatever the cluster said — the one string on this panel that never
-/// passed an ingest (NOTES § D217, [`SAID`]).
+/// process (the security gate). **Every line here is a [`Stripped`], and that is what changed in
+/// Phase 12** (todo.md § Phase 12): three of the four strings that reach this type *were* stripped
+/// before they got here — the manifest through `main.rs`'s own `sanitize`, a read line's names
+/// through `k8s::text` at ingest, a mutation's line through `ops::Record::of` — but all three were
+/// promises held by the **caller**, and a fourth caller with a fourth string would have been
+/// nobody's failed test. [`Log::push`] is the single door now, so the type holds what the callers
+/// were trusted for.
+///
+/// **[`Log::outcome`]'s word keeps its own strip all the same**, at the much tighter [`SAID`]: the
+/// caller that method is written for hands over whatever the cluster said, and NOTES § D217
+/// measured one of those returning the whole 4859-byte object that was submitted. A line-length
+/// bound is not a word-length bound, and the row it defends is *a Secret value never enters the
+/// command log*.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Log {
-    lines: Vec<String>,
+    lines: Vec<Stripped>,
     /// **Which line is still waiting for its outcome**, or `None` when nothing is running.
     ///
     /// **An index, and not *the last line*.** Navigation stays free while a call is on the wire
@@ -1537,7 +1642,7 @@ pub struct Log {
 impl Log {
     /// **The lines, oldest first** — what `ui::Screen::log` borrows and the strip draws the last
     /// two of.
-    pub fn lines(&self) -> &[String] {
+    pub fn lines(&self) -> &[Stripped] {
         &self.lines
     }
 
@@ -1574,7 +1679,23 @@ impl Log {
     /// that is the honest reading of it: k8rs never learned. A `…` that stays claims less than
     /// the line under it, never more.
     pub fn sent(&mut self, line: String) {
-        self.push(format!("{line}{OUTCOME_GAP}{RUNNING}"));
+        // **[`OUTCOME_GAP`] is measured from what the line ends in *after* the strip**, and
+        // composing before [`Log::push`] meant it was not: `k8s::text` substitutes one space for a
+        // whitespace control character rather than deleting it (NOTES § D198), so a caller's line
+        // ending in `\n`, `\t` or `\r` drew a four-column gap where `screens/widgets.md` § 2 rules
+        // three (`tester`, 2026-09-19). **`trim_end` is `char::is_whitespace`, which is a *wider*
+        // set than what `k8s::text` turns into a space, and the first draft of this comment claimed
+        // they were the same split** (`k8s-admin`, 2026-09-19; NOTES § D154): that strip applies
+        // `is_whitespace` only to characters [`crate::k8s::unprintable`] already answers for, so
+        // NBSP `\u{a0}`, `\u{2028}`, `\u{2003}` and `\u{3000}` are whitespace it deliberately
+        // **keeps** and this call removes. The behaviour is right either way — three columns for
+        // every spelling, measured
+        // (`the_gap_before_an_outcome_is_three_columns_whatever_the_line_ends_in`) — and what it
+        // costs is that [`Log::ran`] and this method now differ over a line ending in one of those
+        // four: `ran` keeps the character, `sent` trims it. A gap `screens/widgets.md` § 2 rules at
+        // three columns is the thing being defended; a trailing NBSP no kubectl line has a use for
+        // is not.
+        self.push(format!("{}{OUTCOME_GAP}{RUNNING}", line.trim_end()));
         self.waiting = Some(self.lines.len() - 1);
     }
 
@@ -1623,17 +1744,38 @@ impl Log {
         // an assumption about the caller set and not a property of this type — [`Log::ran`] is
         // `pub` and takes an arbitrary `String`. `tester` found the sequence that separates them
         // on 2026-09-07; `an_outcome_with_nothing_running_writes_nothing` holds it.
+        //
+        // **And the result is assembled, never re-bound.** Both halves are already stripped — the
+        // command by [`Log::push`], the word by the [`SAID`] strip above — so a second
+        // [`Stripped::of`] could only *shorten*, and `→ {said}` is longer than the mark it
+        // replaces: a line that fitted while it was running came back cut, with the cut landing on
+        // the outcome. `yyy…   →… (shortened by k8rs)` is an arrow pointing at k8rs's own
+        // shortening mark, which reads as an outcome and is not one (`tester`, 2026-09-19). The
+        // honest failure one line up — a line already past [`crate::k8s::FREE_TEXT`] never
+        // resolves at all ([`Log::push`]) — is the other direction and stays.
         let replaced = self.lines[at]
+            .as_str()
             .strip_suffix(RUNNING)
-            .map(|command| format!("{command}→ {said}"));
+            .map(|command| Stripped::assembled(format!("{command}→ {said}")));
         if let Some(replaced) = replaced {
             self.lines[at] = replaced;
         }
     }
 
     /// Append, and drop from the front once past [`KEPT`].
+    ///
+    /// **The strip is here and not at any of the three entry points above**, so a fourth builder
+    /// cannot arrive without it ([`Stripped`]). It is a no-op on everything today's callers hand
+    /// over, which is the point: what it removes is what a *future* caller would have forgotten.
+    ///
+    /// **It also bounds, and the one thing that costs is worth writing down**: a line past
+    /// `k8s::FREE_TEXT` ends in the shortening mark instead of [`RUNNING`], so [`Log::outcome`]'s
+    /// `strip_suffix` finds nothing and that line never resolves. Unreachable through today's
+    /// builders — every name in a kubectl line came through ingest at `k8s::IDENTIFIER`, and a
+    /// handful of them is nowhere near 4096 bytes — and the failure is the honest direction: a line
+    /// that keeps no outcome claims less than it knows, never more.
     fn push(&mut self, line: String) {
-        self.lines.push(line);
+        self.lines.push(Stripped::of(&line));
         let over = self.lines.len().saturating_sub(KEPT);
         if over > 0 {
             self.lines.drain(..over);

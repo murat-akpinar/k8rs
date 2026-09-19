@@ -737,6 +737,122 @@ any dialog, with none left to spend
   mid-session chrome partway through
   ([§ Opening at startup, what differs](#opening-at-startup)).
 
+### After `esc dismiss`, on a switch that failed with a cluster already live
+
+Only `Before::Connected` reaches this — the mid-session box, dismissed. The
+startup box has no frame to fall back to at all: its own `esc` reopens the
+picker, above, and stays there.
+
+**There is no stale prod-eu to fall back to, because there is nothing left
+to fall back *to*.** [§ What happens on `⏎`](#what-happens-on)'s step 1 drops
+the snapshot store, the findings, the analysis results, the table caches and
+every open log stream **before** the switch is known to have failed — the
+moment `⏎` was pressed on `staging`, not the moment `staging` said no. So the
+frame `esc` reveals is not prod-eu gone stale, the way [The connection
+dropped](states.md#the-connection-dropped) or [Your login
+expired](states.md#your-login-expired) draw it — it is a body with nothing in
+it at all, because nothing survived to be stale. Falling back to prod-eu here
+would be the fabrication [D16](../NOTES.md#d16--the-context-switcher) ruling 1
+forbids twice over: once for showing prod-eu as if it were still live, and
+once for showing it at all when the code has already thrown it away.
+
+```
+                                  ctx: staging · ⚠ not allowed · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │                                               │
+│  RESOURCES         │   ⚠ Not connected to the cluster right now.   │
+│   workloads        │                                               │
+│   network          │        Press X to try again, or pick a        │
+│   storage          │        different cluster.                     │
+│   config           │                                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+│   capacity         │                                               │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl --context staging get pods -A --watch   → not allowed    │
+├────────────────────────────────────────────────────────────────────┤
+│ X switch cluster  ? all keys  q quit                               │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The header keeps naming `staging` and keeps `⚠ not allowed`.** Dismissing
+  the box closes the box; it does not answer the question the box was open to
+  ask. Nothing about the connection changed when `esc` was pressed, so nothing
+  about the sentence describing it should. This is the same word
+  [§ When the new cluster does not work](#when-the-new-cluster-does-not-work)
+  already draws while the box is open — not a fifth connection word invented
+  for the frame behind it. **The fault's word is what occupies the connection
+  slot for as long as nothing is connected**, which is a longer span than
+  "while this one modal happens to be drawn" — measured wrong 2026-09-19,
+  `reports/2026-09-19-the-strip-and-the-connection-word.md` § M1: read against
+  "while the box is open" the slot went on to draw a second, joined connection
+  word the instant `esc` closed it, over a cluster k8rs still was not
+  connected to.
+- **None of [`Link`](widgets.md#1a-the-header-row)'s four words is written
+  here, and a fifth is not added to hold one.** `connecting…` claims an
+  attempt is in flight; none is — the last one already answered, and the
+  answer was no. This page could invent a generic fifth word, *"not
+  connected"*, for this slot, but it would say strictly less than
+  `⚠ not allowed` already sitting
+  there, and it would cost a new [`Link`] variant, four more match arms, and
+  a second header word to keep in sync with this page's own eleven-fault
+  table for every fault that is not `Refused` — for no reader benefit, since
+  the fault's own word is the more specific, truer answer to the same
+  question. **The slot is not empty and it is not a sixth vocabulary: it is
+  the one word this page already wrote, still there.**
+- **The body carries no stale card and no severity glyph of its own kind** —
+  `○`, `●` and `▲` are claims about the cluster's own health, and k8rs has
+  not read this cluster's health even once. `⚠` here is the connection's own
+  mark, the same one the header already carries, not a finding.
+- **The sentence never repeats *why* staging refused.** The reader already
+  read that sentence in the box just dismissed, worded once by `because` and
+  `next_step` — a second, shorter copy here is exactly the second vocabulary
+  [NOTES § D264 ruling 1](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+  refuses, and it is the copy that goes stale first. What this frame owes the
+  reader is the next step, not the reason again.
+- **`X switch cluster` is on the footer, not behind `?`** — the same
+  exception [Your login expired](states.md#your-login-expired) already makes,
+  for the same reason: it is *the* next step, not one option among several,
+  and a reader stranded here with no visible way back is the failure this
+  whole page exists to prevent. `↑↓ move` and `⏎ open` are gone, the same
+  reasoning [Still loading](states.md#still-loading) already gives a sidebar
+  whose rows have nothing behind them yet — stronger here, because this
+  sidebar's rows have nothing behind them **until `X` is pressed again**,
+  never merely *not yet*.
+- **`s` and `r` do not appear, and nothing pauses them to get there.** No
+  object is selected — there is no card, no row, nothing under a cursor —
+  so both read exactly as they do on any other pane with nothing to act on
+  ([widgets.md § The footer](widgets.md#2a-the-footer)). A reader who presses
+  `s` here presses a key the footer never offered, the same as pressing `s`
+  over an empty Alerts list on a healthy cluster.
+- **The sidebar's labels are the app frame's own, not the cluster's, and stay
+  drawn** — `ALERTS`, `RESOURCES`, `ANALYSIS` and their rows are this
+  product's own words, unlike [Opening at startup](#opening-at-startup),
+  where no frame has been built yet at all. `certificates  30d` can still show
+  — reading the client certificate `staging`'s kubeconfig entry already holds
+  is a local file read, the same one [Still
+  loading](states.md#still-loading) draws it from, and it costs no connection
+  to the cluster that just refused one. **This is `Fault::Refused`'s own
+  case, where a request reached the cluster at all** — for a fault whose
+  client was never built (`sent: false`, [§ Every other fault has its own
+  sentence](#every-other-fault-has-its-own-sentence-and-this-page-does-not-retype-it)),
+  there may be no certificate read to show either, and that is a narrower
+  question this section does not answer, since every failure-box mockup in
+  this file draws `Fault::Refused`. Every other ANALYSIS row stays blank —
+  `capacity`, `drain safety`, `posture`, `restarts`, `waste`, `versions` all
+  need the cluster staging just refused.
+- **This frame ends the moment `X` is pressed again** — the picker reopens,
+  `(current)` marking `staging` per [§ The picker](#the-picker)'s own rule for
+  a context that connected before but is not live now, and `⏎` on it tries
+  again rather than merely closing. A second failure redraws this same frame,
+  not a new one.
+
 ## Unhappy states
 
 The eleven this screen has to answer for, and where each is decided:

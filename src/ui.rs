@@ -16,11 +16,26 @@
 //! carriers cannot disagree (invariant: colour is never the only one).
 //!
 //! **Nothing here strips a string that came off the API, and that is not an omission**
-//! (invariant 9). Everything reaching this file came through `k8s::text` at ingest, and the one
-//! class that did not — what the user typed — is bounded and refused control characters by
-//! `views::Input`. A third strip here would be a second opinion about what the first one did.
-//! What this file does owe is not *building* a string that escapes that guarantee, which is why
-//! every span below is either a literal or a value that arrived stripped.
+//! (invariant 9). A second strip here would be a second opinion about what the first one did. Three
+//! classes arrive, and each is stripped by a *type* one layer down rather than by a rule somebody
+//! had to follow:
+//!
+//! - what the cluster sent came through `k8s::text` at ingest, behind `k8s::ingest`'s single door;
+//! - what the user typed is bounded and refused control characters by [`crate::views::Input`];
+//! - what the caller *assembled* — [`Screen`]'s `vitals`, `context`, `note`, `clock`, `namespace`
+//!   and `log` — is a [`Stripped`], whose only constructor reachable from here spends `k8s::text`.
+//!
+//! **The third bullet is Phase 12's, and this paragraph asserted it for a phase while five
+//! `Screen` fields took a bare `&str`** (todo.md § Phase 12). A doc comment claiming a security
+//! guarantee nothing enforced is worth less than none: it is what a reviewer reads instead of the
+//! field list.
+//!
+//! **Some strings this file draws are still a caller's word, and [`Screen`]'s own doc is where
+//! they are listed** — with what each rests on, and which box owes it a type. **The list is kept
+//! in one place on purpose**: this paragraph carried a count of its own, it said *two*, and there
+//! were more (`k8s-admin`, 2026-09-19).
+//! What this file owes on top of all of it is not *building* a string that escapes the guarantee,
+//! which is why every span below is either a literal or a value that arrived stripped.
 //!
 //! **A modal is drawn by [`draw`] and never by [`content`]**, because it floats over the body
 //! region rather than inside the content pane: [`content`] dispatches on
@@ -47,8 +62,8 @@ use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, Tag};
 use crate::rules::{ContainerSnapshot, Finding, ObjectId, ObjectKind, PodSnapshot, Severity, age};
 use crate::theme::{self, Colour, Depth, Ink, Signal};
 use crate::views::{
-    self, App, Card, Cursor, Detailing, Filters, Input, NavItem, Offer, Pane, Refused, Tab, Typing,
-    View,
+    self, App, Card, Cursor, Detailing, Filters, Input, NavItem, Offer, Pane, Refused, Stripped,
+    Tab, Typing, View,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use ratatui::Frame;
@@ -542,12 +557,52 @@ enum Held {
 
 // --- WHAT A FRAME IS DRAWN FROM START ---
 
-/// **What the frame needs that [`App`] does not hold** — one borrowed value per frame, built by
-/// the caller and dropped with it.
+/// **What the frame needs that [`App`] does not hold** — one value per frame, built by the caller
+/// and dropped with it. The store's answers are borrowed; the four the caller *assembles* are
+/// owned, because the strip that makes them a [`Stripped`] allocates and there is no `&str` left
+/// for a caller to lend.
 ///
 /// `App` is what the *user* did; this is what the *store* answered, plus the two header zones,
 /// which are assembled where the facts in them live. Nothing here is stored, and nothing here is
 /// a decision: every string arrives already worded and already stripped.
+///
+/// **"Already stripped" is a type and not a promise, since Phase 12** (todo.md § Phase 12). Every
+/// string a caller builds for this struct is a [`Stripped`], whose only constructor reachable from
+/// here spends `k8s::text` — so an unstripped `vitals`, `context`, `note`, `clock`, `namespace` or
+/// `log` line does not compile, the way a `k8s::Table` that never met the ingest door does not. It
+/// read as the sentence above and nothing enforced it.
+///
+/// **The example is `--namespace`, and getting it wrong is worth recording** (`k8s-admin`,
+/// 2026-09-19): the paragraph above ended on a right-to-left override in a kubeconfig *context*
+/// name reaching the header, and that one never could — `k8s::drawable` spends `k8s::text` at
+/// `k8s::IDENTIFIER` on the context name and on its namespace, and has said so since
+/// NOTES § D154. What arrives unstripped is what
+/// the reader **typed**: `--namespace` off argv meets `crate::views::sanitize`, which filters
+/// control characters and bounds nothing at all, and nothing else stood between it and a cell. The
+/// class was real and the example was not, which is the shape of claim this file has paid for
+/// before.
+///
+/// **Two strings on this struct are still the caller's word, and they are named here rather than
+/// covered by that claim**: [`Writes::Unaudited`]'s sentence, which `ops::audit_log` built and
+/// `ops::named` stripped, and the labels in [`Screen::reports`], which are literals until somebody
+/// gives them a home. A third arrives through [`crate::views::Pane::Denied`], and it **does** carry
+/// the cluster's own text: `views::because` quotes a free `said`, the server's own sentence.
+/// **Invariant 9 holds on it one layer further down rather than by a type here** —
+/// [`crate::k8s::said`] reads it through `k8s::message`, which spends `k8s::text` at
+/// [`crate::k8s::FREE_TEXT`] before it leaves `k8s.rs`: the same strip the first bullet above
+/// names, spent at a different door. What the three lack is the *type*; not one of them is a
+/// sentence the cluster wrote that nothing has stripped.
+///
+/// **And the enumeration above reads closed while it is not: [`draw`] also draws four caller-built
+/// `String`s that never touch this struct** (`k8s-admin`, 2026-09-19) — `crate::views::Dialog`'s
+/// `consequence`, `warning`, `kubectl` and `asks`, which arrive through `crate::views::App::modal`
+/// and not through [`Screen`]. They are safe **today** because `ops::Shown` is built from an
+/// `ObjectId` that met ingest — which is precisely the caller-held promise a type was introduced
+/// here to stop relying on — and `Dialog::kubectl` is the same command text invariant 4 and NOTES
+/// § D233 ruling 1 put behind [`Stripped`] one field down, carried loose. **Wrapping them belongs
+/// to the box that wires the dialogs, not to this one**: they are `crate::views`' fields, the
+/// turn that builds them has not run, and naming them here is what keeps the gap from being
+/// rediscovered as a defect.
 ///
 /// **[`Screen::detail`] is the one field that is deliberately the other way round, and this
 /// sentence used to be false because of it** (NOTES § D254). A detail tab carries *typed* values —
@@ -563,9 +618,24 @@ pub struct Screen<'a> {
     /// The header's left zone — `nodes 3/3`, `nodes …`, or empty for a reader who cannot list
     /// nodes. **A vital that cannot be read is blank, never guessed** (`screens/widgets.md`
     /// § 1a), which is a rule about what the caller puts here.
-    pub vitals: &'a str,
-    /// The header's right zone **up to the connection state**, already joined — `ctx: prod-eu ·
-    /// live`, and on a longer row `ctx: prod-eu · ns: payments · live`.
+    pub vitals: Stripped,
+    /// The header's right zone **up to the connection state**, already joined — `ctx: prod-eu`, and
+    /// on a longer row `ctx: prod-eu · ns: payments`.
+    ///
+    /// **The connection word is not in it and [`header`] joins it on from [`Screen::link`]**
+    /// (todo.md § Phase 12, NOTES § D265 rulings 1 and 2, whose reasoning this is): a caller
+    /// holding that join could write `live` beside a link that is `Lost`, exactly as a caller
+    /// holding the permission word could have said `admin` over dead keys. The fact is typed one
+    /// field down; the string was a second carrier of it.
+    ///
+    /// **One state is the exception and it is stated rather than left to be discovered**: while
+    /// nothing is connected this string still ends with the *fault's* word —
+    /// `ctx: staging · ⚠ not allowed` — because there is no connection for [`Screen::link`] to
+    /// describe, and `screens/context.md` has written that word for one of eleven faults
+    /// ([`header`]'s own doc). **The caller pairs it with [`Link::Unconnected`], whose
+    /// [`Link::state`] is `None`, so the two cannot both put a word in the slot** — and it holds
+    /// for as long as nothing is connected, not for as long as the failure box is drawn
+    /// (that page's § After `esc dismiss`, on a switch that failed with a cluster already live).
     ///
     /// **Laid out first, and the last zone to give way**: `prod-eu` and `prod-eu-2` differ by one
     /// character. Where the whole row is not enough for it, what gives way is the **front** of
@@ -577,7 +647,7 @@ pub struct Screen<'a> {
     /// rulings 1 and 2): `admin` or `read-only` off [`Screen::writes`], `⚠ TLS not verified` off
     /// [`Screen::insecure`], then `changing…` — `screens/widgets.md` § 1a's last three segments, in
     /// its order. A caller holding that join could say `admin` over dead keys.
-    pub context: &'a str,
+    pub context: Stripped,
     /// **The connected context's kubeconfig sets `insecure-skip-tls-verify`**, which [`header`]
     /// draws as the zone's TLS warning. Its writer is Phase 12, from the `current` row of
     /// `k8s::contexts(&kubeconfig, context)` (NOTES § D265 ruling 8).
@@ -601,7 +671,7 @@ pub struct Screen<'a> {
     /// cluster-wide one* (`screens/resources.md` § Rules). It is not derived from
     /// [`Screen::context`], which already spells the same fact for the header — a string is not a
     /// value, and parsing one back is how two zones start disagreeing.
-    pub namespace: Option<&'a str>,
+    pub namespace: Option<Stripped>,
     /// The snapshot's moment, so an age drawn here and an age sorted on in
     /// [`crate::views::cards`] are the same answer (NOTES § D246 ruling 4).
     pub now: &'a Time,
@@ -614,7 +684,7 @@ pub struct Screen<'a> {
     /// every one of these, and when the 13 rows run out it is the *last* paragraph here that gives
     /// way (`screens/states.md` § On a healthy or a still-loading Alerts screen). A pointer the
     /// reader can do without belongs at the end.
-    pub note: &'a [String],
+    pub note: &'a [Stripped],
     /// Every browsable kind the cluster said it serves, for the sidebar's rows under an open
     /// group. **Never a list written here** (invariant 12).
     pub kinds: &'a [Browsable],
@@ -655,7 +725,7 @@ pub struct Screen<'a> {
     pub reports: &'a [(&'a str, Option<&'a Report>)],
     /// The command log, oldest first. The strip draws the last [`LOG_LINES`] of it — display
     /// text, never executed and never fed back into a process (invariant 4).
-    pub log: &'a [String],
+    pub log: &'a [Stripped],
     /// **Which of the three mutating keys this login has been told it may not use, for the
     /// selected object** (`crate::views::Refused`, `screens/widgets.md` § 2a).
     ///
@@ -687,7 +757,7 @@ pub struct Screen<'a> {
     /// the sentence is one of [`Screen::note`]'s own paragraphs, because *clock skew is drawn in
     /// whichever family the rest of the screen is already in — it does not bring its own* (that
     /// section, § Nothing is broken, and the clock is still off).
-    pub clock: Option<&'a str>,
+    pub clock: Option<Stripped>,
     /// **What the connection to this cluster is doing** ([`Link`]) — the fact
     /// [`crate::views::Pane`] cannot carry, and the one that decides whether k8rs is in a position
     /// to offer a write at all.
@@ -811,6 +881,24 @@ impl<'a> Writes<'a> {
 /// link.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Link {
+    /// **Nothing has come back on this connection yet** — the first launch, and the moment after
+    /// `⏎` on a new context (`screens/states.md` § Still loading, `screens/context.md`
+    /// § What happens on `⏎` step 3, which draw the same `connecting…` header).
+    ///
+    /// **It arrived with [`Link::state`] and it closes a hole the header hid** (todo.md § Phase
+    /// 12): those two pages draw a fourth connection word, this type had three, and the connecting
+    /// frame was therefore a `Live` — *requests are completing* — carrying a caller's string that
+    /// said otherwise. Nothing reachable changes: every reader below that separates `Live` from the
+    /// rest already wanted this frame on the other side of the line — the skew sentence is not read
+    /// until a response carries a `Date`, and *nothing is broken* is a claim about a list that has
+    /// not answered.
+    ///
+    /// **`s` and `r` pause under it**, which is a sentence `screens/help.md` has since written —
+    /// *paused while k8rs reads the cluster* ([`withheld`]): k8rs cannot ask whether a write would
+    /// be allowed on a cluster it has not yet heard back from, any more than on one it has stopped
+    /// hearing from. It was grouped with `Live` while that clause did not exist. Unreachable
+    /// today either way, because nothing is selected on a pane that has not answered.
+    Connecting,
     /// Requests are completing.
     Live,
     /// **The stream is gone and k8rs is retrying.** Stale data stays visible and stays labelled;
@@ -821,6 +909,67 @@ pub enum Link {
     /// costs the same two keys and promotes `X switch cluster` onto the footer, because renewing
     /// and reconnecting is *the* next step.
     Expired,
+    /// **Nothing is connected at all** — a mid-session switch that was refused, expired or
+    /// otherwise failed, from the moment its box first draws through however long the reader
+    /// leaves it dismissed (`screens/context.md` § After `esc dismiss`, on a switch that failed
+    /// with a cluster already live; `screens/widgets.md` § 1a).
+    ///
+    /// **The one state with no word of its own, and that is the whole of it** (PM ruling,
+    /// 2026-09-19). Those pages refuse a fifth connection *word*, not a fifth state: the slot
+    /// carries the **fault's** own short word — `⚠ not allowed` for a `Refused` — which the caller
+    /// already put in [`Screen::context`], and the more specific answer to the same question.
+    /// So [`Link::state`] answers `None` here and [`header`] has nothing to join.
+    ///
+    /// **It is a session fact and not a modal one, which is the defect it closes** (todo.md
+    /// § Phase 12, `reports/2026-09-19-the-strip-and-the-connection-word.md` § M1): [`header`]
+    /// read `crate::views::Modal::Unconnected` until 2026-09-19 and
+    /// `crate::views::App::escape` clears that modal for a `Before::Connected`, so the frame after
+    /// `esc` joined `live` onto a zone already ending in the fault's word — two connection words,
+    /// and none of the four true of a cluster k8rs never reached. A variant that *cannot* be
+    /// worded makes that frame unspellable rather than merely unwritten.
+    ///
+    /// **It promotes `X switch cluster` onto the footer the way [`Link::Expired`] does**
+    /// ([`offered`]), for that page's own reason: pressing `X` again is the only way out.
+    Unconnected,
+}
+
+impl Link {
+    /// **The header's connection segment, from the typed fact rather than from a caller's string**
+    /// (`screens/widgets.md` § 1a, `screens/states.md` §§ The connection dropped, Your login
+    /// expired; todo.md § Phase 12).
+    ///
+    /// **NOTES § D265 rulings 1 and 2, applied to the segment they left behind.** The permission
+    /// word came off [`Screen::writes`] and the TLS warning off [`Screen::insecure`] for one
+    /// reason — a caller holding the join can say a word the value beside it contradicts — and the
+    /// connection word was still riding in [`Screen::context`] while [`Link`] carried the same fact
+    /// typed. Everything that withholds a key under a dead link reads the enum ([`withheld`],
+    /// [`clock`], [`Screen::link`]'s own doc); only the header read the string.
+    ///
+    /// **A `String` and not a `&'static str`, because two of the four open with `theme::ALARM`** —
+    /// the fourth symbol, spelled once in `theme.rs` and never here ([`unverified`] is the same
+    /// shape for the same reason).
+    ///
+    /// **The fourth word is [`Link::Connecting`]'s and this method is why the variant exists**:
+    /// `screens/states.md` § Still loading and `screens/context.md` § What happens on `⏎`
+    /// both draw `connecting…` in this slot, so a method that could not say it would have left one
+    /// of the four connection words in the caller's string — the exact thing NOTES § D265 ruling 1
+    /// took the permission word out of.
+    ///
+    /// **`None` is [`Link::Unconnected`]'s, and it is why this is an `Option`** (PM ruling,
+    /// 2026-09-19): there are four words for five states, because the fifth is the one where
+    /// nothing is connected for any of them to describe and the fault's own word is already in the
+    /// slot (`screens/widgets.md` § 1a). A method returning a `String` would have had to invent a
+    /// fifth word or let [`header`] decide when to drop one — and *when to drop one* keyed on the
+    /// modal is exactly the fact that outlived its modal.
+    fn state(self) -> Option<String> {
+        match self {
+            Link::Connecting => Some("connecting…".to_owned()),
+            Link::Live => Some("live".to_owned()),
+            Link::Lost => Some(format!("{} disconnected, retrying", mark(theme::ALARM))),
+            Link::Expired => Some(format!("{} login expired", mark(theme::ALARM))),
+            Link::Unconnected => None,
+        }
+    }
 }
 
 /// **What the detail slot holds — the four tabs, or the step before there is an object to draw
@@ -1292,13 +1441,18 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 /// login over a still-loading pane is `Nothing { switch: true }` and over an empty kind
 /// `Filter { switch: true }`, because `X` never acted on a selected row and *nothing is selected*
 /// was never its condition (`screens/states.md` § Over a pane with nothing to show yet).
+/// **[`Link::Unconnected`] is the second state that sets it**, and the page makes the same
+/// exception for the same reason: on a switch that failed there is nothing behind these rows
+/// *until `X` is pressed again*, so a reader with no visible way back is stranded
+/// (`screens/context.md` § After `esc dismiss`, on a switch that failed with a cluster already
+/// live).
 ///
 /// **Analysis and an open detail tab return `Move { switch: false }`, and that value is not idle.**
 /// Their footers are drawn above it in `crate::views::App::footer` from their own closed lines, so
 /// no footer is built from it — but `may_mutate` is handed it, and it is what leaves no mutating
 /// key pressable behind a footer that names none (PRIOR-ART § G2).
 pub fn offered(app: &App, screen: &Screen) -> Offer {
-    let switch = screen.link == Link::Expired;
+    let switch = matches!(screen.link, Link::Expired | Link::Unconnected);
     // **A mode whose own footer names no mutating key may not leave one pressable behind it**
     // (PRIOR-ART § G2 — *read-only enforced per view is a hole per view*, and k9s #3858 is that
     // hole in its XRay view). Analysis and the detail tabs answer above this value in
@@ -1455,8 +1609,22 @@ fn withheld(screen: &Screen) -> Option<Held> {
         return Some(Held::Off(why));
     }
     match screen.link {
+        // **The fourth pause is [`Link::Connecting`]'s**, and it is drawn now that
+        // `screens/help.md` § *While the link is down, still connecting, the login has expired, or
+        // the clock is off* has written the row: k8rs cannot ask a cluster it has not yet heard
+        // back from any more than one it has stopped hearing from. It was grouped with
+        // [`Link::Live`] while that clause did not exist, because this file does not write wording.
+        Link::Connecting => Some(Held::Paused("paused while k8rs reads the cluster")),
         Link::Lost => Some(Held::Paused("paused while disconnected, retrying")),
         Link::Expired => Some(Held::Paused("paused — renew your login, then press X")),
+        // **[`Link::Unconnected`] pauses nothing, and that is the page's own sentence rather than
+        // an omission**: *"`s` and `r` do not appear, and nothing pauses them to get there … both
+        // read exactly as they do on any other pane with nothing to act on"*
+        // (`screens/context.md` § After `esc dismiss`, on a switch that failed with a cluster
+        // already live). Nothing survives the switch to be selected, so [`offered`] answers
+        // `Nothing` there and no key is promised that a clause would have to take back — and
+        // `screens/help.md` has written no fifth clause for it.
+        Link::Unconnected => None,
         Link::Live => clock(screen)
             .map(|_| Held::Paused("paused — the clocks disagree; quit and start k8rs again")),
     }
@@ -1558,14 +1726,33 @@ fn indented(area: Rect) -> Rect {
 /// to `nodes 3/3 (` reads as a complete count of three ready nodes: *a vital that cannot be read
 /// is blank, never guessed*. What the context does instead is [`shortened`].
 ///
-/// **The zone's last three segments are joined here and not by the caller, which is what fixes
-/// their place in the order** (`screens/widgets.md` § 1a, NOTES § D265 rulings 1 and 2). The zone
-/// is one string joined by ` · `: [`Screen::context`] up to the connection state, then
-/// [`Writes::permission`] — in every state, so the header cannot say `admin` over dead keys — then
-/// [`unverified`] where [`Screen::insecure`] holds, then `changing…` last of all. A caller that
-/// joined any of them itself could put it anywhere in that string; a caller that cannot reach the
-/// join cannot. `changing…` is [`crate::views::App::changing`]'s fact rather than the store's,
-/// which is the other reason it is not a field on [`Screen`].
+/// **The zone's last four segments are joined here and not by the caller, which is what fixes
+/// their place in the order** (`screens/widgets.md` § 1a, NOTES § D265 rulings 1 and 2, todo.md
+/// § Phase 12). The zone is one string joined by ` · `: [`Screen::context`] up to the connection
+/// state, then [`Link::state`], then [`Writes::permission`] — in every state, so the header cannot
+/// say `admin` over dead keys — then [`unverified`] where [`Screen::insecure`] holds, then
+/// `changing…` last of all. A caller that joined any of them itself could put it anywhere in that
+/// string; a caller that cannot reach the join cannot. `changing…` is
+/// [`crate::views::App::changing`]'s fact rather than the store's, which is the other reason it is
+/// not a field on [`Screen`].
+///
+/// **The connection word was the last one still riding in the caller's string** and joins here for
+/// D265 ruling 1's reason unchanged: `live` beside a `Link::Lost` is the same lie `admin` over dead
+/// keys was. § 1a puts it after the namespace scope and before the permission word, which is where
+/// it lands — the caller's zone ends at the scope.
+///
+/// **Four words, five states, and the fifth joins nothing here** (todo.md § Phase 12). `live`,
+/// `connecting…`, `⚠ disconnected, retrying` and `⚠ login expired` are [`Link::state`]'s;
+/// [`Link::Unconnected`] answers `None`, because the slot already holds the *fault's* own word —
+/// `⚠ not allowed` for a `Fault::Refused` — which the caller put inside [`Screen::context`] and
+/// `screens/context.md` § When the new cluster does not work draws. A type that carried that word
+/// would be inventing ten more for the faults `screens/` has not written one for; a type that
+/// cannot be worded at all costs nothing and makes the two-word frame unspellable
+/// (`screens/widgets.md` § 1a: *not a fifth connection word, and not a blank segment either*).
+///
+/// **What this function does not do any more is ask which modal is open** (`k8s-admin`,
+/// 2026-09-19): it did, and `crate::views::App::escape` clears that modal while the connection
+/// stays exactly as bad, so the next frame joined a second connection word onto the fault's.
 ///
 /// **Being the tail is also why [`shortened`] needs no case for them**: that cut eats the *front*
 /// of the zone, so the cluster's name erodes and `read-only`, the TLS warning and `changing…`
@@ -1575,17 +1762,24 @@ fn indented(area: Rect) -> Rect {
 /// § Opening at startup, `screens/widgets.md` § 1a): no context has been chosen, so the zone reads
 /// `choose a cluster` and the one fact already known before any connection — whether writes are
 /// on for this run — and neither a TLS warning nor the vitals, because no context has been read.
-/// The failure that picker can lead to names the context it tried, which is the caller's ordinary
-/// zone again.
+/// The failure that picker can lead to names the context it tried — the caller's zone again,
+/// ending in the fault's own word for as long as nothing is connected, above.
 fn header(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     let dim = screen.fg(theme::DIM);
     let picking = matches!(&app.modal, Some(views::Modal::ContextPick(picker)) if picker.startup());
     let tls = unverified();
+    // **Nothing here reads [`crate::views::App::modal`] for the connection word, and that is the
+    // repair rather than a simplification** (todo.md § Phase 12): the frame with no word is
+    // [`Link::Unconnected`]'s and lasts as long as nothing is connected, which outlives the box
+    // that announced it — `crate::views::App::escape` closes that modal and the connection is no
+    // better for it.
+    let state = screen.link.state();
     let segments: Vec<&str> = if picking {
         vec!["choose a cluster", screen.writes.permission()]
     } else {
         [
-            Some(screen.context),
+            Some(screen.context.as_str()),
+            state.as_deref(),
             Some(screen.writes.permission()),
             screen.insecure.then_some(tls.as_str()),
             app.changing.is_some().then_some(mark(theme::CHANGING)),
@@ -1611,11 +1805,12 @@ fn header(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
     );
 
     let room = indented(left);
-    let vitals = if !app.connecting_first() && width(screen.vitals) <= usize::from(room.width) {
-        screen.vitals
-    } else {
-        ""
-    };
+    let vitals =
+        if !app.connecting_first() && width(screen.vitals.as_str()) <= usize::from(room.width) {
+            screen.vitals.as_str()
+        } else {
+            ""
+        };
     frame.render_widget(Paragraph::new(Line::styled(vitals, dim)), room);
 
     let name = width(NAME) as u16;
@@ -1676,7 +1871,7 @@ fn strip(frame: &mut Frame, area: Rect, screen: &Screen) {
     let lines: Vec<Line> = screen.log[last..]
         .iter()
         .map(|line| {
-            let (command, outcome) = views::outcome_of(line);
+            let (command, outcome) = views::outcome_of(line.as_str());
             let room = usize::from(row.width).saturating_sub(width(outcome));
             Line::styled(
                 format!("{}{outcome}", command_cut(command, room, STRIP_CUT)),
@@ -3312,8 +3507,12 @@ fn floor(area: Rect) -> usize {
 /// is stated in the same section: a state directory that could not be opened is fixed for the run
 /// and goes nowhere while the connection is down, so a sentence that had hidden itself would have
 /// to reappear from nowhere with no event to explain it.
-fn clock<'a>(screen: &Screen<'a>) -> Option<&'a str> {
-    screen.clock.filter(|_| screen.link == Link::Live)
+fn clock<'a>(screen: &'a Screen) -> Option<&'a str> {
+    screen
+        .clock
+        .as_ref()
+        .filter(|_| screen.link == Link::Live)
+        .map(Stripped::as_str)
 }
 
 /// The centred block an empty or still-loading pane draws (`screens/states.md`).
@@ -3344,7 +3543,7 @@ fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool, first: Op
         budget = budget.saturating_sub(lines.len());
     }
     let measure = usize::from(BLOCK);
-    let waiting = [WAITING.to_owned()];
+    let waiting = [Stripped::of(WAITING)];
     let handed = if !healthy && screen.note.is_empty() {
         &waiting[..]
     } else {
@@ -3357,7 +3556,7 @@ fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool, first: Op
     // drew a line holding nothing but the mark. **Still the same 13-of-16 cap the banner path
     // keeps**: `centred` clips whatever it is handed with no mark of its own.
     let mut text: Vec<String> = Vec::new();
-    for paragraph in first.into_iter().chain(handed.iter().map(String::as_str)) {
+    for paragraph in first.into_iter().chain(handed.iter().map(Stripped::as_str)) {
         let gap = usize::from(!text.is_empty());
         let share = budget.saturating_sub(text.len());
         if share <= gap {
@@ -4050,8 +4249,10 @@ fn heading(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsab
 /// **The namespace this view is scoped to, or `None`** — one condition per fact, never a list of
 /// kinds (`screens/resources.md` § Rules). It decides the title's label *and* whether a row is
 /// drawn `namespace/name`, so the two can never answer differently.
-fn scope<'a>(kind: Option<&Browsable>, screen: &Screen<'a>) -> Option<&'a str> {
-    kind.filter(|kind| kind.namespaced).and(screen.namespace)
+fn scope<'a>(kind: Option<&Browsable>, screen: &'a Screen) -> Option<&'a str> {
+    kind.filter(|kind| kind.namespaced)
+        .and(screen.namespace.as_ref())
+        .map(Stripped::as_str)
 }
 
 /// The word the sidebar drew for this kind — **the server's own plural**, never one derived from

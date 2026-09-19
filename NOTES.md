@@ -292,6 +292,7 @@ its line moving with it.
 - [D268](#d268--the-footer-key-box-a-filter-nobody-could-see-a-picker-whose-name-column-the-cluster-could-erase-and-an-esc-that-meant-two-things-2026-09-18) — the footer-key box: a filter nobody could see, a picker whose name column the cluster could erase, and an `esc` that meant two things
 - [D269](#d269--the-per-key-offer-a-key-a-kind-has-not-got-leaves-the-line-and-the-browser-was-asking-about-a-kind-word-with-the-group-thrown-away-2026-09-18) — the per-key offer: a key a kind has not got leaves the line, and the browser was asking about a kind word with the group thrown away
 - [D270](#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18) — the which-pods box: a block is about the object the surface is about, a stack that erased the pane's own sentence, and a row order that would not hold still
+- [D271](#d271--the-strip-box-a-callers-promise-becomes-a-type-and-a-header-word-that-outlived-the-fact-it-described-2026-09-19) — the strip box: a caller's promise becomes a type, and a header word that outlived the fact it described
 
 ## Why it exists — where the gap is
 
@@ -23716,3 +23717,97 @@ that **no committed capture produces a card with `affected >= 2`**, so every tes
 stands on a hand-built `Card` and the phase close cannot reach the screen from the binary. That last
 one needs a capture trip — a Deployment or DaemonSet with at least two pods failing for two different
 reasons — and it is the PM's.
+
+### D271 — the strip box: a caller's promise becomes a type, and a header word that outlived the fact it described (2026-09-19)
+
+Phase 12's fourth box — the six strings a caller assembles for `ui::Screen` met no strip on the way
+in, and the header's connection word was still riding inside one of them. One test round, one
+operator round, one screen round, one fix round; one blocker, two defects, three claims that were
+written rather than measured.
+
+**1. `views::Stripped` — the promise a paragraph could not keep.** `ui.rs`'s module doc said every
+string reaching that file had already been stripped, while five `Screen` fields and `views::Log`
+took a bare `&str`. Three calls held it up — `k8s::text` at ingest, `main.rs`'s `sanitize` over the
+driver's documents, `ops::Record::of` over a mutation's line — and **a fourth caller with a fourth
+string would have been nobody's failed test**: two of the three were found by asking who the obvious
+caller was, not by a red build (NOTES § D264 ruling 1, 2026-09-07). The type has one constructor
+reachable from outside `views.rs`, `Stripped::of`, and it spends `k8s::text` at `k8s::FREE_TEXT`;
+the field is private, so an unstripped `vitals`, `context`, `note`, `clock`, `namespace` or `log`
+line **does not compile**. That is the bar `k8s::Table` already meets on the ingest side.
+`k8s::text` and not `sanitize`, because every value here is *one line*: a `\n` that is removed glues
+two words together and one that becomes a space does not (D198), and `text` is also the half that
+**bounds**, which is the security gate's *sizes are bounded* row.
+
+**2. A blank line does not survive it, and the asymmetry is the ruling.** `ui::banner` splits on
+`"\n\n"` for both `Screen::clock` and `Pane::Denied`'s reason; `Stripped::of` turns that into one
+space, so the split is now permanently dead for the first and live for the second. **The clock
+sentence is one paragraph by design** — `screens/states.md` § *Your computer's clock is off* writes
+one per direction — and `Denied` is not a `Stripped` at all: the clock sentence is k8rs's own, a
+refusal carries the server's, which `k8s::said` already strips and bounds one layer down. Found by
+`tester`.
+
+**3. The connection word comes off `Link`, and the fifth state has no word.** D265 ruling 1 took the
+permission word out of the caller's string because a caller holding the join can write a word the
+value beside it contradicts; the connection word was still in there. `Link::state` now joins it, and
+the variant `Link::Connecting` exists because that method needs a fourth word — `screens/states.md`
+§ Still loading and `screens/context.md` § What happens on `⏎` both draw `connecting…`, and the type
+had three.
+
+**The blocker was the fifth state.** `header` suppressed the join while `views::Modal::Unconnected`
+was open, and `views::App::escape` clears that modal for a `Before::Connected` — so the frame after
+`esc` joined `live` onto a zone already ending in the fault's word: `ctx: staging · ⚠ not allowed ·
+live · admin`, two connection words, and **none of the four true of a cluster k8rs never reached**
+(`k8s-admin`, `reports/2026-09-19-the-strip-and-the-connection-word.md` § M1). The screen ruled it
+before the code could: `screens/context.md` § *After `esc dismiss`, on a switch that failed with a
+cluster already live* draws the frame the page had never drawn — an empty body, because D16 ruling 1
+drops the store the moment `⏎` is pressed and not when the switch fails, so there is nothing stale
+to fall back to — and `screens/widgets.md` § 1a says the slot carries **the fault's own short word
+for as long as nothing is connected**, a session fact and not a modal one. So `Link::Unconnected`
+has no word, `Link::state` answers `Option<String>`, and the bad frame is **unspellable rather than
+merely unwritten**. It promotes `X switch cluster` onto the footer the way `Link::Expired` does,
+because pressing `X` again is the only way out.
+
+**4. What the two new states cost the mutating keys.** `Connecting` pauses `s` and `r` —
+*paused while k8rs reads the cluster*, a clause `screens/help.md` wrote for this box — because k8rs
+cannot ask whether a write would be allowed on a cluster it has not heard back from, any more than
+on one it has stopped hearing from. `Unconnected` pauses **nothing**: the page says `s` and `r`
+*"do not appear, and nothing pauses them to get there"*, because nothing survived the switch to be
+selected. Neither is reachable until the wiring box, and both rest on a **caller-held promise** —
+that no selectable card is handed over with either link — which is the class this box's own type
+exists to stop trusting. It is the wiring box's constraint, recorded here because nothing in the
+type system holds it.
+
+**5. Two defects in the command log, both in this box's own new code.** `Log::outcome` rebuilt the
+resolved line through `Stripped::of`, and `→ rejected` is longer than the `…` it replaces — so a
+line that *fitted while it was running* came back cut, drawing `yyy…   →… (shortened by k8rs)`, an
+arrow pointing at k8rs's own shortening mark. The fix is `Stripped::assembled`, private, which joins
+parts already stripped and skips only the bound. `Log::sent` appended the three-column `OUTCOME_GAP`
+**before** the strip, so a line ending in `\n`, `\t` or `\r` drew four columns where
+`screens/widgets.md` § 2 rules three; `trim_end` now runs first. Both found by `tester`, both
+unreachable through today's builders, both fixed in the same box because a defect in the box being
+landed is that box.
+
+**6. Three claims written instead of measured, which is the round's real lesson.** The doc said a
+right-to-left override in a kubeconfig **context name** reached the header — it never could, because
+`k8s::drawable` spends `k8s::text` at `IDENTIFIER` on it and has said so since D154; the genuinely
+unstripped value is what the reader **typed**, `--namespace` off argv, which meets only
+`views::sanitize` and is bounded by nothing. The `trim_end` comment claimed `char::is_whitespace`
+was *the same split* `k8s::text` uses: it is a **wider** set — NBSP, U+2028, U+2003 and U+3000 are
+whitespace the strip deliberately keeps and `trim_end` removes, so `Log::ran` and `Log::sent` now
+differ over a trailing NBSP, and the three-column result is right either way. And the enumeration of
+strings *not* covered by the type read closed while `ui::draw` also draws four caller-built `String`s
+that never touch `Screen` — `views::Dialog`'s `consequence`, `warning`, `kubectl` and `asks`, of
+which `kubectl` is the same text the strip now holds as a type (invariant 4, D233 ruling 1). All
+three were found by reading the assembled file against the object one command away, two by
+`k8s-admin` and one by `tester`.
+
+**Evidence.** `just check` green on the test host (1461 unit, 35 e2e); `just mutants-diff` over the
+settled tree, 29 mutants, 27 caught, 2 unviable that name a type, **0 missed** — the first run of it
+measured a tree that changed underneath it (last edit 12:46:47 inside a 12:38→12:48 window, D180
+again) and was re-run rather than reported.
+
+**Deferred, and where:** the header's clock pointer, which `screens/states.md` draws in eight
+mockups and `widgets.md` § 1a does not list, is in `backlog.md` — two screen files disagreeing is a
+ruling, not a patch. A type for `Dialog`'s four strings belongs to the dialog-wiring box. The ten
+`Fault` variants with no word written in `screens/` for that header slot are `tui-designer`'s, left
+deliberately. None of the three blocks this box.

@@ -3195,3 +3195,20 @@ long-form version and stays the authority.*
   ([D270](NOTES.md#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18)).
   `tui-designer`'s own definition now carries the check by hand, which is the copy that goes stale.
   `tester`'s, and the guard must be seen red before it is trusted (D26). Found by the PM, 2026-09-18.
+
+- **The header's clock pointer is drawn on eight mockups and no code can produce it.**
+  `screens/states.md` ends the header with `⚠ your clock is behind` / `ahead` at `:727 :803 :860
+  :899 :947 :974 :1371 :1539`, and `header()` joins context → `Link::state` → the permission word →
+  the TLS mark → `changing…` and nothing else; `grep "your clock is" src/*.rs` finds it only in a
+  `theme.rs` doc comment and one test string. It sits *after* the permission word, so no caller can
+  smuggle it in through `Screen::context` either — the same slot-ownership reasoning that moved the
+  connection word onto `Screen::link` ([D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13) ruling 1)
+  applies to it and nobody has boxed it. **The two screen files disagree, which is why this is a
+  ruling and not a patch**: `screens/states.md` § *It does not fit in the header, so it does not go
+  there whole* makes the split deliberate — the sentence goes in the pane, the header carries a
+  pointer sized like the two marks it already has — while `screens/widgets.md` § 1a's zone table
+  lists six segments and the pointer is not one of them. The code follows § 1a, and since
+  2026-09-19 a test *asserts* the pointer's absence for `(Link::Live, Some(SKEWED))`, so the gap is
+  nailed in. The reader is not blind meanwhile: `Screen::clock` draws the whole sentence over the
+  pane. Found by `tester` and `k8s-admin`
+  ([reports/2026-09-19-the-strip-and-the-connection-word.md](reports/2026-09-19-the-strip-and-the-connection-word.md)), 2026-09-19.
