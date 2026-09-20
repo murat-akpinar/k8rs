@@ -137,6 +137,7 @@
 - *(ci)* Force cargo's output plain where a guard parses it ([a356a5a](https://github.com/murat-akpinar/k8rs/commit/a356a5a5159d4a0210bbf86b9d987271347af84f))
 - *(ui)* Stop six screens drawing something false before phase 11 closes ([7553d3e](https://github.com/murat-akpinar/k8rs/commit/7553d3e57149512701182446c8cd7ffbc09c66ee)) — A confirm dialog now names the object it will hit. The identity cut gives way from the namespace's front first and the name's front last, because two objects differ at the end of their names, so a canary and its stable sibling no longer draw byte-identical scale, restart, gone and in-flight frames. The same cut serves the Alerts card and the detail heading, and sidebar kind rows cut from their front behind a visible mark.
 - *(ci)* Bump rustls past the handshake advisory cargo-deny now refuses ([96514c1](https://github.com/murat-akpinar/k8rs/commit/96514c1c44bf33e3521dfa31372b489a896d41cc)) — GHSA-2mjx-qc3c-rqvc was published against rustls 0.23.43 after the last green run, so development went red on cargo deny without a line changing. 0.23.45 carries the fix; the lockfile moves one version and no package is added.
+- *(ui)* Keep the row the frame drew, and refuse esc while a check is out ([46d3d33](https://github.com/murat-akpinar/k8rs/commit/46d3d3385c519340cb20e1baa6b6066dfb63dcfc))
 
 ### 💼 Other
 
