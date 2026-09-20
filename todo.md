@@ -4568,6 +4568,18 @@ Secret is redrawn after the reveal is dismissed.
 
 Goal: one binary, live and safe.
 
+**The one family below the surface boxes: the event loop.** The `main.rs`
+`tokio::select!` box and the coalescing test under it are one turn — same code,
+same question, and the test is the only proof of that box's central claim, so a
+loop that lands without it has had its coalescer proven by nothing
+([D109](NOTES.md#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)).
+Every other box in this phase stays one at a time. **Its preconditions are
+landed** — the screen ruling on who owns the free-text scroll offset
+(`screens/widgets.md` § 4), the dialog page's ceiling and its second 1b reading
+(`screens/dialogs.md`), and the bound on the check itself
+([D273](NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20),
+which also corrected the mechanism that box used to order).
+
 **The surface the console still owes its wiring** — boxed at Phase 11's close
 ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 3), in `ui.rs` / `views.rs`, which stay open until this phase closes:
 
