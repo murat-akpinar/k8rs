@@ -864,6 +864,16 @@ decision, and the PM writes it into `NOTES.md` before committing.
   slices; nobody read the result.
 - **The PM's own edits reviewed by nobody.** `NOTES.md`, `todo.md`, `docs/` and
   this file go through step 7's pass with the agents' work, not around it.
+- **A commit taken before the agent's report arrived.** A settled diffstat, a
+  clean `git status` and a `just check` the PM ran itself all read one instant
+  and none of them knows whether the agent intends another write — or whether
+  its *own* gate is still out. Three times now: on 2026-08-16 it split one box
+  across two commits, and on 2026-09-20 it landed a box while `just mutants-diff`
+  was still running, so the gate that decides whether the tests can fail at all
+  reported after the commit. It came back green, which is the only reason that
+  one is a note and not a revert. **The completion notification is the only
+  proof** — wait for it, or say in the reply that the commit was taken without
+  it.
 
 ## Phase close — the ritual at the end of every phase
 
