@@ -665,8 +665,7 @@ fn the_sentence_the_operator_reads_names_the_fault_and_what_the_cluster_said() {
                 said: None,
             },
             true,
-            "k8rs does not know whether the change was made — k8rs could not reach the cluster"
-                .to_string(),
+            "k8rs does not know whether the change was made — nothing usable came back".to_string(),
         ),
         (
             Outcome::Failed {
@@ -703,7 +702,11 @@ async fn a_failure_this_side_of_the_wire_is_not_recorded_as_the_server_refusing(
         (
             dead_socket("connection reset by peer"),
             Fault::Unanswered,
-            "k8rs could not reach the cluster",
+            // **Not *k8rs could not reach the cluster*, which this arm said until 2026-09-20**
+            // (NOTES § D273 *The review round* 2). A dead socket cannot tell a connection that
+            // never opened from one that died after the request went out, so the sentence may
+            // not claim either.
+            "nothing usable came back",
         ),
         (
             refusal("Unauthorized", "Unauthorized", 401),
@@ -754,6 +757,257 @@ fn clone_of(error: &kube::Error) -> kube::Error {
         kube::Error::Api(status) => kube::Error::Api(status.clone()),
         _ => dead_socket("connection reset by peer"),
     }
+}
+
+/// **The two numbers, pinned exactly, because a sentence built from one rounds it**
+/// (NOTES § D273 *The review round* 6).
+///
+/// **`from_millis(10_900)` passed both tests below**: `heard_nothing` prints `as_secs()`, so every
+/// deadline inside a second of the right one spells the same words. A number this repo measured on
+/// a cluster should not be movable by a hundred milliseconds without a test saying so. The two
+/// tests below assert what the deadlines *do* — that each wait is exactly the one its own caller
+/// owns; this is the only place that says what either number **is**.
+#[test]
+fn the_two_deadlines_are_the_numbers_that_were_measured_and_not_near_them() {
+    assert_eq!(
+        CHECK_DEADLINE,
+        std::time::Duration::from_secs(35),
+        "the check's deadline moved off the one measured against a real admission chain \
+         (reports/2026-09-20-the-dry-run-deadline.md): 34 s was that apiserver's own ceiling and \
+         this has to sit above it"
+    );
+    assert_eq!(
+        READ_DEADLINE,
+        std::time::Duration::from_secs(10),
+        "the pre-read's deadline moved off the ten a plain read gets — it runs no admission \
+         chain, so it may not inherit the check's number"
+    );
+}
+
+/// **Both sides of one deadline, and the shipped one** — a check that is already answered comes
+/// back whole, a check that already failed keeps the cluster's words, and a check that never
+/// answers becomes the bound (NOTES § D273).
+///
+/// **The clock moves, the suite does not wait.** `tokio`'s paused time auto-advances to the next
+/// timer whenever nothing else can run, so every case here runs on the number that ships and the
+/// test costs microseconds — which is the whole of why `test-util` is a dev-dependency
+/// (NOTES § D273 *The review round* 6). The first two cases need no timer at all: `timeout` polls
+/// the future before its own timer, so an answer that is already there never reaches the deadline,
+/// and `elapsed` proves it by staying at zero until the third.
+#[tokio::test(start_paused = true)]
+async fn a_check_that_answers_is_its_answer_and_one_that_does_not_is_the_bound() {
+    assert_eq!(
+        checked_within(CHECK_DEADLINE, std::future::ready(Ok::<u8, kube::Error>(7))).await,
+        Ok(7),
+        "an answer that had already arrived was thrown away by a deadline it never reached"
+    );
+
+    let denial = "deployments.apps \"web\" is forbidden";
+    assert_eq!(
+        checked_within(
+            CHECK_DEADLINE,
+            std::future::ready(Err::<u8, _>(refusal(denial, "Forbidden", 403)))
+        )
+        .await,
+        Err((Fault::Refused, Some(denial.to_string()))),
+        "the bound swallowed a failure the cluster had already explained"
+    );
+    assert_eq!(
+        tokio::time::Instant::now().elapsed(),
+        std::time::Duration::ZERO,
+        "an answer that was already there still spent time on the clock"
+    );
+
+    let started = tokio::time::Instant::now();
+    let expired = checked_within(
+        CHECK_DEADLINE,
+        std::future::pending::<Result<u8, kube::Error>>(),
+    )
+    .await;
+    let waited = started.elapsed();
+    println!("{waited:?} → {expired:?}");
+    assert_eq!(
+        waited, CHECK_DEADLINE,
+        "the check came back at a moment its own deadline does not name"
+    );
+    assert_eq!(
+        expired,
+        Err((
+            Fault::Unanswered,
+            Some(
+                "k8rs waited 35 seconds for the cluster to check this change and heard nothing \
+                 back"
+                    .to_string()
+            )
+        )),
+        "a check nothing answers either is not bounded at all, or ends in words nobody at 3am \
+         can act on"
+    );
+}
+
+/// **The absolute stop every test here uses instead of a multiple of the thing under test.**
+///
+/// **A stop derived from the constant cannot catch a wrong constant** (NOTES § D273 *The review
+/// round* 6): the first draft used `CHECK_DEADLINE * 3`, so a planted `from_secs(3600)` would have
+/// been a three-hour hang rather than a failure. A day of *paused* time costs nothing and is the
+/// same number whatever the deadline becomes.
+const NO_HANG: std::time::Duration = std::time::Duration::from_secs(86_400);
+
+/// **A check the cluster never answers ends the mutation, and the log holds both of its lines**
+/// (NOTES § D273, invariant 4).
+///
+/// **This is the test that says [`perform`] bounds the check at all**, which
+/// [`a_check_that_answers_is_its_answer_and_one_that_does_not_is_the_bound`] cannot: that one
+/// drives [`checked_within`] directly, and a `perform` that stopped calling it went on passing.
+/// Planted and watched (`dev-core`, 2026-09-20).
+///
+/// **The outer [`NO_HANG`] is the test's own stop and not the bound**: without it, a `perform`
+/// that bounds nothing parks the paused runtime — there is no timer left for it to advance to —
+/// and hangs the suite instead of failing it.
+#[tokio::test(start_paused = true)]
+async fn a_check_the_cluster_never_answers_ends_with_a_result_line_under_its_attempt() {
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let started = tokio::time::Instant::now();
+    let stopped = tokio::time::timeout(
+        NO_HANG,
+        performed(
+            &scaling(),
+            stamp,
+            &mut sink,
+            shows(&trace),
+            confirms(&trace),
+            |pass| {
+                trace.borrow_mut().steps.push(step(pass));
+                std::future::pending::<Result<(), kube::Error>>()
+            },
+        ),
+    )
+    .await
+    .expect(
+        "`perform` did not come back inside a day of virtual time, so it bounds the dry-run with \
+         nothing and the confirm box it opened has no key that closes it",
+    );
+
+    assert_eq!(
+        started.elapsed(),
+        CHECK_DEADLINE,
+        "`perform` waited something other than the deadline it owns"
+    );
+    assert_eq!(
+        stopped.outcome,
+        Some(Outcome::NotSent {
+            fault: Fault::Unanswered,
+            said: Some(
+                "k8rs waited 35 seconds for the cluster to check this change and heard nothing \
+                 back"
+                    .to_string()
+            ),
+        }),
+        "a check nobody answered was not recorded as a change that never went"
+    );
+    assert!(
+        stopped.recorded,
+        "the audit log is holding an attempt line with nothing after it — the one reading D225 \
+         ruling 1 refused to ship"
+    );
+
+    assert_eq!(
+        transcript(&trace),
+        vec![
+            ATTEMPT.to_string(),
+            "shown".to_string(),
+            "dry-run".to_string(),
+            format!(
+                "{RESULT} · dry-run: k8rs does not know whether the check reached the cluster · \
+                 the change was never sent — nothing usable came back: k8rs waited 35 seconds \
+                 for the cluster to check this change and heard nothing back\n"
+            ),
+        ],
+        "a check that ran out of time asked for a confirmation, went on to the real call, or \
+         left the record one line short"
+    );
+}
+
+/// **A loopback port that accepts the connection and then says nothing** — [`stub`]'s shape with
+/// the answer removed, and the one failure neither [`stub`] nor [`dead_port`] can produce.
+///
+/// **The address is built and not written**, [`stub`]'s own reason: the port is whatever `:0` gave
+/// us, so there is no hardcoded loopback URL in this tree for `scripts/security-guard.py` to be
+/// right about. The listener is kept alive by the spawned task, and the accepted sockets are held
+/// rather than dropped — a dropped socket is a `FIN`, which is an answer.
+async fn silent_port() -> Client {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            held.push(socket);
+        }
+    });
+    Client::try_from(kube::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing")
+}
+
+/// **A read the cluster never answers refuses the scale, and refuses it before anything exists to
+/// read afterwards** (NOTES § D273 *The review round* 3).
+///
+/// **This one is worse than the case the contract's own bound closes, which is why it is here.**
+/// `scale`'s `get_scale` runs ahead of the attempt line and ahead of `show`, so unbounded it hung
+/// with no dialog, no `$ kubectl` line and **no audit record at all** — nothing for an operator to
+/// find afterwards, where a bounded check at least leaves two lines.
+///
+/// **It takes [`READ_DEADLINE`] and not [`CHECK_DEADLINE`]**, asserted on the clock as well as in
+/// the sentence, because a `GET` runs no admission chain and the thirty-five seconds is entirely
+/// that chain's measurement.
+#[tokio::test(start_paused = true)]
+async fn a_read_the_cluster_never_answers_refuses_the_scale_with_nothing_recorded() {
+    let client = silent_port().await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let started = tokio::time::Instant::now();
+    let refusal = tokio::time::timeout(
+        NO_HANG,
+        scale(
+            &client,
+            &asking(3),
+            stamp,
+            &mut sink,
+            shows(&trace),
+            confirms(&trace),
+        ),
+    )
+    .await
+    .expect("`scale` did not come back inside a day of virtual time, so its read bounds nothing")
+    .expect_err("a cluster that never answered the read cannot have said how many are running");
+
+    let waited = started.elapsed();
+    println!("{waited:?}\n{refusal}");
+    assert_eq!(
+        waited, READ_DEADLINE,
+        "the read waited something other than the deadline it owns — the check's, most likely"
+    );
+    assert_eq!(
+        refusal,
+        "k8rs could not read how many copies of deployment/web in payments are running right \
+         now — nothing usable came back: k8rs waited 10 seconds for the cluster to answer and \
+         heard nothing back",
+        "the refusal for a read that never answered is not the one a reader can act on"
+    );
+    assert_eq!(
+        transcript(&trace),
+        Vec::<String>::new(),
+        "a scale that never got its read opened a dialog or wrote an audit line — the attempt \
+         line is written inside `perform`, which this never reached"
+    );
 }
 
 /// **A call that fails after a good check is a different fact from a refused check**: something
@@ -884,7 +1138,7 @@ async fn a_broken_pipe_after_the_request_went_out_says_k8rs_does_not_know() {
         transcript(&trace).last().cloned(),
         Some(format!(
             "{RESULT} · {CHECKED_FIRST} · k8rs does not know whether the change was made — \
-             k8rs could not reach the cluster\n"
+             nothing usable came back\n"
         )),
         "the record asserts the change did not happen, which is the one thing k8rs cannot see \
          from here"
@@ -4228,10 +4482,13 @@ async fn neither_operation_claims_a_check_was_sent_when_nothing_usable_answered(
             line.contains(UNKNOWN),
             "{verb}: the line does not say k8rs cannot tell whether the check arrived: {line:?}"
         );
-        // **The next field says the cluster could not be reached**, and the two were on one line
-        // contradicting each other. Both are asserted so the pair cannot drift apart again.
+        // **The next field used to say the cluster could not be reached**, and the two were on
+        // one line contradicting each other — this pair is what pinned that wording, and both
+        // reviewers found the contradiction it was holding in place (NOTES § D273 *The review
+        // round* 2). Both halves are still asserted so the pair cannot drift apart again; what
+        // changed is that neither of them now claims more than k8rs knows.
         assert!(
-            line.contains("the change was never sent — k8rs could not reach the cluster"),
+            line.contains("the change was never sent — nothing usable came back"),
             "{verb}: the outcome stopped naming the fault beside the check: {line:?}"
         );
     }
@@ -6661,8 +6918,8 @@ async fn a_cluster_that_never_answered_is_could_not_tell_and_says_so() {
         panic!("a cluster that never answered is not could-not-tell: {verdict:?}");
     };
     assert!(
-        why.contains("k8rs could not reach the cluster"),
-        "the sentence blames the cluster's answer for a call that never got one: {why}"
+        why.contains("nothing usable came back"),
+        "the sentence claims something about a call that never got an answer: {why}"
     );
 }
 

@@ -105,7 +105,7 @@ check to wait on (§ *The verdict line* below).
 │    │  This starts 1 more copy of your app.                    │    │
 │    │  Right now: 2 copies. After: 3 copies.                   │    │
 │    │                                                          │    │
-│    │  Checking with the cluster…                              │    │
+│    │  Checking with the cluster — up to 35 seconds…           │    │
 │    │                                                          │    │
 │    │  $ kubectl scale deployment/web --replicas=3 -n payments │    │
 │    │                                                          │    │
@@ -126,17 +126,33 @@ nothing about the box's shape moves when it does. Measured at 80×24 against
 exactly this input:
 [reports/2026-09-20-the-four-behaviours.md § 4](../reports/2026-09-20-the-four-behaviours.md#4-the-pending-confirmation--what-the-box-draws-and-what-the-footer-says).
 
-1. **The verdict line reads `Checking with the cluster…`, dim, in the exact
-   row the answered sentence lands in once it arrives — never blank.**
-   Leaving that row empty was the smaller bug underneath the one below: the
-   footer already said `waiting for the cluster` and the box said nothing
-   at all, so the one sentence a reader could act on sat one line below the
-   box they were actually reading. The ellipsis is not new vocabulary — it
-   is this product's own mark for *in progress*, the one the header's own
-   `· changing…` already carries
+1. **The verdict line reads `Checking with the cluster — up to 35
+   seconds…`, dim, in the exact row the answered sentence lands in once it
+   arrives — never blank.** Leaving that row empty was the smaller bug
+   underneath the one below: the footer already said `waiting for the
+   cluster` and the box said nothing at all, so the one sentence a reader
+   could act on sat one line below the box they were actually reading. The
+   ellipsis is not new vocabulary — it is this product's own mark for *in
+   progress*, the one the header's own `· changing…` already carries
    ([widgets.md § 1a](widgets.md#1a-the-header-row)) and the command log's
    own running mark already carries
    ([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)).
+   **The ceiling is new, and it is a fixed clause, never a countdown**
+   (NOTES § D273 — the entry and its own appended *The review round*, which
+   is where 35 became the number): a wait that can legitimately run half a
+   minute against a cluster with admission webhooks is a long time in front
+   of a box this section keeps keyless, below, and half a minute of a screen
+   that looks identical throughout is how a reader concludes the tool is
+   hung and kills it — the outcome the bound exists to prevent. A number
+   that ticked down would need a redraw on a timer to stay honest, and
+   [widgets.md § 6](widgets.md#6-when-a-frame-is-drawn) already rules out a
+   frame rate for anything short of a key, a resize, a watch event or a
+   modal's own verdict — none of which fire on a schedule while this box is
+   up. So the clause is stated once, drawn from the row's first frame,
+   unchanging until a verdict replaces the whole line: true the instant it
+   is read and still true a moment before the deadline actually fires,
+   which a moving number could not promise without a tick nothing here
+   provides.
 2. **Both buttons draw dim, not one.** `[ ⏎ do it ]` already dims until
    `Dialog::armed` — that much shipped. `[ esc cancel ]` never did: it has
    read at full weight, `screen.fg(theme::TEXT)`, in every frame this box
@@ -167,31 +183,41 @@ key that already did this same nothing; now the dim button and the silent
 press agree with each other and with the footer.
 
 **Ruling 3 — the box stays keyless, on purpose, and the bound belongs to
-code, not to a footer word.** `k8s-admin`'s own reading is right that a
+code, not to a footer word.** `k8s-admin`'s own reading was right that a
 dialog with zero live keys is one wedged apiserver from *the tool ignored
-me*, and it is not a hypothetical: the dry-run `ops::perform` sends carries
-no `tokio::time::timeout`, and none of the three `kube::Config`s it can be
-built from sets a `read_timeout` at all — a dead apiserver that accepted the
-TCP connection hangs this box **forever**
-([reports/2026-09-20-the-four-behaviours.md § What bounds the
+me*, and it was not a hypothetical when this ruling was first written: the
+dry-run `ops::perform` sent carried no `tokio::time::timeout`, and none of
+the three `kube::Config`s it could be built from set a `read_timeout` at all
+— a dead apiserver that accepted the TCP connection hung this box
+**forever** ([reports/2026-09-20-the-four-behaviours.md § What bounds the
 wait](../reports/2026-09-20-the-four-behaviours.md#what-bounds-the-wait)).
-That is a real gap, and closing it is bounding the wait so this state always
-ends — code, not a screen, and it is `main.rs`'s wiring box to own. **What
-this page will not do is paper over an unbounded wait with a `q quit` that
-lives only in this one sub-state of one dialog.** Every modal on this
-product already omits the anchor pair for the same stated reason — `esc` is
-always the way out, and a global quit sitting beside it on a pending
-mutation is a second, riskier way to leave that buys nothing `esc` does not
+**That gap is closed, not merely described** — the bound lives in
+`ops::perform` itself, around the `call(DRY_RUN)` this contract awaits, one
+edit that covers every operation rather than something each caller has to
+remember (NOTES § D273: *"the wiring box has no `call` closure, so the
+bound … goes inside the contract and `ops.rs` reopens for one change"* —
+overriding this ruling's own first guess that the wiring box would carry
+it). Expiry takes the path a refused dry-run already takes — `esc dismiss`
+in [§ The cluster said no](#the-cluster-said-no) — so the keyless window
+this section describes is bounded at **35 seconds**, not forever, and ends
+in a frame that already has a key. **What this page still will not do is
+paper over that window with a `q quit` that lives only in this one
+sub-state of one dialog.** Every modal on this product already omits the
+anchor pair for the same stated reason — `esc` is always the way out, and a
+global quit sitting beside it on a pending mutation is a second, riskier way
+to leave that buys nothing `esc` does not
 ([widgets.md § 2a](widgets.md#2a-the-footer)) — and a key that turns live
 only for the width of a dry-run, goes dark again the instant the box arms,
 and comes back *refused* rather than merely absent once the real call is on
 the wire ([§ While the call is running](#while-the-call-is-running)) would
 teach a reader three different answers for one key across one dialog's
-life. The fix this box needs is the one that makes `esc`'s own promise true
-again — bounded, not a second escape hatch — and until it lands, a reader
-genuinely stuck here has the same recourse they have over any other frozen
-keypress this product has ever produced: the terminal underneath it, not a
-key this page draws.
+life. A reader who presses `esc` before the deadline still gets ruling 2's
+silent no-op — that has not changed, and does not need to: the deadline is
+what makes the wait finite, not what makes `esc` do something new. **What
+this ruling no longer has to say is what a reader does if the deadline
+never fires** — it always does, now, within the 35 seconds ruling 1 names,
+and the frame that follows draws a live `esc dismiss`
+([§ The cluster said no](#the-cluster-said-no)).
 
 ### When the object's own name does not fit
 
@@ -539,7 +565,7 @@ variant:
 │   │  a new one. How many stop at the same time is a setting on  │  │
 │   │  this deployment — it can be a few, or all of them at once. │  │
 │   │  A paused deployment will not start until you resume it.    │  │
-│   │  Checking with the cluster…                                 │  │
+│   │  Checking with the cluster — up to 35 seconds…              │  │
 │   │                                                             │  │
 │   │  $ kubectl rollout restart deployment/web -n payments       │  │
 │   │                                                             │  │
@@ -1162,6 +1188,46 @@ sent once its own check has passed, and this check did not:
       │                   [ esc dismiss ]                    │
       └──────────────────────────────────────────────────────┘
 ```
+
+**1b, when it is k8rs's own deadline that answers, not a dead wire.** The
+generic sentence above is right when nothing is known beyond *silence* — a
+socket that dropped, a connection that went quiet with no cause k8rs can
+name. A `dryRun=All` that ran past **35 seconds** is a different fact: k8rs
+knows exactly how long it waited and that it was k8rs, not the network, that
+ended the wait ([NOTES § D273](../NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20)
+and its own appended *The review round*, which set the number). Telling the
+two apart is the whole reason [§ While the check is still on the
+wire](#while-the-check-is-still-on-the-wire) now names the ceiling up
+front — a reader who saw that line and watched it run out should not land
+on a sentence that reads as if nothing was ever known, because that is the
+sentence for the *other* cause and it undersells what k8rs can actually
+report:
+
+```
+      ┌ The check never got an answer ───────────────────────┐
+      │                                                      │
+      │  Nothing was changed.                                │
+      │                                                      │
+      │  k8rs waited 35 seconds for the cluster to check this│
+      │  change and heard nothing back.                      │
+      │                                                      │
+      │                   [ esc dismiss ]                    │
+      └──────────────────────────────────────────────────────┘
+```
+
+**Same title, same width, same button — only the explanation line differs,
+and only when k8rs actually has the more specific fact to give.** This is
+not a fourth top-level state: it is still `Fault::Unanswered`, `esc
+dismiss`, no quote heading, everything state 1b already draws — it is one
+box with two possible explanation lines, told apart by whether k8rs's own
+deadline is what ended the wait or a connection simply went quiet with no
+cause to name. `esc dismiss` and the audit log's own line already agree
+with this wording — [NOTES § D273](../NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20)
+§ *The review round* is what fixed the audit line to stop calling this
+sentence *the cluster's own words* — it is k8rs's, the one place on this
+whole page a `said` is not something the server sent back, which is also
+why it draws here with no `What the cluster sent back:` heading over it:
+that heading is 1c's, for the one state that can honestly carry it.
 
 **1c. The check reached the cluster, and the cluster said no.** This is the
 one case the old single sentence was already right about — the box below is

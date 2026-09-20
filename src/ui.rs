@@ -174,7 +174,22 @@ const WAITING: &str = "reading the cluster…";
 /// **The ellipsis is this product's own mark for *in progress*** — the header's `· changing…` and
 /// the command log's own running mark already carry it (`screens/widgets.md` § 1a, § 7) — and not
 /// [`CUT`], which is the mark for a string that had to give way.
-const CHECKING: &str = "Checking with the cluster…";
+///
+/// **The ceiling is read off [`crate::ops::CHECK_DEADLINE`] and never typed here** — that constant
+/// is `pub(crate)` for this one reader, and its own doc says so (NOTES § D273 *The review round*,
+/// which moved the number once already). **A fixed clause and never a countdown**: nothing redraws
+/// this box on a timer (`screens/widgets.md` § 6), so a number that ticked would go stale between
+/// frames, while *up to N* is true from the first frame to the last.
+///
+/// A `String` because `format!` is not `const`, and the alternative — a `const` prefix joined at
+/// the one call site — puts half the sentence a screen file specifies somewhere the screen file's
+/// own test cannot read it.
+fn checking() -> String {
+    format!(
+        "Checking with the cluster — up to {} seconds…",
+        crate::ops::CHECK_DEADLINE.as_secs()
+    )
+}
 
 /// **The only thing k8rs shortens on purpose, and it is always visible where it happened**
 /// (`screens/widgets.md` § 7). One character on every cut, so the mark a reader learns is one mark
@@ -2165,7 +2180,7 @@ fn typed_name(dialog: &views::Dialog, columns: usize, screen: &Screen) -> Vec<Li
 ///
 /// **The verdict's row is drawn whether or not the verdict has arrived**, so the box does not
 /// grow by a row the moment the cluster answers — and while the check is out that row says
-/// [`CHECKING`] rather than nothing, because a blank row put the one sentence a reader could act
+/// [`checking`] rather than nothing, because a blank row put the one sentence a reader could act
 /// on outside the box they were reading (`screens/dialogs.md` § While the check is still on the
 /// wire). For `delete` the verdict is `Some` from the first frame (NOTES § D225 ruling 1 —
 /// nothing is sent, so there is nothing to wait for) and that box never draws this row; for
@@ -2193,7 +2208,7 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
         .as_ref()
         .map_or_else(Vec::new, |warning| wrapped(warning, columns));
     let verdict = dialog.verdict.map_or_else(
-        || wrapped(CHECKING, columns),
+        || wrapped(&checking(), columns),
         |verdict| wrapped(&spoken(verdict), columns),
     );
     let field = usize::from(dialog.asks.is_some()) * FIELD_ROWS;
@@ -2299,11 +2314,16 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
 /// **The cluster said no** (`screens/dialogs.md` § The cluster said no) — a rejected write is a
 /// first-class state and not a toast that vanishes.
 ///
-/// **What the cluster sent back is the one string in any dialog that came off the API**, so it is
-/// the one thing here that is bounded at draw time: `k8s::FREE_TEXT` allows 4096 bytes and a
-/// `fieldValidation=Strict` rejection hands back the object that was sent (NOTES § D217), which
-/// is eighty wrapped lines into a box with room for four. [`cut`] marks what it dropped, which is
-/// what keeps this out of `screens/widgets.md` § 7's ban on a silent truncation.
+/// **Two strings in this box came off the API, and both are bounded at draw time**:
+/// `k8s::FREE_TEXT` allows 4096 bytes and a `fieldValidation=Strict` rejection hands back the
+/// object that was sent (NOTES § D217), which is eighty wrapped lines into a box with room for
+/// four. [`cut`] and [`marked`] mark what they dropped, which is what keeps this out of
+/// `screens/widgets.md` § 7's ban on a silent truncation.
+///
+/// **The second one is new and the doc here said *the one string* until 2026-09-20**: state 1b's
+/// second reading draws `ops::Outcome::said` as the explanation line rather than as a quote
+/// (`screens/dialogs.md` § The cluster said no, NOTES § D273), so the quote block is no longer the
+/// only way an API string reaches this box.
 ///
 /// **The room left is counted from the rows already spent and never from the mockup's own three
 /// lines** — the closing sentence wraps to two at this width today and to more at another, and a
@@ -2332,6 +2352,24 @@ fn refused(
     // server answer at all** ([`answered`]) decides the other two. Only a state the cluster can
     // have answered in words carries a quote.
     let moved = format!("{} — {}.", capitalised(views::MOVED), views::REREAD);
+
+    // **State 1b is one box with two explanation lines** (`screens/dialogs.md` § The cluster said
+    // no, *1b, when it is k8rs's own deadline that answers*): silence with no cause k8rs can name,
+    // or k8rs's own deadline, which knows exactly how long it waited. Same title, same width, same
+    // button, and no `What the cluster sent back:` heading either way — that heading is 1c's.
+    //
+    // **The discriminator is *is there a sentence*, not *did the deadline fire*, and it is weaker
+    // than it looks** (NOTES § D273, last section): `ui.rs` cannot see the deadline, and a server
+    // that put k8rs's own expiry wording in a `Status.message` would land here. Accepted rather
+    // than closed, for the reasons that entry gives — do not read this as proof of origin.
+    //
+    // **The full stop is the renderer's** (same entry): `ops.rs`'s sentences are fragments because
+    // they are composed, and this is the only place one is drawn alone in a box. It goes on this
+    // arm only — 1c quotes the cluster, and a period k8rs wrote inside quoted words is a lie.
+    let waited = said
+        .filter(|said| !said.is_empty())
+        .map(|said| format!("{said}."));
+
     let (title, outcome, because, quotes) = match (fault, sent) {
         (Fault::Conflict, _) => (
             "The object changed first",
@@ -2349,8 +2387,10 @@ fn refused(
         (Fault::Unanswered | Fault::Unfinished, false) => (
             "The check never got an answer",
             "Nothing was changed.",
-            "k8rs does not know whether the check that runs before the real change reached the \
-             cluster.",
+            waited.as_deref().unwrap_or(
+                "k8rs does not know whether the check that runs before the real change reached \
+                 the cluster.",
+            ),
             false,
         ),
         (Fault::Refused | Fault::Rejected | Fault::Expired | Fault::Gone, false) => (
@@ -2384,10 +2424,27 @@ fn refused(
     let mut lines = vec![Line::raw("")];
     lines.extend(margined(outcome, columns, text));
     lines.push(Line::raw(""));
-    let tail: Vec<Line> = margined(because, columns, text)
-        .into_iter()
-        .chain([Line::raw(""), dismiss(screen)])
-        .collect();
+
+    // **The explanation is bounded too, and that is the security gate's *sizes are bounded* row
+    // rather than tidiness.** Until 1b's second reading every explanation here was k8rs's own
+    // words and the quote block below was the only thing that came off the API; now one arm draws
+    // `ops::Outcome::said` as the explanation itself, which `k8s::FREE_TEXT` lets reach 4096
+    // bytes — eighty wrapped lines, and [`boxed`] sizes the box to the lines it is handed, so an
+    // unbounded one grows past [`MODAL_ROWS`] and takes `esc dismiss` off the screen with it.
+    // **The budget is the rows the blank and the button leave**, and [`marked`] leaves [`CUT`]
+    // where it dropped the rest (`screens/widgets.md` § 7).
+    let tail: Vec<Line> = indent(
+        marked(
+            wrapped(because, columns),
+            columns,
+            MODAL_ROWS.saturating_sub(lines.len() + 2),
+        ),
+        MODAL_MARGIN,
+        text,
+    )
+    .into_iter()
+    .chain([Line::raw(""), dismiss(screen)])
+    .collect();
 
     if let Some(said) = said.filter(|said| quotes && !said.is_empty()) {
         // **The heading stopped promising prose** (invariant 14, `screens/dialogs.md` § The

@@ -294,6 +294,7 @@ its line moving with it.
 - [D270](#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18) — the which-pods box: a block is about the object the surface is about, a stack that erased the pane's own sentence, and a row order that would not hold still
 - [D271](#d271--the-strip-box-a-callers-promise-becomes-a-type-and-a-header-word-that-outlived-the-fact-it-described-2026-09-19) — the strip box: a caller's promise becomes a type, and a header word that outlived the fact it described
 - [D272](#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20) — the four behaviours: a clamp the renderer computed and threw away, an `esc` that is inert with nothing bounding the wait, and a box that named two keys the footer did not
+- [D273](#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20) — the wiring box has no `call` closure, so the bound D272 ordered goes inside the contract and `ops.rs` reopens for one change
 
 ## Why it exists — where the gap is
 
@@ -23917,3 +23918,175 @@ silent), its missing `g`/`G`, and the scrollbar no tab body draws — all three 
 three new surface rather than defects in the landed code. The unbounded wait, the `Confirm → Refused`
 transition, who owns `App::scroll`, and the two `dead_code` expectations are in the wiring box's own
 text, each with the measurement behind it.
+
+### D273 — the wiring box has no `call` closure, so the bound D272 ordered goes inside the contract and `ops.rs` reopens for one change (2026-09-20)
+
+[D272](#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20)
+ruling 2 put an obligation into Phase 12's wiring box and named the place to carry it out: *"bound
+the wait in the wiring box's own `call` closure, exactly as `main.rs` already does eight times"*.
+**That closure does not exist, and this was found by opening `ops.rs` rather than by reading D272
+again.** The three shipped operations build their own: `ops::scale` at `src/ops.rs:1733`,
+`ops::restart` and `ops::delete` at the same position in theirs. A caller hands `ops::scale` a
+`client`, a `Scaling`, a clock, an audit sink, `show` and `ask` — and nothing else. `main.rs`'s
+eight `tokio::time::timeout`s are around **reads it issues itself**; there is no ninth place for
+one, because the write path is `ops.rs`'s by [invariant 1](CLAUDE.md) and the console may not
+assemble a request.
+
+So D272's ruling stands and its mechanism was reasoned rather than measured — the failure mode
+[CLAUDE.md § Where a leak would actually happen](CLAUDE.md) names, written by someone being careful
+about a hang one `grep` away from the closure they were placing it in.
+
+**Three places it could go, and why two of them are wrong.**
+
+**The client, rejected on a decision already recorded.** `kube::Config::read_timeout` would bound
+every request including this one, and `src/k8s.rs` § WHAT A THROTTLE LOOKS LIKE leaves it unset on
+purpose: *"`read_timeout` is client-wide and a healthy watch is idle for long stretches"*. A
+deadline that kills an idle watch to bound a dialog is a worse bug than the one it closes.
+
+**The loop, by dropping the future — nearly right, and it loses the half the log needs.** The
+console holds `perform`'s future in a field and polls it through `&mut`
+([D232](#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)),
+so it *can* arm a deadline when the dialog opens and drop the future when it fires; that is what
+`tokio::time::timeout` does anyway, one level out. What it cannot do is finish the record. The
+attempt line is written and flushed **before** the call and the result line is appended after, and
+that ordering is type-enforced — `result_line` takes `&outcome`, which cannot exist before the call
+returns (todo.md § Phase 7, *the audit line is written and flushed before the call*). A dropped
+future produces no `Outcome` and therefore no result line, leaving the audit log holding an attempt
+with nothing after it — indistinguishable from k8rs being killed mid-call, which is the one reading
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1 refused to ship for `delete`. A bound whose own record cannot say it fired is not the bound
+invariant 4 asks for.
+
+**The contract, which is where it goes.** `perform` is the one place `call(DRY_RUN)` is awaited
+(`src/ops.rs:938`), so one edit there covers `scale`, `restart`, `delete` and every operation v0.2
+adds — single point of change, and the deadline becomes part of *what a check is* rather than
+something each caller has to remember. Expiry takes the path a dry-run `Err` already takes:
+`Outcome::NotSent`, which opens `Modal::Refused`, where `esc dismiss` works. The result line is
+written because `perform` returned.
+
+**This reopens a frozen file, and that is the ruling, not an oversight.** `ops.rs` froze at Phase 7's
+close. [CLAUDE.md § Architecture workflow](CLAUDE.md) says what to do when a later step needs a
+frozen file changed — *stop, fix the order, record it in `NOTES.md`, continue* — and this entry is
+that record, written before the change. **It is bounded to one thing**: a deadline around the
+dry-run inside `perform`, its constant beside it, and the tests that prove it. Nothing else in
+`ops.rs` opens, and it re-freezes when that lands.
+
+**What D232 missed, worth saying because that box existed to catch exactly this.** It asked whether
+`perform`'s *signature* could be driven beside an event loop and proved that it can. It did not ask
+whether everything the console would need to *do* to `perform` was reachable through that signature,
+and the unbounded check is the case where it is not. A freeze-risk probe that tests the types and
+not the obligations is half a probe.
+
+**What is deliberately not taken.** `call(FOR_REAL)` is unbounded too, and stays so here: it hangs
+with the modal already closed, `changing…` in the header and `q` refused, which is a different
+screen and a different ruling — and a bound on the real call raises D225's *k8rs does not know
+whether the change was made*, which is not a thing to decide in passing. It is `backlog.md`'s.
+
+**The review round, and it moved both of the two things this entry had chosen.** The mechanism above
+survived; the number and the sentence did not, and each was overturned by a measurement rather than
+by an argument.
+
+**1. Ten seconds is below what a healthy cluster legitimately spends, measured on one**
+(`k8s-admin`, [reports/2026-09-20-the-dry-run-deadline.md](reports/2026-09-20-the-dry-run-deadline.md)).
+A `dryRun=All` runs the admission chain, and a black-holed webhook at `failurePolicy: Ignore` — so
+every row below is a dry-run the cluster **accepted**, `rc=0` — cost: no webhooks **93 ms**; one
+validating at the default `timeoutSeconds: 10`, **10 078 ms**; one at 30, **30 090 ms**; three
+mutating at 10 each, **30 078 ms** — they accumulate; three validating at 10 each, **10 086 ms** —
+that phase does not. Two mutating plus one validating hit the apiserver's own ceiling at **34 s** and
+came back `Timeout: request did not complete within requested timeout`. So the original doc reasoned
+to a floor from `ValidatingWebhook::timeout_seconds` — correct, read off the crate — and then set the
+deadline **at** it: at the default single-webhook timeout the cluster's answer lands on the same
+millisecond k8rs gives up, and `restart` pays the handshake out of the same budget. **The argument
+from [`k8s::REPORT_FETCH`] was matching on the wrong axis**: that constant bounds an optional read
+whose expiry costs one row — its own doc says *"this call owes the reader nothing"* — and this one
+aborts an operator's confirmed mutation. Same shape, opposite cost of being wrong.
+
+**The number is 35 seconds**, above the ceiling the server enforced, so expiry means the apiserver
+has stopped keeping its own request budget — a genuine wedge, which is the only thing this bound was
+ever for. **It is one cluster's ceiling and not a guarantee**: `--request-timeout` is a server flag no
+client can read. The shape that removes the class rather than re-tuning it is sending the deadline
+*to* the server (`?timeout=30s`) and keeping a local bound just above it, so the common case ends in
+the cluster's own typed answer; `PatchParams` has no `timeout` field, so that is a hand-built request
+and it is `backlog.md`'s.
+
+**2. The record contradicted itself inside one line, and both reviewers found it independently.**
+`in_words` answers `Fault::Unanswered | Fault::Unfinished` with *"k8rs could not reach the cluster"*,
+so the audit line read `dry-run: k8rs does not know whether the check reached the cluster · … k8rs
+could not reach the cluster: k8rs waited 10 seconds …`. Both clauses cannot be the careful one, and
+the deadline covers the connect *and* the wait, so the honest claim is the first. `src/k8s.rs`'s own
+doc over `answer()` already named the class — *"the fallback is a claim about the cluster, so every
+code without an arm silently accuses the network"* — written for status codes with no arm, and this
+change added a route with no status code at all onto the same fault. **Two other files already had
+the careful wording**, so nothing was invented: `ui.rs`'s modal says *"k8rs does not know whether the
+check … reached the cluster"* and `views.rs` says *"nothing usable came back"*. `in_words` now says
+the same, which also ends a pre-existing over-claim on the four routes that were there before.
+**`tester` found that the one output-derived assertion in the diff was the one pinning that
+sentence** — a wording decided in a test rather than in a ruling, which is why it is here.
+
+**3. `ops::scale`'s pre-read is bounded too, which widens the reopening this entry authorised.**
+`api.get_scale` runs *before* `perform` — before the attempt line and before `show` — and nothing
+wrapped it, so against the exact failure this entry names, `scale` hung with no dialog, no audit
+record **at all**, and no bound: strictly worse than the case being closed, one line above it. The
+deferral reasoning in this entry's last paragraph does not reach it — a `GET` changes nothing, so
+bounding it raises none of [D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1's *k8rs does not know whether the change was made*. It is [`crate::k8s::REPORT_FETCH`]'s own
+case one file over.
+
+**4. `Fault::Unanswered` is kept and the argument for it is replaced.** The first draft defended it
+by reading *a timeout* off that variant's own list; the timeouts on that list are ones the **client**
+reported as an error, and this route produces no error at all. `Fault::Unfinished` is documented as
+exactly *k8rs's own deadline said the waiting is over* — the better fit on the definition, and its
+doc claims it arrives only through `Watch::unfinished`, so taking it means editing a frozen file to
+make a doc true again for no observable gain: `in_words`, `answered()` and `Record::check` map the
+two identically. Kept, with the choice stated rather than reasoned from a word on a list.
+
+**What the gate could not say, recorded because a count cannot.** `just mutants-diff` reported **2
+mutants, both unviable** — cargo-mutants replaces a function's return value, `Response` and
+`Performed` are not `Default`, and a `const` is not a function at all. **Zero viable mutants: the
+gate made no claim about this diff**, which reads exactly like a clean one. The bound's proof is four
+hand-planted reds — two by the author, two by `tester`, including a planted `from_secs(30)` that the
+test pair caught. **The pair pins whole seconds only** (`from_millis(10_900)` passed both), and a
+wrong large constant made the suite *hang* rather than fail, because the test's own outer stop was
+`CHECK_DEADLINE * 3`. Both are why `test-util` is now a `[dev-dependencies]` feature and the tests
+move the clock instead of waiting on it.
+
+**Two sentences for one event, and the newer one is kept on purpose.** `src/main.rs`'s driver already
+says *"this cluster has not answered for {thing} after {seconds} seconds"*. The write path says
+*"k8rs waited N seconds for the cluster to check this change and heard nothing back"* because the
+reader of that one needs the second half — that nothing was sent. The driver's is scaffolding that
+goes at Phase 12's flags box, so the two are not unified now; the choice is recorded here rather than
+left to be found (`tester`).
+
+**Still unbounded, and now measured rather than suspected** (`tester`, against an apiserver that
+accepts the TCP connection and never speaks TLS): `k8rs --once` is bounded and says so at 30 s, and
+**every `ops` verb hangs to the kill printing nothing** — `may-i` included, which never enters
+`perform`. The hang is in the driver's pre-operation path, before `show`, so it is neither this entry's
+bound nor the pre-read in point 3. `backlog.md`'s, beside `call(FOR_REAL)`.
+
+**The full stop belongs to whoever composes a whole sentence, and that is never `ops.rs`.**
+`screens/dialogs.md` draws the expiry sentence alone in a box beside `Nothing was changed.`, so it
+wants a terminator; `dev-core` was asked for one and **stopped instead, having measured what it
+would do**. Every sentence in `ops.rs`'s vocabulary is a deliberate fragment — `verdict`'s arms,
+`in_words`'s seven, `unread`, `unasked` — because they are *composed*: `verdict` + `": "` + `said`,
+and then `Performed::plainly` appends `" — but k8rs could not write that to the audit log …"` when
+`recorded` is false. A stop inside the fragment produces **`…heard nothing back. — but k8rs could
+not write …`**: a terminated sentence followed by a fragment, in the one branch where k8rs is
+telling an operator its own record is short a line. Not reachable today only because a Kubernetes
+`Status.message` conventionally carries no trailing period, which is a convention and not a
+guarantee.
+
+**So the renderer adds it, at the point where a fragment becomes a sentence.** `ui.rs` draws that
+string alone in a box and is the only consumer that does; the audit line and `unread` both run it
+on. This is not a second copy of anything — punctuation for a standalone line is a fact about the
+line, not about the vocabulary — and it keeps the composable set composable, which is what the other
+two consumers are built on. **The stop goes only on the arm where the sentence is k8rs's own**:
+state 1c quotes the cluster's words under their own heading and must not gain a period k8rs wrote.
+
+**And the discriminator is *is there a sentence*, not *did the deadline fire*, which is worth saying
+because it is weaker than it looks.** `tester` forged a `500` whose `Status.message` is k8rs's own
+expiry sentence and got a byte-identical audit line, so a server can in principle put a string on
+the route that draws without a quote heading. It is accepted rather than closed: a hostile API
+server is outside the trust model ([invariant 3](CLAUDE.md) — k8rs runs on the user's machine
+against their kubeconfig, and that is the whole of it), invariant 9's strip still applies to
+whatever arrives, and the alternative is a typed *this expired* flag threaded out of `ops.rs`, which
+reopens a frozen file for a case no untrusted party can reach.

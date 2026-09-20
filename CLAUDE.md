@@ -938,7 +938,14 @@ in order, no skipping:
   ```
 
   - **types:** `feat` `fix` `docs` `perf` `refactor` `style` `test` `chore` `ci` `revert`
-  - **scopes:** `rules` `k8s` `ui` `theme` `main` `fixtures` `ci` `docs`
+  - **scopes:** `rules` `ops` `ui` `theme` `main` `analysis` `views` `fixtures`
+    `guards` `screens` `ci` `docs` `changelog` — **counted off the log, not recalled**:
+    `git log --format='%s' | grep -oE '^[a-z]+\(([a-z-]+)\)' | sed 's/.*(//;s/)//' | sort | uniq -c | sort -rn`.
+    This list said `k8s` until 2026-09-20 and **no commit has ever used it**, while `ops`
+    (13), `changelog` (201), `guards` (3) and `screens` (2) were in the log and not here —
+    the same staleness invariant 10's flag list has now had four times, in the file that
+    warns about it. A scope is a word a reader of the changelog sorts by, so the rule is the
+    file the change is in, and a new one is added here in the same commit that first uses it
   - **subject:** English, imperative, lowercase, no trailing period
   - **body:** never open a paragraph with `Word:` — git-conventional reads the
     line as a *footer*, so `commit.body` loses it and the changelog entry ships

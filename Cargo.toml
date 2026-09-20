@@ -203,7 +203,24 @@ ratatui = "0.30.2"
 # left here is `io-util`, for the stub API server that exercises § EVERY KIND THE
 # CLUSTER SERVES' legacy fallback — the branch a supported-with-a-note pre-1.27
 # cluster reaches and no other test can (D149, D152 failure 1).
-tokio = { version = "1.53.1", features = ["net", "io-util"] }
+# **`test-util` for the one thing a deadline needs and cannot buy: a clock the
+# test moves.** `ops::CHECK_DEADLINE` bounds `perform`'s `dryRun=All`
+# ([NOTES § D273](NOTES.md)) and the operator review raised it above the
+# apiserver's own ceiling, which is the right number and an unrunnable test: a
+# suite that pays a real deadline once pays it on every CI run forever.
+# `tokio::time::pause`/`advance` is the answer and it lives behind this feature.
+# **It was asked for twice before it was granted** — `k8s_tests.rs` hit the same
+# wall on 2026-08-27 and paid wall clock, and `dev-core` hit it again writing
+# D273's tests.
+#
+# **It does not reach the shipped binary, and that is measured rather than
+# reasoned from the resolver's documentation** — edition 2024 selects resolver 3,
+# which keeps a `[dev-dependencies]` feature out of the normal build, and
+# `cargo tree -e features,no-dev -i tokio` is what says so about *this* tree.
+# `net` and `io-util` above carry the same claim for the same reason
+# ([NOTES § D165](NOTES.md)): name what our own code writes, inherit nothing
+# silently.
+tokio = { version = "1.53.1", features = ["net", "io-util", "test-util"] }
 
 # Only the fixture tests parse JSON in Phase 3 — the decode they exercise is
 # `serde` into `k8s_openapi::api::core::v1::Pod`. It moves up to a real

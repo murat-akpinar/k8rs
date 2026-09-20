@@ -8988,7 +8988,7 @@ fn the_verdict_row_is_reserved_before_the_cluster_answers() {
                 .unwrap_or_else(|| panic!("no {needle:?} row in\n{}", box_.join("\n")))
         };
         assert_eq!(
-            at(&waiting, CHECKING),
+            at(&waiting, &checking()),
             at(&answered, &spoken(verdict)),
             "the sentence the cluster's answer replaces is not drawn in the row it lands in"
         );
@@ -9034,18 +9034,6 @@ fn the_delete_boxes_are_the_screen_files_boxes_but_for_the_gap_between_two_butto
 /// this file keeps from the page, and it has its own test.
 #[test]
 fn every_dialog_says_the_words_the_screen_file_says() {
-    let words = |box_: &[String]| {
-        box_[1..box_.len() - 1]
-            .iter()
-            .filter(|row| !row.contains("esc cancel") && !row.contains("esc dismiss"))
-            .flat_map(|row| {
-                row.trim_matches('│')
-                    .split_whitespace()
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>()
-    };
     let mut paused = restarting();
     paused.warning = Some(PAUSED.to_owned());
     let mut pending = scaling();
@@ -9089,8 +9077,8 @@ fn every_dialog_says_the_words_the_screen_file_says() {
             "block {nth} is a different width from the box the screen file draws"
         );
         assert_eq!(
-            words(&drawn),
-            words(&mockup),
+            said_by(&drawn),
+            said_by(&mockup),
             "block {nth} does not say what screens/dialogs.md says"
         );
 
@@ -9117,6 +9105,195 @@ fn every_dialog_says_the_words_the_screen_file_says() {
             "block {nth} does not offer the buttons screens/dialogs.md draws"
         );
     }
+}
+
+/// The words of every row of a box but its button row, in order — the button row is every box's
+/// one difference from the page ([`every_dialog_says_the_words_the_screen_file_says`] says why)
+/// and is asserted on its own wherever it matters.
+fn said_by(box_: &[String]) -> Vec<String> {
+    box_[1..box_.len() - 1]
+        .iter()
+        .filter(|row| !row.contains("esc cancel") && !row.contains("esc dismiss"))
+        .flat_map(|row| {
+            row.trim_matches('│')
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// **The pending row names the ceiling its check is bounded at, and the number is
+/// `ops::CHECK_DEADLINE`'s** (`screens/dialogs.md` § While the check is still on the wire,
+/// NOTES § D273 — which moved that number once already).
+///
+/// **What this pins is the *number*, against the constant and never against `35`.** The sentence
+/// around it is the screen file's, and
+/// [`the_restart_boxes_are_the_screen_files_boxes_row_for_row`] and
+/// [`every_dialog_says_the_words_the_screen_file_says`] assert it against the page — which is why
+/// this one reads a fragment: the wording has a specification and the number has a source, and
+/// the defect worth catching is a second copy of the source.
+///
+/// **What it cannot prove is that `ui.rs` did not type `35`**, because both sides read 35 today —
+/// no in-process assertion can tell a derived number from a copied one that agrees. It is proven
+/// by moving the constant and watching this go red, which is what it is here to do the day
+/// somebody moves it for real (NOTES § D273 *The review round* 1 is the last time).
+#[test]
+fn the_pending_row_names_the_ceiling_the_check_is_bounded_at() {
+    let mut pending = scaling();
+    pending.verdict = None;
+    let drawn = box_of(views::Modal::Confirm(pending));
+    let ceiling = format!("up to {} seconds", crate::ops::CHECK_DEADLINE.as_secs());
+    assert!(
+        drawn.iter().any(|row| row.contains(&ceiling)),
+        "the pending box does not name {ceiling:?}, the ceiling its own check is bounded at:\n{}",
+        drawn.join("\n")
+    );
+}
+
+/// **State 1b is one box with two explanation lines, and k8rs's own deadline gets the specific
+/// one** (`screens/dialogs.md` § The cluster said no, *1b, when it is k8rs's own deadline that
+/// answers*; NOTES § D273).
+///
+/// **Both readings are asserted, because the claim is that one box says two things** — a test
+/// fed only the expiry sentence would pass on a box that had lost the generic one entirely, and
+/// the generic sentence is the right answer for every `Unanswered` a socket caused.
+///
+/// **The quote heading is asserted absent by name.** `What the cluster sent back:` is 1c's, for
+/// the one state that can honestly carry the cluster's words; this sentence is k8rs's own, and
+/// the heading over it would say the cluster answered when it did not.
+///
+/// **The full stop is part of the words and not a geometry detail** — `back.` and `back` are
+/// different tokens, so the join below carries it (NOTES § D273's last two sections: `ops.rs`'s
+/// vocabulary is composable fragments and the terminator is the renderer's).
+///
+/// **The sentence fed in is written here rather than called**, because `ops::heard_nothing` is
+/// private to its own file; its *number* is still read off `ops::CHECK_DEADLINE` and not typed.
+#[test]
+fn the_unanswered_box_says_how_long_it_waited_where_that_is_what_k8rs_knows() {
+    let blocks = fenced("dialogs.md", "## The cluster said no");
+    assert_eq!(
+        blocks.len(),
+        5,
+        "screens/dialogs.md § The cluster said no no longer draws a 409, 1a, 1b's two readings \
+         and 1c"
+    );
+    let waited = format!(
+        "k8rs waited {} seconds for the cluster to check this change and heard nothing back",
+        crate::ops::CHECK_DEADLINE.as_secs()
+    );
+    let mut both = Vec::new();
+    for (nth, said) in [(2, None), (3, Some(waited))] {
+        let drawn = box_of(views::Modal::Refused {
+            sent: false,
+            fault: crate::k8s::Fault::Unanswered,
+            said,
+        });
+        let mockup = nested(&blocks[nth]);
+        assert!(
+            drawn.last().is_some_and(|row| row.starts_with('└')),
+            "the box does not close:\n{}",
+            drawn.join("\n")
+        );
+        // **The title bar is the width and the title in one row**, which is the page's own
+        // *same title, same width* said as a comparison instead of as two numbers.
+        assert_eq!(
+            drawn[0], mockup[0],
+            "1b's block {nth} does not draw screens/dialogs.md's title bar"
+        );
+        assert_eq!(
+            drawn.len(),
+            mockup.len(),
+            "1b's block {nth} is a different height from the box screens/dialogs.md draws:\n{}\n{}",
+            drawn.join("\n"),
+            mockup.join("\n")
+        );
+        assert_eq!(
+            said_by(&drawn),
+            said_by(&mockup),
+            "1b's block {nth} does not say what screens/dialogs.md says"
+        );
+        assert!(
+            !drawn.join("\n").contains("What the cluster sent back:"),
+            "1b drew 1c's quote heading over a sentence k8rs wrote itself:\n{}",
+            drawn.join("\n")
+        );
+        both.push(drawn);
+    }
+
+    // **The button is compared between the two drawn boxes and never against the page**, because
+    // its centring is the one thing on any box this file does not take from the screen file
+    // ([`the_delete_boxes_are_the_screen_files_boxes_but_for_the_gap_between_two_buttons`]).
+    let button = |box_: &[String]| {
+        box_.iter()
+            .find(|row| row.contains("esc dismiss"))
+            .cloned()
+            .unwrap_or_else(|| panic!("no button row on\n{}", box_.join("\n")))
+    };
+    assert_eq!(
+        button(&both[0]),
+        button(&both[1]),
+        "the two readings differ in their button"
+    );
+    assert_ne!(
+        said_by(&both[0]),
+        said_by(&both[1]),
+        "the deadline reading drew the sentence for a cause k8rs could not name"
+    );
+}
+
+/// **1b's own sentence came off the API too, so it is bounded like the quote is** — the security
+/// gate's *sizes are bounded* row, read at the second place a string `k8s::FREE_TEXT` sized can
+/// now reach this box ([`refused`], NOTES § D273).
+///
+/// **The sibling of [`a_consequence_too_long_for_the_box_gives_way_before_the_buttons_do`], and
+/// for the same reason**: [`boxed`] sizes a box to the lines it is handed, so an unbounded
+/// explanation is not a long sentence — it is a box taller than the body with `esc dismiss`, its
+/// last row, the first thing ratatui clips. Nothing `ops.rs` builds comes near 4096 bytes; the
+/// field is a `String` off the wire and this is reachable by construction.
+///
+/// **The mark is asserted, not just the height**, because a silent clip passes a height check and
+/// is what `screens/widgets.md` § 7 bans by name.
+#[test]
+fn a_refusal_sentence_the_size_the_api_allows_gives_way_before_the_button_does() {
+    let said = "word ".repeat(820);
+    assert!(
+        said.len() > 4000,
+        "the fixture stopped being the size k8s::FREE_TEXT allows"
+    );
+    let drawn = box_of(views::Modal::Refused {
+        sent: false,
+        fault: crate::k8s::Fault::Unanswered,
+        said: Some(said),
+    });
+    // **Exactly [`MODAL_ROWS`], not *at most* it** — a sentence with more to say than the box has
+    // room for spends every row the box has and not one more. `<=` passes on a budget that is one
+    // row short as readily as on the right one, and a budget arrived at by arithmetic is where a
+    // row goes missing (the same arithmetic one box along, in [`confirm`], has four surviving
+    // mutants recorded against it for exactly this reason).
+    assert_eq!(
+        drawn.len(),
+        MODAL_ROWS + 2,
+        "the box is {} rows where it has room for {}:\n{}",
+        drawn.len(),
+        MODAL_ROWS + 2,
+        drawn.join("\n")
+    );
+    assert!(
+        drawn.iter().any(|row| row.contains(CUT)),
+        "the sentence was clipped in silence:\n{}",
+        drawn.join("\n")
+    );
+    assert!(
+        drawn.iter().any(|row| row.contains("[ esc dismiss ]")),
+        "a long sentence pushed the way out off the box:\n{}",
+        drawn.join("\n")
+    );
+    assert!(
+        drawn.last().is_some_and(|row| row.starts_with('└')),
+        "the box does not close:\n{}",
+        drawn.join("\n")
+    );
 }
 
 /// **The three widths, and the margins that are nobody's choice** (`screens/widgets.md` § 5).

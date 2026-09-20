@@ -2584,6 +2584,40 @@ recorded reversal and a later box rather than a dev round
   (`ns: payments · read-only`, no `live`). Found by `tester`, 2026-09-13;
   pre-existing.
 
+- **Every `ops` verb hangs forever against an apiserver that accepts the connection and never speaks
+  TLS, and `may-i` — which sends nothing and changes nothing — hangs with them.** Measured against
+  the real binary, 2026-09-20: `k8rs --once` is bounded and says so at 30 s, while
+  `ops scale`, `ops restart`, `ops delete` and `ops may-i` each ran to the kill at 40–45 s having
+  **printed nothing at all** — no dialog, no error, no audit line. The hang is in the driver's
+  pre-operation path, before `show` and before `ops::perform`, so neither
+  [D273](NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20)'s
+  bound on the check nor the bound it added to `ops::scale`'s pre-read reaches it; `may-i` never
+  enters `perform` at all, which is what rules out the contract as the place to fix it. The same
+  four calls `connect_with` makes are the ones `src/k8s.rs` § REPORT\_FETCH already records as
+  having no read deadline — this is that hole measured from the outside, on the one path where the
+  operator is sitting in front of it. Found by `tester`, 2026-09-20.
+
+- **`call(FOR_REAL)` is unbounded and deferred on purpose, which is a stated asymmetry rather than an
+  oversight.** The check is bounded at 35 s; the real call is not, so a cluster that accepts the
+  mutation and never answers leaves the modal closed, `changing…` in the header and `q` refused,
+  with nothing ending it. A bound there is not the same change as a bound on the check: it converts
+  a clean *never sent* into
+  [D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+  ruling 1's *k8rs does not know whether the change was made*, which is exactly what the delete
+  preflight was spent avoiding — so it needs a ruling about what the screen says, not a `timeout`.
+  Recorded by the PM with D273, 2026-09-20.
+
+- **Sending the deadline to the server instead of only keeping one locally.** `?timeout=30s` on the
+  `dryRun=All` would make the common slow-admission case end in the apiserver's own typed answer —
+  `Timeout: request did not complete within requested timeout`, measured — instead of k8rs guessing
+  from a local clock, with a local bound a few seconds above it as the backstop. It removes the
+  class that D273's review round re-tuned: the local number is currently 35 s because it sits just
+  above the 34 s ceiling **one** cluster was observed enforcing, and `--request-timeout` is a server
+  flag no client can read, so that margin is a guess everywhere else. Cost:
+  `PatchParams` carries no `timeout` field, so the request is built by hand. Proposed by
+  `k8s-admin` ([reports/2026-09-20-the-dry-run-deadline.md](reports/2026-09-20-the-dry-run-deadline.md)),
+  2026-09-20.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

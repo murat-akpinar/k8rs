@@ -4619,9 +4619,16 @@ Goal: one binary, live and safe.
       carries a lifetime: `Console<'a>`, never `Console`. Cheap if it shapes the
       struct; a rewrite if it is met afterwards.
       **Four things this box owes that were measured elsewhere** ([D272](NOTES.md#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20)):
-      the `call` closure wraps the dry-run in a `tokio::time::timeout` — kube's
+      the dry-run is bounded — kube's
       three `Config` constructors set `read_timeout: None`, so an apiserver that
-      answers nothing leaves a confirm box open forever with no live key; the
+      answers nothing leaves a confirm box open forever with no live key.
+      **That clause said *the `call` closure wraps the dry-run in a
+      `tokio::time::timeout`* and the closure it named does not exist**, which is
+      [D273](NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20):
+      the three operations build their own inside `ops.rs`, so the bound went into
+      `perform` and this box owes **nothing** here but not giving it a second,
+      outer deadline. Landed 2026-09-20 with a review round that moved the number
+      and the sentence both. The
       modal is replaced on **every** terminal path of `perform`, the dry-run's
       own `Err` included, because nothing in `views.rs` can perform
       `Confirm → Refused` and `esc` is inert while a check is out; the key
