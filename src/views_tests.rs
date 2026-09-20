@@ -1381,10 +1381,70 @@ fn quit_and_the_cluster_switcher_are_refused_exactly_where_the_key_map_says() {
     );
 }
 
-/// `screens/widgets.md:273`: **`esc` closes exactly one level, always** — and the two filters are
+/// `screens/dialogs.md` § The verdict line: **for `scale` and `restart`, `esc` is inert for as
+/// long as a real round trip to the cluster takes** (NOTES § D214's *"`esc` is inert until the
+/// verdict arrives"*). [`App::footer`] has named no key beside that box since `1f687fc` and
+/// [`App::escape`]'s catch-all arm took the dialog and dropped it anyway — so the press the screen
+/// did not offer closed a confirmation with the dry-run still on the wire behind it.
+///
+/// **The filter underneath is not what the refused press lands on either**: `esc` did not fall
+/// through one level, it did nothing, which is what *inert* means.
+///
+/// **And the moment the verdict lands the same press cancels**, which is what makes this a wait
+/// and not a modal that traps the reader.
+#[test]
+fn escape_is_inert_on_a_confirmation_whose_check_has_not_answered() {
+    let mut app = App {
+        modal: Some(Modal::Confirm(dialog(None))),
+        ..App::default()
+    };
+    for character in "web".chars() {
+        app.filters.text.push(character);
+    }
+
+    assert!(
+        !app.escape(Detailing::Closed),
+        "an esc with no startup picker open ended the run"
+    );
+    assert!(
+        matches!(app.modal, Some(Modal::Confirm(_))),
+        "esc closed a confirmation the cluster had not answered for yet"
+    );
+    assert_eq!(
+        app.filters.text.text(),
+        "web",
+        "the refused press fell through onto the filter underneath it"
+    );
+
+    let Some(Modal::Confirm(mut answered)) = app.modal.take() else {
+        unreachable!("the confirmation is the modal that is open");
+    };
+    answered.verdict = Some("The cluster checked it first and accepted it.");
+    app.modal = Some(Modal::Confirm(answered));
+
+    assert!(
+        !app.escape(Detailing::Closed),
+        "an esc with no startup picker open ended the run"
+    );
+    assert!(
+        app.modal.is_none(),
+        "esc did not cancel the dialog once its verdict had arrived"
+    );
+    assert_eq!(
+        app.filters.text.text(),
+        "web",
+        "the press that cancelled the dialog cleared a filter with it"
+    );
+}
+
+/// `screens/widgets.md` § 5: **`esc` closes exactly one level, always** — and the two filters are
 /// two levels, so one press clears one of them (NOTES § D246). Scoped to `n payments` and then
 /// narrowed with `/web`, one `esc` used to jump all the way back to every namespace in the
 /// cluster: one press undoing two.
+///
+/// **That *always* has one named exception, and that page now names it itself** — a `Confirm`
+/// whose check has not answered, which is the test above; the dialog this one opens is therefore
+/// one whose check has.
 #[test]
 fn escape_closes_one_level_per_press_and_never_two() {
     let mut app = App::default();
@@ -1394,7 +1454,11 @@ fn escape_closes_one_level_per_press_and_never_two() {
     for character in "web".chars() {
         app.filters.text.push(character);
     }
-    app.modal = Some(Modal::Confirm(dialog(None)));
+    // **Answered, because a confirmation whose check is still out is the one modal `esc` does
+    // not close** ([`Dialog::waiting`], the test below) — and the subject here is levels.
+    let mut answered = dialog(None);
+    answered.verdict = Some("The cluster checked it first and accepted it.");
+    app.modal = Some(Modal::Confirm(answered));
 
     assert!(
         !app.escape(Detailing::Closed),
@@ -3147,6 +3211,16 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         (
             App {
                 modal: Some(Modal::Confirm(dialog(None))),
+                ..App::default()
+            },
+            "waiting for the cluster",
+        ),
+        // **A name field does not make `esc` live while the check is still out** — the waiting
+        // arm is asked first, so the one dialog that could hold both (`drain`, v0.2) cannot
+        // offer a key [`App::escape`] refuses ([`Dialog::waiting`]).
+        (
+            App {
+                modal: Some(Modal::Confirm(dialog(Some("web")))),
                 ..App::default()
             },
             "waiting for the cluster",

@@ -42,14 +42,24 @@
 //! only sort in this file is [`cards`]', over `Severity` and a `Time`, both of which were never
 //! strings.
 
-// The renderer that reads all of this is Phase 11's `ui.rs`. Same attribute, same position and
-// same accepted blind spot as `theme.rs`'s and `ops.rs`'s (NOTES § D38) — and, like `theme.rs`'s,
-// **it does not expire by itself: Phase 11 deletes it by hand.**
+// The renderer that reads all of this is `ui.rs`. Same attribute, same position and same accepted
+// blind spot as `theme.rs`'s and `ops.rs`'s (NOTES § D38) — and, like `theme.rs`'s, **it does not
+// expire by itself: it is deleted by hand.**
+//
+// **It said *Phase 11 deletes it* and Phase 11 closed without it, so the deadline was measured
+// rather than moved** (2026-09-19). `ui.rs` reads most of this and the key handler the rest, but
+// nothing outside `#[cfg(test)]` reads `ui.rs` — the loop that will is the `main.rs` wiring box —
+// and an
+// `#[allow]`ed module is a *live root* to rustc's reachability pass, not a live caller. So with
+// `ui.rs`'s own expectation in place and this one removed, the build is **27 dead-code warnings**
+// over this file; with both removed it is **244**, 179 of them in `ui.rs` and 65 here. Both
+// expectations come off in the same turn, and that turn is the one that wires `main.rs`.
 #![cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "the renderer that reads this state is Phase 11's (todo.md § Phase 11)"
+        reason = "the loop that reaches this state through `ui.rs` is the `main.rs` wiring box \
+                  (todo.md § Phase 12)"
     )
 )]
 
@@ -917,7 +927,7 @@ pub fn answers(row: &ReportRow) -> bool {
 ///
 /// **The enum makes stacking unrepresentable, and that is the point.** A dialog that can open over
 /// a dialog is how a confirmation ends up applying to the wrong object. There is no modal stack
-/// and no z-index; `esc` closes exactly one level, and one level is all there is.
+/// and no z-index; one level is all `esc` can ever have to close.
 ///
 /// **[`Self::Refused`] and [`Self::Gone`] are their own variants rather than a [`Dialog`] wearing
 /// a different message**, and the reason is structural (`screens/widgets.md` § 5): a `Confirm`
@@ -1465,19 +1475,6 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// **Whether the confirm button is drawn live** — the dry-run has answered, and for a
-    /// typed-name dialog the name matches (`screens/widgets.md` § 5, `screens/dialogs.md` rule 3).
-    ///
-    /// **This decides how a button looks and it authorises nothing.** The only route to a mutation
-    /// is `ops::Checked::pressed` / `ops::Checked::typed` building an `ops::Agreed`, which nothing
-    /// outside `ops.rs` can construct. So the worst a bug here can do is draw a live button that
-    /// `ops.rs` then refuses — never the reverse.
-    ///
-    /// **The empty-name guard is `ops::Checked::typed`'s and is repeated rather than skipped.**
-    /// `typed == name` holds for `("", "")` — *typing the object name* satisfied by typing
-    /// nothing. `ops.rs` refuses it in the one function every dialog routes through; this is the
-    /// same refusal on the drawing side, so a name that `k8s::text` stripped to nothing cannot
-    /// even light the button up.
     /// **The word the confirm button and the footer both use** — `do it` for a dialog a press
     /// confirms, and the operation's own verb for one that asks for a name.
     ///
@@ -1491,6 +1488,42 @@ impl Dialog {
         }
     }
 
+    /// **Whether the cluster's check is still out** — the one state in which *no* key inside a
+    /// confirmation is live, `esc` included (`screens/dialogs.md` § The verdict line: *"for
+    /// `scale` and `restart`, `esc` is inert for as long as a real round trip to the cluster
+    /// takes"*, NOTES § D214's *"`esc` is inert until the verdict arrives"*).
+    ///
+    /// **One predicate, two readers, because they were two answers.** [`App::footer`] has drawn
+    /// `waiting for the cluster` — naming neither key — since the dialogs were drawn (`1f687fc`,
+    /// 2026-09-12), while [`App::escape`]'s catch-all arm took the dialog and dropped it: `esc`
+    /// closed a confirmation the footer had just said nothing could be pressed on, with the check
+    /// still on the wire behind it.
+    ///
+    /// **It is [`Self::verdict`] alone and not [`Self::armed`]**, which is the difference between
+    /// *the cluster has not answered* and *you have not typed the name yet*. The second is a
+    /// dialog waiting on the reader, and `esc cancel` is exactly the key that should work there.
+    /// **`delete` is in that second state from its first frame and is never in this one** — it
+    /// sends no check, so its verdict is `Some` before the box is drawn (NOTES § D225 ruling 1).
+    pub fn waiting(&self) -> bool {
+        self.verdict.is_none()
+    }
+
+    /// **Whether the confirm button is drawn live** — the dry-run has answered, and for a
+    /// typed-name dialog the name matches (`screens/widgets.md` § 5, `screens/dialogs.md` rule 3).
+    /// **It is two questions and [`Self::waiting`] is only the first of them**, which is why the
+    /// cancel button beside it un-dims off that one alone (`screens/dialogs.md` § While the check
+    /// is still on the wire, ruling 1).
+    ///
+    /// **This decides how a button looks and it authorises nothing.** The only route to a mutation
+    /// is `ops::Checked::pressed` / `ops::Checked::typed` building an `ops::Agreed`, which nothing
+    /// outside `ops.rs` can construct. So the worst a bug here can do is draw a live button that
+    /// `ops.rs` then refuses — never the reverse.
+    ///
+    /// **The empty-name guard is `ops::Checked::typed`'s and is repeated rather than skipped.**
+    /// `typed == name` holds for `("", "")` — *typing the object name* satisfied by typing
+    /// nothing. `ops.rs` refuses it in the one function every dialog routes through; this is the
+    /// same refusal on the drawing side, so a name that `k8s::text` stripped to nothing cannot
+    /// even light the button up.
     pub fn armed(&self) -> bool {
         self.verdict.is_some()
             && match self.asks.as_deref() {
@@ -2072,6 +2105,23 @@ pub struct App {
     /// **Nothing here clamps it to the end of the content, and that is the renderer's job** — the
     /// number of lines a pane has depends on the width it is drawn at, which this file has no
     /// business knowing (`ui::scrolled`).
+    ///
+    /// **So this holds the row the last frame actually drew, written back by `ui::scrolled`, and
+    /// that is what makes it an offset a key can move from.** The clamp used to be computed and
+    /// thrown away: while [`Self::following`] pinned the pane to the bottom this field kept
+    /// whatever it held when the tab opened — 0 — so the first [`App::scroll_by`] out of follow
+    /// saturated to the top of the buffer rather than stepping one line up from the tail, and an
+    /// offset past the end stayed past the end no matter how often the screen clamped it.
+    ///
+    /// **The rule is `screens/widgets.md` § 4's** — *"follow mode (`f`) pins the offset to the
+    /// bottom and any manual scroll turns it off"* — and a bottom this field does not hold is a
+    /// bottom the scroll that turns follow off cannot start from. `screens/detail.md` § When the
+    /// buffer fills says the reader's half of the same fact, that turning follow off freezes the
+    /// *view* and not the stream under it; it names no row, so the row is this one's to keep.
+    ///
+    /// **It is the same reason a `ListState` is handed to its widget by `&mut`** — that section's
+    /// *"a selection that moves can never leave it pointing at the wrong window"* — applied to the
+    /// one offset on this product that is stored between frames.
     pub scroll: u16,
     /// **Follow mode, the log tab's `f`** — the offset is pinned to the bottom while it is on, and
     /// any manual scroll turns it off. The standard `tail -f` behaviour, and the only way a stream
@@ -2727,14 +2777,22 @@ impl App {
                 return (Cow::Borrowed("? or esc to close"), quit);
             }
             Some(Modal::Confirm(dialog)) => {
-                let keys = match (dialog.armed(), dialog.asks.is_some()) {
-                    (true, _) => Cow::Owned(format!("⏎ {}  esc cancel", dialog.confirm())),
-                    (false, true) => Cow::Borrowed("type the name to enable  esc cancel"),
+                let keys = match dialog.armed() {
+                    true => Cow::Owned(format!("⏎ {}  esc cancel", dialog.confirm())),
                     // **No verdict yet, so neither key is live** — the dry-run is a real round
                     // trip for a scale and a restart, and `esc` is inert until it answers
-                    // (NOTES § D214). `delete` never sits here: it sends no check, so its verdict
-                    // is `Some` from the first frame (NOTES § D225 ruling 1).
-                    (false, false) => Cow::Borrowed("waiting for the cluster"),
+                    // ([`Dialog::waiting`], NOTES § D214). `delete` never sits here: it sends no
+                    // check, so its verdict is `Some` from the first frame (NOTES § D225
+                    // ruling 1).
+                    //
+                    // **Asked before the typed-name arm and not beside it**, so the one dialog
+                    // that could hold both — a check on the wire *and* a name to type, which
+                    // `drain` is in v0.2 — cannot offer `esc cancel` on a press [`App::escape`]
+                    // would refuse. The pair `(false, false)` this replaced reached the same arm
+                    // by arithmetic: an unarmed dialog with no name field can only be a waiting
+                    // one. It said nothing about a dialog that has both.
+                    false if dialog.waiting() => Cow::Borrowed("waiting for the cluster"),
+                    false => Cow::Borrowed("type the name to enable  esc cancel"),
                 };
                 return (keys, "");
             }
@@ -2944,8 +3002,17 @@ impl App {
         (Cow::Borrowed(keys), "")
     }
 
-    /// **`esc` — closes exactly one level, always** (`screens/widgets.md` § 5, and those are its
-    /// words). A modal never traps the user; with no modal open it backs out of a filter.
+    /// **`esc` — closes exactly one level** (`screens/widgets.md` § 5, and those are its words).
+    /// With no modal open it backs out of a filter.
+    ///
+    /// **That section says *always* and then names the one exception itself** — a confirmation
+    /// whose dry-run has not answered ([`Dialog::waiting`]), which it points at
+    /// `screens/dialogs.md` § While the check is still on the wire for, over NOTES § D214. The
+    /// footer this file draws beside that box has named no key since `1f687fc`, so the two halves
+    /// of the screen finally say the same thing. **It is not a modal trapping the reader**: the
+    /// check is a real round trip and it ends, the box arms, and the same press cancels it — what
+    /// is refused is closing a confirmation while the cluster is still being asked whether it
+    /// would be allowed.
     ///
     /// **The two filters are two levels, so one press clears one of them** (NOTES § D246). **Text
     /// first because it is the inner one** — `/` narrows whatever `n` already scoped, so backing
@@ -3018,6 +3085,14 @@ impl App {
                 before: Before::Picking(picker),
                 ..
             }) => self.modal = Some(Modal::ContextPick(picker)),
+            // **A confirmation whose check has not answered is the one modal `esc` does not
+            // close** ([`Dialog::waiting`], `screens/dialogs.md` § The verdict line, NOTES
+            // § D214). Its footer names no key at all, and this arm was taking the dialog and
+            // dropping it anyway — the reader pressed the key the box did not offer and the box
+            // went, with the dry-run still on the wire behind it. Put back, not left `None`.
+            Some(Modal::Confirm(dialog)) if dialog.waiting() => {
+                self.modal = Some(Modal::Confirm(dialog));
+            }
             Some(_) => {}
             // **A detail tab is open, so this press is `esc back` and the filters are untouched**
             // (`screens/widgets.md` § 2b). The caller closes the tab; `App` holds no field for it.
@@ -3108,6 +3183,16 @@ impl App {
     /// **A manual scroll, which turns follow mode off** — the two halves are one action and are
     /// written once so no key handler can do the first and forget the second
     /// (`screens/widgets.md` § 4).
+    ///
+    /// **It moves from the row the last frame drew and not from a number nobody was looking at**,
+    /// which is [`App::scroll`]'s write-back and is what makes the first `k` out of follow the
+    /// line above the one the reader was watching. **`f` off is the same fact from the other end
+    /// and the key handler gets it for nothing**: the offset already *is* the tail
+    /// (`screens/widgets.md` § 4, *"follow mode (`f`) pins the offset to the bottom"*), so
+    /// clearing [`App::following`] leaves the pane where it stood rather than somewhere else —
+    /// the row `screens/detail.md` § When the buffer fills leaves unnamed when it says turning
+    /// follow off freezes the *view* and not the stream under it.
+    /// The toggle itself is the `main.rs` wiring box's; there is no method for it here yet.
     pub fn scroll_by(&mut self, lines: i16) {
         self.following = false;
         self.scroll = self.scroll.saturating_add_signed(lines);

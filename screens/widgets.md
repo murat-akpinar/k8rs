@@ -472,7 +472,10 @@ are counted below, after the refused table they extend.
 
 **A modal's footer is a closed, complete list, and it never carries the
 anchor pair.** Every `Modal` variant but `Help` (§5) draws only the keys valid
-inside it — `⏎ do it  esc cancel`, `type the name to enable  esc cancel`,
+inside it — `⏎ do it  esc cancel`, `waiting for the cluster` for a `Confirm`
+whose check has not answered
+([dialogs.md § While the check is still on the wire](dialogs.md#while-the-check-is-still-on-the-wire)),
+`type the name to enable  esc cancel`,
 `esc dismiss  ⏎ open` for `Refused`, the bare `esc dismiss` for `Gone` (it has
 nothing to reopen — the object is already gone), `esc stop draining`,
 `↑↓ move  / filter  ⏎ switch  esc cancel` — because a modal this small has
@@ -481,7 +484,14 @@ nothing left for `?` to reveal, and stacking
 (§5): opening one would silently drop whatever the modal underneath was
 confirming. `q` is absent the same way — `esc` is always the way out of a
 modal, and a global quit sitting beside it on a pending mutation is a second,
-riskier way to leave that buys nothing `esc` does not. **`Help` is the one
+riskier way to leave that buys nothing `esc` does not. **`waiting for the
+cluster` is this rule's own extreme, not an exception to it: the closed set
+there is empty**, because for that one window `esc` is not merely undrawn,
+it is inert — the one modal state on this product where the promise this
+paragraph just made is not yet true, and it is closed by the wire being
+bounded, not by a key
+([dialogs.md, same section](dialogs.md#while-the-check-is-still-on-the-wire)).
+**`Help` is the one
 modal exempt from both halves of this rule**, because nothing is pending
 while it is open: it keeps `q quit` and replaces `? all keys` with its own
 `? or esc to close` — the map itself, not a pointer to one — drawn once, in
@@ -1024,8 +1034,8 @@ reopens the picker it came from
 
   | Interior width | Used when | Margin, centred |
   |---|---|---|
-  | 58 | the default for a `Confirm` box with a `$ kubectl …` line — used whenever the content fits ([dialogs.md § Scale](dialogs.md#scale--confirm-with-dry-run)) | 4 / 4 |
-  | 61 | 58 does not fit — a longer consequence sentence, or the typed-name field ([§ Restart](dialogs.md#restart--confirm-with-dry-run), [§ Delete](dialogs.md#delete--the-name-has-to-be-typed-and-nothing-is-checked-first)) | 3 / 2 — 5 columns split as evenly as an odd number allows |
+  | 58 | the default for a `Confirm` box with a `$ kubectl …` line — used whenever the content fits: the consequence wraps to `CONSEQUENCE_LINES` or fewer at this room **and** the `$` line itself needs no cut at all — kind/name, every flag, `-n`'s value, whole — at this room ([dialogs.md § Scale](dialogs.md#scale--confirm-with-dry-run), [§ The namespace flag never disappears without a trace](dialogs.md#the-namespace-flag-never-disappears-without-a-trace)) | 4 / 4 |
+  | 61 | 58 does not fit — a longer consequence sentence, the typed-name field, or a `$ kubectl …` line that would need any cut at all at 58's own room ([§ Restart](dialogs.md#restart--confirm-with-dry-run), [§ Delete](dialogs.md#delete--the-name-has-to-be-typed-and-nothing-is-checked-first), [§ The namespace flag never disappears without a trace](dialogs.md#the-namespace-flag-never-disappears-without-a-trace)) | 3 / 2 — 5 columns split as evenly as an odd number allows |
   | 54 | `Refused`, `Gone` or `Unconnected` — no `$ kubectl …` line and no typed-name field inside the box, so there is consistently less to fit ([§ The cluster said no](dialogs.md#the-cluster-said-no), [§ The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open), [§ Drain](dialogs.md#drain-which-takes-minutes), [context.md § When the new cluster does not work](context.md#when-the-new-cluster-does-not-work)) | 6 / 6 |
 
   **58 fits with room to spare either side. 61 is as wide as any dialog on
@@ -1054,10 +1064,21 @@ reopens the picker it came from
   [D223](../NOTES.md#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)/[D224](../NOTES.md#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)/[D225](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
   put there on purpose; § Restart's paused variant and § Drain both land on
   exactly 13, the ceiling itself, with no blank left to spend.
-- `esc` closes exactly one level, always. A modal never traps the user.
+- `esc` closes exactly one level, always — with one named exception, and it
+  is not a trap: a `Confirm` whose check has not answered yet
+  (`Dialog::waiting`) puts the same dialog straight back rather than
+  closing it, because the wait it is refusing to leave is bounded by the
+  wire, not by this key
+  ([dialogs.md § While the check is still on the wire](dialogs.md#while-the-check-is-still-on-the-wire),
+  NOTES § D214).
 - The confirm button is a `Span` with a reversed style; it is **not** live
   until the dry-run has returned and, for a typed-name dialog, until the typed
-  string equals the object name ([dialogs.md](dialogs.md)).
+  string equals the object name ([dialogs.md](dialogs.md)). **The cancel
+  button beside it is not exempt from the same wait**: it draws `theme::DIM`
+  for exactly the window `Dialog::waiting` names and `theme::TEXT` from the
+  moment a verdict exists, independently of whether the confirm side ever
+  arms
+  ([dialogs.md § While the check is still on the wire](dialogs.md#while-the-check-is-still-on-the-wire)).
 - Under `--read-only` the mutating variants are not constructed anywhere —
   unreachable, not merely unbound ([invariant 2](../CLAUDE.md)).
 
@@ -1130,7 +1151,18 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
      may follow it — see the strip's own rule, next bullet but one.
   4. **A `Confirm` dialog's `$` line** — the same 76-column-style budget, much
      narrower inside a nested box, and the same rule as the strip: trailing
-     flags give way before the object's own `kind/name` word does.
+     flags give way before the object's own `kind/name` word does. **One flag
+     is not an equal trailing candidate here: `-n`.** Every other trailing
+     flag still gives way whole, in order; `-n` gives way last, and past the
+     point where the strip would drop it whole too, this line keeps
+     degrading its **value** instead — down to a bare `-n…`, if it must —
+     because this is the line a reader reads *before* anything is sent, and
+     a namespace silently missing is the one loss on this page that can put
+     a retyped command against the wrong object
+     ([dialogs.md § The namespace flag never disappears without a
+     trace](dialogs.md#the-namespace-flag-never-disappears-without-a-trace)).
+     `box_width` reads this line too, for the same reason
+     ([§5](#5-the-modal-layer)).
   5. **An Analysis row's own detail text**, when what `analysis.rs` built for
      it is taller than the pane — [analysis.md § A row taller than the
      pane](analysis.md#a-row-taller-than-the-pane-and-the-cut-that-keeps-the-cursors-row-on-screen).
@@ -1160,6 +1192,14 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   cut command and a command still running could draw the identical trailing
   character with nothing to tell them apart; they no longer can, on this
   strip only. Every other cut on this page keeps `…`.
+
+  **4 goes one floor further than 3, for `-n` alone.** Once not even one
+  character of `-n`'s value would fit, 3 still falls back to dropping the
+  flag whole — cosmetic there, because the real call already carries the
+  right namespace by the time that line is drawn — while 4 keeps the bare
+  flag name standing, `-n…`, because it is read before anything is sent
+  ([dialogs.md § The namespace flag never disappears without a
+  trace](dialogs.md#the-namespace-flag-never-disappears-without-a-trace)).
 
   **Front-cuts.** None of these six promises the full text is one `⏎` away —
   what justifies the cut instead is the header's own reasoning

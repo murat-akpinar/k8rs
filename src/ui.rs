@@ -49,6 +49,11 @@
 // `main.rs`. Same attribute, same position and same accepted blind spot as `theme.rs`'s and
 // `views.rs`'s (NOTES § D38) — and, like both of those, **it does not expire by itself: the
 // turn that wires `main.rs` deletes it by hand.**
+//
+// **Measured rather than assumed, 2026-09-19**: removing it today is 179 dead-code warnings over
+// this file, and `views.rs`'s goes with it in the same turn — 65 more — because an `#[allow]`ed
+// module is a live root to rustc's reachability pass, so silencing this one is what keeps most of
+// `views.rs` counted as reached.
 #![cfg_attr(
     not(test),
     expect(
@@ -161,6 +166,15 @@ const NAME: &str = "k8rs";
 /// (`screens/detail.md` § When the stack is taller than a Loading or Empty tab has anything of its
 /// own). Two spellings of one sentence is how the two frames come to differ in a word.
 const WAITING: &str = "reading the cluster…";
+
+/// **The verdict row of a `Confirm` while the cluster's check is still on the wire**
+/// (`screens/dialogs.md` § While the check is still on the wire). It lands in the row the
+/// answered sentence lands in, so the box does not grow when the cluster answers.
+///
+/// **The ellipsis is this product's own mark for *in progress*** — the header's `· changing…` and
+/// the command log's own running mark already carry it (`screens/widgets.md` § 1a, § 7) — and not
+/// [`CUT`], which is the mark for a string that had to give way.
+const CHECKING: &str = "Checking with the cluster…";
 
 /// **The only thing k8rs shortens on purpose, and it is always visible where it happened**
 /// (`screens/widgets.md` § 7). One character on every cut, so the mark a reader learns is one mark
@@ -1223,7 +1237,13 @@ fn detailing(screen: &Screen) -> Detailing {
 
 /// **Draw the whole screen.** The one entry point, called once per event by the loop
 /// (invariant 7 — there is no frame rate).
-pub fn draw(frame: &mut Frame, app: &App, screen: &Screen) {
+///
+/// **`&mut App`, and the only thing a frame writes is the scroll offset it resolved**
+/// ([`scrolled`], [`crate::views::App::scroll`]) — the same `&mut` a `ListState` is handed for the
+/// same reason. So the loop draws, then handles the key, and the key moves from the row the reader
+/// was looking at. Nothing else in [`crate::views::App`] is touched here: what the *user* did stays
+/// the key handler's, and [`Screen`] — what the store answered — is still `&`.
+pub fn draw(frame: &mut Frame, app: &mut App, screen: &Screen) {
     let area = frame.area();
     // **`BACKGROUND` and `TEXT` are painted together or not at all** (`theme.rs` § THE PALETTE):
     // at sixteen colours both are the terminal's own and this paints nothing, and at 24-bit a
@@ -1990,19 +2010,36 @@ fn margined<'a>(text: &str, columns: usize, style: Style) -> Vec<Line<'a>> {
 /// **How wide a `Confirm`'s box is, and it is the only thing a dialog decides about its shape**
 /// (`screens/widgets.md` § 5).
 ///
-/// **Read off [`views::Dialog::consequence`] and [`views::Dialog::asks`], which is what makes it
-/// hold still.** Both are fixed the moment the dialog opens; the verdict and the paused warning
-/// arrive later and neither may change the width, or the box would resize under the reader while
-/// they were deciding — `screens/dialogs.md` § Restart's *the two states of one dialog should not
-/// be shaped differently*, which is why its plain box is drawn at the width its paused variant
-/// needs.
+/// **Read off [`views::Dialog::consequence`], [`views::Dialog::asks`] and
+/// [`views::Dialog::kubectl`], which is what makes it hold still.** All three are fixed the moment
+/// the dialog opens; the verdict and the paused warning arrive later and neither may change the
+/// width, or the box would resize under the reader while they were deciding —
+/// `screens/dialogs.md` § Restart's *the two states of one dialog should not be shaped
+/// differently*, which is why its plain box is drawn at the width its paused variant needs.
+///
+/// **The `$` line has a vote and it is *no cut at all*** (`screens/dialogs.md` § The namespace
+/// flag never disappears without a trace, ruling 2; `screens/widgets.md` § 5's table).
+/// [`CONFIRM_BOX`] wins only where the whole command — `kind/name`, every flag, `-n`'s value in
+/// full — already fits that box's own `$` room; the moment any cut is needed, the wider box is
+/// what a longer name spends before [`namespaced_cut`] has to choose what to drop. Measured:
+/// `kubectl scale deployment/checkout-worker --replicas=3 -n…` is 57 columns, which is
+/// [`CROWDED_BOX`]'s own `$` budget to the character, and at [`CONFIRM_BOX`] the same scale lost
+/// `-n payments-production` whole (`reports/2026-09-20-the-four-behaviours.md` § 5).
 fn box_width(dialog: &views::Dialog) -> u16 {
     let fits = wrapped(&dialog.consequence, room(CONFIRM_BOX)).len() <= CONSEQUENCE_LINES;
-    if dialog.asks.is_none() && fits {
+    let whole = width(&dialog.kubectl) <= command_room(CONFIRM_BOX);
+    if dialog.asks.is_none() && fits && whole {
         CONFIRM_BOX
     } else {
         CROWDED_BOX
     }
+}
+
+/// **The columns a box's `$ kubectl …` line has for the command itself** — [`room`] less the `$`
+/// and the space after it, which [`confirm`] draws and [`box_width`] measures against. One
+/// expression, because the two disagreeing is a box picked for a line it then cuts anyway.
+fn command_room(width: u16) -> usize {
+    room(width).saturating_sub("$ ".len())
 }
 
 /// **A live confirm button, drawn as [`theme::FOCUS`] asks** — the reversal `screens/widgets.md`
@@ -2022,8 +2059,18 @@ fn focused(screen: &Screen) -> Style {
 /// **The row of buttons at the foot of a `Confirm`** (`screens/dialogs.md`, every box on it).
 ///
 /// **The confirm button is not live until [`views::Dialog::armed`] says so** — rule 3, and the
-/// ctrl-key-slip guard for a delete. `esc cancel` is always live and never dims: a modal never
-/// traps the user (`screens/widgets.md` § 5).
+/// ctrl-key-slip guard for a delete.
+///
+/// **`esc cancel` dims for exactly the window [`views::Dialog::waiting`] names, and un-dims the
+/// instant a verdict exists** (`screens/dialogs.md` § While the check is still on the wire,
+/// ruling 1; `screens/widgets.md` § 5's *the cancel button beside it is not exempt from the same
+/// wait*). `esc` is inert there (NOTES § D214) and the footer beside this row has named no key
+/// since `1f687fc`; the button read live over a press that did nothing until that page settled it.
+///
+/// **The two buttons dim off two different questions and neither waits on the other.** Cancel
+/// asks *has the cluster answered*; confirm asks that **and** *has the name been typed*
+/// ([`views::Dialog::armed`]), so a typed-name dialog's `esc` goes live the moment its own check
+/// answers, with an empty field beside it.
 ///
 /// **A typed-name dialog prints its verb where the others print `⏎ do it`** — `[ delete ]`, the
 /// operation's own word, because by then the reader has typed a name rather than reached for a
@@ -2038,10 +2085,15 @@ fn buttons(dialog: &views::Dialog, screen: &Screen) -> Line<'static> {
     } else {
         screen.fg(theme::DIM)
     };
+    let cancel = if dialog.waiting() {
+        theme::DIM
+    } else {
+        theme::TEXT
+    };
     Line::from(vec![
         Span::styled(confirm, style),
         Span::raw(BUTTON_GAP),
-        Span::styled("[ esc cancel ]", screen.fg(theme::TEXT)),
+        Span::styled("[ esc cancel ]", screen.fg(cancel)),
     ])
     .centered()
 }
@@ -2112,9 +2164,13 @@ fn typed_name(dialog: &views::Dialog, columns: usize, screen: &Screen) -> Vec<Li
 /// consequence is stated in plain language *above* the command, never instead of it.
 ///
 /// **The verdict's row is drawn whether or not the verdict has arrived**, so the box does not
-/// grow by a row the moment the cluster answers. For `delete` it is `Some` from the first frame
-/// (NOTES § D225 ruling 1 — nothing is sent, so there is nothing to wait for); for `scale` and
-/// `restart` it is the real round trip, and the button below it stays dim until then.
+/// grow by a row the moment the cluster answers — and while the check is out that row says
+/// [`CHECKING`] rather than nothing, because a blank row put the one sentence a reader could act
+/// on outside the box they were reading (`screens/dialogs.md` § While the check is still on the
+/// wire). For `delete` the verdict is `Some` from the first frame (NOTES § D225 ruling 1 —
+/// nothing is sent, so there is nothing to wait for) and that box never draws this row; for
+/// `scale` and `restart` it is the real round trip, and both buttons below it stay dim until
+/// then ([`buttons`]).
 ///
 /// **A typed-name dialog spends the `$` line's rows on the field, and the command is on the log
 /// strip beneath either way** (`screens/widgets.md` § 2, invariant 4). It is not a preference:
@@ -2136,15 +2192,16 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
         .warning
         .as_ref()
         .map_or_else(Vec::new, |warning| wrapped(warning, columns));
-    let verdict = dialog
-        .verdict
-        .map_or_else(Vec::new, |verdict| wrapped(&spoken(verdict), columns));
+    let verdict = dialog.verdict.map_or_else(
+        || wrapped(CHECKING, columns),
+        |verdict| wrapped(&spoken(verdict), columns),
+    );
     let field = usize::from(dialog.asks.is_some()) * FIELD_ROWS;
 
-    // **The rows nothing can give up**: the blank under the title bar, the verdict — one row even
-    // before it arrives, so the box does not grow when the cluster answers — the `$ kubectl …`
-    // line, the typed-name field, and the buttons.
-    let hard = 1 + verdict.len().max(1) + 1 + field + 1;
+    // **The rows nothing can give up**: the blank under the title bar, the verdict — the same
+    // rows before it arrives as after, so the box does not grow when the cluster answers — the
+    // `$ kubectl …` line, the typed-name field, and the buttons.
+    let hard = 1 + verdict.len() + 1 + field + 1;
 
     // **The four blank rows, given up in this order while the box is over [`MODAL_ROWS`]**
     // (`screens/widgets.md` § 5: dropped first, before any sentence is cut). The order is least
@@ -2196,11 +2253,7 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
     if under_text {
         lines.push(Line::raw(""));
     }
-    if verdict.is_empty() {
-        lines.push(Line::raw(""));
-    } else {
-        lines.extend(indent(verdict, MODAL_MARGIN, screen.fg(theme::DIM)));
-    }
+    lines.extend(indent(verdict, MODAL_MARGIN, screen.fg(theme::DIM)));
     if under_verdict {
         lines.push(Line::raw(""));
     }
@@ -2212,7 +2265,7 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
     lines.push(Line::styled(
         format!(
             "{MODAL_MARGIN}$ {}",
-            command_cut(&dialog.kubectl, columns.saturating_sub(2), CUT)
+            namespaced_cut(&dialog.kubectl, command_room(width))
         ),
         screen.fg(theme::INFO),
     ));
@@ -3171,7 +3224,7 @@ fn value<'a>(badge: Option<&'a Badge>, screen: &Screen) -> Vec<Span<'a>> {
 /// report already ([`Screen::reports`]). What is left is *nothing came back yet*, and it draws
 /// [`note`] — the same block the other two panes draw while they wait, because it is the same
 /// wait.
-fn content(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
+fn content(frame: &mut Frame, area: Rect, app: &mut App, screen: &Screen) {
     // **A detail is drawn over the view, not instead of one** ([`Screen::detail`]): the view
     // underneath is still what `esc` goes back to, so it is not cleared and not consulted.
     match screen.detail {
@@ -3980,7 +4033,7 @@ fn leads(
     area: Rect,
     above: &[Line],
     said: &[Line],
-    app: &App,
+    app: &mut App,
     screen: &Screen,
 ) -> bool {
     let keeps = u16::try_from(said.len()).unwrap_or(u16::MAX).max(FLOOR);
@@ -3992,7 +4045,7 @@ fn leads(
     let [held, rest] = Layout::vertical([Constraint::Length(tall), Constraint::Min(0)]).areas(area);
     // **The block keeps the pane's own two-column reading margin and the bar draws in the right
     // one**, so the block's width is the width `pinned` wrapped to whether it overflows or not.
-    let at = scrolled(frame, padded(held), app.scroll, false, above.to_vec());
+    let at = scrolled(frame, padded(held), &mut app.scroll, false, above.to_vec());
     let [_, margin] = Layout::horizontal([Constraint::Min(0), Constraint::Length(PAD)]).areas(held);
     // [`scrollbar`] draws nothing where the content fits, so there is no *does it overflow* flag
     // here: a second condition could only agree with it or be wrong.
@@ -4764,7 +4817,7 @@ const NAMES_GAP: usize = 3;
 /// scrolled mockups draw: *"The object's name, the tab row and its underline stay pinned — drawn
 /// above the scrolling `Paragraph`, not inside it."* A reader who has scrolled has not lost which
 /// object they are looking at or which tab they are on.
-fn detail(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, open: &Detail) {
+fn detail(frame: &mut Frame, area: Rect, app: &mut App, screen: &Screen, open: &Detail) {
     let [head, row, under, body] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -5042,23 +5095,51 @@ fn tabs(frame: &mut Frame, row: Rect, under: Rect, app: &App, screen: &Screen) {
 /// (`screens/widgets.md` § 4: no cap, no *N more* line, a `Paragraph` with an offset).
 ///
 /// **The offset is clamped here and not in `views.rs`**, because how many rows a pane has depends
-/// on the width it is drawn at and that file names no widget ([`crate::views::App::scroll`]).
+/// on the width it is drawn at and that file names no widget ([`crate::views::App::scroll`]) —
+/// **and the clamped row is written back, which is the half that was missing.** A `ListState` is
+/// handed to its widget by `&mut` for exactly this reason (`screens/widgets.md` § 4: *"nothing
+/// here stores one between frames, so a selection that moves can never leave it pointing at the
+/// wrong window"*), and the one offset this product does store between frames had no way to be
+/// told what it had been resolved to. So a draw leaves [`crate::views::App::scroll`] holding the
+/// row the reader is actually looking at, and the next keypress moves from there.
 ///
 /// **Every line handed here is already one row**, wrapped by [`wrapped`] on the way in and never
 /// by ratatui's own `Wrap`. Two wrapping algorithms in one pane is two answers to *how tall is
 /// this*, and the offset is computed from the taller-or-shorter of them — so a followed stream
 /// pins to a bottom that is not the bottom. One algorithm, and the count is `len`.
-fn scrolled(frame: &mut Frame, area: Rect, offset: u16, follow: bool, lines: Vec<Line>) -> usize {
+fn scrolled(
+    frame: &mut Frame,
+    area: Rect,
+    offset: &mut u16,
+    follow: bool,
+    lines: Vec<Line>,
+) -> usize {
     let last = lines.len().saturating_sub(usize::from(area.height));
     let at = if follow {
         last
     } else {
-        usize::from(offset).min(last)
+        usize::from(*offset).min(last)
     };
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).scroll((u16::try_from(at).unwrap_or(u16::MAX), 0)),
-        area,
-    );
+    let row = u16::try_from(at).unwrap_or(u16::MAX);
+    // **The row that was drawn goes back into the state, which is what makes the *next*
+    // keypress start from what the reader was looking at** (`crate::views::App::scroll`).
+    // Computed and thrown away, follow mode left that field on whatever it held before — 0
+    // for a log opened and followed — so the first `k` out of follow saturated to the top of
+    // the buffer instead of stepping one line up from the tail, and an offset past the end
+    // stayed past the end however many times it was clamped on screen
+    // (`screens/widgets.md` § 4, *"follow mode (`f`) pins the offset to the bottom and any manual
+    // scroll turns it off"*).
+    //
+    // **A pane with no rows drew no row, so it writes none back.** `last` there is the whole
+    // line count — one *past* the last line rather than a row anybody is looking at — and
+    // storing it would be this field claiming a frame that never happened. Not reached through
+    // [`draw`] today and it self-heals on the next real frame either way (`tester`, 2026-09-20,
+    // who reached it by calling this directly); what is kept here is the field's own promise,
+    // which is the thing the next keypress reads.
+    if area.height > 0 {
+        *offset = row;
+    }
+    frame.render_widget(Paragraph::new(Text::from(lines)).scroll((row, 0)), area);
     // **The row the window starts on, handed back rather than recomputed** — [`leads`] draws a
     // `Scrollbar` beside this pane and a second clamp is a thumb that disagrees with the text.
     at
@@ -5138,7 +5219,7 @@ fn set<'a>(text: &str, columns: usize, style: Style) -> Vec<Line<'a>> {
 fn logs(
     frame: &mut Frame,
     area: Rect,
-    app: &App,
+    app: &mut App,
     screen: &Screen,
     pane: &Pane<Logs>,
     above: Vec<Line>,
@@ -5167,7 +5248,7 @@ fn logs(
 fn stream(
     frame: &mut Frame,
     area: Rect,
-    app: &App,
+    app: &mut App,
     screen: &Screen,
     logs: &Logs,
     above: Vec<Line>,
@@ -5246,7 +5327,7 @@ fn stream(
     // (`screens/detail.md` § Every finding about this object pinned at the top of every tab).
     let mut lines = above;
     lines.extend(logs.held.lines().flat_map(|line| kept(line, region, text)));
-    scrolled(frame, padded(body), app.scroll, app.following, lines);
+    scrolled(frame, padded(body), &mut app.scroll, app.following, lines);
 }
 
 /// **The describe tab: the object, then what happened to it** — two reads, one pane
@@ -5254,7 +5335,7 @@ fn stream(
 fn describe(
     frame: &mut Frame,
     area: Rect,
-    app: &App,
+    app: &mut App,
     screen: &Screen,
     open: &Detail,
     above: Vec<Line>,
@@ -5328,7 +5409,7 @@ fn describe(
     }
     lines.push(Line::default());
     lines.extend(block(open.events, screen, region));
-    scrolled(frame, area, app.scroll, false, lines);
+    scrolled(frame, area, &mut app.scroll, false, lines);
 }
 
 /// **Describe's own events block: the heading, then the three answers under it**
@@ -5376,7 +5457,7 @@ fn block<'a>(events: &Pane<crate::k8s::Happened>, screen: &Screen, region: usize
 fn events(
     frame: &mut Frame,
     area: Rect,
-    app: &App,
+    app: &mut App,
     screen: &Screen,
     pane: &Pane<crate::k8s::Happened>,
     above: Vec<Line>,
@@ -5420,7 +5501,7 @@ fn events(
 fn rows_into(
     frame: &mut Frame,
     area: Rect,
-    app: &App,
+    app: &mut App,
     screen: &Screen,
     happened: &crate::k8s::Happened,
     above: Vec<Line>,
@@ -5462,7 +5543,7 @@ fn rows_into(
     let [pinned, body] =
         Layout::vertical([Constraint::Length(height), Constraint::Min(0)]).areas(area);
     frame.render_widget(Paragraph::new(Text::from(top)), pinned);
-    scrolled(frame, body, app.scroll, false, lines);
+    scrolled(frame, body, &mut app.scroll, false, lines);
 }
 
 /// **One event's rows, and the whole of the grammar** (`screens/detail.md` § The events tab):
@@ -5537,7 +5618,7 @@ fn rows<'a>(happened: &crate::k8s::Happened, screen: &Screen, region: usize) -> 
 fn yaml(
     frame: &mut Frame,
     area: Rect,
-    app: &App,
+    app: &mut App,
     screen: &Screen,
     open: &Detail,
     above: Vec<Line>,
@@ -5578,7 +5659,7 @@ fn yaml(
             screen.fg(theme::DIM),
         ));
     }
-    scrolled(frame, area, app.scroll, false, lines);
+    scrolled(frame, area, &mut app.scroll, false, lines);
 }
 
 // --- THE DETAIL TABS END ---
@@ -5671,8 +5752,12 @@ fn front(text: &str, columns: usize, mark: &str) -> String {
 /// end, one whole word at a time: a flag one character short still reads as a flag
 /// (`--show-managed-fiel`), so a flag goes whole. **A flag's own value is the one word cut inside**
 /// (`-n payments-product...`), because dropping it whole leaves `-n` naming no namespace at all
-/// (`screens/dialogs.md` § The command log's own line) — and so a flag that takes a value is never
-/// where the line ends on its own. A value glued on with `=` is part of its flag's word.
+/// (`screens/dialogs.md` § The command log's own line) — **for as long as one character of the
+/// value still fits**. Past that this line still drops the flag whole, which is cosmetic here: by
+/// the time the strip is drawn, the real call already carries the namespace on the wire. The `$`
+/// line inside a box is read *before* anything is sent and has one floor further down
+/// ([`namespaced_cut`], `screens/widgets.md` § 7's *4 goes one floor further than 3*). A value
+/// glued on with `=` is part of its flag's word.
 ///
 /// **Where even the head and its mark do not fit, the object's name gives way from its front**,
 /// behind the mark and never its `kind/` (`screens/dialogs.md` § When the object's own name does
@@ -5737,6 +5822,80 @@ fn command_cut<'a>(line: &'a str, columns: usize, mark: &str) -> Cow<'a, str> {
         Some(name) if !name.is_empty() => Cow::Owned(format!("{fixed}{name}")),
         _ => tailed(line, columns, mark),
     }
+}
+
+/// **The flag a `Confirm`'s `$` line protects, with the space that makes it the second-to-last
+/// word on that line** (`screens/dialogs.md` § The namespace flag never disappears without a
+/// trace).
+const NAMESPACE_FLAG: &str = " -n";
+
+/// **[`command_cut`] with the one floor a `Confirm`'s `$` line has that the command log strip
+/// does not** — `screens/widgets.md` § 7's back-cut 4 (*"4 goes one floor further than 3, for
+/// `-n` alone"*), `screens/dialogs.md` § The namespace flag never disappears without a trace,
+/// ruling 1.
+///
+/// **One rule and not a second one.** Everything before ` -n` is cut by [`command_cut`], exactly
+/// as the strip cuts it; what this adds is that ` -n` and the mark are held back out of the
+/// budget *before* anything else is measured. The two halves of that ruling both fall out of it:
+/// every other trailing flag gives way whole ahead of the namespace, and what degrades in its
+/// place is `-n`'s own **value**, character by character, down to a bare `-n…`.
+///
+/// **Why only this line and only this flag.** The strip's identical command is drawn *after* the
+/// real call went out carrying the right namespace, so losing it there costs a reader nothing
+/// they can act on wrongly. The `$` line is read *before* anything is sent, and
+/// `kubectl scale deployment/checkout-worker --replicas=3` with the namespace silently gone is a
+/// complete, runnable command against whatever that name resolves to in the reader's *own*
+/// default namespace — the one cut on this product that can put the wrong object under their
+/// hands rather than merely an ugly line.
+///
+/// **Where even a bare `-n…` cannot stand beside the object's own — by then already front-cut —
+/// name, this floor meets the strip's again** and the flag goes whole with everything else behind
+/// one mark: a line wider than the row it is drawn in is worse than one that shows less
+/// ([`command_cut`]'s own closing rule).
+fn namespaced_cut(line: &str, columns: usize) -> Cow<'_, str> {
+    if width(line) <= columns {
+        return Cow::Borrowed(line);
+    }
+    // **The pair has to be the last two words on the line.** A `-n` anywhere else is a word
+    // [`command_cut`]'s own walk treats like any other, and it is the *trailing* namespace that a
+    // cut from the end reaches first.
+    let Some((head, value)) = line
+        .rsplit_once(' ')
+        .filter(|(head, _)| head.ends_with(NAMESPACE_FLAG))
+        .map(|(head, value)| (&head[..head.len() - NAMESPACE_FLAG.len()], value))
+    else {
+        return command_cut(line, columns, CUT);
+    };
+    let spare = columns.saturating_sub(width(NAMESPACE_FLAG) + width(CUT));
+    let cut = command_cut(head, spare, CUT);
+    // **The head's own trailing mark comes off where it stands for whole words that were
+    // dropped**, because the `-n…` appended below is then this line's single end-of-row mark —
+    // the strip's own convention, one mark standing for everything the row could not hold.
+    // **Only there**: a head whose *name* had to front-cut keeps its own mark, which sits inside
+    // the name and says something this one cannot, and a head clipped mid-word keeps it because
+    // taking it off is the silent cut `screens/widgets.md` § 7 bans by name. The boundary is read
+    // off the head itself rather than inferred from which branch [`command_cut`] took.
+    let kept = cut
+        .strip_suffix(CUT)
+        .filter(|kept| {
+            head.get(kept.len()..)
+                .is_some_and(|rest| rest.starts_with(' '))
+        })
+        .unwrap_or(&cut);
+    // **Whatever the head did not spend is the namespace's own**, a character at a time, and the
+    // flag name still stands where not one of them fits.
+    let room = columns.saturating_sub(width(kept) + width(NAMESPACE_FLAG) + width(CUT));
+    let said = match room.checked_sub(1).map(|room| fits(value, room)) {
+        Some(part) if !part.is_empty() => format!("{kept}{NAMESPACE_FLAG} {part}{CUT}"),
+        _ => format!("{kept}{NAMESPACE_FLAG}{CUT}"),
+    };
+    // **A line wider than the row it is drawn in is worse than one that shows less**
+    // ([`command_cut`]'s own closing rule), and a row too narrow to keep one character of the
+    // object leaves nothing for ` -n` to hang off.
+    if kept.is_empty() || width(&said) > columns {
+        return command_cut(line, columns, CUT);
+    }
+    Cow::Owned(said)
 }
 
 /// **The identity cut — `screens/widgets.md` § 7's eleventh deliberate cut, one rule at six call

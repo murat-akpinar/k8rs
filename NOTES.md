@@ -293,6 +293,7 @@ its line moving with it.
 - [D269](#d269--the-per-key-offer-a-key-a-kind-has-not-got-leaves-the-line-and-the-browser-was-asking-about-a-kind-word-with-the-group-thrown-away-2026-09-18) — the per-key offer: a key a kind has not got leaves the line, and the browser was asking about a kind word with the group thrown away
 - [D270](#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18) — the which-pods box: a block is about the object the surface is about, a stack that erased the pane's own sentence, and a row order that would not hold still
 - [D271](#d271--the-strip-box-a-callers-promise-becomes-a-type-and-a-header-word-that-outlived-the-fact-it-described-2026-09-19) — the strip box: a caller's promise becomes a type, and a header word that outlived the fact it described
+- [D272](#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20) — the four behaviours: a clamp the renderer computed and threw away, an `esc` that is inert with nothing bounding the wait, and a box that named two keys the footer did not
 
 ## Why it exists — where the gap is
 
@@ -23811,3 +23812,108 @@ mockups and `widgets.md` § 1a does not list, is in `backlog.md` — two screen 
 ruling, not a patch. A type for `Dialog`'s four strings belongs to the dialog-wiring box. The ten
 `Fault` variants with no word written in `screens/` for that header slot are `tui-designer`'s, left
 deliberately. None of the three blocks this box.
+
+### D272 — the four behaviours: a clamp the renderer computed and threw away, an `esc` that is inert with nothing bounding the wait, and a box that named two keys the footer did not (2026-09-20)
+
+Phase 12's fifth box — four key behaviours that were wrong before anything drives them. One test
+round, one operator round, two screen rounds, one fix round; two of the four were not what the box
+said they were, and the operator review found a blocker in the half that was.
+
+**1. `k` out of follow, and the clamp nobody stored.** The box said *`k` after following a log jumps
+to the top*, and the cause was one layer below where it pointed: `views::App::scroll_by` already
+turned follow off in one place, but `ui::scrolled` computed the clamped row it drew and **threw it
+away**, so `App::scroll` still held whatever it had when the tab opened — zero — and one `k` out of
+follow landed on line 0 of a 5000-line stream. `ui::draw` now takes `&mut App` and `scrolled` takes
+`&mut u16`, writing back the row it actually drew: the write-back a `ListState` already gets. Nine
+signatures were threaded through and no logic moved. It also ends a second silence — an offset of
+900 over a 15-line pane used to stay 900 in the state, so `k` did nothing for hundreds of presses.
+
+**What the write-back costs, and who owns it.** `App::scroll` is one `u16` shared by four tab
+bodies across every object the reader opens, and **nothing resets it**. Storing the clamp turns a
+stale value the renderer used to discard harmlessly into one it destroys: yaml at row 400 → a
+3-row tab → back to yaml now reads 0 (`tester`), and a terminal resized 24 → 44 → 24 rows leaves
+the reader 16 lines from where they were (`k8s-admin`, and PRIOR-ART § D3 is the entry that argues
+against it — *wrapping and resizing must be pure functions*). Both are the same root, and neither is
+fixable from inside the renderer: the key handler owns the offset. **It is the `main.rs` wiring
+box's**, written into that box, and a *reset per tab* is not a complete answer because the resize
+case survives it.
+
+**2. `esc` on a confirm whose check has not answered — right against the decision, and the decision
+assumed something that is not true.** `screens/dialogs.md` § The verdict line and D214 rule that
+`esc` is inert until the verdict arrives; `views::Dialog::waiting()` is `verdict.is_none()`, read by
+`App::escape` (which puts the dialog back) and by `App::footer` (asked before the typed-name arm, so
+the footer says `waiting for the cluster` and offers no key `escape` would refuse). Measured over
+all four dialog shapes, including the drain-shaped one that has both a check and a name to type.
+
+**Then the operator review measured what bounds the wait, and nothing does.** `kube-client`'s three
+`Config` constructors set `read_timeout: None` (`connect_timeout` is 30s and bounds only a handshake
+that never completes), and `ops::perform` calls `call(DRY_RUN).await` bare while `main.rs` wraps
+every other cluster read it makes in a `tokio::time::timeout`. So against an apiserver that accepts
+the connection and never answers — etcd in a leader election, a NAT-dropped flow after a partition —
+the dialog is permanent, and its key set is **empty**: `esc` refused, `q` and `?` not offered. **The
+bug is the assumption, not the rule**: D214 is right that a cancellable dialog would log a write
+that may still land, and the fix is not to re-enable `esc`. It is to bound the wait in the wiring
+box's own `call` closure, exactly as `main.rs` already does eight times — a timeout is an `Err`,
+`perform` turns that into `Outcome::NotSent`, that opens `Refused`, and `esc dismiss` works there.
+**A second obligation comes with it**: `esc` used to be the accidental safety net for a driver that
+drops the ball, and nothing in `views.rs` can perform the `Confirm → Refused` transition, so the
+wiring box must replace the modal on *every* terminal path of `perform`, including the one where the
+dry-run errors and `ask` is never called. Both are in that box's done-when.
+
+**3. `--context` appended last — measured false as the box states it.** Nothing composes a
+command-log line with `--context` at all: it is `main.rs`'s CLI constant and nowhere else, and the
+watch lines are built without it. What is true is that `ui::command_cut` keeps a **prefix**, so a
+trailing flag is always what a narrow row loses — and `screens/context.md` draws the flag **second**,
+which is therefore the placement that survives. A characterisation test now pins it so the wiring
+box cannot compose the line the other way. **The cost is real and is accepted here rather than
+discovered later**: at 76 columns a `scale` line keeps the context or the namespace, not both, and
+the page's order keeps the context — a line that names a cluster and no namespace runs in that
+context's *default* namespace.
+
+**4. The `dead_code` expectations cannot come off in this box, and the number is why.** Measured
+twice, independently: `views.rs`'s alone reports 27 warnings, both report **244** — 179 primary
+spans in `ui.rs` — because a silenced module is a **live root to rustc's reachability pass**, so
+`ui.rs`'s expectation is what keeps most of `views.rs` counted as reached. `main.rs` declares
+`mod ui;` and never calls `ui::draw`. Five of the 27 are `may_mutate`, `escape`, `pick_pods`, `open`
+and `scroll_by` — functions the wiring box calls. So the fourth clause of this box moves, with its
+measurement, into the box that wires the event loop, which is what `ui.rs`'s own comment said from
+the day it was written: *the turn that wires `main.rs` deletes it by hand*. A stale *Phase 11*
+deadline in `views.rs`'s copy was corrected at the same time.
+
+**5. The frame that named two keys the footer did not.** With `esc` inert, `ui::buttons` still drew
+`[ ⏎ do it ]    [ esc cancel ]` at full weight in a box whose footer named **no** key — one press
+from *the tool ignored me*, and `screens/widgets.md` § 2a's closed-set rule is exactly what that
+breaks. `screens/dialogs.md` had no mockup of the pending state at all, so the page was rewritten
+first: the verdict row reads `Checking with the cluster…`, dim, in the row the answered sentence
+already occupies so the box does not grow; **both** buttons dim while the check is out and each
+un-dims on its own; and the box stays **keyless on purpose** — no `q quit` band-aid for one
+sub-state of one dialog — which is safe only because ruling 2 above bounds the wait.
+
+**6. The namespace flag, and two helpers that answered one question differently.** A `scale` confirm
+box is sized from `dialog.asks` and the wrapped `consequence`, and **the `$` line had no vote**: at
+58 columns `scale` lost `-n <namespace>` whole while `restart` and `delete` kept `-n pa…` by luck of
+an unrelated wrap — and `scale` is the one write whose command is absolute, so the same line retyped
+elsewhere scales a different object. `command_cut`'s own doc promised *a flag that takes a value is
+never where the line ends on its own*, which held only while `-n` fit. The page now rules both
+halves: the `$` line picks the wider box when it needs any cut at all, and inside a dialog `-n` is
+the last flag dropped, its value degrading to a bare `-n…` first. `ui::namespaced_cut` is **one floor
+below `command_cut`, not a second cut function** — it reserves the flag's room and delegates the
+rest unchanged, because the page's order produces a line that is not a prefix of the input and
+`command_cut` can only return a prefix. It also closes most of a family gap the review named:
+`name_cut` front-cuts `namespace/name` as one address and never drops the namespace word, while
+`command_cut` treated `-n <ns>` as an expendable trailing flag.
+
+**Evidence, and the one number that moved.** `just check` green on the test host (1469 unit, 35
+e2e); `just mutants-diff` first reported **3 missed**, all in `namespaced_cut`, all the same hole —
+every case asserted filled its row exactly, so a rule that fills whatever it is given was
+indistinguishable from one that only has to fit; a name five columns shorter and a 4-column floor
+were added and the second run was **65 caught, 0 missed**. Two screen rounds, because the first left
+§ *When the object's own name does not fit* drawing `$` lines with no namespace and calling scale's
+box the narrow one — a section the same file's new rulings had just falsified.
+
+**Deferred, and where:** the logs pane's missing follow indicator (`j` at the tail turns follow off
+and the frame is byte-identical, which this box made *more* likely by making the key correct and
+silent), its missing `g`/`G`, and the scrollbar no tab body draws — all three in `backlog.md`, all
+three new surface rather than defects in the landed code. The unbounded wait, the `Confirm → Refused`
+transition, who owns `App::scroll`, and the two `dead_code` expectations are in the wiring box's own
+text, each with the measurement behind it.

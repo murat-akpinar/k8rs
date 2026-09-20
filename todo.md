@@ -4594,11 +4594,15 @@ Goal: one binary, live and safe.
       title cells
       ([D271](NOTES.md#d271--the-strip-box-a-callers-promise-becomes-a-type-and-a-header-word-that-outlived-the-fact-it-described-2026-09-19) ·
       [reports/2026-09-19-the-strip-and-the-connection-word.md](reports/2026-09-19-the-strip-and-the-connection-word.md))
-- [ ] **Four behaviours a key reaches that are wrong today**: `k` after
+- [x] **Four behaviours a key reaches that are wrong today**: `k` after
       following a log jumps to the top; `esc` closes a confirm whose check has
       not answered; `--context` appended last is what a cut command line drops
       first; and the `dead_code` expectations over `ui.rs` / `views.rs` are
-      removed so an unwired function is reported
+      removed so an unwired function is reported — **the fourth clause is
+      measured, not done, and moved to the wiring box below**: both expectations
+      report 244 warnings while nothing calls `ui::draw`
+      ([D272](NOTES.md#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20) § 4 ·
+      [reports/2026-09-20-the-four-behaviours.md](reports/2026-09-20-the-four-behaviours.md))
 
 - [ ] `main.rs`: single `tokio::select!` (watch streams · crossterm events ·
       Ctrl-C), draw-on-change with ~100ms coalescing, block when idle.
@@ -4613,7 +4617,19 @@ Goal: one binary, live and safe.
       long enough … dropped here while still borrowed`. So the `Mutation`, its
       strings and the `File` live in the frame that runs the loop, and the console
       carries a lifetime: `Console<'a>`, never `Console`. Cheap if it shapes the
-      struct; a rewrite if it is met afterwards
+      struct; a rewrite if it is met afterwards.
+      **Four things this box owes that were measured elsewhere** ([D272](NOTES.md#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20)):
+      the `call` closure wraps the dry-run in a `tokio::time::timeout` — kube's
+      three `Config` constructors set `read_timeout: None`, so an apiserver that
+      answers nothing leaves a confirm box open forever with no live key; the
+      modal is replaced on **every** terminal path of `perform`, the dry-run's
+      own `Err` included, because nothing in `views.rs` can perform
+      `Confirm → Refused` and `esc` is inert while a check is out; the key
+      handler takes ownership of `App::scroll` — one `u16` shared by four tab
+      bodies that nothing resets, where a resize of 24 → 44 → 24 rows now costs
+      the reader 16 lines and a *reset per tab* does not cover it; and the two
+      `dead_code` expectations come off here, together, once `ui::draw` has a
+      caller
 - [ ] **A coalescing test that ends quiet and asserts the final state** — the
       loop above draws on change with ~100 ms coalescing, which is invariant 7
       and also the exact manoeuvre k9s merged and reverted a month later

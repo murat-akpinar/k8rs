@@ -3212,3 +3212,49 @@ long-form version and stays the authority.*
   nailed in. The reader is not blind meanwhile: `Screen::clock` draws the whole sentence over the
   pane. Found by `tester` and `k8s-admin`
   ([reports/2026-09-19-the-strip-and-the-connection-word.md](reports/2026-09-19-the-strip-and-the-connection-word.md)), 2026-09-19.
+
+- **Two screen files disagree about whether `esc` can ever be refused, and the code has had to
+  pick one.** `screens/widgets.md:1057` reads *"`esc` closes exactly one level, always. A modal
+  never traps the user."*; `screens/dialogs.md:673` § The verdict line reads *"for `scale` and
+  `restart`, `esc` is inert for as long as a real round trip to the cluster takes"*
+  ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
+  Phase 12's four-behaviours box implemented the dialogs.md side — `views::Dialog::waiting()`, and
+  `App::escape` puts a dialog back while its check is out — and wrote the disagreement into
+  `escape`'s own doc rather than leaving it silent. The two sentences can both stand if the
+  widgets.md one is read as *a modal never traps the user permanently*, but that is a reading and
+  not what the line says, and the line is in the file the key map is checked against. Found by
+  `dev-ui`, 2026-09-19.
+
+- **`screens/dialogs.md` draws no pending box, so the one state a confirm spends a round trip in
+  is the one state nobody has drawn.** Every mockup in that file carries `[ esc cancel ]` at full
+  weight, and `ui::buttons` therefore draws it at full weight while `Dialog::waiting()` is true —
+  a live-looking key beside a footer that, since 2026-09-19, says `waiting for the cluster` and
+  names no key at all. Whether the button dims, disappears or stays is a wording-and-weight
+  question `tui-designer` owns; the code cannot pick without inventing it, which is why it did not.
+  The state is unreachable until the `main.rs` wiring box opens a dialog for real. Found by
+  `dev-ui`, 2026-09-19.
+
+- **The logs pane tells the reader nothing about where they are or whether it is still following.**
+  Measured 2026-09-20: `j` pressed at the tail of a followed stream turns follow off and the frame
+  is **byte-identical** before and after, so an operator leaning on `j` while tailing a crashlooping
+  container gets a dead window and concludes the container stopped writing. Nothing on the screen
+  says follow is off — the header draws `container: app                      previous log: off` and
+  carries the convention for exactly this one column over, and the footer's `f follow` reads the
+  same in both states. **The four-behaviours box made this more likely, not less**: before it, `k`
+  and `j` out of follow saturated to line 0 — wrong, but loud. Related and in the same pane:
+  `screens/help.md:10` gives `↑ ↓ / j k` and nothing else, so the top of the 5000-line buffer
+  `screens/detail.md:599` sells as *"enough to scroll back through a crash"* is 5000 presses away,
+  and the one accidental way to get there in one key is what the box removed. An indicator, a
+  `g`/`G`, or both — new surface, so it is a later phase's box and not a defect in the landed code.
+  Found by `k8s-admin` ([reports/2026-09-20-the-four-behaviours.md](reports/2026-09-20-the-four-behaviours.md)), 2026-09-20.
+
+- **None of the four scrolling tab bodies draws a scrollbar, and `screens/widgets.md` disagrees with
+  itself about whether one is owed.** `grep -n "scrollbar(" src/ui.rs` finds four call sites — the
+  container picker, the pod-pick step, `leads`' pinned block and the which-pods list — and **none of
+  `scrolled`'s five**: `stream`, `describe`, `rows_into`, `yaml` and the tab body itself.
+  `screens/widgets.md:215` says a `Scrollbar` is rendered on *"any pane taller than its viewport"*
+  and § 4 writes a rule for the log pane's bar — *"the bar shows position within what is retained"* —
+  which is a sentence about a bar that pane does not have; the mockups draw none, and the code
+  followed the mockups. With the follow-indicator gap above, the net is that the pane an operator
+  lives in during an incident gives no position feedback at all. Pre-existing, a screen ruling
+  before it is a code box. Found by `k8s-admin`, same report, 2026-09-20.

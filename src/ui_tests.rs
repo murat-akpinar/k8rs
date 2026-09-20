@@ -138,13 +138,21 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
     }
 }
 
-fn render_at(columns: u16, rows: u16, app: &App, screen: &Screen) -> Buffer {
+/// **Draw, and keep what the frame resolved [`App::scroll`] to** — `ui::draw` takes `&mut App`
+/// because [`scrolled`] writes the row it drew back into the state, and the scroll tests are about
+/// exactly that value. Every other test in this file is about what is on the screen, so
+/// [`render_at`] hands this a copy and they need no `mut` binding of their own.
+fn render_into(columns: u16, rows: u16, app: &mut App, screen: &Screen) -> Buffer {
     let mut terminal =
         Terminal::new(TestBackend::new(columns, rows)).expect("a terminal over a test backend");
     terminal
         .draw(|frame| draw(frame, app, screen))
         .expect("a frame");
     terminal.backend().buffer().clone()
+}
+
+fn render_at(columns: u16, rows: u16, app: &App, screen: &Screen) -> Buffer {
+    render_into(columns, rows, &mut app.clone(), screen)
 }
 
 fn render(app: &App, screen: &Screen) -> Buffer {
@@ -5759,6 +5767,12 @@ fn on(tab: Tab) -> App {
 
 /// Render one detail pane at the 80×24 floor.
 fn detailed(app: &App, open: &Detail) -> Buffer {
+    detailed_into(&mut app.clone(), open)
+}
+
+/// [`detailed`] over the caller's own [`App`], so the offset the frame resolved survives the call
+/// ([`render_into`]).
+fn detailed_into(app: &mut App, open: &Detail) -> Buffer {
     let alerts = Pane::Ready(vec![oom()]);
     let now = later();
     let mut screen = screen(&alerts, &now);
@@ -5766,7 +5780,7 @@ fn detailed(app: &App, open: &Detail) -> Buffer {
         open,
         from_step: false,
     });
-    render(app, &screen)
+    render_into(MIN_WIDTH, MIN_HEIGHT, app, &screen)
 }
 
 fn logged(lines: &[&str]) -> crate::k8s::LogLines {
@@ -6478,17 +6492,199 @@ fn follow_pins_to_the_last_line_and_a_wild_offset_stops_at_the_end() {
         !holds(&following, "line 0 "),
         "and has scrolled past the oldest"
     );
-    let wild = detailed(
-        &App {
-            tab: Tab::Logs,
-            scroll: 900,
-            ..App::default()
-        },
-        &open.open(),
-    );
+    let mut app = App {
+        tab: Tab::Logs,
+        scroll: 900,
+        ..App::default()
+    };
+    let wild = detailed_into(&mut app, &open.open());
     assert!(
         holds(&wild, "line 14"),
         "an offset past the end clamps to it rather than drawing a blank pane"
+    );
+    // **And the clamp is kept, not recomputed and dropped** ([`scrolled`]): left at 900, the next
+    // `k` would have spent hundreds of presses walking back to an end the screen was already
+    // drawing (`crate::views::App::scroll`).
+    assert!(
+        app.scroll < 900,
+        "the offset the frame clamped on screen went back into the state as 900"
+    );
+}
+
+/// **The first manual scroll out of follow mode steps up from the tail, not from the top of the
+/// buffer** — `screens/widgets.md` § 4, *"follow mode (`f`) pins the offset to the bottom and any
+/// manual scroll turns it off"*, which is the sentence that rules the row. `screens/detail.md`
+/// § When the buffer fills says the reader's half of it — that turning follow off freezes the
+/// *view* and not the stream under it — and names no row of its own.
+///
+/// **The bottom was the renderer's own local and `App::scroll` never learned it.** Follow pinned
+/// the pane to `lines.len() - height` while the field stayed on 0, so `scroll_by(-1)` saturated
+/// there and one `k` threw the reader to line 0 of the stream they were tailing — the top, which
+/// is the opposite end from the line above the one they were watching.
+///
+/// **The claim is *one line*, measured off the screen at both ends and not off the geometry that
+/// produces it**: a pane height, a block stack and a wrap width all move where the window sits,
+/// and none of them may decide whether this test passes.
+#[test]
+fn the_first_scroll_out_of_follow_steps_up_one_line_from_the_tail() {
+    let (pod, names) = declared_by("pending");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    // Long enough that the window at the tail and the window at the top share no line at all —
+    // which is what lets *jumped to the top* be an assertion rather than an impression.
+    let written: Vec<String> = (0..40).map(|nth| format!("line {nth}")).collect();
+    let held = logged(&written.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &held,
+    });
+
+    /// The stream lines on screen, oldest first. **It asserts it found some** — every claim below
+    /// is about where this window sits, and an empty one satisfies all of them.
+    fn shown(drawn: &Buffer) -> Vec<usize> {
+        let seen: Vec<usize> = rows(drawn)
+            .iter()
+            .filter_map(|row| {
+                said(row)
+                    .trim_start()
+                    .strip_prefix("line ")
+                    .and_then(|nth| nth.parse().ok())
+            })
+            .collect();
+        assert!(
+            !seen.is_empty(),
+            "no `line N` of the stream is on screen at all:\n{}",
+            rows(drawn).join("\n")
+        );
+        seen
+    }
+
+    let mut app = App {
+        tab: Tab::Logs,
+        following: true,
+        ..App::default()
+    };
+    let followed = shown(&detailed_into(&mut app, &open.open()));
+    assert_eq!(
+        followed.last(),
+        Some(&39),
+        "follow is not showing the newest line, so nothing below is about follow"
+    );
+
+    // The reader presses `k`.
+    app.scroll_by(-1);
+    let after = shown(&detailed_into(&mut app, &open.open()));
+
+    assert_eq!(
+        after.first().map(|nth| nth + 1),
+        followed.first().copied(),
+        "one `k` out of follow did not move the window up exactly one line \
+         (0 would be the top of the buffer)"
+    );
+    assert_eq!(
+        after.last().map(|nth| nth + 1),
+        followed.last().copied(),
+        "the line the reader was watching is not the last one off the bottom"
+    );
+}
+
+/// **A frame that drew no row writes no row back** — [`crate::views::App::scroll`]'s own promise
+/// is *the row the last frame actually drew*, and a pane of zero rows drew none.
+///
+/// **`last` there is the whole line count**, one past the end rather than a row anybody is
+/// looking at, so writing it was this field claiming a frame that never happened. Unreachable
+/// through [`draw`] today, where every pane is laid out at a `Min`, and it self-heals on the next
+/// real frame; what is kept true here is the claim (`tester`, 2026-09-20).
+///
+/// **The one-row control is what makes it falsifiable**: the same call at a height of 1 does
+/// write back, so the assertion above is not satisfied by a function that never writes at all.
+#[test]
+fn a_pane_with_no_rows_leaves_the_offset_where_it_was() {
+    let lines: Vec<Line> = (0..15)
+        .map(|nth| Line::raw(format!("line {nth}")))
+        .collect();
+    let drawn_at = |height: u16, offset: u16| {
+        let mut terminal =
+            Terminal::new(TestBackend::new(20, 4)).expect("a terminal over a test backend");
+        let mut held = offset;
+        let mut at = 0;
+        terminal
+            .draw(|frame| {
+                at = scrolled(
+                    frame,
+                    Rect::new(0, 0, 20, height),
+                    &mut held,
+                    true,
+                    lines.clone(),
+                );
+            })
+            .expect("a frame");
+        (held, at)
+    };
+    assert_eq!(
+        drawn_at(0, 3),
+        (3, 15),
+        "a pane with no rows wrote one past the last line back as the row the reader is on"
+    );
+    assert_eq!(
+        drawn_at(1, 3),
+        (14, 14),
+        "a pane with a row did not write the row it drew back, so the case above says nothing"
+    );
+}
+
+/// **The only field a frame writes through its `&mut App` is the offset it resolved** — `ui::draw`
+/// takes the state by `&mut` for [`scrolled`]'s write-back alone, and until now a doc comment was
+/// the whole of that bound: the signature is a licence to write any field on the way past
+/// (`tester`, 2026-09-20). `App` derives `Clone` and `Eq`, so it can be an assertion instead.
+///
+/// **It renders through [`detailed_into`] and not [`detailed`]**, because the second hands the
+/// frame a `clone()` — over that entry point every field comes back unchanged and this would pass
+/// whatever `draw` did.
+///
+/// **The offset has to have actually moved**, or *nothing else changed* is satisfied by a frame
+/// that wrote nothing at all.
+#[test]
+fn a_frame_writes_nothing_through_its_app_but_the_row_it_drew() {
+    let (pod, names) = declared_by("pending");
+    let containers = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &containers,
+    };
+    let written: Vec<String> = (0..40).map(|nth| format!("line {nth}")).collect();
+    let held = logged(&written.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut open = Open::new();
+    open.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &held,
+    });
+
+    let mut app = App {
+        tab: Tab::Logs,
+        following: true,
+        ..App::default()
+    };
+    let before = app.clone();
+    let _ = detailed_into(&mut app, &open.open());
+    assert_ne!(
+        app.scroll, before.scroll,
+        "the frame resolved no new offset, so nothing below could catch a stray write"
+    );
+
+    let mut only = before.clone();
+    only.scroll = app.scroll;
+    assert_eq!(
+        app, only,
+        "a frame wrote a field of App other than the scroll offset it resolved"
     );
 }
 
@@ -8661,8 +8857,9 @@ fn nested(rows: &[String]) -> Vec<String> {
 /// **`screens/dialogs.md` is the fixture, which is the point** (`mockup`'s own reason, one screen
 /// along). A test that compares the drawn box with a constant this file also wrote compares the
 /// implementation with itself; the screen file is the specification, so it is what the assertion
-/// reads. The blocks are in the file's own order: 0 scale · 1 restart · 2 restart paused ·
-/// 3 delete pod · 4 delete node · 5 the object changed first · 6 refused · 7 gone · 8 drain.
+/// reads. The blocks are in the file's own order: 0 scale · **1 scale, check on the wire** ·
+/// 2 restart · 3 restart paused · **4 restart, check on the wire** · 5 delete pod ·
+/// 6 delete node · 7 the object changed first · 8 refused · 9 gone · 10 drain.
 fn mockup_dialog(nth: usize) -> Vec<String> {
     let path = format!("{}/screens/dialogs.md", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path)
@@ -8684,8 +8881,8 @@ fn mockup_dialog(nth: usize) -> Vec<String> {
     }
     assert_eq!(
         blocks.len(),
-        9,
-        "screens/dialogs.md no longer draws nine screens"
+        11,
+        "screens/dialogs.md no longer draws eleven screens"
     );
     nested(&blocks[nth])
 }
@@ -8726,7 +8923,7 @@ fn box_of(modal: views::Modal) -> Vec<String> {
 fn the_restart_boxes_are_the_screen_files_boxes_row_for_row() {
     assert_eq!(
         box_of(views::Modal::Confirm(restarting())),
-        mockup_dialog(1),
+        mockup_dialog(2),
         "screens/dialogs.md § Restart"
     );
 
@@ -8734,9 +8931,68 @@ fn the_restart_boxes_are_the_screen_files_boxes_row_for_row() {
     paused.warning = Some(PAUSED.to_owned());
     assert_eq!(
         box_of(views::Modal::Confirm(paused)),
-        mockup_dialog(2),
+        mockup_dialog(3),
         "screens/dialogs.md § Restart, its paused Deployment"
     );
+
+    // **And the same box with its check still on the wire** (§ … restart's own box) — ten content
+    // rows, the same as the plain box above, with `Checking with the cluster…` in the row the
+    // verdict lands in and `Dialog::warning` as unknown as the verdict while this frame is up.
+    let mut pending = restarting();
+    pending.verdict = None;
+    assert_eq!(
+        box_of(views::Modal::Confirm(pending)),
+        mockup_dialog(4),
+        "screens/dialogs.md § Restart, its check still on the wire"
+    );
+}
+
+/// **The verdict's row is reserved from the first frame, so the box does not move when the
+/// cluster answers** (`screens/dialogs.md` § While the check is still on the wire: *"same width,
+/// same nine content rows"*).
+///
+/// **It compares two frames the product drew, not a frame with a drawing.** What the two boxes
+/// *say* is the screen file's, asserted against blocks 1 and 4 by the two tests either side of
+/// this one; what is asserted here is that the answered box and the pending one are the same
+/// shape — a claim no single mockup can carry, because a box that grew by a row would match its
+/// own mockup perfectly and still shift a sentence under a reader mid-way through it.
+///
+/// **The row that holds the verdict is found rather than counted**, so a wrap that moves the
+/// consequence onto another line cannot decide whether this passes.
+#[test]
+fn the_verdict_row_is_reserved_before_the_cluster_answers() {
+    for (verdict, dialog) in [(ACCEPTED, scaling()), (ACCEPTED, restarting())] {
+        let mut pending = dialog.clone();
+        pending.verdict = None;
+        assert!(
+            pending.waiting() && !dialog.waiting(),
+            "the pair is not one waiting box and one answered one"
+        );
+        let waiting = box_of(views::Modal::Confirm(pending));
+        let answered = box_of(views::Modal::Confirm(dialog));
+        assert!(
+            waiting.last().is_some_and(|row| row.starts_with('└')),
+            "the pending box does not close:\n{}",
+            waiting.join("\n")
+        );
+        assert_eq!(
+            (waiting.len(), width(&waiting[0])),
+            (answered.len(), width(&answered[0])),
+            "the box changed shape when the cluster answered:\n{}\n{}",
+            waiting.join("\n"),
+            answered.join("\n")
+        );
+        let at = |box_: &[String], needle: &str| {
+            box_.iter()
+                .position(|row| row.contains(needle))
+                .unwrap_or_else(|| panic!("no {needle:?} row in\n{}", box_.join("\n")))
+        };
+        assert_eq!(
+            at(&waiting, CHECKING),
+            at(&answered, &spoken(verdict)),
+            "the sentence the cluster's answer replaces is not drawn in the row it lands in"
+        );
+    }
 }
 
 /// **§ Delete's two boxes, every row but the one between its buttons.**
@@ -8751,7 +9007,7 @@ fn the_restart_boxes_are_the_screen_files_boxes_row_for_row() {
 /// row cannot also fit inside a delete box.
 #[test]
 fn the_delete_boxes_are_the_screen_files_boxes_but_for_the_gap_between_two_buttons() {
-    for (nth, dialog) in [(3, deleting()), (4, deleting_a_node())] {
+    for (nth, dialog) in [(5, deleting()), (6, deleting_a_node())] {
         let drawn = box_of(views::Modal::Confirm(dialog));
         let mockup = mockup_dialog(nth);
         assert_eq!(drawn.len(), mockup.len(), "block {nth} changed height");
@@ -8767,12 +9023,12 @@ fn the_delete_boxes_are_the_screen_files_boxes_but_for_the_gap_between_two_butto
 /// **Every box says what the screen file says, wherever the wrap lands** — the words, in order,
 /// none dropped and none invented, in a box of the same width and the same height.
 ///
-/// **The wrap points themselves are deliberately not asserted for three of these boxes**, because
+/// **The wrap points themselves are deliberately not asserted for four of these boxes**, because
 /// `screens/dialogs.md` says they are not the specification: *"the wrap points shown are this
 /// box's choice of where to break for readability, not a second field"* (§ Restart, of a
-/// consequence that is one string). § Scale's, § The cluster said no's and § The object went
-/// away's differ from a real wrap at the same width; § Restart's and § Delete's do not, and those
-/// two are asserted character for character above.
+/// consequence that is one string). § Scale's — in both of its states — § The cluster said no's
+/// and § The object went away's differ from a real wrap at the same width; § Restart's and
+/// § Delete's do not, and those are asserted character for character above.
 ///
 /// **The button row is left out of the join** — its gap and its centring are the one difference
 /// this file keeps from the page, and it has its own test.
@@ -8792,14 +9048,17 @@ fn every_dialog_says_the_words_the_screen_file_says() {
     };
     let mut paused = restarting();
     paused.warning = Some(PAUSED.to_owned());
+    let mut pending = scaling();
+    pending.verdict = None;
     for (nth, modal) in [
         (0, views::Modal::Confirm(scaling())),
-        (1, views::Modal::Confirm(restarting())),
-        (2, views::Modal::Confirm(paused)),
-        (3, views::Modal::Confirm(deleting())),
-        (4, views::Modal::Confirm(deleting_a_node())),
+        (1, views::Modal::Confirm(pending)),
+        (2, views::Modal::Confirm(restarting())),
+        (3, views::Modal::Confirm(paused)),
+        (5, views::Modal::Confirm(deleting())),
+        (6, views::Modal::Confirm(deleting_a_node())),
         (
-            5,
+            7,
             views::Modal::Refused {
                 sent: true,
                 fault: crate::k8s::Fault::Conflict,
@@ -8807,7 +9066,7 @@ fn every_dialog_says_the_words_the_screen_file_says() {
             },
         ),
         (
-            6,
+            8,
             views::Modal::Refused {
                 sent: false,
                 fault: crate::k8s::Fault::Rejected,
@@ -8815,7 +9074,7 @@ fn every_dialog_says_the_words_the_screen_file_says() {
             },
         ),
         (
-            7,
+            9,
             views::Modal::Gone {
                 object: deleting().object,
                 recreated: true,
@@ -8932,11 +9191,84 @@ fn a_dialog_picks_one_of_three_widths_and_centring_decides_the_rest() {
     }
 }
 
+/// **A `$ kubectl …` line that would have to be cut widens the box before anything is dropped**
+/// (`screens/dialogs.md` § The namespace flag never disappears without a trace, ruling 2;
+/// `screens/widgets.md` § 5's own table, whose [`CONFIRM_BOX`] row now reads *"the `$` line
+/// itself needs no cut at all"*).
+///
+/// **Measured, not reasoned**: at [`CONFIRM_BOX`] this scale lost `-n payments-production` whole
+/// and read as a complete, runnable command against whatever `checkout-worker` resolves to in the
+/// reader's own default namespace; [`CROWDED_BOX`]'s three extra columns are exactly what
+/// `kubectl scale deployment/checkout-worker --replicas=3 -n…` — 57 — needs
+/// (`reports/2026-09-20-the-four-behaviours.md` § 5).
+///
+/// **The consequence is the same string in both**, so the width can only have moved for the `$`
+/// line, and **the right edge is asserted in both states** — the line that fits whole and the one
+/// that had to give way — because a fix for a clip is one column from reintroducing it.
+#[test]
+fn a_command_line_that_would_be_cut_widens_the_box_first() {
+    let short = scaling();
+    let mut long = scaling();
+    long.object = views::Object::new(
+        "deployment",
+        Some("payments-production".to_owned()),
+        "checkout-worker".to_owned(),
+        Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
+    );
+    long.kubectl =
+        "kubectl scale deployment/checkout-worker --replicas=3 -n payments-production".to_owned();
+    assert_eq!(
+        short.consequence, long.consequence,
+        "the two dialogs differ in their consequence too, so the width says nothing about the \
+         command"
+    );
+    assert_eq!(box_width(&short), CONFIRM_BOX, "the drawn scale box moved");
+    assert_eq!(
+        box_width(&long),
+        CROWDED_BOX,
+        "a command that cannot be drawn whole did not widen its box"
+    );
+
+    // What the reader actually reads, and that it ends inside the box either way.
+    let command = |dialog: views::Dialog| {
+        let box_ = box_of(views::Modal::Confirm(dialog));
+        let row = box_
+            .iter()
+            .find(|row| row.contains("$ kubectl"))
+            .unwrap_or_else(|| panic!("no `$` row in\n{}", box_.join("\n")))
+            .clone();
+        assert!(
+            row.starts_with('│') && row.ends_with('│'),
+            "the `$` row overran the box's own border: {row:?}"
+        );
+        assert_eq!(
+            width(&row),
+            width(&box_[0]),
+            "the `$` row is not the width of the box it is drawn in: {row:?}"
+        );
+        row.trim_matches('│').trim().to_owned()
+    };
+    assert_eq!(
+        command(short),
+        "$ kubectl scale deployment/web --replicas=3 -n payments",
+        "the box that fits its command whole cut it anyway"
+    );
+    assert_eq!(
+        command(long),
+        "$ kubectl scale deployment/checkout-worker --replicas=3 -n…",
+        "the widened box still lost the namespace it was widened to keep"
+    );
+}
+
 /// **The confirm button is dim until [`views::Dialog::armed`], and then it is
 /// [`theme::FOCUS`]** (`screens/widgets.md` § 5, `screens/dialogs.md` rule 3) — the ctrl-key-slip
 /// guard, seen on the screen rather than asked of the type.
 ///
-/// **`esc cancel` never dims**, because a modal never traps the user.
+/// **`esc cancel` is asserted here only for a dialog whose check has answered**, which is every
+/// box `screens/dialogs.md` draws but the two pending ones. The window where it dims is
+/// [`views::Dialog::waiting`]'s and has its own test below — and the pair is the point: the
+/// delete dialog here has its verdict and an unfinished name, so cancel is live while confirm is
+/// not.
 #[test]
 fn the_confirm_button_is_only_lit_once_the_dialog_is_armed() {
     let alerts = Pane::Ready(vec![oom()]);
@@ -8986,6 +9318,86 @@ fn the_confirm_button_is_only_lit_once_the_dialog_is_armed() {
         lit(whole),
         (true, true, false),
         "the typed name did not light the button, or it lit `esc cancel` with it"
+    );
+}
+
+/// **Both buttons dim while the cluster's check is out, and each un-dims on its own**
+/// (`screens/dialogs.md` § While the check is still on the wire, ruling 1; `screens/widgets.md`
+/// § 5's *"the cancel button beside it is not exempt from the same wait"*). `esc` is inert for
+/// exactly that window (NOTES § D214) and the button read live over a press that did nothing.
+///
+/// **The independence is the half one pending box cannot show**, and a delete is the state that
+/// has it: its verdict is `Some` from the first frame (NOTES § D225 ruling 1) while the name is
+/// half typed, so `esc cancel` is live because the cluster answered and `[ delete ]` is not
+/// because the reader has not finished. A cancel button keyed off [`views::Dialog::armed`] would
+/// draw that one dim and be wrong in a state this product reaches on every delete.
+#[test]
+fn both_buttons_dim_while_the_check_is_out_and_each_undims_on_its_own() {
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let screen = opened_over(&alerts, &now, &log);
+
+    // The colour of a button's own first column, found on the row rather than counted off it.
+    let inked = |dialog: views::Dialog, needle: &str| {
+        let drawn = render(&over(views::Modal::Confirm(dialog)), &screen);
+        let text = rows(&drawn);
+        let (y, row) = text
+            .iter()
+            .enumerate()
+            .find(|(_, row)| row.contains(needle))
+            .unwrap_or_else(|| panic!("no {needle:?} on\n{}", text.join("\n")));
+        let byte = row.find(needle).expect("the row holds it, found above");
+        let x = u16::try_from(row[..byte].chars().count()).expect("a column inside the frame");
+        drawn
+            .cell((x, u16::try_from(y).expect("a row inside the frame")))
+            .expect("a cell the row says is there")
+            .fg
+    };
+    let dim = ink(theme::DIM, Depth::TrueColor);
+    let text = ink(theme::TEXT, Depth::TrueColor);
+    assert_ne!(
+        dim, text,
+        "the palette draws the two roles the same, so nothing below can fail"
+    );
+
+    let mut pending = scaling();
+    pending.verdict = None;
+    assert_eq!(
+        (
+            inked(pending.clone(), "[ esc cancel ]"),
+            inked(pending, "[ ⏎ do it ]")
+        ),
+        (dim, dim),
+        "a box waiting on its dry-run drew a button at full weight"
+    );
+
+    // The same dialog, answered: both sides un-dim together because a press-only dialog arms on
+    // the verdict alone.
+    let answered = scaling();
+    assert!(answered.armed(), "the answered scale box is not armed");
+    assert_eq!(
+        (
+            inked(answered.clone(), "[ esc cancel ]"),
+            inked(answered, "[ ⏎ do it ]")
+        ),
+        (text, text),
+        "the verdict landed and a button stayed dim"
+    );
+
+    // A delete with its verdict and half a name: the two answers differ, and that is the claim.
+    let half = deleting();
+    assert!(
+        !half.waiting() && !half.armed(),
+        "the delete fixture is not in the one state where the two buttons disagree"
+    );
+    assert_eq!(
+        (
+            inked(half.clone(), "[ esc cancel ]"),
+            inked(half, "[ delete ]")
+        ),
+        (text, dim),
+        "cancel followed the confirm button's own arming rule instead of the verdict"
     );
 }
 
@@ -12137,6 +12549,39 @@ fn a_command_gives_way_from_its_last_flag_and_never_from_its_object() {
     );
     assert_eq!(command_cut(scale, 0, CUT), "");
 
+    // **The flag that names the cluster survives where `screens/context.md` puts it and nowhere
+    // else** — that page draws `$ kubectl --context staging get pods -A --watch`, the flag second
+    // and not last, and this is why. [`command_cut`] keeps a prefix: the head, then whole words
+    // from the front until one will not fit, so what a narrow row loses is always the line's
+    // *end*. Second, `--context staging` outlives every word after it; appended last it is the
+    // first thing gone, and a `kubectl` line that no longer says which cluster it was run against
+    // is the dishonesty invariant 4 exists to stop. Both marks, because the strip and the `$`
+    // line inside a box spend different ones on the same rule.
+    //
+    // **Nothing composes this line yet** — the watch lines are `main.rs`'s and carry no context
+    // flag today — so this pins the placement the wiring box has to use rather than repairing
+    // one (measured 2026-09-19).
+    for mark in [CUT, STRIP_CUT] {
+        let front = command_cut("kubectl --context staging get pods -A --watch", 30, mark);
+        let back = command_cut("kubectl get pods -A --watch --context staging", 30, mark);
+        assert!(
+            front.ends_with(mark),
+            "the page's line was not cut at 30 columns, so it says nothing about a cut: {front:?}"
+        );
+        assert!(
+            back.ends_with(mark),
+            "the appended line was not cut at 30 columns, so it says nothing either: {back:?}"
+        );
+        assert!(
+            front.contains("--context staging"),
+            "the page's own placement lost the cluster the command names: {front:?}"
+        );
+        assert!(
+            !back.contains("--context"),
+            "a context flag appended last survived a cut, so this test proves nothing: {back:?}"
+        );
+    }
+
     // A flag with no value keeps the value before it whole, and the strip's own mark is spent.
     let yaml = "$ kubectl get secret db -n payments -o yaml --show-managed-fields";
     assert_eq!(
@@ -12171,6 +12616,121 @@ fn a_command_gives_way_from_its_last_flag_and_never_from_its_object() {
                     "{line:?} at {columns} drew {drawn:?}"
                 );
             }
+        }
+    }
+}
+
+/// **Inside a `Confirm`'s `$` line, `-n` is the last flag to give way and its value degrades to a
+/// bare `-n…` before the flag name does** — `screens/widgets.md` § 7's back-cut 4 (*"4 goes one
+/// floor further than 3, for `-n` alone"*), `screens/dialogs.md` § The namespace flag never
+/// disappears without a trace, ruling 1.
+///
+/// **Every line here is one the product really composes** and the widths that matter are
+/// [`command_room`] over the two box widths (`reports/2026-09-20-the-four-behaviours.md` § 5's own
+/// measurements), not a shape chosen to make the rule visible. The narrower widths below are the
+/// floors: they exist to reach the two states a drawn box cannot — the value that has nowhere
+/// left to go, and the row too narrow to keep the object at all.
+///
+/// **The strip's answer to the same line is asserted beside each one**, because the claim is a
+/// difference between two cuts: a test that only read [`namespaced_cut`] would pass just as well
+/// if [`command_cut`] had been changed underneath it, which is the one thing back-cut 3 forbids.
+#[test]
+fn a_confirm_line_gives_up_every_other_flag_before_the_namespace() {
+    let budget = command_room(CROWDED_BOX);
+    let scale = "kubectl scale deployment/checkout-worker --replicas=3 -n payments-production";
+
+    // The measured case: the namespace's value goes to nothing and the flag still stands, where
+    // the strip drops `-n payments-production` whole behind one mark.
+    assert_eq!(
+        namespaced_cut(scale, budget),
+        "kubectl scale deployment/checkout-worker --replicas=3 -n…"
+    );
+    assert_eq!(
+        command_cut(scale, budget, CUT),
+        "kubectl scale deployment/checkout-worker --replicas=3…",
+        "the strip's own line changed, so the difference above is not the one being asserted"
+    );
+
+    // Narrower than any box draws: the other flag gives way **whole** first — which a cut that
+    // only ever keeps a prefix of the line cannot do — and what is left over is the namespace's.
+    assert_eq!(
+        namespaced_cut(scale, 50),
+        "kubectl scale deployment/checkout-worker -n payme…"
+    );
+
+    // **The floor between those two, at the same drawn width**: a name five columns shorter
+    // leaves exactly one column after ` -n`, which is a column a space plus a character cannot
+    // share — so the bare flag stands and the line comes in **under** its own budget at 56.
+    // A row that is exactly full is what every other case here draws, and a rule that only ever
+    // has to fit exactly cannot be told from one that fills whatever it is given.
+    let short = "kubectl scale deployment/api-gateway-v2 --replicas=3 -n payments-production";
+    assert_eq!(
+        namespaced_cut(short, budget),
+        "kubectl scale deployment/api-gateway-v2 --replicas=3 -n…"
+    );
+
+    // Restart and delete reach ruling 1 through the ordinary value cut both lines already share,
+    // and are unchanged by it.
+    assert_eq!(
+        namespaced_cut(
+            "kubectl rollout restart deployment/checkout-worker -n payments-production",
+            budget
+        ),
+        "kubectl rollout restart deployment/checkout-worker -n pa…"
+    );
+
+    // The name itself front-cuts **and** the bare flag still stands — the case the section calls
+    // "past the identity cut's own case 3".
+    let canary = "kubectl scale deployment/checkout-worker-service-canary --replicas=3 \
+                  -n team-alpha-payments-platform";
+    assert_eq!(
+        namespaced_cut(canary, budget),
+        "kubectl scale deployment/…ckout-worker-service-canary -n…"
+    );
+    assert!(
+        !command_cut(canary, budget, CUT).contains("-n"),
+        "the strip already kept the namespace here, so this case proves nothing"
+    );
+
+    // Nothing to protect, or no room to protect it in: the strip's own rule, unchanged. A `-n`
+    // that is not the second-to-last word is not this flag.
+    for (line, columns) in [
+        ("kubectl delete node/node-3", 20),
+        ("kubectl get secret db -n payments -o yaml", 30),
+        // Four columns is the width where ` -n…` would still fit and the object would not: the
+        // one row on which keeping the flag means keeping *only* the flag, which says nothing at
+        // all about which object this command runs against.
+        (
+            "kubectl scale deployment/checkout-worker --replicas=3 -n payments-production",
+            4,
+        ),
+        (
+            "kubectl scale deployment/checkout-worker --replicas=3 -n payments-production",
+            3,
+        ),
+    ] {
+        assert_eq!(
+            namespaced_cut(line, columns),
+            command_cut(line, columns, CUT),
+            "{line:?} at {columns} did not fall back to the strip's own cut"
+        );
+    }
+
+    // Every answer above is inside the row it was asked for, in both states — the one that fits
+    // whole and the ones that gave way.
+    for columns in [budget, command_room(CONFIRM_BOX), 50, 30, 4, 3] {
+        for line in [
+            scale,
+            short,
+            canary,
+            "kubectl scale deployment/web --replicas=3 -n payments",
+        ] {
+            let drawn = namespaced_cut(line, columns);
+            assert!(
+                width(&drawn) <= columns,
+                "{line:?} at {columns} drew {drawn:?}, which is {} columns",
+                width(&drawn)
+            );
         }
     }
 }
@@ -12331,7 +12891,7 @@ fn cursor_at(columns: u16, lines: u16, app: &App, screen: &Screen) -> ratatui::l
     let mut terminal =
         Terminal::new(TestBackend::new(columns, lines)).expect("a terminal over a test backend");
     terminal
-        .draw(|frame| draw(frame, app, screen))
+        .draw(|frame| draw(frame, &mut app.clone(), screen))
         .expect("a frame");
     terminal.get_cursor_position().expect("a cursor position")
 }

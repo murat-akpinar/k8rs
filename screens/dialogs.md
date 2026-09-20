@@ -85,6 +85,114 @@ does not touch the title bar:
 `payments/web` there is namespace/name (rule 1), a different sentence
 answering a different question, and it was never the one that disagreed.
 
+### While the check is still on the wire
+
+`show` runs synchronously the instant `s` is pressed — invariant 2's own
+order, dialog opens *before* anything is asked of the cluster — so the box
+drawn above is not this dialog's first frame. Its first frame is this one,
+for as long as the real `dryRun=All` scale and restart both send is still on
+the wire ([`Dialog::waiting`](../src/views.rs), NOTES § D214's *"`esc` is
+inert until the verdict arrives"*). `delete` never draws this frame at all:
+its own verdict is `Some` before the box is ever shown, because it sends no
+check to wait on (§ *The verdict line* below).
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│    ┌ Scale payments/web ──────────────────────────────────────┐    │
+│    │                                                          │    │
+│    │  This starts 1 more copy of your app.                    │    │
+│    │  Right now: 2 copies. After: 3 copies.                   │    │
+│    │                                                          │    │
+│    │  Checking with the cluster…                              │    │
+│    │                                                          │    │
+│    │  $ kubectl scale deployment/web --replicas=3 -n payments │    │
+│    │                                                          │    │
+│    │              [ ⏎ do it ]    [ esc cancel ]               │    │
+│    └──────────────────────────────────────────────────────────┘    │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl scale deployment/web --replicas=3 -n payments            │
+├────────────────────────────────────────────────────────────────────┤
+│ waiting for the cluster                                            │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Three things changed from the answered box above, and nothing else did —
+same width, same nine content rows: the verdict's own row is reserved the
+instant the dialog opens, whether or not the cluster has answered yet, so
+nothing about the box's shape moves when it does. Measured at 80×24 against
+exactly this input:
+[reports/2026-09-20-the-four-behaviours.md § 4](../reports/2026-09-20-the-four-behaviours.md#4-the-pending-confirmation--what-the-box-draws-and-what-the-footer-says).
+
+1. **The verdict line reads `Checking with the cluster…`, dim, in the exact
+   row the answered sentence lands in once it arrives — never blank.**
+   Leaving that row empty was the smaller bug underneath the one below: the
+   footer already said `waiting for the cluster` and the box said nothing
+   at all, so the one sentence a reader could act on sat one line below the
+   box they were actually reading. The ellipsis is not new vocabulary — it
+   is this product's own mark for *in progress*, the one the header's own
+   `· changing…` already carries
+   ([widgets.md § 1a](widgets.md#1a-the-header-row)) and the command log's
+   own running mark already carries
+   ([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)).
+2. **Both buttons draw dim, not one.** `[ ⏎ do it ]` already dims until
+   `Dialog::armed` — that much shipped. `[ esc cancel ]` never did: it has
+   read at full weight, `screen.fg(theme::TEXT)`, in every frame this box
+   has ever drawn, this one included, where pressing it does exactly
+   nothing (ruling 2, below). **Ruling 1: `esc cancel` dims the same way
+   the confirm button already does, off the same `Dialog::waiting` this
+   section is named for**, and undims the instant a verdict exists —
+   independently of whether the confirm side ever arms, so a typed-name
+   dialog's `esc` keeps working the moment its own check answers, even
+   before a name has been typed. Nothing else about the row moves: same
+   two labels, same gap, same centring — only which of `theme.rs`'s own
+   colour roles (`DIM`, `TEXT`/`FOCUS`) each button draws in.
+3. **The footer is unchanged — `waiting for the cluster`, naming neither
+   key** (`screens/widgets.md` § 2a, drawn since `1f687fc`). It was already
+   the honest line; the box simply did not agree with it until this round.
+
+**Ruling 2 — what pressing `esc` does anyway, because a reader will do
+it.** Nothing, silently, and on purpose: `App::escape` takes the dialog and
+puts the identical one straight back
+([reports/2026-09-20-the-four-behaviours.md § 4](../reports/2026-09-20-the-four-behaviours.md#4-the-pending-confirmation--what-the-box-draws-and-what-the-footer-says),
+`P6`, both `waiting=true` rows read `esc -> modal still open`). This is not
+a cancel — the dry-run has already gone out and there is nothing on this
+side of the wire to un-send — and the alternative NOTES § D214 rejected was
+a `Drop` guard printing *"k8rs stopped before the call returned,"* a record
+of something that did not happen. Ruling 1 is what makes this no-op honest
+to look at: before this round the box claimed a live `esc cancel` over a
+key that already did this same nothing; now the dim button and the silent
+press agree with each other and with the footer.
+
+**Ruling 3 — the box stays keyless, on purpose, and the bound belongs to
+code, not to a footer word.** `k8s-admin`'s own reading is right that a
+dialog with zero live keys is one wedged apiserver from *the tool ignored
+me*, and it is not a hypothetical: the dry-run `ops::perform` sends carries
+no `tokio::time::timeout`, and none of the three `kube::Config`s it can be
+built from sets a `read_timeout` at all — a dead apiserver that accepted the
+TCP connection hangs this box **forever**
+([reports/2026-09-20-the-four-behaviours.md § What bounds the
+wait](../reports/2026-09-20-the-four-behaviours.md#what-bounds-the-wait)).
+That is a real gap, and closing it is bounding the wait so this state always
+ends — code, not a screen, and it is `main.rs`'s wiring box to own. **What
+this page will not do is paper over an unbounded wait with a `q quit` that
+lives only in this one sub-state of one dialog.** Every modal on this
+product already omits the anchor pair for the same stated reason — `esc` is
+always the way out, and a global quit sitting beside it on a pending
+mutation is a second, riskier way to leave that buys nothing `esc` does not
+([widgets.md § 2a](widgets.md#2a-the-footer)) — and a key that turns live
+only for the width of a dry-run, goes dark again the instant the box arms,
+and comes back *refused* rather than merely absent once the real call is on
+the wire ([§ While the call is running](#while-the-call-is-running)) would
+teach a reader three different answers for one key across one dialog's
+life. The fix this box needs is the one that makes `esc`'s own promise true
+again — bounded, not a second escape hatch — and until it lands, a reader
+genuinely stuck here has the same recourse they have over any other frozen
+keypress this product has ever produced: the terminal underneath it, not a
+key this page draws.
+
 ### When the object's own name does not fit
 
 `payments/web` is short enough that the title and the `$` line never have to
@@ -102,8 +210,8 @@ one thing this whole box exists to confirm.
 `-stable` sibling, measured at the 80×24 floor:
 
 ```
-Scale …-payments-platform/checkout-worker-service-canary
-Scale …-payments-platform/checkout-worker-service-stable
+Scale …pha-payments-platform/checkout-worker-service-canary
+Scale …pha-payments-platform/checkout-worker-service-stable
 
 Restart …a-payments-platform/checkout-worker-service-canary
 Restart …a-payments-platform/checkout-worker-service-stable
@@ -113,31 +221,135 @@ Restart …a-payments-platform/checkout-worker-service-stable
 not simply drop the object it names.** `kubectl scale deployment/…` with
 nothing after it is not a shorter version of the command above it — it is a
 different, incomplete one, and a reader who copies it gets a kubectl error
-telling them nothing about their Deployment. The `$` line's own cut therefore
-gives way in this order: the trailing flags first (`--replicas=3`, `-n
-<namespace>`), one whole flag at a time, exactly as the command log strip's
-own flags do ([§ The command log's own line, while a call is running or just
+telling them nothing about their Deployment. The `$` line's own cut
+therefore gives way in this order: every trailing flag but `-n` first, one
+whole flag at a time, exactly as the command log strip's own flags do
+([§ The command log's own line, while a call is running or just
 after](#the-command-logs-own-line-while-a-call-is-running-or-just-after),
-below); then, only if the bare
-`kubectl <verb> <kind>/<name>` still does not fit, the **name** itself —
-never the `kind/` in front of it — gives way the same front-cut way as the
+below); then `-n`'s own **value**, character by character, never its flag
+name, which the strip's identical line can still lose
+([§ The namespace flag never disappears without a
+trace](#the-namespace-flag-never-disappears-without-a-trace), below, for why
+and for what `box_width` does about it); only if the bare
+`kubectl <verb> <kind>/<name>` still does not fit does the **name** itself —
+never the `kind/` in front of it — give way, the same front-cut way as the
 title:
 
 ```
-$ kubectl scale deployment/…eckout-worker-service-canary
-$ kubectl scale deployment/…eckout-worker-service-stable
+$ kubectl scale deployment/…ckout-worker-service-canary -n…
+$ kubectl scale deployment/…ckout-worker-service-stable -n…
 
-$ kubectl rollout restart deployment/…worker-service-canary
-$ kubectl rollout restart deployment/…worker-service-stable
+$ kubectl rollout restart deployment/…er-service-canary -n…
+$ kubectl rollout restart deployment/…er-service-stable -n…
 ```
 
-Both boxes above are at their own real column budget — [`CONFIRM_BOX`] for
-scale, the wider [`CROWDED_BOX`] for restart (§ *Printed instead of drawn*,
-below, on why restart's box is the crowded one) — with nothing left over: the
-flags are gone and the name itself has already given up its own front to fit.
-That is the honest floor of what this line can say at 80×24 for a name this
-long, and it is still a line a reader can tell two Deployments apart by,
-which the box it replaces was not.
+Both boxes above are `CROWDED_BOX` now, not `CONFIRM_BOX` — restart already
+needed the wider box (§ *Printed instead of drawn*, below, on why restart's
+box is the crowded one); scale needs it too, the moment its own `$` line
+needs any cut at all
+([§ The namespace flag never disappears without a
+trace](#the-namespace-flag-never-disappears-without-a-trace), below, ruling
+2) — with nothing left over: `--replicas=3` is gone, the name has front-cut
+to fit, and `-n` is still standing — only its value gave way, down to the
+bare flag. That is the honest floor of what this line can say at 80×24 for a
+name this long: still a line a reader can tell two Deployments apart by, and
+still one that tells the reader a namespace belongs here, which the box it
+replaces was not.
+
+### The namespace flag never disappears without a trace
+
+Measured against `payments-production/checkout-worker`, an ordinary "up by
+one" scale (2 → 3) — the same relation § Scale opens with, on a longer name:
+the full command is 76 columns,
+`kubectl scale deployment/checkout-worker --replicas=3 -n payments-production`,
+and neither of this page's two box widths shows all of it
+([reports/2026-09-20-the-four-behaviours.md §
+5](../reports/2026-09-20-the-four-behaviours.md#5-commandcut-over-the-lines-the-product-composes-at-their-drawn-widths)).
+Before this round, both widths drew the same shape of loss:
+
+```
+$ kubectl scale deployment/checkout-worker --replicas=3…
+```
+
+**That is the defect, not a smaller version of one.** The command that
+remains reads as complete and runnable —
+`kubectl scale deployment/checkout-worker --replicas=3` is valid kubectl on
+its own — and nothing about it hints that a twenty-character namespace used
+to sit after it. A reader who copies the shape of the command rather than
+its exact characters, which is what this whole box exists to teach, comes
+away having learned a command that scales whatever `checkout-worker`
+resolves to in whichever namespace their current context defaults to, not
+necessarily the one k8rs asked to change — the risk this section's own title
+names, and the one place on this page a cut can put the wrong object under
+the reader's own hands rather than merely an ugly line.
+
+**The fix is two rulings together, because either alone is not enough at
+this width.**
+
+1. **Inside a `Confirm` dialog's `$` line only — never on the command log
+   strip — `-n`'s own flag name is the last thing this line ever drops, the
+   same protection this line already gives the object's own `kind/name`
+   token, extended one flag further out** ([widgets.md § 7, cut
+   4](widgets.md#7-text-that-came-from-the-api)). Every *other* trailing
+   flag (`--replicas=3` today, whatever else scale or a future operation
+   ever adds) still gives way whole, in the strip's own order, before `-n`
+   is touched at all; once that walk-back is done, only `-n`'s **value**
+   degrades, character by character — down to nothing, if it must, leaving
+   the bare flag standing:
+   ```
+   $ kubectl scale deployment/checkout-worker --replicas=3 -n…
+   ```
+   A bare `-n…` is not a smaller version of the old, silent loss — a reader
+   who sees it on a `$` line k8rs drew learns immediately that a namespace
+   was there and was cut for space, which is the one fact the old cut threw
+   away along with the rest of the value. **This sharpens, rather than
+   contradicts, the rule this line already shares with the strip's own**
+   ([§ The command log's own line, while a call is running or just
+   after](#the-command-logs-own-line-while-a-call-is-running-or-just-after);
+   [widgets.md § 7](widgets.md#7-text-that-came-from-the-api)): both already
+   character-cut a flag's value rather than drop the flag whole *where part
+   of the value would still fit* — that much was already true of both lines
+   before this round, and is why restart's and delete's own boxes already
+   draw `-n pa…` correctly, unchanged by this section. What was still
+   missing, on the dialog only, is the floor **past** that: the strip, once
+   not even one character of a flag's value would fit, still falls back to
+   dropping the flag whole, `-n` included — a fallback that is a cosmetic
+   loss there, because by the time that line is drawn the real call already
+   carries the right namespace on the wire. The dialog's own `$` line is
+   what a reader reads **before** anything is sent, so for `-n` alone it
+   never reaches that fallback: past zero characters of value, the bare
+   flag name still stands, and only once even a bare `-n…` cannot coexist
+   with the object's own (possibly already front-cut) `kind/name` token
+   does `-n` give way whole too — the one extreme case, past
+   [the identity cut's own case 3](widgets.md#7-text-that-came-from-the-api)
+   already front-cutting the name itself, where this line's floor and the
+   strip's meet again.
+2. **`box_width` reads the `$` line too, not only the consequence.**
+   `CONFIRM_BOX` wins only when the whole `$` line — `kind/name`, every
+   flag, `-n`'s value in full — already fits its own room with **no cut of
+   any kind**. The moment any cut is needed at all, `box_width` picks
+   `CROWDED_BOX` first, the same way it already does for a consequence that
+   does not fit at `CONFIRM_BOX`'s own room — so a longer name spends its
+   three extra columns before ruling 1's own cut ever has to choose what to
+   drop. Measured, this is exactly enough for the worked example above:
+   `kubectl scale deployment/checkout-worker --replicas=3 -n…` is 57
+   columns, `CROWDED_BOX`'s own `$`-line budget to the character. **No
+   third box width** — reusing the existing wider standard is what keeps
+   [widgets.md § 5](widgets.md#5-the-modal-layer)'s "three standard widths,
+   never a bespoke fit per mockup" true of this rule too.
+
+Restart and Delete never reach ruling 2 in practice — `-n` is their only
+flag, so `CROWDED_BOX` is already where their own consequence or typed-name
+field puts them regardless — and ruling 1 alone is already exactly what
+their own boxes draw today:
+`$ kubectl rollout restart deployment/checkout-worker -n pa…` and
+`$ kubectl delete pod/checkout-worker-7d9f4b6c8-x2k9w -n pa…`
+([reports/2026-09-20-the-four-behaviours.md §
+5](../reports/2026-09-20-the-four-behaviours.md#5-commandcut-over-the-lines-the-product-composes-at-their-drawn-widths)) —
+unchanged by this section, and the reason ruling 1 is written as a general
+rule rather than a scale-specific patch: it was already true wherever `-n`
+happened to be the only flag standing, and now it is true wherever `-n` is
+not.
 
 ### Printed instead of drawn — scale on the headless surface
 
@@ -303,6 +515,50 @@ wrong, before this line existed, was not the write — it was the dialog
 claiming the copies had already been replaced when they had not. Only a
 Deployment carries this line: a StatefulSet and a DaemonSet have no
 `spec.paused`, so their dialogs never grow it (D224).
+
+### While the check is still on the wire — restart's own box
+
+The same wait, the same three rulings —
+[§ Scale's own version of this state](#while-the-check-is-still-on-the-wire)
+settles what the verdict row says, what both buttons look like, what `esc`
+does and why nothing new is bound; nothing about any of the three reads
+differently for restart. Restart's own box draws it at its own width and
+its own row count, because [`Dialog::warning`](../src/views.rs) is exactly
+as unknown as [`Dialog::verdict`](../src/views.rs) while this frame is up —
+both arrive off the same check, in the same frame — so the shape below is
+the *one* box for either eventual outcome, paused or not, not a third
+variant:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│   ┌ Restart payments/web ───────────────────────────────────────┐  │
+│   │                                                             │  │
+│   │  This asks Kubernetes to replace every copy of your app with│  │
+│   │  a new one. How many stop at the same time is a setting on  │  │
+│   │  this deployment — it can be a few, or all of them at once. │  │
+│   │  A paused deployment will not start until you resume it.    │  │
+│   │  Checking with the cluster…                                 │  │
+│   │                                                             │  │
+│   │  $ kubectl rollout restart deployment/web -n payments       │  │
+│   │                                                             │  │
+│   │                [ ⏎ do it ]    [ esc cancel ]                │  │
+│   └─────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl rollout restart deployment/web -n payments               │
+├────────────────────────────────────────────────────────────────────┤
+│ waiting for the cluster                                            │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Ten content rows — the same as § Restart's own plain box above, not the
+thirteen the paused variant needs. **If the check comes back paused, the
+box grows by the same three rows the instant it does** — the same jump
+already standing between the plain and paused boxes drawn above this
+section, unrelated to this round and unchanged by it: the warning has
+always arrived with the verdict, never a frame before it.
 
 ### Refused, not opened — pod and replicaset
 
@@ -672,11 +928,12 @@ understanding before they press `⏎`:
 - **The button is never actually waiting on anything.** For `scale` and
   `restart`, `esc` is inert for as long as a real round trip to the cluster
   takes ([NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)'s
-  "`esc` is inert until the verdict arrives"). For `delete` that rule still
-  holds structurally — the confirm callback still cannot run before a
-  `Checked` exists — but nothing was sent to wait on, so there is no
-  perceptible delay: the verdict line and a live typed-name field appear
-  in the same frame the dialog opens in.
+  "`esc` is inert until the verdict arrives") — drawn in
+  [§ While the check is still on the wire](#while-the-check-is-still-on-the-wire),
+  above. For `delete` that rule still holds structurally — the confirm
+  callback still cannot run before a `Checked` exists — but nothing was
+  sent to wait on, so there is no perceptible delay: the verdict line and a
+  live typed-name field appear in the same frame the dialog opens in.
 
 **What is given up is small, and it is D225's to weigh, not this file's to
 relitigate**: a preflight would catch a denying admission webhook before a
