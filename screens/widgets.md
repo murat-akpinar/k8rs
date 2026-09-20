@@ -211,7 +211,7 @@ more column from the name beside it.
 | Resource table | `Table` | `TableState` | rows and header both come from the server's `Table` response; widths `Constraint::Min(len(header))` per column, so nothing is hard-coded per kind ([invariant 12](../CLAUDE.md)) |
 | Finding marker in a table row (`●`) | `Span` prepended to the first `Cell` | — | how Alerts bleeds through into the browser |
 | Detail tabs (logs · describe · yaml · events) | `Tabs` | `usize` index in the view state | `[` `]` move it |
-| Logs / describe / yaml pane | `Paragraph` + `Wrap { trim: false }` | `u16` scroll offset | yaml and logs do **not** wrap-trim: leading whitespace is meaningful |
+| Logs / describe / yaml / events pane | `Paragraph`, pre-wrapped by [`wrapped`](../src/ui.rs) / [`kept`](../src/ui.rs) — ratatui's own `Wrap` is never called | one `u16` scroll offset **per tab**, not one shared by all four ([§4](#4-scrolling)) | yaml and logs do **not** wrap-trim: leading whitespace is meaningful |
 | Any pane taller than its viewport | `Scrollbar` (`ScrollbarOrientation::VerticalRight`) | `ScrollbarState` | rendered **only** when content exceeds the viewport — a permanent scrollbar in a 3-line pane is noise |
 | Command log strip | `Paragraph` inside a `Block` | `VecDeque<Line>`, capped | last 2 lines visible, no wrap — these are copy-paste text and a wrapped command is a lie |
 | Footer | `Paragraph` of `Span`s | — | rebuilt per frame from the current mode; there is no stored footer |
@@ -906,20 +906,29 @@ them.
 **No `ListState`, `TableState` or `ScrollbarState` is stored anywhere.** What
 `views.rs` holds is a `Cursor` (a plain `usize` index plus the anchor key it
 last pointed at, so a selection survives the list under it changing shape) for
-the sidebar and for whatever the content pane is showing, a `u16` scroll offset
-for the free-text panes — logs, yaml, describe — which have no selection to
-follow, and a tab index: [NOTES § File layout](../NOTES.md#file-layout)'s
-"per-view state: selection, filters, tabs, scroll", named in the types that
-actually carry it. `ui::draw` takes **`&App`, immutably** — it builds every `ListState`
-and `TableState` fresh from a `Cursor` on the spot, hands it to
-`render_stateful_widget`, and drops it at the end of the frame. Nothing ratatui
-resolves is carried between frames; the `Cursor` is what is, and it is
-re-derived every time.
+the sidebar and for whatever the content pane is showing, one scroll offset
+**per tab** for the free-text panes — logs, describe, yaml, events — which
+have no selection to follow ([§ 4](#4-scrolling)), and a tab index:
+[NOTES § File layout](../NOTES.md#file-layout)'s "per-view state: selection,
+filters, tabs, scroll", named in the types that actually carry it. `ui::draw`
+takes **`&mut App`** — every `ListState` and `TableState` is still built
+fresh from a `Cursor` on the spot, handed to `render_stateful_widget`, and
+dropped at the end of the frame; nothing ratatui resolves is carried between
+frames, and the `Cursor` mechanism above is untouched by the `&mut`. **The
+one thing the `&mut` is for is the open tab's scroll offset**: `ui::scrolled`
+clamps it to what the pane can show at its current size and writes the row
+it actually drew back into `App`, which is what lets the next keypress move
+from the line the reader was looking at instead of from a stale number the
+renderer used to discard harmlessly (NOTES § D272 § 1).
 
-`ui.rs` computes nothing that outlives the frame, stores nothing, and decides
-nothing a second frame could see — this is what makes a view's behaviour
-testable without a terminal. It does not keep the file short: `ui.rs` has
-already passed the ~800-line mark at which
+`ui.rs` computes nothing that outlives the frame, stores nothing, and
+decides nothing a second frame could see **for every value except that one
+offset** — true of `ListState`, `TableState` and the `Cursor` mechanism above
+exactly as written, and no longer true of the open tab's scroll offset by
+design: it is the one place this product stores what a frame resolved for
+the next frame to read back ([§ 4](#4-scrolling)). This is still what makes
+the rest of a view's behaviour testable without a terminal. It does not keep
+the file short: `ui.rs` has already passed the ~800-line mark at which
 [NOTES § D11](../NOTES.md#d11--the-ninth-file-pre-approved) pre-approves
 `dialog.rs` as the ninth file, and that permission is now on the table for
 Phase 11's dialog boxes to spend or not
@@ -936,8 +945,60 @@ Phase 11's dialog boxes to spend or not
   `ListState` of that height would give, measured at 1 through 300 rows
   ([NOTES § D264 ruling 26](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13),
   [`context.md` § More contexts than fit](context.md#more-contexts-than-fit)).
-- Free text (logs, yaml, describe) keeps its own `u16` offset because
-  `Paragraph` has no selection to follow.
+- Free text (logs, describe, yaml, events) keeps its own scroll offset
+  because `Paragraph` has no selection to follow — the one exception to the
+  bullet above: this offset *is* stored between frames, written back by
+  `ui::scrolled` with the row it actually drew
+  ([§ 3](#3-where-the-state-lives), NOTES § D272 § 1), because nothing else
+  can tell a `Paragraph` where the reader last was.
+- **One offset per tab, not one shared by all four.** Logs, describe, yaml
+  and events each keep their own, so switching from a yaml pane scrolled to
+  its four-hundredth line over to describe and back returns to line four
+  hundred, not to whatever describe's own three rows happened to clamp a
+  shared number down to. A `Paragraph` has no `ListState` to isolate one
+  tab's scrolling from another's the way lists and tables get for free,
+  above, so this product does it by keeping four numbers instead of one
+  (NOTES § D272 § 1 — `tester`'s measured case: yaml at row 400, over to a
+  3-row tab, back to yaml used to read row 0).
+- **A resize discards all four, back to the top of whichever tab redraws
+  next.** The row a free-text offset names is a row of *wrapped, rendered*
+  text, and both the wrap and the window it scrolls through are a function
+  of the pane's own width and height at the moment it was drawn
+  ([§ 2's element table](#2-element--widget), row *Logs / describe / yaml /
+  events pane*; PRIOR-ART § D3 — *"wrapping and resizing must be pure
+  functions"*, the k9s bug class this rule exists not
+  to repeat). A number that named a true position at 24 rows does not name
+  the same position at 44, and there is no cheap way to ask "where was I"
+  back from a rendered row once the wrap that produced it is gone — so this
+  product does not pretend to know. It says so, plainly, by starting the
+  pane over at the top rather than landing short of where the reader
+  actually was and looking almost right: measured at sixteen lines short
+  after a 24 → 44 → 24 resize with no reset at all (NOTES § D272 § 1,
+  `k8s-admin`'s measured case). Follow mode is unaffected — a followed pane
+  ignores its stored offset every frame regardless of what it holds — and a
+  tab that has not been redrawn since the resize has nothing to discard yet;
+  it starts at the top the first time it is drawn after one, the same as any
+  tab does the first time it is ever opened.
+- **Closing the detail slot and opening it again discards all four the same
+  way, every time — not only when the object changed.**
+  [`k8s::log_stream`](../src/k8s.rs) opens a fresh socket,
+  [`k8s::document`](../src/k8s.rs) is a plain fetch, and the per-object
+  events fetch behind `describe` and `events` runs the same on every open
+  ([NOTES § D199](../NOTES.md#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31));
+  neither [`Store`](../src/k8s.rs) nor `App` holds a buffer between one open
+  and the next, and Phase 6 boxed a fetch for each of the four tabs and
+  boxed no cache beside any of them (`todo.md` § Phase 6). A stored row is
+  therefore not a wrapped position that might still be recoverable, the way
+  a resize's is — it names a place in a buffer that is simply gone, which
+  makes this the *easier* of the two rules to defend, not a harder one.
+  **No identity check decides it**: re-opening the very pod that was open
+  before resets exactly the same as opening a different one, because the
+  same fetch runs either way and a rule that told the two apart would buy a
+  re-open after a mis-pressed `esc` at the cost of two behaviours that look
+  identical on screen and are not — precisely what this section exists to
+  not do. Follow mode is unaffected here too: a reader who re-opens a pod's
+  logs lands pinned to the tail, the same as a first open, not at an offset
+  of zero pretending to be one.
 - **The scrollbar reports the buffer, not the history.** The log buffer is
   bounded ([invariant 9](../CLAUDE.md) — no unbounded line, no unbounded
   buffer), so the bar shows position within what is *retained*. When the

@@ -51,6 +51,33 @@ container picker are what a reader reaches for on nearly every open log pane;
 `⇧p` only matters once a container has actually crashed, and a text search is
 the same `/` every other pane already carries silently.
 
+## Leaving a tab, closing the object, and resizing the terminal
+
+**Switching tabs keeps your place.** `[` and `]` move between logs, describe,
+yaml and events, and each of the four keeps its own scroll position — scroll
+`yaml` halfway down a long Deployment, read `describe`, come back, and `yaml`
+is exactly where it was, not back at the top and not wherever `describe`'s
+own shorter body happened to land ([widgets.md § 4](widgets.md#4-scrolling)).
+
+**Closing the detail and opening it again does not — even on the very same
+object.** `esc` back to the browser or Alerts, then `⏎` on the same pod a
+second later: every tab starts at its own top again, or at the tail under
+follow, because opening the slot reads everything it shows fresh — a new log
+stream, a new copy of the object's YAML, a new read of its events — and there
+is no earlier buffer left for an old row number to mean anything against
+([widgets.md § 4](widgets.md#4-scrolling)).
+
+**Resizing the terminal does not, either.** A tab that has been scrolled away
+from its own top redraws from the top the next time the window changes size —
+deliberately: once the wrap a scrolled position was measured against no
+longer exists, there is no honest way left to say "the same line," so the
+pane says where it actually is instead of a number that only looks right
+([widgets.md § 4](widgets.md#4-scrolling)).
+
+Follow mode (`f`) is unaffected by any of this: a followed logs pane is
+always at the tail regardless of what any stored offset says, on a tab
+switch, a close and a re-open, or a resize alike.
+
 ## The heading, when the name does not fit
 
 The heading is one `Paragraph` holding `namespace/name` in full — and until
@@ -704,6 +731,15 @@ whichever bound gets there first), not the Rust shape underneath it.
   open — dropping can still happen off-screen and the counter still climbs;
   turning follow back on does not "catch up" the dropped lines, because they
   are gone.
+- **A resize is a separate event from a drop, and does not touch this
+  line.** Losing lines to the 2 MB ceiling changes what the buffer *holds*;
+  resizing the terminal changes only where a paused, scrolled-back reader is
+  *looking* — [the rule that a resize resets a scrolled pane to its own
+  top](widgets.md#4-scrolling) applies to this tab exactly as it does to the
+  other three, and neither event moves the other's count. A reader
+  mid-scroll who resizes the window still sees the exact dropped-lines line
+  they had before, unchanged, with the log content itself back at whatever
+  is now the top of the retained buffer.
 
 ### A line longer than the cap, and a line longer than the pane — not the same thing
 
