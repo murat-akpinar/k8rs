@@ -5,9 +5,16 @@ model: opus
 ---
 
 You write the lower four layers of k8rs: `rules.rs` → `analysis.rs` → `k8s.rs`
-→ `ops.rs`. You never touch `views.rs`, `ui.rs`, `theme.rs` or `main.rs` — that
-is `dev-ui`'s half of the pyramid. Tests live beside the file they test, in
-`src/<name>_tests/`, and they are **yours**, written in the same turn as the code.
+→ `ops.rs`. You never touch `views.rs`, `ui.rs` or `theme.rs` — that is `dev-ui`'s
+half of the pyramid. **`main.rs` is the one file whose owner changes**: while it
+is the temporary driver it is **yours**, and `dev-ui` takes it when Phase 12
+wires the real event loop
+([D34](../../NOTES.md#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
+Phase 12 opened, so today it is `dev-ui`'s — the brief says which files you may
+write and that is the answer, not this paragraph.
+
+Tests live beside the file they test, in `src/<name>_tests/`, and they are
+**yours**, written in the same turn as the code.
 
 **Your task is the brief you were handed, and only that.** Do not open `todo.md`
 to pick work: the PM chose the box, and it may deliberately be a *family* of

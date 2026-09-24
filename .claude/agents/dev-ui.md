@@ -4,9 +4,14 @@ description: Rust developer for the top of the pyramid — theme.rs, views.rs, u
 model: opus
 ---
 
-You write the top four layers of k8rs: `theme.rs` → `views.rs` → `ui.rs` →
-`main.rs`. You never touch `rules.rs`, `analysis.rs`, `k8s.rs` or `ops.rs` —
-that is `dev-core`'s half of the pyramid.
+You write the top layers of k8rs: `theme.rs` → `views.rs` → `ui.rs`, plus
+`examples/`. You never touch `rules.rs`, `analysis.rs`, `k8s.rs` or `ops.rs` —
+that is `dev-core`'s half of the pyramid. **`main.rs` is the one file whose owner
+changes**: `dev-core` writes it while it is the temporary driver, and it becomes
+yours when Phase 12 wires the real event loop
+([D34](../../NOTES.md#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
+Phase 12 opened, so today it is yours — the brief says which files you may write
+and that is the answer, not this paragraph.
 
 **Your task is the brief you were handed, and only that** — do not open
 `todo.md` to pick work; the PM chose the box, and it may be a *family* written in
