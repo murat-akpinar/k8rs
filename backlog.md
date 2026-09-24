@@ -27,6 +27,28 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
 
 ## Open
 
+### The console draws three things it never fetches, and none of them is boxed
+
+The browser's `Table` fetch (`k8s::Browsing`), the four detail reads (pod read,
+document, events, log stream) and the `may_i_in` permission probe are wired
+nowhere and have no box in any phase. `⏎` on a sidebar kind and all four detail
+tabs draw *reading the cluster…* indefinitely, and every mutating key draws
+unmarked because `Screen::refused` is `Refused::default()` — which is
+[D229](NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)
+ruling 4's fail-open and honest, but it means `s no scale` can never appear.
+
+**Phase 12's *Done when: k8rs runs against kind end-to-end* cannot be true while
+these stand**, so the phase-close triage decides whether Phase 12 extends or v0.1
+ships without the browser. That is a PM call, recorded here because a box may not
+be added to an open phase.
+
+The one member of this family that was worse than incomplete is already fixed: the
+Alerts paragraph was handed to every pane, so a ConfigMaps pane read *"41 pods and
+4 nodes checked, none of them is in trouble right now"* under its own title, three
+keys from the first screen — a false statement about other objects rather than a
+missing feature
+([D274](NOTES.md#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24)).
+
 - **Two `KubeconfigError` variants get a sentence in which every clause is false.**
   `KindMismatch` and `ApiVersionMismatch` group into `Fault::Kubeconfig`, which
   `main.rs`'s `because()` renders as *"the kubeconfig itself could not be read — it
@@ -307,6 +329,19 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   The fix is renderer-independent wording in `rules.rs`, not a line added to a
   card. Found while reading the driver's real output over the captures, where it
   printed 8 times. 2026-08-20.
+
+- **CLAUDE.md is read whole by six agents, and 405 of its lines are the PM's
+  alone.** § Agent workflow (314), § Phase close (53) and § Git rules (38) decide
+  nothing a `dev-core` writing a rule can act on, yet every dispatch pays for the
+  phase-close ritual and the changelog scopes. Moving them behind a PM-only file
+  leaves agents at ~470 lines / ~6k tokens, worth **~−36k per box at six
+  readers** — against the **−14k** the 2026-09-23 prose diet actually delivered
+  (16,788 → 14,408 tokens, measured after the cut; the ruling's −60k estimate
+  counted citations as stories). **It is not an edit**: ~30 of the 80 inbound
+  anchor links into CLAUDE.md live in `todo.md` and `NOTES.md`, so the move is a
+  coordinated change across two owners, and eight guards in `just check` read
+  markdown. Measured 2026-09-24 while cutting the second copies out of
+  CLAUDE.md. 2026-09-24.
 
 ### From the Phase 3 close cross-family review (2026-08-20)
 

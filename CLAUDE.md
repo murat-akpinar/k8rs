@@ -11,7 +11,10 @@ command it ran every time.
 > before acting on anything that predates it.
 
 This file is the working rules — binding, always in effect. It holds no plans,
-no decisions and no requirements; those have their own files, below.
+no decisions and no requirements; those have their own files, below. **A rule
+here states the rule and cites the decision that made it; it never re-tells
+it.** The second copy is the one that goes stale, and it is never the one that
+gets fixed.
 
 ## What to do next
 
@@ -27,46 +30,37 @@ a file finished in an earlier step is frozen.
 
 **A box is never added to an open phase.** Work found mid-phase — a review
 finding, a prior-art gap, an idea — is recorded where it belongs and boxed in a
-*later* phase, so the phase that is running can converge. Twelve boxes were
-injected into a running Phase 3 on 2026-08-14 and the phase stopped closing
+*later* phase, so the phase that is running can converge
 ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
 The one exception is a defect in the box currently being landed: that is the
 same box, not a new one.
 
 ## Every file here also has to get smaller
 
-Every other rule in this file ends in *record it*. None of them made anything
-shorter, and the two files every agent must read — `NOTES.md` and `todo.md` —
-are the two that every box grows. That is why a box came to cost two hours when
-the gate that proves it costs forty seconds
+Every other rule in this file ends in *record it*, and none of them made
+anything shorter — which is why a box came to cost two hours when the gate that
+proves it costs forty seconds
 ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
-Three rules. The first and third are the PM's, at step 7; the second binds
-whoever is writing — a dev at step 3 as much as the PM at step 7:
+Four rules. The first, third and fourth are the PM's, at step 7; the second
+binds whoever is writing — a dev at step 3 as much as the PM at step 7:
 
 - **`todo.md` holds boxes, not history.** A box says what to do and how it is
   known to be done. When it closes it keeps its title and its `NOTES.md`
-  links — the round-by-round story of how it got there does not go back onto
-  it, because every claim in that story cites a decision that already holds it.
+  links — the round-by-round story of how it got there does not go back onto it.
 - **A decision is written once, in `NOTES.md`, and cited everywhere else.** A
-  doc comment, a box, a report: they link `D##`, they do not restate it. The
-  second copy is the one that goes stale, and it is never the one that gets
-  fixed.
+  doc comment, a box, a report, a section of this file: they link `D##`, they do
+  not restate it.
 - **The box is the code, and the turn makes one dispatch.** What the PM writes
   before it is what the brief could not be written without — a blocking ruling,
-  a screen the code must match. Nothing else. A stale list, a wrong number, a
-  contradiction noticed on the way is
-  [`backlog.md`](backlog.md)'s ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
-  not this turn's edit. Three hours once went into documents nobody was blocked
-  on, each defensible on its own, while the code sat finished and uncommitted in
-  the working tree
+  a screen the code must match. A stale list, a wrong number, a contradiction
+  noticed on the way is [`backlog.md`](backlog.md)'s
+  ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
+  not this turn's edit
   ([D196](NOTES.md#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30)).
-  The three rules above bound what goes *into* a document; this one bounds
-  whether it is written *now*.
 - **`NOTES.md`'s index is part of the entry.** A new `### D##` heading lands
   with its line in [§ Decision index](NOTES.md#decision-index) in the same edit.
-  `scripts/check-docs.py` fails on a line whose anchor stopped resolving, so a
-  renamed heading is caught; a heading added with no line at all is not, and
-  that one is on the PM.
+  `scripts/check-docs.py` fails on a line whose anchor stopped resolving; a
+  heading added with no line at all it cannot see, and that one is on the PM.
 
 ## Where to look
 
@@ -91,7 +85,7 @@ whoever is writing — a dev at step 3 as much as the PM at step 7:
 | Crates, versions, toolchain, build targets, colours | [docs/tech-stack.md](docs/tech-stack.md) · [NOTES § Dependencies](NOTES.md#dependencies) |
 | Data flow (watch → prune → store → rules → UI) | [docs/architecture § Data flow](docs/architecture.md#data-flow) |
 | The broken-pod test manifest for kind | [NOTES § kind test manifest](NOTES.md#kind-test-manifest) |
-| How a tool of this shape breaks — k9s's tracker read as a defect catalogue, and the gaps it opens here | [PRIOR-ART.md](PRIOR-ART.md) — evidence, never a plan; a gap becomes a box only by a ruling ([D89](NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14) is the first) |
+| How a tool of this shape breaks — k9s's tracker read as a defect catalogue | [PRIOR-ART.md](PRIOR-ART.md) — evidence, never a plan; a gap becomes a box only by a ruling ([D89](NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14)) |
 
 `tmp/` holds downloaded upstream docs (kube-rs, ratatui, k8s) and is never
 committed.
@@ -139,44 +133,29 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
    `log_stream` / `apiserver_version` may appear. `clippy.toml` carries the ban
    crate-wide with `-D warnings`; `ops.rs` carries the single visible
    `#![allow(clippy::disallowed_methods)]`. The allowlist stays **mechanical**:
-   `may_i(...)` lives in `ops.rs` despite mutating nothing, because it is
-   performed with `create`
+   `may_i(...)` lives there despite mutating nothing, because it is performed
+   with `create`
    ([D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)).
-   **"One file to audit" is one file *plus its test module*, and that is worth
-   saying because it is not obvious.** `ops_tests.rs` is a `#[path]` child module
-   (invariant 11), so `ops.rs`'s inner `#![allow]` covers it lexically and banned
-   calls legitimately appear in two files. Proven not a hole rather than assumed
-   ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04))
-   — **and the proof written here was the wrong one, which is worth more than a
-   quiet fix** ([D226](NOTES.md#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04)).
-   It said *the test module holds no `Client`, no `.send(`, no `.request(`*; it
-   holds **four** `Client`s and did before this claim was written, because the
-   operation tests dispatch real requests at a stub. What actually holds is
-   narrower and does not depend on counting: every client there is built from a
+   **"One file to audit" is that file *plus its test module*** — `ops_tests.rs`
+   is a `#[path]` child (invariant 11), so the inner `#![allow]` covers it
+   lexically and banned calls legitimately appear in two files
+   ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)).
+   What makes that not a hole is structural: every `Client` there is a
    `kube::Config::new` over a literal `http://127.0.0.1:<kernel-assigned>` — no
-   kubeconfig, no `KUBECONFIG`, structurally unable to reach a cluster.
-   `write-guard.py` still reports
-   exactly one silencer, and it scans `tests/` as well as `src/` — measured, by
-   planting one and watching it fail.
+   kubeconfig, unable to reach a cluster
+   ([D226](NOTES.md#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04)).
+   `write-guard.py` reports exactly one silencer and scans `tests/` too.
 2. **No write is implicit.** Every mutation requires: an explicitly selected
    object → a keypress → a confirmation dialog stating the consequence in plain
    language → a server-side `dryRun=All` **where the operation asks for one** →
    an audit line. Deletes and drains additionally require typing the object
    name. `--read-only` makes the whole path unreachable, not merely unbound.
-   Bulk mutation does not exist.
-   **That dry-run clause read *where the API supports it* until 2026-09-04, and
-   `delete` narrowed it** — the API dry-runs a `DELETE` and k8rs declines,
-   because the marker rides in the request body and the cluster's own audit
-   record at `Metadata` level cannot then tell a cancelled dialog from the
-   delete that happened
+   Bulk mutation does not exist. **Declining the dry-run is per operation,
+   recorded in that operation's box, never a default and never silent** —
+   `delete` is the only one, and it costs the connectivity probe the preflight
+   also was
    ([D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
-   ruling 1). **The narrowing is real and it costs something**: the preflight was
-   also the connectivity probe, so a dead socket on a delete now ends in *k8rs
-   does not know whether the change was made* where `scale` would have said
-   *never sent*. **Declining is per operation, is recorded in that operation's
-   box, and is never a default and never silent** — the two halves of this
-   invariant that are not negotiable are the typed name and the audit line, and
-   neither moved.
+   ruling 1). The typed name and the audit line are not negotiable.
 3. **Nothing is deployed into the cluster.** k8rs runs on the user's machine
    against their kubeconfig, and that is the entire trust model.
 4. **Every mutation is visible twice, and neither record may lie.** The
@@ -188,16 +167,14 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
 5. **Rules are pure functions:** `analyze(&Snapshot) -> Vec<Finding>` — no
    network, no terminal, no globals, no `Result` (a missing field means no
    finding), and **no clock call**: `Snapshot` carries `now`, captured once by
-   the caller
-   ([D18](NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact)). Findings
-   carry timestamps; the *renderer* turns one into "4 min ago". Same for
-   `analysis.rs`.
-6. **Watch, never poll-list** — a periodic `LIST pods -A` is what makes k9s
-   heavy. LIST once then stream changes, pruned with `managedFields` dropped.
-   The Alerts view's inputs are watched permanently — Pods, Nodes, and
-   Deployments/StatefulSets/DaemonSets — **pruned to the fields the snapshot
-   types in `rules.rs` name** and no others, across metadata, spec *and* status;
-   "metadata + status only" was never true of this design
+   the caller ([D18](NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact)).
+   Findings carry timestamps; the *renderer* turns one into "4 min ago". Same
+   for `analysis.rs`.
+6. **Watch, never poll-list.** LIST once then stream changes, pruned with
+   `managedFields` dropped. The Alerts view's inputs are watched permanently —
+   Pods, Nodes, and Deployments/StatefulSets/DaemonSets — **pruned to the fields
+   the snapshot types in `rules.rs` name** and no others, across metadata, spec
+   *and* status
    ([D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) ·
    [D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
    ReplicaSets are fetched on demand, never watched; browser kinds are watched
@@ -212,74 +189,52 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
 10. **No new dependencies without asking.** The **twelve** allowed crates:
     `kube`, `k8s-openapi`, `ratatui`, `crossterm`, `tokio`, `anyhow`,
     `serde_json`, `serde_yaml_ng`, `x509-parser`, `similar`, `futures-util`,
-    `tokio-rustls`.
-    `similar` arrives only in v0.4 with `edit` — approved is not the same as
-    present. **No `clap`**, and the threshold is not *a flag that takes a
-    value* — `--context` and `--namespace` take one each, `--context`'s against
-    a closed set, both parsed by hand. It is **subcommands, generated help, or a
-    mutual-exclusion table**
+    `tokio-rustls`. `similar` arrives only in v0.4 with `edit` — approved is not
+    present. **No `clap`**: the threshold is not *a flag that takes a value*, it
+    is **subcommands, generated help, or a mutual-exclusion table**
     ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
-    **The flag list here is a fact about the code, it gets no `check-docs` and no
-    operator review, and it has now gone stale three times** — four when the binary
-    had six (fixed 2026-08-30, [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
-    six when it had fourteen (fixed 2026-08-31), fourteen when it had fifteen
-    (fixed 2026-09-05 — `--subresource`, and it was `dev-core` who counted it, not
-    this file). **Counted, not recalled:**
-    `grep -oE '^(pub )?const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs src/views.rs`
-    — `views.rs` since `--namespace` moved there with the wording that names it
-    ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
-    ruling 14). Two groups, and
-    the split is the point:
-    **released** — `--read-only` `--context` `--namespace` `--once` `--analysis`
-    (the last put there by
-    [D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30));
-    **temporary driver's, and gone at Phase 12** — `--live`, plus the verbs and
-    the selector that name one object: `--logs` `--describe` `--yaml`, `--object`
-    `--kind` `--container` `--previous` `--follow` `--subresource`
-    ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) ·
-    [D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
-    `--namespace` also answers to `-n`. **Ten of these fifteen are scaffolding,
-    which is why the count alone was never the thing to defend** — the threshold
-    below is. No `tracing` until debugging demands it
+    No `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
-    **The eleventh was a reversal and is the shape to argue from**
-    ([D143](NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)):
-    every `kube-runtime` entry point returns `impl Stream`, `Stream` is not in
-    `std`, so the ten approved a client and nothing that could consume it. It
-    added **no compiled code** — 213 crates in `Cargo.lock` before and after —
-    because `futures-util` was already linked under `kube-client`. A crate that
-    is already in the build and only needs *naming* is the narrow case; `clap`
-    and `tracing` are not, which is why they are still refused.
-    **The twelfth is the same shape, measured the same way**
-    ([D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)):
-    C2 is only readable off the peer certificate of a handshake we drive, driving
-    one needs a connector, and `tokio-rustls` was already linked under
-    `hyper-rustls` — **213 packages in `Cargo.lock` before and after**. It
-    re-exports `rustls`, so one crate is named and not two, and the `ClientConfig`
-    it is handed is `kube::client::ConfigExt`'s, built from the same kubeconfig CA
-    the real client uses — so nothing here calls `dangerous()` and
-    the TLS line of the security gate holds structurally.
+    **The flag list below is a fact about the code and has gone stale four
+    times. Counted, not recalled:**
+    `grep -oE '^(pub )?const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs src/views.rs`
+    — `views.rs` since `--namespace` moved there
+    ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+    ruling 14). Two groups, and the split is the point:
+    **released** — `--read-only` `--context` `--namespace` (also `-n`) `--once`
+    `--analysis`
+    ([D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30));
+    **temporary driver's, gone at Phase 12** — `--live` `--logs` `--describe`
+    `--yaml` `--object` `--kind` `--container` `--previous` `--follow`
+    `--subresource`
+    ([D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
+    **Ten of fifteen are scaffolding, which is why the count was never the thing
+    to defend** — the threshold is.
+    **The narrow case for a thirteenth is a crate already in the build that only
+    needs *naming***: that is what the eleventh and twelfth were, each adding no
+    compiled code and leaving `Cargo.lock` at 213 packages
+    ([D143](NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22) ·
+    [D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
+    `clap` and `tracing` are not that case. Nothing here calls `dangerous()`:
+    `tokio-rustls` is handed `kube::client::ConfigExt`'s `ClientConfig`, built
+    from the same kubeconfig CA the real client uses.
 11. **Eight product files, flat.** `main.rs / k8s.rs / ops.rs / rules.rs /
     analysis.rs / views.rs / ui.rs / theme.rs` — no `mod.rs` pyramid, no trait
     layer, no plugin system. Exactly one ninth is pre-approved: `dialog.rs`, if
     `ui.rs` passes ~800 lines ([D11](NOTES.md#d11--the-ninth-file-pre-approved)).
-    **Tests sit beside the file they test, never inside it.** A product file
-    with tests carries that one declaration —
+    **Tests sit beside the file they test, never inside it.** A product file with
+    tests carries one declaration —
     `#[cfg(test)] #[path = "<name>_tests.rs"] mod tests;` — and no test code of
-    its own; the tests live in `src/<name>_tests.rs`. It is still a
-    child module — it sees the private items, and **no `lib.rs` is added**,
-    which is the thing [D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)
-    refused and still refuses. This is a convention, not a per-file judgement
-    call: every product file that has tests splits the same way.
+    its own. It is still a child module, so it sees the private items and **no
+    `lib.rs` is added**
+    ([D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
+    This is a convention, not a per-file judgement call.
     **The test file — and only the test file — may split again**, into
     `src/<name>_tests/` with one `#[path]` module per `// --- … START ---`
-    region of the product file, when it has grown past what one turn can read.
-    `rules_tests.rs` did on 2026-08-15 and now holds the imports, the helpers
-    more than one region reads, and five declarations. Still no `mod.rs`, still
-    no `lib.rs`, and **the product file never splits with it**: the defects this
-    repo has paid most for were two rules reading one container and disagreeing,
-    and a module boundary is exactly where the second copy of a shared helper
-    grows back ([D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15) ·
+    region, when it outgrows one turn's reading. Still no `mod.rs`, no `lib.rs`,
+    and **the product file never splits with it**: a module boundary is exactly
+    where the second copy of a shared helper grows back
+    ([D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15) ·
     [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
 12. **No per-kind code in the browser.** Resource views come from API discovery
     and server-side `Table` printing; typed structs exist only where the rule
@@ -305,7 +260,8 @@ not a follow-up ticket. Reasoning: [docs/security.md](docs/security.md),
 ([D105](NOTES.md#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16)):
 workflow hygiene, no shell spawned from `src/`, no dependency or hostname outside
 the approved list, no `Debug` over a type that can hold a token, no in-cluster
-ServiceAccount door, no TLS knob turned off by us. They are marked **`[auto]`**
+ServiceAccount door, no TLS knob turned off by us. The seventh **`[auto]`** row
+is `cargo deny`, a separate tool `just check` also runs. All seven are marked
 below and are not re-read by hand. **Everything unmarked is yours**, and a script
 that goes green says nothing about those.
 
@@ -323,24 +279,17 @@ that goes green says nothing about those.
 
 - [ ] Least privilege holds: the documented read-only role runs everything
       except the operations — **including the `nonResourceURLs` grant discovery
-      needs**, which the role lacked until 2026-08-26 and which only a cluster
-      without the default `system:discovery` binding reveals
+      needs**. A 403 degrades that one feature and names the missing verb +
+      resource; it never crashes and never retries in a loop. **A
+      `nonResourceURL` refusal has neither**, so the only true sentence names
+      the path: *"this kubeconfig may not `get /apis`"*
       ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
-      A 403 degrades that one feature and names the missing verb + resource; it
-      never crashes and never retries in a loop. **A `nonResourceURL` refusal
-      has neither** — the measured `Status` for `/apis` carries an empty
-      `details`, so a formatter reading `details.group`/`details.kind` prints an
-      empty sentence and the only true one names the path: *"this kubeconfig may
-      not `get /apis`"*.
 - [ ] `--read-only` is structurally true — **no mutation is reachable**, keys
-      unbound. **The row said *`ops.rs` unreachable* until 2026-09-05 and that is
-      no longer the same sentence**
+      unbound. The invariant's subject is mutation: `may_i` is in `ops.rs` for
+      [D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)'s
+      mechanical reason, writes nothing, and stays reachable under `--read-only`
       ([D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
-      ruling 3): `may_i` is in `ops.rs` for [D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)'s
-      *mechanical* reason and writes nothing, and `--read-only` refusing it told
-      the read-only user they could not ask what they were allowed to do. The
-      invariant's subject was always mutation; the shorthand stopped being true
-      the moment the allowlist's own cost landed in the file.
+      ruling 3).
 
 **The write path**
 
@@ -348,21 +297,15 @@ that goes green says nothing about those.
 - [ ] Dry-run precedes the real call for every operation that asks for one, and
       an operation that declines has said why in its own box
       ([D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
-      ruling 1 is the only one so far, and it is `delete`). *Wherever the API
-      supports it* is what this row said until 2026-09-04 and the API supports
-      all of them.
+      ruling 1 is the only one so far, and it is `delete`).
 - [ ] Destructive actions require the typed object name.
 - [ ] Applies carry the resourceVersion that was read; a 409 offers a re-read,
-      never a blind overwrite. **"Applies" is the word to read literally — it
-      means a read-modify-write, which today is only v0.4's `edit`, and this row
-      is not a licence to put a precondition on every mutation**
-      ([D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)).
-      A Phase 7 box read it as *every call*, `scale` got one, and it was measured
-      refusing **5 of 9** runs against rolling and crashlooping Deployments —
-      because `metadata.resourceVersion` moves on a `status` write by the object's
-      own controller, which falsifies nothing an operator agreed to. `scale
-      --replicas=N` is absolute intent and needs no precondition; the second half
-      of the row — a `409` names a next step — is live and shipped.
+      never a blind overwrite. **"Applies" is literal — a read-modify-write,
+      which today is only v0.4's `edit`. This row is not a licence to put a
+      precondition on every mutation**
+      ([D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)):
+      `scale --replicas=N` is absolute intent and needs none. The second half of
+      the row — a `409` names a next step — is live and shipped.
 - [ ] No bulk mutation, no operation without a selected object.
 - [ ] Every attempt — success, failure, refusal — reaches the audit log.
 
@@ -375,10 +318,9 @@ that goes green says nothing about those.
       at all it refuses a shell program, a `-c` flag and a command string. **Two
       files spawn today**, each through an argument vector: `tests/binary.rs` runs
       the built binary, and `src/k8s_tests.rs` runs `openssl` on literals and temp
-      paths to build the CA and leaf its TLS server needs
+      paths
       ([D179](NOTES.md#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28)).
-      When `$EDITOR` lands it is an argument vector too, never a command string;
-      a pod named `; rm -rf ~` is boring.
+      When `$EDITOR` lands it is an argument vector too, never a command string.
 - [ ] The command log is display text. k8rs does not execute it, and nothing in
       it is fed back into a process.
 - [ ] Object names are sanitised before they build a filesystem path — `../` in
@@ -390,11 +332,10 @@ that goes green says nothing about those.
 
 - [ ] Environment variable values are never displayed. Secret values require an
       explicit reveal and never enter the command log, the audit log, or the
-      YAML shown by `y`. **One path into this arrives from the server rather
-      than from anything k8rs chose to render, which is why it was missed for a
-      month**: a `fieldValidation=Strict` rejection on a workload object returns
-      the *whole object* in `Status.message` — 4859 bytes on a trivial
-      Deployment, measured — and that message is what the audit line quotes
+      YAML shown by `y`. **One path in arrives from the server rather than from
+      anything k8rs chose to render:** a `fieldValidation=Strict` rejection
+      returns the *whole object* in `Status.message`, and that message is what
+      the audit line quotes
       ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
 - [ ] *(from v0.4, when `edit` lands)* The edit temp file is mode 0600, in the
       user's own temp dir, and removed on exit *and* on panic.
@@ -427,9 +368,12 @@ that goes green says nothing about those.
   functions.
 - **Comments are sparse, and the "why" belongs in `NOTES.md`.** A doc comment
   states what the item is and cites the decision that shaped it
-  (`NOTES § D27`) — it does not re-argue it. Where a rationale genuinely lives
-  nowhere else, keep it short and *write the NOTES entry in the same change*, so
-  the next comment can cite it instead of repeating it. Block markers when a
+  (`NOTES § D27`) — **it does not re-argue it, and a comment that cites a `D##`
+  and then restates its reasoning loses the argument and keeps the citation.**
+  Where a rationale genuinely lives nowhere else, keep it short and *write the
+  NOTES entry in the same change*, so the next comment can cite it instead.
+  **This binds new and edited code only** — there is no retrospective pass over
+  the existing comments, and it is not to be boxed as one. Block markers when a
   section needs one:
 
   ```
@@ -468,8 +412,9 @@ installed locally is added to `just check` anyway: a missing binary is a loud
 error, a missing step is an invisible gap.
 
 **Nothing builds or runs on this machine — every `cargo`, `just`, guard and
-binary run happens on the test host** ([D267](NOTES.md#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17),
-the user's ruling). Edit here, mirror, run there:
+binary run happens on the test host**
+([D267](NOTES.md#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17)).
+Edit here, mirror, run there:
 
 ```
 rsync -a --delete --exclude=/target --exclude='/mutants.out*' ~/GIT/k8rs/ ubuntu:k8rs-src/
@@ -479,9 +424,8 @@ ssh ubuntu 'cd ~/k8rs-src && export PATH=$HOME/.cargo/bin:$PATH && just check'
 `~/k8rs-src` is never edited, since the next mirror deletes the edit. One command
 runs in it at a time. **`rsync -a` preserves mtimes, so `touch src/*.rs` after a
 mirror that restores a file** — otherwise `cargo` reuses the object built from
-the version you just replaced and the run measures a binary no tree ever held
-([D267](NOTES.md#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17)). A run longer than ten minutes goes to the background with
-its log on the host.
+the version you just replaced. A run longer than ten minutes goes to the
+background with its log on the host.
 
 **The one exception is the mutation sweep, and it runs here** — 82 s per mutant
 on the host, measured, against 136 mutants for one box. `just mutants-diff` and
@@ -523,11 +467,10 @@ delivery, in the same turn, never filed as follow-ups — then say what changed.
 Five subagents live in `.claude/agents/`, committed. **The main session is the
 project manager.** Agents do not talk to each other, do not commit, do not push,
 and do not check a box in `todo.md`. Every handoff goes through the PM, so there
-is exactly one place a lie can be caught. **The PM is not a sixth agent for the
-same reason** — a subagent starts cold on every dispatch and would carry neither
-this file, nor `todo.md`, nor the box it just landed; `/basla`
-(`.claude/commands/`) is the trigger that puts the main session into this
-procedure, not a delegation of it.
+is exactly one place a lie can be caught. **The PM is not a sixth agent** — a
+subagent starts cold and would carry neither this file, nor `todo.md`, nor the
+box it just landed; `/basla` (`.claude/commands/`) triggers the procedure in the
+main session, it does not delegate it.
 
 ### Ownership — and the file each one may write
 
@@ -543,10 +486,10 @@ Every path in the repo appears in exactly one **Writes** cell.
 | **PM** (main session) | `todo.md` `NOTES.md` `backlog.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/` `.claude/commands/`, branches, commits, PRs | `src/` (delegate it) |
 
 **A `<name>_tests.rs`, and every module under `<name>_tests/`, has the same
-writer as `<name>.rs`** (invariant 11, which says where they live): the tests
-move out of the file, never out of the author's hands. **`tester` does not write
-them and does not re-run their red; it attacks them** (step 5). `tests/` is
-fixtures and, from Phase 7, end-to-end tests — never the rule tests
+writer as `<name>.rs`** (invariant 11): the tests move out of the file, never out
+of the author's hands. **`tester` does not write them and does not re-run their
+red; it attacks them** (step 5). `tests/` is fixtures and, from Phase 7,
+end-to-end tests — never the rule tests
 ([D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
 
 Phase map, from [`todo.md`](todo.md): **2** → `tester` · **3–7** → `dev-core` ·
@@ -557,20 +500,17 @@ owner changes
 
 ### The PM does not wait for approval — the boxes run back to back
 
-**Standing authorisation
-([D98](NOTES.md#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15)):
-the user is not in the room.** The PM picks the next family, briefs it, runs the
-cycle, lands it, and starts the next — no "shall I continue", no question
-[`todo.md`](todo.md) already answers. **Nothing else loosens**, and the person who
-could have caught a skipped gate has left, so a gate skipped now is never found.
+**Standing authorisation: the user is not in the room**
+([D98](NOTES.md#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15)).
+The PM picks the next family, briefs it, runs the cycle, lands it, and starts the
+next — no "shall I continue", no question [`todo.md`](todo.md) already answers.
+**Nothing else loosens**: the person who could have caught a skipped gate has
+left, so a gate skipped now is never found.
 
-**But the PM reports at the first dispatch, not only at the push** — one line:
-the box, what had to be ruled before it, what is running now. **A phase close is
-not a box and reports the same way, at each of its dispatches** — it is the
-longest thing this process runs.
-[D98](NOTES.md#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15)
-removed the *asking*, not the *saying*. A box that has been running three hours
-is otherwise invisible until the user asks what happened to their afternoon
+**The PM reports at the first dispatch, not only at the push** — one line: the
+box, what had to be ruled before it, what is running now. **A phase close is not
+a box and reports the same way, at each of its dispatches.** D98 removed the
+*asking*, not the *saying*
 ([D196](NOTES.md#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30)).
 The only stops: the section below, a red build, and any reversal of a design
 decision — written into [NOTES.md](NOTES.md) before it is acted on.
@@ -583,47 +523,43 @@ prints the exact command for the user and waits for the real output. A box whose
 evidence is "this would work" is an unchecked box.
 
 **The cluster is split by what the run produces, not by who runs it**
-([D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
-Anything that **produces an artifact** — `just fixtures`, any write into
-`tests/`, and `just e2e` whose green *is* a box's done-when — is the PM's, because
-committed fixtures carry [D53](NOTES.md#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
-and the sanitization gate. An **ephemeral measurement** — bring a cluster up,
-check one claim, tear it down — is `k8s-admin`'s, and nobody else's: a dev with a
-cluster tunes the code until the cluster agrees. It runs under
-**`K8RS_CLUSTER=review`** — the default name is the PM's fixture cluster and
-teardown would delete it. **The sanitizer never sees a cluster name; it reads
-node names**, and since 2026-08-20 `scripts/sanitize.jq` accepts only the four
-the fixture cluster actually produces — `k8rs-control-plane` and
-`k8rs-worker[N]`, `.lan` suffix allowed — instead of the whole `k8rs-*` family
-that `k8rs-review-control-plane` walked straight through three times
+([D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)):
+
+- **Produces an artifact** — `just fixtures`, any write into `tests/`, `just e2e`
+  whose green *is* a box's done-when — is the **PM's**, because committed
+  fixtures carry [D53](NOTES.md#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+  and the sanitization gate.
+- **An ephemeral measurement** — cluster up, one claim checked, torn down — is
+  **`k8s-admin`'s** and nobody else's, under **`K8RS_CLUSTER=review`** (the
+  default name is the PM's fixture cluster and teardown would delete it). The
+  write-up lands in [`reports/`](reports/README.md)
+  ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)).
+
+**The sanitizer never sees a cluster name; it reads node names**, and accepts
+only the four the fixture cluster produces — `k8rs-control-plane` and
+`k8rs-worker[N]`, `.lan` suffix allowed — so **no cluster but `k8rs` can produce
+a committed fixture**, however it was made
 ([D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
-So **no cluster but `k8rs` can produce a committed fixture**, which is stronger
-than the old claim about one name, and it holds however the cluster was made —
-`cluster.sh` refuses the family name too, but it is the loud guard and not the
-load-bearing one, because a reviewer runs `kind create cluster` directly. **The cluster is ephemeral; the write-up is not** — the measurement
-lands in [`reports/`](reports/README.md) under that file's sanitization rule,
-which is what keeps *an object from the cluster* on the PM's side of this split
-while *what was observed about it* stays on `k8s-admin`'s
-([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)).
-One cluster at a time, and its output is evidence for a *finding* — a
-box that needs a cluster to close is still a PM box.
+One cluster at a time, and a box that needs a cluster to close is still a PM box.
 
 ### The one hard rule of concurrency
 
-**One writer per file tree at a time**, and **the scratchpad is a file tree
-too** — each agent works in its own subdirectory of it, named after itself, and
-re-verifies anything it saved earlier before relying on it
+**One writer per file tree at a time.** **The scratchpad is a file tree too** —
+each agent works in its own subdirectory of it and re-verifies anything it saved
+earlier before relying on it
 ([D60](NOTES.md#d60--claudemd-was-compressed-and-four-stories-moved-here-2026-08-12)).
-**So is the cluster** ([D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)):
-a capture and a review measurement never run at once, whatever the file trees
-say. What may genuinely run at the same time — at most one writer per row:
+**So is the cluster**: a capture and a review measurement never run at once,
+whatever the file trees say
+([D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
+What may genuinely run at the same time — at most one writer per row:
 
 | Safe together | Because |
 |---|---|
 | one dev writing `src/` · `tester` writing `tests/`, `scripts/` | disjoint trees |
 | one dev writing · `tui-designer` on a **later** phase's screen | `screens/` is not code |
-| two reviewers (`k8s-admin` + `tui-designer`) on the same diff | disjoint trees — `k8s-admin` writes only `reports/`, `tui-designer` only `screens/`; but if `k8s-admin` is measuring, no capture runs beside it |
-| one dev writing · `k8s-admin` auditing an **already merged** phase | the audit lands as findings and a `reports/` file, never as an edit to the thing audited |
+| two reviewers (`k8s-admin` + `tui-designer`) on the same diff | disjoint trees; but if `k8s-admin` is measuring, no capture runs beside it |
+| **`tester` (step 5) · `k8s-admin` (step 6)** | disjoint trees — `tests/`+`scripts/` against `reports/`. Halves the review wall clock. **Not** while `k8s-admin` is measuring on the test host: one command runs in the mirror at a time |
+| one dev writing · `k8s-admin` auditing an **already merged** phase | the audit lands as findings and a `reports/` file, never as an edit |
 
 Anything else runs one at a time; worktree isolation (`isolation: "worktree"`)
 exists if two writers are ever unavoidable, but reach for the plan fix first.
@@ -631,79 +567,43 @@ exists if two writers are ever unavoidable, but reach for the plan fix first.
 `k8s-admin` reports, and the dev idles meanwhile.
 
 **A sweep that edits in place is a writer for as long as it runs, and what it
-breaks is a reader.** A statement-deletion run that mutates the shared tree, waits
-for a test, then restores is a writer holding that file — and when the ten-minute
-tool cap kills it, the restore on its last line never runs. The tree survives,
-because the author restores it; what does not survive is anybody who *read* the
-file meanwhile and measured a real state no commit ever held. That is how the PM
-filed a live invariant-9 defect against a line that was there the whole time
+breaks is a reader**
 ([D180](NOTES.md#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)).
-So a sweep runs against a copy with its own `CARGO_TARGET_DIR`, and its restore
-lives in a `try`/`finally` and not on a last line. **That holds for every resource
-a run owes cleanup on, not just an edited file**
-([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)):
-a killed background job, a torn-down cluster, a released lock. A load generator
-whose `kill` sat on the last line spawned 32 busy loops, exceeded the ten-minute
-cap, and left them spinning for twenty-six hours at load average 33 — where they
-became a silent term in every timing number measured beside them. If the only
-thing between the machine and a leak is the script reaching its final statement,
-there is no cleanup. **`just mutants-diff` is already
-this shape** — `scripts/mutants.sh` names its own scratch volume — which is why the
-hand sweeps are the ones that need saying.
+So it runs against a copy with its own `CARGO_TARGET_DIR`, and its restore lives
+in a `try`/`finally`, not on a last line. **That holds for every resource a run
+owes cleanup on** — a background job, a cluster, a lock
+([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)).
+**And the restore goes to a snapshot it took, never to `HEAD`** — restoring to
+`HEAD` deletes the uncommitted box underneath the sweep's edits. `cp` first,
+restore from the copies.
 
 **No agent runs a destructive git command. Ever, on any tree.** Not
-`git checkout`, not `git reset`, not `git stash`, not `git clean` — **and the
-rule is the class, not the spelling.** The first draft of this paragraph said
-*not `git checkout -- .`* and a second agent ran
-`git checkout -- src/ops.rs src/main.rs` the next day, named files, straight
-past it (D94: a guard the obvious wrong name walks past is not a guard).
-**Restoring a file you edited is the same command as deleting a box, and git
-cannot tell them apart.**
-The working tree is the PM's, it usually holds a box in flight, and none of those
-commands can tell your scratch file from somebody's afternoon. `tester` ran
-`git checkout -- .` to tidy one probe file and destroyed a finished, unreviewed
-box; it recovered it only because it happened to have captured a `git diff`
-first, and it was still unable to vouch for its own doc comments — `rustfmt` and
-the tests cannot see a typo in a comment
+`git checkout`, not `git reset`, not `git stash`, not `git clean` — **the rule is
+the class, not the spelling.** **Restoring a file you edited is the same command
+as deleting a box, and git cannot tell them apart**
 ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)).
-**An agent that wants a clean tree copies it** and gives the copy its own
-`CARGO_TARGET_DIR` — **under `$HOME`, never under the scratchpad**, which is a
-12 GiB tmpfs here. Two agents filled it on 2026-09-12 and one of them lost **all
-stdout and stderr for four consecutive commands**, which is indistinguishable
-from a command that printed nothing: [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
-volume wearing a second hat — not *a full disk reads as a pass* but *a full disk
-reads as nothing at all* ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
-item 12). `scripts/mutants.sh` names its own volume for exactly this; a hand-run
-`cargo` does not, and the scratchpad is where agents are told to work. An agent
-that wants a file gone deletes *that file by name*. Anything that would discard
-work is the PM's, and the PM backs up first.
+**An agent that wants a clean tree copies it**, with the copy's own
+`CARGO_TARGET_DIR` **under `$HOME`, never under the scratchpad** — a 12 GiB tmpfs
+whose filling loses a command's stdout and stderr entirely, indistinguishable
+from a command that printed nothing
+([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21) ·
+[D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
+An agent that wants a file gone deletes *that file by name*. Anything that would
+discard work is the PM's, and the PM backs up first.
 
-**And a sweep's restore goes to a snapshot it took, never to HEAD.** This is
-where the second occurrence came from: the trap was there, exactly as
-[D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)
-requires, and it restored to `HEAD` — so it did not undo the sweep's edits, it
-deleted the uncommitted box underneath them. `cp` the files first and restore
-from the copies. D185 says cleanup belongs in the trap; it does not say what
-*to*, and that is the half that cost a box twice.
-
-**A re-dispatch to fix a finding is a write, not a review** — `screens/` went to
-its owner for a rewrite in the slot the table below reserves for two *reviewers*,
-and the reviewer's first read carried a section that no longer existed
-([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
-
-**Sending a finished agent another message is a new dispatch**, and a resumed
-agent owns its files again the moment it wakes — so a follow-up while someone
-else holds that tree puts two writers on it, and the second one's restore from
-backup silently reverts the first
+**A re-dispatch to fix a finding is a write, not a review**
+([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)),
+and **sending a finished agent another message is a new dispatch** — a resumed
+agent owns its files again the moment it wakes
 ([D96](NOTES.md#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)).
-Check who holds the files before resuming; if someone does, wait or tell them
-what landed underneath.
+Check who holds the files before resuming.
 
-**The gate is not split by tree, so the PM is a writer too.** `just check` reads
-`docs/`, `todo.md`, `NOTES.md` and `screens/` as well as `src/`. Two rules, both
-cheap: **every PM edit is self-consistent on its own** — never a link to an
-anchor a later edit will add — and while an agent is running the gate, the PM
-either waits or expects to explain the red in somebody else's report.
+**The gate is not split by tree, so the PM is a writer too.** Eight guards in
+`just check` read markdown, so `docs/`, `todo.md`, `NOTES.md` and `screens/` are
+gate-visible. Two rules: **every PM edit is self-consistent on its own** — never
+a link to an anchor a later edit will add — and while an agent is running the
+gate, the PM either waits or expects to explain the red in somebody else's
+report.
 
 ### The cycle — one **family** of `todo.md` boxes is one turn of it
 
@@ -712,28 +612,38 @@ one turn** ([D109](NOTES.md#d109--the-family-is-the-unit-of-work-and-the-commit-
 A family is the boxes that touch the same code and answer the same question; the
 PM names it at the phase's head in [`todo.md`](todo.md). Boxes with no family
 stay one at a time, and **`ops.rs` is never batched** — see step 6.
-
-**The commit does not batch with it.** Every turn commits, never a phase: a
-commit costs nothing and is the recovery point, and a phase that commits once
-gives sixteen boxes of work one changelog line and no way back to box eleven.
+**The commit does not batch with it**: every turn commits, never a phase.
 
 | # | Step | Who | Gate to pass |
 |---|---|---|---|
 | 1 | **`git status --short` first**, then read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking — **and no file the brief names is already modified** ([D195](NOTES.md#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)) |
 | 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
-| 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
-| 4 | Prove the tests can fail | the author, before reporting | `just mutants-diff` over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
+| 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency; the dev's build gate below |
+| 4 | Prove the tests can fail | the author, before reporting | `just mutants-diff` over the box's **own diff**, not the file; the author's red/green is pasted in step 3 — see below |
 | 5 | Attack it, then the full run | `tester` | the assertions attacked and the unfed shapes fed · `just check` green **and** the code exercised for real |
-| 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** — see below |
+| 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** |
 | 7 | Land it | PM | see below |
+
+**Steps 5 and 6 run in parallel**, except while `k8s-admin` is measuring on the
+test host.
+
+**The dev does not run `just check`** — the full gate is step 5's, `tester`'s,
+and a duplicate on every dev turn and review round is pure cost. **But the dev
+cannot skip compiling**, so:
+
+- **dev runs:** `cargo fmt --all -- --check` · `cargo clippy --locked
+  --all-targets --all-features -- -D warnings` · `cargo test --locked
+  --all-targets` · `just mutants-diff`. Clippy is not optional — `-D warnings`
+  makes one lint a red build.
+- **`tester` alone runs the full `just check`**, which adds `guards`,
+  `cargo deny check` and `cross`. Those do not turn on the dev's judgement.
 
 **Step 6 reads the family together, with the shared helpers they all call**
 ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)):
 a reviewer shown one rule finds the defect in that one rule, and every expensive
-defect this repo has had was two rules reading one container and disagreeing,
-which is invisible from inside either. **Two things stay per-box, because their
-blast radius is not a family: anything in `ops.rs`, and any change to a shared
-helper** — a helper is the thing every rule in the family already agreed on.
+defect this repo has had was two rules reading one container and disagreeing.
+**Two things stay per-box, because their blast radius is not a family: anything
+in `ops.rs`, and any change to a shared helper.**
 
 Step 7 in order, one push at the end and not two: [second
 pass](#second-pass--nothing-is-delivered-on-its-first-draft) over the **landed
@@ -748,8 +658,13 @@ everyone upstream already passed** (2026-08-13, the user's standing
 instruction). Every pass before it saw one slice; a review can even create the
 defect it could not have seen
 ([D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
-Open the changed files whole, and check the PM's own edits with the rest — they
-got no review at all. Findings are fixed **before** the push, in the same turn.
+**It reads the changed regions whole, plus every region that calls into them** —
+not the whole file, which at over 9,000 lines is more than half a context window,
+so *"open the changed files whole"* was a rule nobody could follow. The
+`// --- … START ---` markers exist for exactly this
+([D110](NOTES.md#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16)).
+Check the PM's own edits with the rest — they got no review at all. Findings are
+fixed **before** the push, in the same turn.
 
 Steps 4–6 loop back to 3 on any failure, and nothing is negotiated down to get
 past a gate. **When the reviewer and the author disagree, the PM decides, in
@@ -766,38 +681,36 @@ phase — a fix, a docs change, this file — goes on `development` too.
 
 "I saw it fail" is a claim
 ([D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12)). **The author
-still proves its own change red then green and pastes both** — that is step 3's,
-not a separate turn. What checks the *claim* is a mutation run, because a
-surviving mutant is a test that cannot fail, stated by a tool with no incentive
+still proves its own change red then green and pastes both** — that is step 3's.
+What checks the *claim* is a mutation run: a surviving mutant is a test that
+cannot fail, stated by a tool with no incentive
 ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
-**Per turn it is scoped to the diff** — **`just mutants-diff`**, never a raw
-`cargo mutants` line — because the whole file was 519 mutants at ~2s each the last
-time it was run whole (2026-08-16; the file has grown since). `just mutants` whole
-is the *phase-close* gate **only for a phase that changed `rules.rs`,
-`analysis.rs` or their tests** — those are the only files it mutates, so every
-other close runs `git log` over those paths, finds nothing, and cites the last
-clean sweep instead of spending hours re-proving frozen files
+
+**Per turn it is scoped to the diff — `just mutants-diff`**, never a raw
+`cargo mutants` line. **`just mutants` whole is the phase-close gate only for a
+phase that changed `rules.rs`, `analysis.rs` or their tests** — the only files it
+mutates; every other close runs `git log` over those paths, finds nothing, and
+cites the last clean sweep
 ([D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
-`--iterate` skips what an earlier run already caught. **Both go through
-`scripts/mutants.sh`, and that is not a convenience.**
+`--iterate` skips what an earlier run already caught.
+
+**Both go through `scripts/mutants.sh`, and that is not a convenience.**
 cargo-mutants files *any* build failure as `unviable`, so a mutant that never got
-built because the scratch volume was full reads exactly like one that cannot
-compile — and this box's `/tmp` is a 12 GiB tmpfs that has been at 94% while
-`$HOME` had 916 GB free
+built for want of disk reads exactly like one that cannot compile
 ([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)).
 The script names its own scratch volume, refuses to start without headroom, and
 **reads the run's logs afterwards** — an honest `unviable` names a type, a
-dishonest one names a filesystem, and the *count* cannot tell them apart (the last
-phase close had 55 legitimate unviables). A shard that dies for space prints no
-`MISSED` line, which is exactly what a passing shard prints.
+dishonest one names a filesystem, and the *count* cannot tell them apart. A shard
+that dies for space prints no `MISSED` line, which is what a passing shard
+prints.
 
-**So `tester` no longer re-runs the author's mutations by hand** — measured, it
-found zero defects for fourteen minutes and 120k tokens
+**`tester` does not re-run the author's mutations by hand** — measured, zero
+defects for fourteen minutes and 120k tokens
 ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
 Its work is the part that did find things: attack the assertions (is this
 expected number derived from the requirement, or updated to match the output?),
 feed the shapes the author did not, read what the screen actually prints, and
-`just check`. Guards in `scripts/` keep the hand `--self-test`, their equivalent.
+`just check`.
 
 ### The brief the PM hands out, and the report it gets back
 
@@ -807,17 +720,14 @@ behaviour · what is explicitly out of scope · **and what to read, by region**.
 
 **A box written a phase ago may describe a defect the code has already closed**,
 so the brief carries its premise re-checked at HEAD, or says plainly that it was
-not. Two Phase 4 boxes were stale; the one checked at brief time cost nothing and
-the one that was not cost a review round
-([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+not ([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
 
-**That last line is the one that costs hours when it is missing**
+**The region line is the one that costs hours when it is missing**
 ([D110](NOTES.md#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16)).
 An agent starts cold and, told only *fix rule 5*, pages the whole file. Name the
-`// --- … START ---` regions and the test modules the turn actually touches, plus
-the shared helpers it must not disagree with — the pod rules are **one**
-`// --- THE POD RULES START ---` region, not the whole of `rules.rs`, and the
-region markers exist for exactly this.
+`// --- … START ---` regions and the test modules the turn touches, plus the
+shared helpers it must not disagree with. **The PM does not survey the source to
+write the brief**: it names the regions and the dev reads them.
 
 The report, or the work is not received: what changed and where · the exact
 commands run and their real output · the red run and the green run · what could
@@ -829,30 +739,27 @@ That last item is the one that goes missing: an agent that picked a threshold,
 named a field or settled a behaviour the docs did not settle has made a
 decision, and the PM writes it into `NOTES.md` before committing.
 
+**A review round goes back to the same agent by message, not as a fresh
+dispatch** — it keeps its context, which is cheaper and faster. The ownership
+rule still applies on wake.
+
 ### Where a leak would actually happen — the PM checks these by hand
 
-- **A brief dispatched over a dirty tree.** A modified file the brief names is
-  somebody's turn already in flight — another session, or a box that landed
-  while the PM was writing documents. The whole dispatch is then wasted and its
-  output is a merge nobody asked for. It costs one command and it is step 1's
-  gate now ([D195](NOTES.md#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)).
-  **`git status` cannot say *whose* dirty tree it is**, and that is the half that
-  cost a day on 2026-09-06 ([D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)):
-  `.claude/session-check.sh` answers it at every session start and every
-  `/clear` — a live process with this repo as its cwd is another writer, and no
-  such process over a dirty tree is your own box to finish.
+- **A brief dispatched over a dirty tree** — a modified file the brief names is
+  somebody's turn already in flight. Step 1's gate
+  ([D195](NOTES.md#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)).
+  **`git status` cannot say *whose*** — `.claude/session-check.sh` answers it at
+  session start and every `/clear`: a live process with this repo as its cwd is
+  another writer, and no such process over a dirty tree is your own box to finish
+  ([D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)).
 - A box checked for work that was written but never *run*.
 - A test that has only ever been green — step 4's mutation run skipped because
   the diff looked small. It is `--in-diff` and it costs a minute.
 - **A claim reasoned from a definition instead of measured against the object.**
-  Numbers are the loud half — two drafts of the mutation gate put a wrong figure
-  in this file, each reasoned about the tool rather than read off it
-  ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
-  The quiet half is prose: a formula read correctly and concluded from wrongly, a
-  feature gate's name, a field's type, a column budget estimated in a review and
-  repeated as measured — four of them in one turn, each written by someone being
-  careful with the object one command away
-  ([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+  Numbers are the loud half; the quiet half is prose — a feature gate's name, a
+  field's type, a column budget estimated in a review and repeated as measured
+  ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15) ·
+  [D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
   **The definition says what it is; only the object says what it does** — and
   somebody else's finding stays an estimate until *you* have run it.
 - The security gate skipped because "this diff is only UI".
@@ -866,14 +773,9 @@ decision, and the PM writes it into `NOTES.md` before committing.
   this file go through step 7's pass with the agents' work, not around it.
 - **A commit taken before the agent's report arrived.** A settled diffstat, a
   clean `git status` and a `just check` the PM ran itself all read one instant
-  and none of them knows whether the agent intends another write — or whether
-  its *own* gate is still out. Three times now: on 2026-08-16 it split one box
-  across two commits, and on 2026-09-20 it landed a box while `just mutants-diff`
-  was still running, so the gate that decides whether the tests can fail at all
-  reported after the commit. It came back green, which is the only reason that
-  one is a note and not a revert. **The completion notification is the only
-  proof** — wait for it, or say in the reply that the commit was taken without
-  it.
+  and none knows whether the agent intends another write, or whether its own gate
+  is still out. **The completion notification is the only proof** — wait for it,
+  or say in the reply that the commit was taken without it.
 
 ## Phase close — the ritual at the end of every phase
 
@@ -888,8 +790,7 @@ in order, no skipping:
    committed fixture while the temporary `main.rs` is the driver, against kind
    from Phase 5 on, breaking pods by hand and watching the screen answer. **A
    capture there runs with nothing else on the host**: at 3.8 GiB, a busy host
-   reports a memory-limit kill as `Error` instead of `OOMKilled`, and that is how
-   a capture destroys rule 2's fixture
+   reports a memory-limit kill as `Error` instead of `OOMKilled`
    ([D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14) ·
    [D267](NOTES.md#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17)).
 3. **Every box of the phase is checked, and every check is true.** If something
@@ -948,21 +849,18 @@ in order, no skipping:
   ```
 
   - **types:** `feat` `fix` `docs` `perf` `refactor` `style` `test` `chore` `ci` `revert`
-  - **scopes:** `rules` `ops` `ui` `theme` `main` `analysis` `views` `fixtures`
-    `guards` `screens` `ci` `docs` `changelog` — **counted off the log, not recalled**:
+  - **scopes:** `rules` `ops` `ui` `theme` `main` `fixtures` `guards` `screens`
+    `ci` `docs` `changelog` — **counted off the log, not recalled**:
     `git log --format='%s' | grep -oE '^[a-z]+\(([a-z-]+)\)' | sed 's/.*(//;s/)//' | sort | uniq -c | sort -rn`.
-    This list said `k8s` until 2026-09-20 and **no commit has ever used it**, while `ops`
-    (13), `changelog` (201), `guards` (3) and `screens` (2) were in the log and not here —
-    the same staleness invariant 10's flag list has now had four times, in the file that
-    warns about it. A scope is a word a reader of the changelog sorts by, so the rule is the
-    file the change is in, and a new one is added here in the same commit that first uses it
+    This list has now gone stale four times, in the file that warns about it. A
+    scope is a word a reader of the changelog sorts by, so the rule is the file
+    the change is in, and a new one is added here in the same commit that first
+    uses it
   - **subject:** English, imperative, lowercase, no trailing period
   - **body:** never open a paragraph with `Word:` — git-conventional reads the
     line as a *footer*, so `commit.body` loses it and the changelog entry ships
-    as a bare subject with no *why*. Measured 2026-09-12: a body opening
-    `App::changing is the object…` rendered with nothing after the link while
-    every sibling entry carried its first paragraph. Same silence as
-    `filter_unconventional`, one level down
+    as a bare subject with no *why*. Same silence as `filter_unconventional`,
+    one level down
   - breaking: `feat(rules)!: ...` plus a `BREAKING CHANGE:` footer
 - **All work happens on `development`** — one long-lived branch, never deleted.
   `main` only ever advances by merging `development` into it, at phase close.
