@@ -295,6 +295,7 @@ its line moving with it.
 - [D271](#d271--the-strip-box-a-callers-promise-becomes-a-type-and-a-header-word-that-outlived-the-fact-it-described-2026-09-19) — the strip box: a caller's promise becomes a type, and a header word that outlived the fact it described
 - [D272](#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20) — the four behaviours: a clamp the renderer computed and threw away, an `esc` that is inert with nothing bounding the wait, and a box that named two keys the footer did not
 - [D273](#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20) — the wiring box has no `call` closure, so the bound D272 ordered goes inside the contract and `ops.rs` reopens for one change
+- [D274](#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24) — the console event loop: the six rulings the brief needed, the strip line that moved to the confirmation, `s` withheld, the `over_modal` survivors invariant 2 had no test for, and the PM repeating D136
 
 ## Why it exists — where the gap is
 
@@ -24090,3 +24091,172 @@ server is outside the trust model ([invariant 3](CLAUDE.md) — k8rs runs on the
 against their kubeconfig, and that is the whole of it), invariant 9's strip still applies to
 whatever arrives, and the alternative is a typed *this expired* flag threaded out of `ops.rs`, which
 reopens a frozen file for a case no untrusted party can reach.
+
+### D274 — the console event loop: what the brief had to rule before it could be written (2026-09-24)
+
+Phase 12's `main.rs` `tokio::select!` box and the coalescing test under it, landed as one turn
+([D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)). Six things
+had to be decided before the brief could be written, and each was measured rather than reasoned.
+
+**1. Bare `k8rs` opens the console.** No new flag — [invariant 10](CLAUDE.md)'s list of fifteen is
+unchanged. Every other argv line behaves exactly as it did. Pruning the scaffolding flags is a
+later box in this phase.
+
+**2. There is no `EventStream` in this tree, so keys come over a channel.** `cargo tree -e features
+-i crossterm` resolves 0.29.0 with `bracketed-paste`, `derive-more`, `events`, `underline-color` and
+`windows` — **`event-stream` is off**, so the type does not exist here. A `std::thread` reads
+`event::read()` into a `tokio::sync::mpsc` and the loop selects on the receiver. That buys no second
+crossterm version in the manifest, and a loop that is a function over a channel — which is the only
+reason the coalescing test can feed a storm with no terminal. `docs/architecture.md` § Async model
+had described `EventStream` unhedged since Phase 0, in a section that hedges `--once`, `--read-only`,
+`--live` and `main.rs`'s ownership scrupulously; it had also described a `select!` that did not exist
+anywhere in `src/` until this box. Both fixed here.
+
+**3. crossterm is reached as `ratatui::crossterm::…`, with no `Cargo.toml` line.** That manifest's
+own comment says the crate *"gets named the day our own code calls it directly"*; the re-export
+answers that without the two-crossterms hazard the same comment warns about, because the version is
+whatever the pinned ratatui resolves.
+
+**4. Ctrl-C is a key, not a signal, so `tokio`'s `signal` feature stays unnamed.** Raw mode clears
+`ISIG`; the router treats `ctrl-c` as `q`, refusals included. A `signal` arm would buy only an
+external `kill -INT`, whose teardown is the panic-guard box's.
+
+**5. The module-wide `dead_code` expectations come off, and what is still unreached gets a per-item
+one naming the work.** Measured with both removed: **248** warnings, 183 in `ui.rs` and 65 in
+`views.rs` — the box and both source comments said 244/179, dated 2026-09-19, and the files had
+grown. **A per-item expectation is reported unfulfilled where a module-wide one is not**, under
+`--all-targets`: unwrapped, fifteen of them turned a green build into fifteen
+`unfulfilled_lint_expectations` errors, so each needs `cfg_attr(not(test))`. Eight of the fifteen
+first cited a Phase 12 box that does not exist; **a reason may not name a fictional box** — it says
+what the work is, or nothing.
+
+**6. The picker's keys are this box's; its reconnect is not.** The router opens `Modal::Contexts` and
+moves in it; `connect()` running again, dropping the old `Session`, and building `Modal::Unconnected`
+are the cluster-picker box's, as is `--context` precedence. The chosen-⏎ arm is a recorded stub.
+
+## What the round itself had to rule
+
+**The strip's line is appended on confirmation and on nothing else, and `screens/dialogs.md` was
+the copy that was wrong.** The page drew the mutation's `$` line in the strip while the dialog was
+still open; [D233](#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05) ruling 1
+appends it when `ask` returns `Answer::Confirmed`. The code did a third thing — appended on the
+dialog **opening**, with the running mark `views::Log::sent` always adds. The ruling: **D233 stands
+unqualified and the page changes.** The command is still taught before the irreversible press,
+because `Dialog` carries its own `kubectl` line inside the box, which is D233's own distinction —
+those are two lines that happen to share their text, and a command log is a record of what k8rs
+*ran*.
+
+**The PM's first draft of this ruling was wrong and is recorded because the reasoning is the useful
+part.** It held that `Answer::Gone` and `Answer::Changed` *do* leave a line, on the grounds that a
+dry-run had gone out by then — which `ops::Outcome::Gone`'s own doc confirms: *"where the operation
+is checkable the `dryRun=All` had already gone out, and only the change itself never did"*. That is
+true and it is beside the point. **The line carries the real mutation, and a dry-run is not that
+command**; appending `$ kubectl rollout restart deployment/web` for a change that never went is
+invariant 4's *neither record may lie*, reached exactly the way D233 warned — by reusing a string
+rather than by writing a false one. `delete` makes it plainer still:
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1 declined its dry-run, so a delete dialog waiting for a typed name has sent nothing at all.
+The draft was caught by reading `ops::Answer` and `ops::Outcome` instead of the two agent reports
+that had both cited D233 second-hand.
+
+**What the code does today is already right, and one thing about it is fragile.** `log.sent` fires
+only in `over_modal`'s `Enter if dialog.armed()` arm, so no line is appended for `Gone` or
+`Changed`. But `settled` then calls `views::Log::outcome`, which edits the **last** line — so an
+outcome arriving with no line of its own would annotate whatever line preceded it. It cannot happen
+today: this router's `ask` closure returns only `Confirmed` and `Cancelled`, so `Outcome::Gone` and
+`Outcome::Changed` are unreachable and `views::Modal::Gone` never draws. Named because the day the
+picker box or a `restart` precondition makes them reachable, the guard has to arrive with them.
+
+**The selected card gains `▸`, and this counts as a defect of the box being landed rather than new
+work.** Before the loop, nothing read the content cursor, so drawing no marker was a simplification.
+This box bound `⏎`, `r` and `ctrl-d` to that cursor, which turned the absence into a safety problem:
+the reader cannot see which card the key will act on. [CLAUDE.md](CLAUDE.md)'s one exception to *a
+box is never added to an open phase* is a defect in the box currently being landed, and this is one.
+It reuses the glyph the sidebar and the browser already use, sits in the two-column pad every card
+already leaves blank, and costs no column — the list is given the pane less its right pad and the
+wrap width subtracts the marker, so the arithmetic is `area.width - 4` either way.
+
+**`s scale` is withheld from `Offer::Act` until a screen says how a copy count is typed.** The footer
+was offering a key bound to nothing, which is
+[D268](#d268--the-footer-key-box-a-filter-nobody-could-see-a-picker-whose-name-column-the-cluster-could-erase-and-an-esc-that-meant-two-things-2026-09-18)'s
+class and a regression against this phase's own first, already-closed box. Withholding is better than
+offering: a reader who presses `s` and gets nothing has no word for it anywhere — `no` is reserved
+for a permission, and `?` would confirm the key should have worked. `screens/help.md`'s `s` row now
+says the step is not built, and `screens/dialogs.md` § *Choosing how many, before the confirm box*
+specifies it, marked **specified, not built**, so the later box exists to be written.
+
+**Six of `outcome_word`'s eight short forms are this box's and are not yet blessed by a screen.**
+`rejected`, `not sent`, `refused` and `login expired` come from `views::SAID` and
+`screens/states.md`; `done`, `started`, `cancelled`, `already gone`, `changed first` and
+`not recorded` were written to that shape. Flagged rather than assumed — the alternative was the
+whole sentence, which is the defect this replaced: measured over `k8s::text`'s cut, six of the eight
+endings left 18–20 columns of the strip's 76 for the command, below `command_cut`'s protected head,
+so the reader lost the object the line was about behind *… (shortened by k8rs)*.
+
+## The mutation gate, and the residue that is honest
+
+Two full sweeps on the dev machine ([D267](#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17)'s
+reversed half): **187 mutants in 46 m — 12 missed, then 8 after four kills, 160 caught, 18 unviable,
+1 timeout.** Thirteen of the earlier run's survivors were in `over_modal`, which is
+[invariant 2](CLAUDE.md)'s surface: `Esc`, `Enter`, `Char(typed)` — the typed object name a
+destructive delete requires — `Backspace`, and the guards `dialog.asks.is_some()`,
+`!dialog.waiting()` and `may_quit()`. Every one was deletable or invertible with no test failing, so
+nothing held the rule that a delete needs its name typed or that keys are refused while a check is on
+the wire. **That was found only by the confirming run**: the first sweep was stopped at 114 of 165
+and its survivors accounted for as if the run had finished.
+
+The 1 timeout is `Owing::due → ()` — the deadline removed, so the loop spins with no await point and
+starves any timeout on a single-threaded runtime. cargo-mutants files that as a detection; there is
+no fix.
+
+**The 8 remaining survivors, and a correction to the reason first given for three of them.** `main`'s
+match guard and `ends_are_terminals`' three returns are genuinely unreachable from a unit test, whose
+own fds always answer `(false, false)`. `console → Option<String>` ×3 was reported as *"it connects
+and takes the terminal"*, and that is not quite the reason: `ops::audit_log`, `k8s::kubeconfig`,
+`k8s::contexts` and `k8s::connect_with` all run **before** `ratatui::try_init()` and two
+`return Some(…)` paths sit among them. The accurate reason is the tty gate — `at_a_keyboard` refuses
+a harness, so `console()` is unreachable from `tests/` without a pty, and a pty is a new dependency
+([invariant 10](CLAUDE.md)). The decisions were extracted into `before_the_first_frame`, which is
+tested; what is left is the fd read and the runtime build. `views.rs`'s `Offer::act` survivor is an
+**equivalent** mutant while `SCALE_IS_BUILT` is `false` — the conjunct short-circuits, so no test can
+distinguish it, and it becomes testable in the box that builds the count step.
+
+## Two gate facts this box exposed and did not cause
+
+**`just cross` has been skipping the whole matrix since D267.** It prints
+*GREEN WITHOUT THE CROSS-COMPILE MATRIX* on the test host because the musl and darwin std are not
+installed there, so `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` and both darwin targets
+have been unchecked on every box since 2026-09-17, with CI the first place they run. The banner is
+loud, which is [D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03)'s
+design working; nobody read it.
+
+**`tests/binary.rs` was reaching the live cluster.** A bare `k8rs` in the harness inherited the real
+`KUBECONFIG` and began watching `kind-k8rs` — measured, `server v1.36.1 · 60 kinds` — and the only
+thing in the way was the absence of a tty, which is the code under test standing in for the
+harness's own guard. Every spawn now overrides `KUBECONFIG`, the opt-in safe helper is deleted so
+there is no unsafe one left to pick, and a test reads the file's own source to assert the property,
+with a canary so a dead needle cannot pass as agreement.
+
+## What this box did not wire, and why the phase cannot close on it
+
+The browser's `Table` fetch, the four detail reads, the log stream and the `may_i_in` probe are wired
+nowhere **and boxed nowhere** — `todo.md` § Phase 12 has no box for any of them. Its *Done when:
+k8rs runs against kind end-to-end* cannot be true while `⏎` on a sidebar kind and the four detail
+tabs draw *reading the cluster…* for ever. A box may not be added to an open phase, so these are
+[`backlog.md`](backlog.md)'s and the phase-close triage decides whether Phase 12 extends or v0.1
+ships without the browser. One of the three was worse than incomplete and was fixed here: the
+Alerts paragraph was handed to every pane, so a ConfigMaps pane read *"41 pods and 4 nodes checked,
+none of them is in trouble right now"* under its own title, three keys from the first screen. That is
+a false statement about other objects, not a missing feature.
+
+## The process failure, recorded because it cost the round
+
+The PM dispatched `tui-designer` to rewrite six `screens/` files while `dev-ui` was still writing
+code. `src/ui_tests.rs` reads screen files as its fixtures, so sixteen tests drifted, `just check`
+went red on nobody's defect, and the confirming sweep's own baseline began failing. The author
+watched the failure count go 4 → 16 and stopped rather than chase a specification that was moving —
+correct, and it cost the phase a serial restart. [CLAUDE.md](CLAUDE.md)'s concurrency table permits
+*one dev writing · `tui-designer` on a **later** phase's screen*; the qualifier is the whole row, and
+ignoring it reproduced
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+exactly — a re-dispatch to fix a finding is a write, not a review.

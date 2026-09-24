@@ -1359,13 +1359,16 @@ fn an_empty_name_never_arms_anything_however_little_is_typed() {
 fn quit_and_the_cluster_switcher_are_refused_exactly_where_the_key_map_says() {
     let mut app = App::default();
     assert!(app.may_quit() && app.may_switch_cluster());
-    assert_eq!(pressable(&app, BOTH), (true, true));
+    // **`(false, true)` is the baseline now, not `(true, true)`** — `s` is withheld from every
+    // offer ([`SCALE_IS_BUILT`]), so what a live ordinary frame offers is `r` alone. The rows
+    // below are about what the *run* takes away, so each starts from this pair.
+    assert_eq!(pressable(&app, ORDINARY), (false, true));
 
     app.modal = Some(Modal::Help);
     assert!(app.may_quit(), "q was refused merely because help was open");
     assert!(!app.may_switch_cluster(), "X stayed bound under a modal");
     assert_eq!(
-        pressable(&app, BOTH),
+        pressable(&app, ORDINARY),
         (false, false),
         "a second dialog could open over the first"
     );
@@ -1375,7 +1378,7 @@ fn quit_and_the_cluster_switcher_are_refused_exactly_where_the_key_map_says() {
     assert!(!app.may_quit(), "q was allowed mid-write");
     assert!(!app.may_switch_cluster());
     assert_eq!(
-        pressable(&app, BOTH),
+        pressable(&app, ORDINARY),
         (false, false),
         "a second mutation was allowed"
     );
@@ -2118,7 +2121,7 @@ fn a_switch_puts_the_view_back_on_alerts_and_empties_the_command_log() {
         view: View::Resources(7),
         expanded: Some(Group::Network),
         tab: Tab::Yaml,
-        scroll: 40,
+        scroll: [40, 40, 40, 40],
         following: true,
         modal: Some(Modal::ContextPick(Picker::new(&rows, live()))),
         ..App::default()
@@ -2194,7 +2197,7 @@ fn the_switcher_is_refused_under_its_own_picker_and_its_own_failure() {
             ..App::default()
         };
         assert!(!app.may_switch_cluster());
-        assert_eq!(pressable(&app, BOTH), (false, false));
+        assert_eq!(pressable(&app, ORDINARY), (false, false));
     }
 }
 
@@ -2607,11 +2610,61 @@ fn a_manual_scroll_turns_follow_mode_off() {
         ..App::default()
     };
     app.scroll_by(5);
-    assert_eq!(app.scroll, 5);
+    assert_eq!(app.scroll[Tab::Logs.at()], 5);
     assert!(!app.following, "follow mode survived a manual scroll");
 
     app.scroll_by(-99);
-    assert_eq!(app.scroll, 0, "the offset went below the top of the buffer");
+    assert_eq!(
+        app.scroll[Tab::Logs.at()],
+        0,
+        "the offset went below the top of the buffer"
+    );
+}
+
+/// `screens/widgets.md` § 4: **one offset per tab, not one shared by all four** — and the tab that
+/// is open is the only one a scroll may move (NOTES § D272 § 1, `tester`'s measured case: yaml at
+/// row 400, over to a three-row tab, back to yaml used to read row 0).
+#[test]
+fn a_scroll_moves_the_open_tabs_own_offset_and_leaves_the_other_three() {
+    let mut app = App {
+        tab: Tab::Yaml,
+        ..App::default()
+    };
+    app.scroll_by(400);
+    assert_eq!(app.scroll[Tab::Yaml.at()], 400);
+    for tab in [Tab::Logs, Tab::Describe, Tab::Events] {
+        assert_eq!(
+            app.scroll[tab.at()],
+            0,
+            "{} moved with yaml's own offset",
+            tab.label()
+        );
+    }
+
+    // The other three keep their own places while yaml keeps its four hundredth line.
+    app.tab = Tab::Describe;
+    app.scroll_by(3);
+    assert_eq!(app.scroll[Tab::Describe.at()], 3);
+    assert_eq!(
+        app.scroll[Tab::Yaml.at()],
+        400,
+        "describe's own scroll clamped yaml's offset"
+    );
+}
+
+/// `screens/widgets.md` § 4: **a resize discards all four, back to the top of whichever tab redraws
+/// next** — and follow mode is untouched, because a followed pane ignores its stored offset every
+/// frame (`screens/detail.md` § Switching tabs keeps your place, last paragraph).
+#[test]
+fn a_rewind_empties_every_tabs_offset_and_leaves_follow_mode_alone() {
+    let mut app = App {
+        scroll: [11, 22, 33, 44],
+        following: true,
+        ..App::default()
+    };
+    app.rewound();
+    assert_eq!(app.scroll, [0, 0, 0, 0]);
+    assert!(app.following, "a rewind turned follow mode off");
 }
 
 /// `screens/widgets.md` § 2b — **`/` and `n` open on the field they name and nothing else is a
@@ -2622,13 +2675,13 @@ fn no_key_is_a_command_while_a_filter_is_being_typed() {
     for field in [Typing::Text, Typing::Namespace] {
         let mut app = App::default();
         assert!(app.may_quit() && app.may_switch_cluster());
-        assert_eq!(pressable(&app, BOTH), (true, true));
+        assert_eq!(pressable(&app, ORDINARY), (false, true));
 
         app.typing = Some(field);
         assert!(!app.may_quit(), "q quit while typing {field:?}");
         assert!(!app.may_switch_cluster(), "X while typing {field:?}");
         assert_eq!(
-            pressable(&app, BOTH),
+            pressable(&app, ORDINARY),
             (false, false),
             "s or r would have fired while typing {field:?}"
         );
@@ -2769,7 +2822,7 @@ fn a_filter_does_not_survive_a_view_change_and_does_survive_a_press_that_changes
 /// [`App::footer`] does not take today, which is why none of them fell out of this one for free.
 #[test]
 fn every_mode_draws_the_footer_its_own_screen_file_draws() {
-    let list = "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit";
+    let list = "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit";
     let logs = "[ ] tabs  f follow  c container  esc back  ? all keys  q quit";
     let tabbed = "[ ] tabs  esc back  ? all keys  q quit";
 
@@ -2806,10 +2859,11 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
             tab,
             ..App::default()
         };
-        let (keys, quit) = app.footer(opened(detail), BOTH, Refused::default(), "", &[]);
+        let (keys, quit) = app.footer(opened(detail), ORDINARY, Refused::default(), "", &[]);
         // **The which-pods step is a mode of this slot too** — one line, whatever view it was
         // opened over and whatever tab was last on (`screens/detail.md` § Picking a pod).
-        let (stepping, stepped) = app.footer(Detailing::Pods, BOTH, Refused::default(), "", &[]);
+        let (stepping, stepped) =
+            app.footer(Detailing::Pods, ORDINARY, Refused::default(), "", &[]);
         assert_eq!(
             (stepping.as_ref(), stepped),
             ("↑↓ move  ⏎ open  esc back  ? all keys  q quit", ""),
@@ -2823,12 +2877,18 @@ fn every_mode_draws_the_footer_its_own_screen_file_draws() {
     }
 }
 
-/// **The ordinary offer on a kind that supports both operations** — a Deployment, a StatefulSet,
-/// which is the running example everywhere in `screens/`. Every condition on [`App::may_mutate`]
-/// but the kind's own kills both keys together, so a test about one of *those* says `BOTH` and
-/// names neither key.
-const BOTH: Offer = Offer::Act {
-    scalable: true,
+/// **The ordinary offer on a kind the console can act on** — a Deployment, a StatefulSet, the
+/// running example everywhere in `screens/`. Every condition on [`App::may_mutate`] but the kind's
+/// own kills every mutating key together, so a test about one of *those* says `ORDINARY` and names
+/// no key.
+///
+/// **`scalable` is `false`, because `Offer::act` cannot produce anything else** (`SCALE_IS_BUILT`,
+/// `screens/widgets.md` § 2a's *"`s scale` is never part of it"*). It was `true` while the footer
+/// still drew `s`, and a fixture that keeps a value the constructor can no longer return tests a
+/// footer no reader can reach — which is what made nine of these assertions fail against the
+/// settled screen files rather than against the code.
+const ORDINARY: Offer = Offer::Act {
+    scalable: false,
     restartable: true,
 };
 
@@ -2978,10 +3038,10 @@ fn help_replaces_the_pointer_with_the_map_and_keeps_the_quit() {
         modal: Some(Modal::Help),
         ..App::default()
     };
-    let (keys, quit) = app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[]);
+    let (keys, quit) = app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[]);
     assert_eq!((keys.as_ref(), quit), ("? or esc to close", "q quit"));
     assert!(
-        !app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+        !app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[])
             .0
             .contains("all keys"),
         "the footer still pointed at a screen the reader is already on"
@@ -3017,70 +3077,82 @@ fn the_picker_and_its_failure_each_say_the_keys_valid_inside_them() {
         (
             at(live(), 0, ""),
             &rows[..],
-            "↑↓ move  / filter  ⏎ switch  esc cancel",
+            "↑↓ move  type to filter  ⏎ switch  esc cancel",
         ),
         (
             at(Connection::Never, 0, ""),
             &rows,
-            "↑↓ move  / filter  ⏎ connect  esc quit",
+            "↑↓ move  type to filter  ⏎ connect  esc quit",
         ),
         (
             at(dropped(), 0, ""),
             &rows,
-            "↑↓ move  / filter  ⏎ switch  esc cancel",
+            "↑↓ move  type to filter  ⏎ switch  esc cancel",
         ),
-        (at(live(), 2, ""), &rows, "↑↓ move  / filter  esc cancel"),
+        (
+            at(live(), 2, ""),
+            &rows,
+            "↑↓ move  type to filter  esc cancel",
+        ),
         (
             at(Connection::Never, 2, ""),
             &rows,
-            "↑↓ move  / filter  esc quit",
+            "↑↓ move  type to filter  esc quit",
         ),
         (
             Modal::ContextPick(Picker::new(&[], live())),
             &[],
-            "/ filter  esc cancel",
+            "type to filter  esc cancel",
         ),
         (
             Modal::ContextPick(Picker::new(&[], Connection::Never)),
             &[],
-            "/ filter  esc quit",
+            "type to filter  esc quit",
         ),
         // **A filter that still shows the row the cursor is on**, both pickers: every key stays,
         // and only `esc`'s word moves.
         (
             at(live(), 0, "prod"),
             &rows,
-            "↑↓ move  / filter  ⏎ switch  esc clear filter",
+            "↑↓ move  type to filter  ⏎ switch  esc clear filter",
         ),
         (
             at(Connection::Never, 0, "prod"),
             &rows,
-            "↑↓ move  / filter  ⏎ connect  esc clear filter",
+            "↑↓ move  type to filter  ⏎ connect  esc clear filter",
         ),
         // **On the shadowed row it still shows**, where `⏎` is dropped.
         (
             at(live(), 2, "prod"),
             &rows,
-            "↑↓ move  / filter  esc clear filter",
+            "↑↓ move  type to filter  esc clear filter",
         ),
         (
             at(Connection::Never, 2, "prod"),
             &rows,
-            "↑↓ move  / filter  esc clear filter",
+            "↑↓ move  type to filter  esc clear filter",
         ),
         // **A filter that hides every row, and one that shows only undefined rows** — the page's
         // `[8]` and `[7]`'s filter-only trigger (ruling 30's last paragraph).
-        (at(live(), 0, "zzz"), &rows, "/ filter  esc clear filter"),
+        (
+            at(live(), 0, "zzz"),
+            &rows,
+            "type to filter  esc clear filter",
+        ),
         (
             at(Connection::Never, 0, "zzz"),
             &rows,
-            "/ filter  esc clear filter",
+            "type to filter  esc clear filter",
         ),
-        (at(live(), 0, "old"), &rows, "/ filter  esc clear filter"),
+        (
+            at(live(), 0, "old"),
+            &rows,
+            "type to filter  esc clear filter",
+        ),
         (
             at(Connection::Never, 0, "old"),
             &rows,
-            "/ filter  esc clear filter",
+            "type to filter  esc clear filter",
         ),
         // **A filter typed over a kubeconfig with no contexts** still holds text for `esc` to
         // clear.
@@ -3091,17 +3163,17 @@ fn the_picker_and_its_failure_each_say_the_keys_valid_inside_them() {
                 picker
             }),
             &[],
-            "/ filter  esc clear filter",
+            "type to filter  esc clear filter",
         ),
         (
             Modal::ContextPick(Picker::new(&undefined, live())),
             &undefined,
-            "/ filter  esc cancel",
+            "type to filter  esc cancel",
         ),
         (
             Modal::ContextPick(Picker::new(&dangling, Connection::Never)),
             &dangling,
-            "↑↓ move  / filter  esc quit",
+            "↑↓ move  type to filter  esc quit",
         ),
         (unconnected(Before::Connected(None)), &[], "esc dismiss"),
         (
@@ -3119,7 +3191,7 @@ fn the_picker_and_its_failure_each_say_the_keys_valid_inside_them() {
             // Every state of the detail slot, the which-pods step included (NOTES § D270).
             for open in SLOTS {
                 assert_eq!(
-                    app.footer(open, BOTH, Refused::default(), "", contexts),
+                    app.footer(open, ORDINARY, Refused::default(), "", contexts),
                     (Cow::Borrowed(expected), ""),
                     "{modal:?} · {open:?}"
                 );
@@ -3147,7 +3219,7 @@ fn help_is_the_footer_whatever_it_was_opened_from() {
         };
         for open in SLOTS.into_iter().chain([opened(detail)]) {
             assert_eq!(
-                app.footer(open, BOTH, Refused::default(), "", &[]),
+                app.footer(open, ORDINARY, Refused::default(), "", &[]),
                 (Cow::Borrowed("? or esc to close"), "q quit"),
                 "{view:?} · {open:?} · {tab:?}"
             );
@@ -3165,7 +3237,7 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+        app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[])
             .0,
         "? or esc to close"
     );
@@ -3174,7 +3246,7 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         "an esc with no startup picker open ended the run"
     );
     assert_eq!(
-        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+        app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[])
             .0,
         "↑↓ move  ⏎ open  esc back  ? all keys  q quit"
     );
@@ -3261,12 +3333,12 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
         ),
     ] {
         assert_eq!(
-            app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+            app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[])
                 .0,
             expected
         );
         assert_eq!(
-            app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+            app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[])
                 .1,
             "",
             "a dialog grew the right-hand zone only `?` has"
@@ -3280,7 +3352,7 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
                     containers: 2,
                     from_step: false,
                 },
-                BOTH,
+                ORDINARY,
                 Refused::default(),
                 "",
                 &[]
@@ -3317,7 +3389,7 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
         assert!(
             app.footer(
                 Detailing::Closed,
-                BOTH,
+                ORDINARY,
                 Refused::default(),
                 "payments/web",
                 &[]
@@ -3331,7 +3403,8 @@ fn a_call_in_flight_replaces_the_two_footers_that_name_s_and_r() {
         let no = |refused: bool| refused.then_some(&Verdict::No);
         for (scale, restart) in [(false, false), (true, false), (false, true), (true, true)] {
             let refused = Refused::of("deployments", [no(scale); 2], [no(restart)], [None]);
-            let (keys, quit) = app.footer(Detailing::Closed, BOTH, refused, "payments/web", &[]);
+            let (keys, quit) =
+                app.footer(Detailing::Closed, ORDINARY, refused, "payments/web", &[]);
             assert_eq!(
                 (keys.as_ref(), quit),
                 (
@@ -3380,11 +3453,11 @@ fn a_call_in_flight_leaves_every_other_footer_whole_but_for_the_quit() {
         for open in [opened(detail), Detailing::Pods] {
             let mut app = app.clone();
             let ordinary = app
-                .footer(open, BOTH, Refused::default(), "payments/web", &[])
+                .footer(open, ORDINARY, Refused::default(), "payments/web", &[])
                 .0;
 
             app.changing = Some(dialog(None).object);
-            let (keys, quit) = app.footer(open, BOTH, Refused::default(), "payments/web", &[]);
+            let (keys, quit) = app.footer(open, ORDINARY, Refused::default(), "payments/web", &[]);
             assert_eq!(
                 format!("{keys}  q quit"),
                 ordinary,
@@ -3415,19 +3488,19 @@ fn the_in_flight_arm_is_changings_and_never_the_names() {
     assert_eq!(
         app.footer(
             Detailing::Closed,
-            BOTH,
+            ORDINARY,
             Refused::default(),
             "payments/web",
             &[]
         )
         .0,
-        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
         "a name alone turned the in-flight footer on"
     );
 
     app.changing = Some(dialog(None).object);
     assert_eq!(
-        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+        app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[])
             .0,
         "↑↓ move  ⏎ open  ? keys  ·  changing  first",
         "an empty name turned the in-flight footer off"
@@ -3447,13 +3520,13 @@ fn help_over_a_call_in_flight_drops_the_quit_it_cannot_promise() {
         ..App::default()
     };
     assert_eq!(
-        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[]),
+        app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[]),
         (Cow::Borrowed("? or esc to close"), "q quit"),
         "help's ordinary footer changed"
     );
 
     app.changing = Some(dialog(None).object);
-    let (keys, quit) = app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[]);
+    let (keys, quit) = app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[]);
     assert_eq!(
         keys.as_ref(),
         "? or esc to close",
@@ -3503,7 +3576,7 @@ fn a_modal_keeps_its_own_closed_set_even_with_a_call_running_under_it() {
         };
         let (keys, quit) = app.footer(
             Detailing::Closed,
-            BOTH,
+            ORDINARY,
             Refused::default(),
             "payments/web",
             &[],
@@ -3603,7 +3676,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
             ..App::default()
         };
         for open in SLOTS.into_iter().chain([opened(detail)]) {
-            let (keys, quit) = app.footer(open, BOTH, Refused::default(), "", &[]);
+            let (keys, quit) = app.footer(open, ORDINARY, Refused::default(), "", &[]);
             let width = ratatui::text::Span::raw(keys.as_ref()).width()
                 + usize::from(!quit.is_empty())
                 + ratatui::text::Span::raw(quit).width();
@@ -3659,15 +3732,22 @@ fn mockup_footers() -> Vec<(String, usize)> {
         .collect();
     assert_eq!(
         rows.len(),
-        9,
-        "screens/widgets.md § 2a no longer tabulates the nine states of the list footer"
+        3,
+        "screens/widgets.md § 2a no longer tabulates the three states of the list footer"
     );
     rows
 }
 
 /// **The list footer marks exactly the keys this login may not use and draws only the keys the
-/// selected kind can use, in `screens/widgets.md` § 2a's own nine strings and at its own nine
+/// selected kind can use, in `screens/widgets.md` § 2a's own three strings and at its own three
 /// column counts** (NOTES § D23, § D229, § D261 ruling 8).
+///
+/// **Three and not nine, because the `s` axis is gone** (that section, 2026-09-24: *"`s scale` is
+/// never part of it: `s` is withheld from `Offer::Act` for every kind, every login and every
+/// run"*). The four both-support rows and the two scale-only rows went with it; what is left is `r`
+/// supported, `r` supported and refused, and `r` not supported. `Offer::act` never producing
+/// `scalable: true` is its own assertion, one test down — this one is about what the footer draws
+/// for the offers that exist.
 ///
 /// **The width is measured the way ratatui measures**, because `↑↓`, `⏎` and `·` are not one byte
 /// each — and it is checked against the section's counted number rather than an inequality, so a
@@ -3685,14 +3765,8 @@ fn the_list_footer_marks_the_keys_this_login_may_not_use() {
     // about. `None` is a refusal the row is *not* about — the key is off the line, so both answers
     // must draw the same string.
     let states = [
-        (true, true, Some(false), Some(false)),
-        (true, true, Some(true), Some(false)),
-        (true, true, Some(false), Some(true)),
-        (true, true, Some(true), Some(true)),
         (false, true, None, Some(false)),
         (false, true, None, Some(true)),
-        (true, false, Some(false), None),
-        (true, false, Some(true), None),
         (false, false, None, None),
     ];
     for (nth, (scalable, restartable, pinned_scale, pinned_restart)) in
@@ -3798,11 +3872,17 @@ fn a_key_the_selected_kind_cannot_use_is_not_pressable() {
 /// here.
 #[test]
 fn a_kind_word_under_another_group_is_another_object_and_gets_no_key() {
+    // **The `s` column is `false` on every row, including the three kinds `ops::scalable` serves**
+    // ([`SCALE_IS_BUILT`], `screens/widgets.md` § 2a): the group question this test is about is
+    // asked of both operations and answered for `r` alone until the count step exists. A bare
+    // ReplicaSet — which scales and does not restart — therefore has no mutating key at all here,
+    // which is the row that would silently start passing again if the withholding were reverted
+    // without this table.
     for (group, kind, expected) in [
-        ("apps", "deployment", (true, true)),
-        ("apps", "statefulset", (true, true)),
+        ("apps", "deployment", (false, true)),
+        ("apps", "statefulset", (false, true)),
         ("apps", "daemonset", (false, true)),
-        ("apps", "replicaset", (true, false)),
+        ("apps", "replicaset", (false, false)),
         // The same four words, owned by somebody else.
         ("apps.kruise.io", "statefulset", (false, false)),
         ("apps.kruise.io", "daemonset", (false, false)),
@@ -3923,8 +4003,8 @@ fn a_refused_delete_changes_no_footer() {
             };
             for open in SLOTS.into_iter().chain([opened(detail)]) {
                 assert_eq!(
-                    app.footer(open, BOTH, refused, "", &[]),
-                    app.footer(open, BOTH, Refused::default(), "", &[]),
+                    app.footer(open, ORDINARY, refused, "", &[]),
+                    app.footer(open, ORDINARY, Refused::default(), "", &[]),
                     "{view:?} · {open:?}"
                 );
             }
@@ -4025,8 +4105,8 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
         // of what `screens/widgets.md` § 2a says a marked list draws.
         for open in [opened(detail), Detailing::Pods] {
             assert_eq!(
-                app.footer(open, BOTH, all, "", &[]),
-                app.footer(open, BOTH, Refused::default(), "", &[]),
+                app.footer(open, ORDINARY, all, "", &[]),
+                app.footer(open, ORDINARY, Refused::default(), "", &[]),
                 "{:?} · {open:?} · {tab:?}",
                 app.view
             );
@@ -4046,7 +4126,7 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
 #[test]
 fn a_filter_being_typed_replaces_the_whole_footer() {
     let ask = |app: &App, cut: &str| {
-        app.footer(Detailing::Closed, BOTH, Refused::default(), cut, &[])
+        app.footer(Detailing::Closed, ORDINARY, Refused::default(), cut, &[])
             .0
             .into_owned()
     };
@@ -4168,7 +4248,7 @@ fn the_footer_over_a_filter_that_hides_every_row_names_the_field_esc_clears() {
 fn c_container_is_offered_only_where_there_is_something_to_choose() {
     let app = App::default();
     let ask = |containers| {
-        app.footer(containers, BOTH, Refused::default(), "", &[])
+        app.footer(containers, ORDINARY, Refused::default(), "", &[])
             .0
             .into_owned()
     };
@@ -4203,7 +4283,7 @@ fn the_container_picker_offers_three_keys_and_none_once_the_pod_has_gone() {
         ..App::default()
     };
     let ask = |containers| {
-        app.footer(containers, BOTH, Refused::default(), "", &[])
+        app.footer(containers, ORDINARY, Refused::default(), "", &[])
             .0
             .into_owned()
     };
@@ -5105,11 +5185,11 @@ fn the_confirm_word_is_the_same_one_the_footer_and_the_button_use() {
         ..App::default()
     };
     assert!(
-        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+        app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[])
             .0
             .contains(armed.confirm()),
         "the footer does not name the button's own word: {:?}",
-        app.footer(Detailing::Closed, BOTH, Refused::default(), "", &[])
+        app.footer(Detailing::Closed, ORDINARY, Refused::default(), "", &[])
             .0
     );
 }
@@ -5411,7 +5491,7 @@ fn the_which_pods_step_offers_five_keys_and_never_a_filter() {
                 tab,
                 ..App::default()
             };
-            let (keys, quit) = app.footer(Detailing::Pods, BOTH, Refused::default(), "", &[]);
+            let (keys, quit) = app.footer(Detailing::Pods, ORDINARY, Refused::default(), "", &[]);
             assert_eq!(
                 (keys.as_ref(), quit),
                 ("↑↓ move  ⏎ open  esc back  ? all keys  q quit", ""),
@@ -5596,4 +5676,48 @@ fn opening_the_step_on_a_second_card_does_not_inherit_the_first_cards_row() {
         Some(0),
         "the step opened on row 7 of a group the reader had not looked at"
     );
+}
+
+/// **`Offer::act` never offers `s`, for any kind, any group and any login** — `SCALE_IS_BUILT`, and
+/// `screens/widgets.md` § 2a's own *"`s scale` is never part of it"* (`screens/help.md` § Rules,
+/// `screens/dialogs.md` § Choosing how many, before the confirm box, which is the step that has to
+/// exist first).
+///
+/// **The kinds walked are the ones `ops::scalable` serves**, so the assertion is over exactly the
+/// inputs that used to answer `true` — a list written here would be a second opinion about which
+/// kinds scale, which is the thing `Offer::act`'s own doc refuses.
+#[test]
+fn no_kind_is_offered_the_scale_key_while_the_count_step_does_not_exist() {
+    for (group, kind) in [
+        ("apps", "deployment"),
+        ("apps", "statefulset"),
+        ("apps", "replicaset"),
+        ("apps", "daemonset"),
+        ("", "pod"),
+        ("", "node"),
+    ] {
+        let offer = Offer::act(group, kind);
+        let Offer::Act { scalable, .. } = offer else {
+            panic!("{group}/{kind} is not an Act at all: {offer:?}")
+        };
+        assert!(
+            !scalable,
+            "{group}/{kind} was offered `s` while there is nowhere to type a copy count"
+        );
+        // And the key cannot be pressed either, which is the other half of the same fact.
+        let app = App::default();
+        assert!(
+            !app.may_mutate(offer, Op::Scale),
+            "{group}/{kind} left `s` pressable off the line"
+        );
+    }
+    // **`restartable` is untouched by the ruling**, which is what keeps this a withholding of one
+    // key rather than of the pair: a DaemonSet still restarts.
+    assert!(matches!(
+        Offer::act("apps", "daemonset"),
+        Offer::Act {
+            restartable: true,
+            ..
+        }
+    ));
 }

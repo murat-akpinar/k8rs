@@ -43,7 +43,7 @@ opens itself at startup when there is a real choice
 ├────────────────────────────────────────────────────────────────────┤
 │ $ kubectl config get-contexts                                      │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  / filter  ⏎ switch  esc cancel                            │
+│ ↑↓ move  type to filter  ⏎ switch  esc cancel                      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,7 +55,7 @@ opens itself at startup when there is a real choice
 | The server line | the API server address of the **selected** row, updated as you move. This is the "am I about to touch production" line, and it is why the address is not hidden behind a detail view. |
 | `⚠ TLS not verified` | the context sets `insecure-skip-tls-verify`. Shown *before* the switch, not after — a beginner cannot be expected to infer it from a header they have not read yet. Shares its column with `(current)` — see the tie-break in [§ The tag column](#the-tag-column). |
 | The sentence | k8rs never writes to `~/.kube/config`. Said on the screen because every user of `kubectl config use-context` will assume the opposite. |
-| `/` | filters the list, exactly as `/` does in every other pane ([NOTES § D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted)) — matching what the row itself draws, `(unnamed)` and `~` included, and never the server address or a badge. Hiding every row this way is its own state — [§ The filter hides every row](#the-filter-hides-every-row). **While `/` holds text, `esc` clears it first rather than doing its ordinary thing, and both the footer and the box's own `[ esc … ]` button say so** — `esc clear filter` in place of `esc cancel` (mid-session) or `esc quit` (startup), on the button as well as the footer, so the key is never spelled two ways in one frame ([NOTES § D264 rulings 27 and 31](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)). |
+| Typing | filters the list, live, on every keystroke — matching what the row itself draws, `(unnamed)` and `~` included, and never the server address or a badge. **There is no dedicated key that opens it, unlike `/` on Alerts and Resources** ([widgets.md § 2b](widgets.md#2b-typing-into-a-filter)): the picker has nothing else for a letter key to mean, so every printable character — `/` included, for an ARN context name's own tail — narrows the list the instant it is typed, and the footer says `type to filter` rather than naming a key that does not exist. Hiding every row this way is its own state — [§ The filter hides every row](#the-filter-hides-every-row). **While the filter holds text, `esc` clears it first rather than doing its ordinary thing, and both the footer and the box's own `[ esc … ]` button say so** — `esc clear filter` in place of `esc cancel` (mid-session) or `esc quit` (startup), on the button as well as the footer, so the key is never spelled two ways in one frame ([NOTES § D264 rulings 27 and 31](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)). |
 | `⏎` | connects, or closes on a live `(current)` row above. **It is not always live** — a shadowed row, no row selected at all, and a filter that hides every row all leave nothing for it to do, and each of those draws the button dim, drops `⏎` from the footer, and says why in the server-line slot rather than leaving a key that looks bound and does nothing ([NOTES § D264 ruling 2](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)). |
 
 **One context in the kubeconfig, and `X` is pressed:** the picker still opens
@@ -286,7 +286,7 @@ second command has run
 │ $ kubectl config get-contexts                                                │
 │                                                                              │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  / filter  ⏎ switch  esc cancel                                      │
+│ ↑↓ move  type to filter  ⏎ switch  esc cancel                                │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -370,7 +370,7 @@ on the picker, and says plainly that k8rs will not write it for you.
 ├────────────────────────────────────────────────────────────────────┤
 │ $ kubectl config get-contexts                                      │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  / filter  ⏎ connect  esc quit                             │
+│ ↑↓ move  type to filter  ⏎ connect  esc quit                       │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -417,8 +417,8 @@ own rule in [§ The picker](#the-picker) already says. `esc` on that reopened
 picker cancels back to the same nothing-is-live state the failed switch left
 behind, not to a cluster that is actually live.
 
-Identical, and not drawn twice above: the list, the tag column, `/` filter,
-`↑↓`, the server line, `⚠ TLS not verified`, the "k8rs does not change your
+Identical, and not drawn twice above: the list, the tag column, typing to
+filter, `↑↓`, the server line, `⚠ TLS not verified`, the "k8rs does not change your
 kubeconfig" sentence, and the command log line — `$ kubectl config
 get-contexts` reads the same local file either way, so it is the same line
 whether the picker opened by itself or by `X`.
@@ -1118,7 +1118,7 @@ not send the reader to a key that would do nothing
 └────────────────────────────────────────────────────────────┘
 ```
 
-- **The footer reads `/ filter  esc cancel` alone** — neither `↑↓ move` nor
+- **The footer reads `type to filter  esc cancel` alone** — neither `↑↓ move` nor
   `⏎` is offered, because neither key has anywhere to go
   ([NOTES § D264 ruling 16](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
 - **`⌫` still works.** If a filter narrowed the list down to only rows like
@@ -1129,7 +1129,7 @@ not send the reader to a key that would do nothing
 
 ### The filter hides every row
 
-Typing into `/` can narrow the list to nothing — a search for a context that
+Typing into the filter can narrow the list to nothing — a search for a context that
 does not exist, or a typo. The list area goes empty and the slot below it,
 which ordinarily carries the selected row's address, says why instead of
 being left blank:
@@ -1151,16 +1151,16 @@ being left blank:
   as `⏎`** — a list with no row showing counts as having no landable row,
   the same reading [§ No row is both current and landable](#no-row-is-both-current-and-landable)
   already gives an every-row-undefined list, so this state's footer is the
-  same shortened `/ filter  esc clear filter` ruling 16 already draws there
-  for a no-landable-row list, not `⏎`'s drop alone — and `esc` reads `clear
-  filter` rather than `cancel`, on the box's own button as well as the
-  footer, because `/` holds the very text that emptied the list and a key
-  is never spelled two ways in one frame
+  same shortened `type to filter  esc clear filter` ruling 16 already draws
+  there for a no-landable-row list, not `⏎`'s drop alone — and `esc` reads
+  `clear filter` rather than `cancel`, on the box's own button as well as
+  the footer, because the buffer holds the very text that emptied the list
+  and a key is never spelled two ways in one frame
   ([NOTES § D264 rulings 2, 16, 18, 27 and 31](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
 - **`⌫` still works** — clearing or narrowing the filter can bring rows
   back, and this state is never a dead end any more than an empty browser
   view is.
-- `/` matches only what the row itself draws — the name as drawn,
+- The filter matches only what the row itself draws — the name as drawn,
   `(unnamed)` included, and the tag as drawn, `~` included — never the
   server address or a badge, so a filter that matches an address never
   narrows anything here
@@ -1192,13 +1192,13 @@ keystroke.
   nothing under them at all, not even a dimmed row, so telling the reader to
   press one would be the exact bug ruling 2 exists to prevent, aimed at a
   key instead of a button.
-- **The footer drops `↑↓ move` as well as `⏎`, leaving `/ filter
+- **The footer drops `↑↓ move` as well as `⏎`, leaving `type to filter
   esc cancel`** — a list with no row showing counts as having no landable
   row whichever way it got empty, the same shortening ruling 18 gives every
   no-landable-row state
   ([NOTES § D264 ruling 18](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
   `esc` reads plain `cancel` here, drawn this way because no filter has
-  been typed yet — `/` still works over an empty list, and the moment
+  been typed yet — typing still works over an empty list, and the moment
   anything is typed into it `esc` reads `clear filter` instead, button and
   footer both, the same rule [§ The filter hides every
   row](#the-filter-hides-every-row) gives any other typed filter on this
@@ -1206,7 +1206,7 @@ keystroke.
   The list stays just as empty either way — there is nothing here for a
   filter to narrow — so typing is never a way out of this screen, only a
   word change on a key that still does nothing.
-  `/` stays bound on the chance a later read of the file brings rows back,
+  Typing stays live on the chance a later read of the file brings rows back,
   even though there is nothing to filter yet — the same reasoning that keeps
   it in every other row-less state on this screen.
 - **`esc` still cancels back to the running app.** Nothing about the

@@ -45,22 +45,12 @@
 //! `screens/dialogs.md`; [`help`] is the sizing exception that file names, and the only modal
 //! that takes the whole body and leaves no sidebar showing to float over.
 
-// Nothing outside `#[cfg(test)]` calls this file yet: the event loop that will is Phase 12's
-// `main.rs`. Same attribute, same position and same accepted blind spot as `theme.rs`'s and
-// `views.rs`'s (NOTES § D38) — and, like both of those, **it does not expire by itself: the
-// turn that wires `main.rs` deletes it by hand.**
-//
-// **Measured rather than assumed, 2026-09-19**: removing it today is 179 dead-code warnings over
-// this file, and `views.rs`'s goes with it in the same turn — 65 more — because an `#[allow]`ed
-// module is a live root to rustc's reachability pass, so silencing this one is what keeps most of
-// `views.rs` counted as reached.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the event loop that draws is Phase 12's (todo.md § Phase 12)"
-    )
-)]
+// The module-wide `dead_code` expectation that stood here until 2026-09-23 is **gone**: this file
+// has a caller now — `main.rs`'s console loop — which is the condition its own comment set for
+// deleting it by hand (NOTES § D38's accepted blind spot, and NOTES § D272 § 4's measurement of
+// what removing it costs). `views.rs`'s came off in the same turn, as that measurement required.
+// What is left is per item and named: every `#[expect(dead_code, …)]` below carries the box that
+// reaches it.
 
 use crate::analysis::{Badge, Report, Row as ReportRow};
 use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, Tag};
@@ -381,11 +371,19 @@ const TITLE: &str = " Keys ";
 /// *and the next line's leading whitespace*, so `Moving around` drew at column 0 while its two
 /// sibling headings drew at 2. It was invisible to a test that compared the screen with this
 /// constant, and visible the moment the screen was compared with `screens/help.md`.
+///
 /// **The three groups run without a blank row between them, and that is paid for and not tidy**
 /// (`screens/help.md` § Rules): the body is capped at sixteen rows by `screens/widgets.md` § 1's
 /// budget, `s` and `r` each needed a second line, and a verbatim sentence cannot be shortened to
 /// fit. The two separators are what bought them. It is denser, the screen file says so, and every
-/// full-body mockup on that page is drawn without them.
+/// full-body mockup on that page is drawn without a separator row.
+///
+/// **`s`'s row says the key is not built yet, in every state this screen draws** (that file's
+/// § Rules, rewritten 2026-09-24): entering a target count has no screen of its own —
+/// `screens/dialogs.md` § Choosing how many, before the confirm box specifies the step and says
+/// plainly that it is *not built* — so the key is withheld from every footer
+/// (`crate::views::Offer::act`) and `?` may not repeat `(scale)` as if it did something. The row is
+/// fixed: no kind, no login and no run changes it, which is why it takes no refusal clause below.
 const HELP: &str = "  Moving around
     ↑ ↓ / j k    move            ⏎     open the selected thing
     tab          next panel      esc   back / close
@@ -397,7 +395,7 @@ const HELP: &str = "  Moving around
     d  describe — the object and what happened to it
     y  view as YAML
   Changing things (each one asks first, and shows the command)
-    s       run more or fewer copies       (scale)
+    s       not built yet — there is no way yet to type a copy count
             works on a deployment, a statefulset and a replicaset
     r       restart, at its own pace       (rollout restart)
             works on a deployment, a statefulset and a daemonset
@@ -495,15 +493,11 @@ fn key_map(help: &str, refused: Refused, changing: bool, held: Option<Held>) -> 
         clauses.push((RESTART_KINDS, String::new()));
         clauses.push((DELETE_ROW, String::new()));
     } else if heading.is_none() {
-        if refused.scale() {
-            clauses.push((
-                SCALE_ROW,
-                format!(
-                    "    s       run more or fewer copies   (scale — {} {resource}/scale)",
-                    Refused::SCALE_VERBS.join("+")
-                ),
-            ));
-        }
+        // **`s` gains no clause here at all** (`screens/help.md` § When a key is refused, rewritten
+        // 2026-09-24): its row already carries the fixed *not built yet* sentence in every state
+        // this screen draws, so there is nothing for a refusal to append to — and it is withheld
+        // before `may_i_in` is ever asked (`crate::views::Offer::act`), so no verdict about it can
+        // exist.
         if refused.restart() {
             clauses.push((
                 RESTART_ROW,
@@ -846,6 +840,13 @@ pub enum Writes<'a> {
     /// **It carries no sentence and drops no banner**: [`header`] says `read-only`, and [`help`]'s
     /// *Changing things* row says the flag was asked for ([`Writes::why`], NOTES § D265). Nothing
     /// in product code constructs it yet — the command line reaches it at Phase 12's flags box.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "`--read-only` off the command line is the flags box (todo.md § Phase 12)"
+        )
+    )]
     ReadOnly,
     /// **[`crate::ops::audit_log`] could not open the log**, carrying the sentence it returned.
     Unaudited(&'a str),
@@ -959,6 +960,14 @@ pub enum Link {
     ///
     /// **It promotes `X switch cluster` onto the footer the way [`Link::Expired`] does**
     /// ([`offered`]), for that page's own reason: pressing `X` again is the only way out.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "a mid-session switch that failed is the cluster picker box's \
+                      (todo.md § Phase 12)"
+        )
+    )]
     Unconnected,
 }
 
@@ -1253,7 +1262,7 @@ fn detailing(screen: &Screen) -> Detailing {
 /// **Draw the whole screen.** The one entry point, called once per event by the loop
 /// (invariant 7 — there is no frame rate).
 ///
-/// **`&mut App`, and the only thing a frame writes is the scroll offset it resolved**
+/// **`&mut App`, and the only thing a frame writes is the open tab's scroll offset, as resolved**
 /// ([`scrolled`], [`crate::views::App::scroll`]) — the same `&mut` a `ListState` is handed for the
 /// same reason. So the loop draws, then handles the key, and the key moves from the row the reader
 /// was looking at. Nothing else in [`crate::views::App`] is touched here: what the *user* did stays
@@ -1613,7 +1622,11 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
 /// belongs beside it, and `rules.rs` closed at the end of Phase 3 — so rather than reopen a frozen
 /// file, the copy lives at the one place that needs it and is pinned as a pair by `tester`'s
 /// guard. The two cannot drift silently: a variant added to that enum is a compile error here.
-fn addressed(kind: &ObjectKind) -> (&'static str, &'static str) {
+///
+/// **`pub` for [`shown_cards`]'s reason** — the key router asks the same question the footer was
+/// drawn from (`crate::views::Offer::act` takes both words), and a second table in `main.rs` is the
+/// copy this one already exists to avoid.
+pub fn addressed(kind: &ObjectKind) -> (&'static str, &'static str) {
     match kind {
         ObjectKind::Deployment => ("apps", "deployment"),
         ObjectKind::StatefulSet => ("apps", "statefulset"),
@@ -3803,10 +3816,27 @@ fn padded(area: Rect) -> Rect {
 /// **One `ListItem` per card, each one several `Line`s tall**, with a blank line between cards —
 /// half the design (`screens/alerts.md`).
 ///
-/// **No card carries a selection marker**, which is what every mockup draws (`theme::SELECTION`
-/// is the sidebar's today). The `ListState` is here for the other half of its job: it keeps the
-/// selected card in view, so `↓` reaches a tall card's action rather than scrolling past it
-/// (`screens/widgets.md` § 4).
+/// **The selected card carries [`MARKER`] on its identity line, and that is a reversal**
+/// (`screens/alerts.md` § The selected card, `screens/widgets.md` § 2): the page used to say *"no
+/// card carries a selection marker"* because nothing read the cursor to act on it. Phase 12's loop
+/// made `⏎`, `r` and `ctrl-d` act on whichever card this `ListState` is sitting on, so silence
+/// about the selection became the unsafe choice, not the simple one.
+///
+/// **It costs the pane no column, and the arithmetic is why**: the list is given the pane less its
+/// *right* pad only, `List` reserves [`MARKER`]'s two columns in front of every row while anything
+/// is selected (`ratatui_widgets::list::rendering`, read off the crate), and the wrap width has
+/// those two subtracted — so a card wraps at the same width [`padded`] gave it and its text starts
+/// in the same column, marked or not.
+///
+/// **The mark alone, with no [`theme::PANEL`] fill beside it** — unlike the browser's table and the
+/// picker's list, where the two go together. `highlight_style` applies to the whole `ListItem`, and
+/// one `ListItem` here is a whole card: a fill would paint up to twelve rows, where the page asks
+/// for the identity line and says a cursor marked down every line of a card *"would read as
+/// several"*. `repeat_highlight_symbol` is left off for the same sentence — the crate draws the
+/// symbol on `j == 0` only.
+///
+/// The `ListState` is also here for the other half of its job: it keeps the selected card in view,
+/// so `↓` reaches a tall card's action rather than scrolling past it (`screens/widgets.md` § 4).
 fn alerts(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, cards: &[Card]) {
     // **A filter that hid every card is its own screen and not an empty list**
     // (`screens/states.md` § The filter hides every row). A list that was empty before the filter
@@ -3824,8 +3854,13 @@ fn alerts(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, cards: &[Ca
         true => area,
         false => narrowed(frame, area, app, screen),
     };
-    let area = padded(area);
-    let region = usize::from(area.width);
+    // **The left pad is the marker's gutter and the right one stays a margin**, which is the whole
+    // of `screens/alerts.md` § The selected card's *"costs no width this page has not already
+    // spent"*: `padded` would have spent both, and `List` then puts the marker where a card's own
+    // text is.
+    let [area, _margin] =
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(PAD)]).areas(area);
+    let region = usize::from(area.width).saturating_sub(width(MARKER));
     let mut drawn: Vec<Vec<Line>> = cards
         .iter()
         .map(|card| lines(card, screen, region))
@@ -3853,7 +3888,7 @@ fn alerts(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, cards: &[Ca
         .collect();
     let anchors: Vec<Option<&str>> = cards.iter().map(|_| None).collect();
     let mut state = ListState::default().with_selected(app.content.selected(&anchors));
-    frame.render_stateful_widget(List::new(items), area, &mut state);
+    frame.render_stateful_widget(List::new(items).highlight_symbol(MARKER), area, &mut state);
 }
 
 /// **One card, in the four parts and only this order**: who · what happened · the evidence ·
@@ -4102,7 +4137,14 @@ fn leads(
     let [held, rest] = Layout::vertical([Constraint::Length(tall), Constraint::Min(0)]).areas(area);
     // **The block keeps the pane's own two-column reading margin and the bar draws in the right
     // one**, so the block's width is the width `pinned` wrapped to whether it overflows or not.
-    let at = scrolled(frame, padded(held), &mut app.scroll, false, above.to_vec());
+    let tab = app.tab.at();
+    let at = scrolled(
+        frame,
+        padded(held),
+        &mut app.scroll[tab],
+        false,
+        above.to_vec(),
+    );
     let [_, margin] = Layout::horizontal([Constraint::Min(0), Constraint::Length(PAD)]).areas(held);
     // [`scrollbar`] draws nothing where the content fits, so there is no *does it overflow* flag
     // here: a second condition could only agree with it or be wrong.
@@ -5156,9 +5198,12 @@ fn tabs(frame: &mut Frame, row: Rect, under: Rect, app: &App, screen: &Screen) {
 /// **and the clamped row is written back, which is the half that was missing.** A `ListState` is
 /// handed to its widget by `&mut` for exactly this reason (`screens/widgets.md` § 4: *"nothing
 /// here stores one between frames, so a selection that moves can never leave it pointing at the
-/// wrong window"*), and the one offset this product does store between frames had no way to be
-/// told what it had been resolved to. So a draw leaves [`crate::views::App::scroll`] holding the
-/// row the reader is actually looking at, and the next keypress moves from there.
+/// wrong window"*), and the four offsets this product does store between frames had no way to be
+/// told what they had been resolved to. So a draw leaves the open tab's slot of
+/// [`crate::views::App::scroll`] holding the row the reader is actually looking at, and the next
+/// keypress moves from there. **Which slot is the caller's**: every call site above indexes it by
+/// [`crate::views::Tab::at`], so a tab's body can only ever resolve its own offset
+/// (`screens/widgets.md` § 4, *"one offset per tab, not one shared by all four"*).
 ///
 /// **Every line handed here is already one row**, wrapped by [`wrapped`] on the way in and never
 /// by ratatui's own `Wrap`. Two wrapping algorithms in one pane is two answers to *how tall is
@@ -5384,7 +5429,9 @@ fn stream(
     // (`screens/detail.md` § Every finding about this object pinned at the top of every tab).
     let mut lines = above;
     lines.extend(logs.held.lines().flat_map(|line| kept(line, region, text)));
-    scrolled(frame, padded(body), &mut app.scroll, app.following, lines);
+    let tab = app.tab.at();
+    let follow = app.following;
+    scrolled(frame, padded(body), &mut app.scroll[tab], follow, lines);
 }
 
 /// **The describe tab: the object, then what happened to it** — two reads, one pane
@@ -5466,7 +5513,8 @@ fn describe(
     }
     lines.push(Line::default());
     lines.extend(block(open.events, screen, region));
-    scrolled(frame, area, &mut app.scroll, false, lines);
+    let tab = app.tab.at();
+    scrolled(frame, area, &mut app.scroll[tab], false, lines);
 }
 
 /// **Describe's own events block: the heading, then the three answers under it**
@@ -5600,7 +5648,8 @@ fn rows_into(
     let [pinned, body] =
         Layout::vertical([Constraint::Length(height), Constraint::Min(0)]).areas(area);
     frame.render_widget(Paragraph::new(Text::from(top)), pinned);
-    scrolled(frame, body, &mut app.scroll, false, lines);
+    let tab = app.tab.at();
+    scrolled(frame, body, &mut app.scroll[tab], false, lines);
 }
 
 /// **One event's rows, and the whole of the grammar** (`screens/detail.md` § The events tab):
@@ -5716,7 +5765,8 @@ fn yaml(
             screen.fg(theme::DIM),
         ));
     }
-    scrolled(frame, area, &mut app.scroll, false, lines);
+    let tab = app.tab.at();
+    scrolled(frame, area, &mut app.scroll[tab], false, lines);
 }
 
 // --- THE DETAIL TABS END ---

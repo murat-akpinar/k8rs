@@ -13,34 +13,96 @@
 
 use std::process::{Command, Output, Stdio};
 
-/// Run the built binary with these arguments. `CARGO_BIN_EXE_k8rs` is set by cargo only for a
-/// target under `tests/`, and is the whole reason this file is not a unit test.
+/// **A path that cannot be a kubeconfig, named once because every spawn in this file uses it**
+/// ([`no_test_here_can_reach_a_cluster`]).
+const NO_KUBECONFIG: &str = "/nonexistent/k8rs-tests/there-is-no-kubeconfig-here";
+
+/// Run the built binary with these arguments, and with `KUBECONFIG` pointed at [`NO_KUBECONFIG`].
+/// `CARGO_BIN_EXE_k8rs` is set by cargo only for a target under `tests/`, and is the whole reason
+/// this file is not a unit test.
 ///
 /// **An argument vector, never a command string.** A path is untrusted text and a pod name will
 /// be, so nothing here is allowed to become shell syntax (CLAUDE.md § Untrusted input;
 /// `scripts/security-guard.py` § no shell is spawned, whose own self-test draws the line here).
+///
+/// **The override is load-bearing, not tidiness, and it belongs on *every* run rather than on an
+/// opt-in helper beside this one** — which is what stood here until 2026-09-24. Inherited, `--live`
+/// connects to whatever cluster the developer's `KUBECONFIG` names and watches it until the harness
+/// gives up — the watch never ends by design (`src/k8s.rs` § THE DRIVER), so the test would not
+/// fail, it would hang. **A bare `k8rs` is the same door and it is newer**: the console opens on no
+/// arguments at all, and the only thing that closed that door was `main`'s `at_a_keyboard` reading
+/// a piped stdout — the code under test standing in for the harness's own guard
+/// ([`no_test_here_can_reach_a_cluster`], which is why the two helpers are now one).
+///
+/// Nothing here reaches a network: the path does not exist, so no client is ever built.
 fn k8rs(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_k8rs"))
         .args(args)
+        .env("KUBECONFIG", NO_KUBECONFIG)
         .output()
         .expect("the built binary runs")
 }
 
-/// The same, with `KUBECONFIG` pointed at a path that cannot be a kubeconfig.
+/// **No test in this file can reach a cluster, and that is a property of this source rather than
+/// of the machine it runs on.**
 ///
-/// **The override is load-bearing, not tidiness.** Inherited, `--live` connects to whatever
-/// cluster the developer's `KUBECONFIG` names and watches it until the harness gives up — the
-/// watch never ends by design (`src/k8s.rs` § THE DRIVER), so the test would not fail, it would
-/// hang. Nothing here reaches a network: the path does not exist, so no client is ever built.
-fn k8rs_with_no_kubeconfig(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_k8rs"))
-        .args(args)
-        .env(
-            "KUBECONFIG",
-            "/nonexistent/k8rs-tests/there-is-no-kubeconfig-here",
-        )
-        .output()
-        .expect("the built binary runs")
+/// Until 2026-09-24 the only thing between a bare `k8rs` here and the developer's live cluster was
+/// that `cargo test`'s stdout is a pipe, so `main`'s `at_a_keyboard` gate answered `false`
+/// (`src/main.rs`). That gate is correct and it is also *the thing under test*: a test whose safety
+/// depends on the code it is testing hangs against a live cluster the day that code is wrong, and
+/// [`no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2`] passes no arguments at all.
+///
+/// **Measured, not argued** (`tester`, 2026-09-24): with `ends_are_terminals` made to answer
+/// `(true, true)` and this file's old inheriting helper in place, that test's stderr came back
+/// `k8rs: watching — server v1.36.1 · 60 kinds · {DisruptionBudgets}` — the harness reading a live
+/// kind cluster from inside `cargo test --test binary`, stopped only by there being no tty for
+/// `ratatui::try_init` on that particular run. With the override it is one line and exit 2 in
+/// 0.01 s, on any machine, cluster or none.
+///
+/// **What this proves and what it does not**: no spawn *inherits* `KUBECONFIG`. It does not read
+/// the value — three spawns point at a stub kubeconfig the test itself wrote, which is the point of
+/// them.
+///
+/// **The count is asserted, not just the property.** A needle that stopped matching would find
+/// nothing and every `KUBECONFIG` check below would pass over an empty list (CLAUDE.md § A derived
+/// list asserts it found something).
+#[test]
+fn no_test_here_can_reach_a_cluster() {
+    // Split so the needle does not appear in this file as the text it looks for.
+    let needle = concat!("Command::new(env!(\"CARGO_BIN_EXE_", "k8rs\"))");
+    let source = include_str!("binary.rs");
+    let spawns: Vec<&str> = source
+        .split(needle)
+        .skip(1)
+        // Each spawn's builder chain ends at whichever of these comes first.
+        .map(|tail| {
+            let end = [".output()", ".spawn()"]
+                .iter()
+                .filter_map(|marker| tail.find(marker))
+                .min()
+                .unwrap_or_else(|| {
+                    panic!("a spawn with neither .output() nor .spawn(): {tail:.200}")
+                });
+            &tail[..end]
+        })
+        .collect();
+
+    assert!(
+        spawns.len() >= 6,
+        "the needle stopped matching: {} spawn(s) found, and every check below would pass over an \
+         empty list",
+        spawns.len()
+    );
+    for (nth, chain) in spawns.iter().enumerate() {
+        // Whitespace out, so the multi-line `.env(\n    "KUBECONFIG",` form reads the same as the
+        // one-line one and neither spelling can slip past.
+        let tight: String = chain.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            tight.contains(".env(\"KUBECONFIG\""),
+            "spawn {nth} does not override KUBECONFIG, so it inherits the developer's own cluster \
+             and a bare `k8rs` there is one boolean away from watching it: {chain:.300}"
+        );
+    }
 }
 
 fn fixture(name: &str) -> String {
@@ -135,7 +197,7 @@ fn a_cluster_mode_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty
     // `--once` returns `Option`, and the mode that can answer *it reported* is the mode that can
     // answer it about a cluster it never reached (`screens/once.md` § Exit codes).
     for mode in ["--live", "--once"] {
-        let out = k8rs_with_no_kubeconfig(&[mode]);
+        let out = k8rs(&[mode]);
 
         assert_eq!(out.status.code(), Some(2), "{mode}: {out:?}");
         assert!(
@@ -248,7 +310,7 @@ fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
     // list asserts it found something). `--once` is asserted beside `--live` because the two
     // share one `live()` and one sentence, and a mode that grew a second one would show here.
     for mode in ["--live", "--once"] {
-        let reached = text(k8rs_with_no_kubeconfig(&[mode]).stderr);
+        let reached = text(k8rs(&[mode]).stderr);
         assert!(
             reached.contains(CONNECT_CANARY),
             "{mode} that reached the connect no longer says {CONNECT_CANARY:?}, so every \
@@ -272,7 +334,7 @@ fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
         vec!["--once", "--namespace"],
         vec!["--once", "-n", "../secrets"],
     ] {
-        let out = k8rs_with_no_kubeconfig(&args);
+        let out = k8rs(&args);
 
         assert_eq!(out.status.code(), Some(2), "{args:?} {out:?}");
         assert!(
@@ -331,7 +393,7 @@ fn a_crafted_namespace_never_reaches_the_terminal_at_all() {
     // branch is ever the one that moves.
     let crafted = "pay\u{1b}[2J\rments\u{9b}/x";
 
-    let out = k8rs_with_no_kubeconfig(&["--live", "--namespace", crafted]);
+    let out = k8rs(&["--live", "--namespace", crafted]);
 
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let stderr = text(out.stderr);
@@ -377,7 +439,7 @@ fn a_crafted_extra_word_leaves_the_process_with_no_control_character_on_stderr()
     // around it nothing has to be added to keep it off a happier path.
     let crafted = "ex\u{1b}[2J\rtra\u{9b}x";
 
-    let out = k8rs_with_no_kubeconfig(&["ops", "scale", "deploy/web", "3", crafted]);
+    let out = k8rs(&["ops", "scale", "deploy/web", "3", crafted]);
 
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let stderr = text(out.stderr);
@@ -411,7 +473,7 @@ fn a_crafted_extra_word_leaves_the_process_with_no_control_character_on_stderr()
 fn an_over_long_argv_word_is_cut_before_it_leaves_the_process() {
     let typed = format!("--{}", "a".repeat(9000));
 
-    let out = k8rs_with_no_kubeconfig(&["--once", &typed]);
+    let out = k8rs(&["--once", &typed]);
 
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let stderr = text(out.stderr);
@@ -468,10 +530,7 @@ fn an_argv_word_that_is_not_text_is_refused_and_does_not_panic() {
         let out = Command::new(env!("CARGO_BIN_EXE_k8rs"))
             .args(before)
             .arg(std::ffi::OsStr::from_bytes(bytes))
-            .env(
-                "KUBECONFIG",
-                "/nonexistent/k8rs-tests/there-is-no-kubeconfig-here",
-            )
+            .env("KUBECONFIG", NO_KUBECONFIG)
             .output()
             .expect("the built binary runs");
 
@@ -572,6 +631,7 @@ fn a_reader_that_closed_the_pipe_costs_nothing() {
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_k8rs"))
         .args(&args)
+        .env("KUBECONFIG", NO_KUBECONFIG)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -611,6 +671,7 @@ fn a_write_that_fails_any_other_way_is_exit_2_and_says_why() {
 
     let out = Command::new(env!("CARGO_BIN_EXE_k8rs"))
         .arg(fixture("healthy.json"))
+        .env("KUBECONFIG", NO_KUBECONFIG)
         .stdout(full)
         .stderr(Stdio::piped())
         .output()
@@ -1493,7 +1554,7 @@ fn a_log_run_that_named_something_unusable_is_refused_with_nothing_on_stdout() {
         vec!["--logs", "--object", "default/we\u{202e}b"],
         vec!["--logs", "--object", "default/web\u{7}"],
     ] {
-        let out = k8rs_with_no_kubeconfig(&line);
+        let out = k8rs(&line);
 
         assert_eq!(
             out.status.code(),
@@ -1832,7 +1893,7 @@ fn one_ops_run(
     std::fs::create_dir_all(&state).expect("a state directory this test owns");
     let stub = cluster.then(|| a_cluster_that_answers_one_scale(spec, status, context));
     let kubeconfig = stub.as_ref().map_or_else(
-        || std::path::PathBuf::from("/nonexistent/k8rs-tests/there-is-no-kubeconfig-here"),
+        || std::path::PathBuf::from(NO_KUBECONFIG),
         |(path, _)| path.clone(),
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_k8rs"))
@@ -2432,7 +2493,7 @@ struct Advertised {
 /// something): *extracted nothing* and *nothing to extract* would otherwise both be a green loop
 /// over an empty vector, in three tests at once.
 fn advertised() -> Vec<Advertised> {
-    let usage = text(k8rs_with_no_kubeconfig(&["ops"]).stderr);
+    let usage = text(k8rs(&["ops"]).stderr);
     println!("--- the usage these tests read their rows off ---\n{usage}");
     let advertised: Vec<&str> = usage
         .lines()

@@ -138,6 +138,14 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
     }
 }
 
+/// **One tab's offset, and zero for the other three** — `App::scroll` is four numbers, one per tab
+/// (`screens/widgets.md` § 4), and every test below is about the tab it opens.
+fn offsets(tab: Tab, offset: u16) -> [u16; Tab::ALL.len()] {
+    let mut scroll = [0; Tab::ALL.len()];
+    scroll[tab.at()] = offset;
+    scroll
+}
+
 /// **Draw, and keep what the frame resolved [`App::scroll`] to** — `ui::draw` takes `&mut App`
 /// because [`scrolled`] writes the row it drew back into the state, and the scroll tests are about
 /// exactly that value. Every other test in this file is about what is on the screen, so
@@ -206,6 +214,23 @@ fn holds(buffer: &Buffer, needle: &str) -> bool {
 /// from the content pane's own left edge. 22 is `1` border + [`SIDEBAR`] + `1` divider.
 fn pane(line: &str) -> String {
     line.chars().skip(usize::from(1 + SIDEBAR + 1)).collect()
+}
+
+/// **A card row with the cursor's gutter dropped** — [`MARKER`] where that card is the selected
+/// one, two blank columns where it is not (`screens/alerts.md` § The selected card). Every
+/// assertion about a card's *own* columns reads this, so the name, the age and the wrap are
+/// measured from where the card's text begins whichever card the cursor is on; that the mark is
+/// there at all, and that it costs nothing, is
+/// [`the_marked_card_is_the_selected_one_and_the_mark_costs_no_column`]'s to say.
+///
+/// **Card rows only** — a banner's own two blank columns are [`padded`]'s and not a gutter, so this
+/// would eat a column of its text.
+fn unmarked(line: &str) -> String {
+    let row = pane(line);
+    match row.strip_prefix(MARKER) {
+        Some(rest) => rest.to_owned(),
+        None => row.chars().skip(width(MARKER)).collect(),
+    }
 }
 
 /// The character in one column. **Not a byte slice**: every row here carries box-drawing and
@@ -1357,6 +1382,70 @@ fn the_age_ends_at_the_card_regions_last_column() {
     );
 }
 
+/// **The selected card is the one ⏎, `r` and `ctrl-d` act on, and it says so** — [`MARKER`] on
+/// its identity line and on no other row (`screens/alerts.md` § The selected card, which reversed
+/// `screens/widgets.md` § 2's own *"no card carries a selection marker"* once Phase 12's loop made
+/// the cursor act).
+///
+/// **What is asserted is *the mark costs the pane no column*, not that a ▸ is somewhere on the
+/// screen.** The gutter it fills is the one every card already left blank, so the same card's
+/// glyph, name and age draw in the same columns whether it is the marked one or the one under it —
+/// which is why the two frames are compared to each other and not to a literal. A marker paid for
+/// out of the card's own width would draw a ▸ just as happily, and rewrap every card by two
+/// columns.
+#[test]
+fn the_marked_card_is_the_selected_one_and_the_mark_costs_no_column() {
+    let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
+    let now = now();
+    let keys = [None, None];
+    let mut app = app();
+    let mut without_the_gutter = Vec::new();
+
+    for chosen in [0, 1] {
+        app.content.select(chosen, &keys);
+        let drawn = render(&app, &screen(&alerts, &now));
+        println!(
+            "=== the cursor on card {chosen} ===\n{}",
+            rows(&drawn).join("\n")
+        );
+
+        let identity = ["payments/web", "node-3"].map(|name| row(&drawn, name));
+        for (at, line) in identity.iter().enumerate() {
+            let want = match at == chosen {
+                true => MARKER.to_owned(),
+                false => " ".repeat(width(MARKER)),
+            };
+            assert!(
+                pane(line).starts_with(&want),
+                "card {at} with the cursor on card {chosen} drew {:?} in the gutter: {line:?}",
+                pane(line).chars().take(width(MARKER)).collect::<String>()
+            );
+            // The right edge, in both states: the age, the pad, the frame — and nothing between.
+            assert!(
+                line.ends_with("4 min ago  \u{2502}"),
+                "card {at} with the cursor on card {chosen} lost its right edge: {line:?}"
+            );
+        }
+        assert_eq!(
+            rows(&drawn)
+                .iter()
+                .filter(|line| pane(line).contains(MARKER.trim_end()))
+                .count(),
+            1,
+            "a cursor is one fact, and a card is up to twelve rows:\n{}",
+            rows(&drawn).join("\n")
+        );
+        without_the_gutter
+            .push(identity.map(|line| pane(&line).chars().skip(width(MARKER)).collect::<String>()));
+    }
+
+    assert_eq!(
+        without_the_gutter[0], without_the_gutter[1],
+        "the gutter is not the only column the mark spends: a card drew differently marked and \
+         unmarked, so every card in the pane wrapped at a different width"
+    );
+}
+
 /// **A card with no age draws none and reserves nothing** — the name gets the whole 51 columns.
 ///
 /// **The name has to be long enough for 51 to be a different answer from 40**, which `node-3` is
@@ -1385,7 +1474,7 @@ fn a_card_with_no_age_draws_none_and_keeps_the_whole_line() {
     let line = row(&drawn, "ip-10-0-134");
 
     assert!(
-        pane(&line).starts_with(&format!("  ▲ {long}")),
+        unmarked(&line).starts_with(&format!("▲ {long}")),
         "the whole name, on a line that reserved nothing: {line:?}"
     );
     // And what follows it is the pad and the frame, nothing else.
@@ -1961,10 +2050,16 @@ fn mockups(section: &str) -> Vec<Mockup> {
 /// (`screens/README.md` § the five rules, item 4).
 fn said_above(pane: &[String]) -> Vec<String> {
     let mut paragraphs: Vec<String> = Vec::new();
-    for row in pane
-        .iter()
-        .take_while(|row| !row.starts_with('●') && !row.starts_with('▲'))
-    {
+    for row in pane.iter().take_while(|row| {
+        // **The marker is stripped before the glyph is looked for** — `screens/` now draws the
+        // selected card with [`MARKER`] in front of its band (`screens/alerts.md`, 2026-09-24), so
+        // a row that starts `▸ ●` is still the first card and still ends the paragraphs above it.
+        // Without this the card's own text was swept into them and pushed the banner being measured
+        // off the pane (measured: § You can only see some namespaces came back with `▸ ●
+        // payments/web · 3 of 5 pods …` appended to its second paragraph).
+        let row = row.strip_prefix(MARKER).unwrap_or(row);
+        !row.starts_with('●') && !row.starts_with('▲')
+    }) {
         let words = row.split_whitespace().collect::<Vec<_>>().join(" ");
         match (words.is_empty(), paragraphs.last_mut()) {
             (true, _) => paragraphs.push(String::new()),
@@ -2261,14 +2356,30 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     against(section, 0, &app(), &partial);
     seen.push((section, 0));
 
+    // § *The same screen, four ways it can differ* → #### Nodes and deployments both refused — the
+    // frame added on 2026-09-24, and **the one frame on this page this sweep visits without
+    // comparing**, for the reason `## Before the TUI ever starts` is visited without one further
+    // down: there is nothing here that can draw it.
+    //
+    // **Its footer is `↑↓ move  ⏎ open  / filter  ? all keys  q quit` over a card whose owner
+    // is a Deployment**, and nothing in `ui::offered`'s five facts withholds `r` for a refused
+    // *workload* watch — while the sibling mockup two screens up insists in as many words that `r
+    // restart` stays and rides on *"the connection and the audit log, never on which namespace"*.
+    // So either that footer is a rule with no home yet or it is an oversight in a new drawing, and
+    // this box does not get to pick: asserting the paragraphs alone would leave the footer
+    // untested, and asserting the code's own answer would be pinning the implementation against its
+    // own specification (CLAUDE.md § Tests must not lie). Reported instead, and ticked here so the
+    // coverage sweep below stays honest about what it has and has not compared.
+    seen.push((section, 1));
+
     // § Nothing broken, and something not checked — the same sentence with no list under it, which
     // is the one screen where silence and *nothing is broken* would look identical. The check that
     // could not run says so beneath the verdict rather than instead of it.
-    let unchecked = fed(section, 1, 1);
+    let unchecked = fed(section, 2, 1);
     let mut said_anyway = screen(&empty, &now);
     said_anyway.note = &unchecked;
-    against(section, 1, &app(), &said_anyway);
-    seen.push((section, 1));
+    against(section, 2, &app(), &said_anyway);
+    seen.push((section, 2));
 
     // § The audit log could not be opened — `ops::audit_log`'s own sentence over a live list, and
     // the state this phase owns outright (NOTES § D21, § D231).
@@ -2352,8 +2463,8 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // that silently stopped parsing would make every loop above it vacuous and this whole sweep a
     // green that proves nothing.
     assert_eq!(
-        frames, 24,
-        "screens/states.md draws {frames} screens with a footer, not the 24 this sweep was \
+        frames, 25,
+        "screens/states.md draws {frames} screens with a footer, not the 25 this sweep was \
          written against — a frame was added or removed and this test has to say so"
     );
 }
@@ -2419,12 +2530,12 @@ fn the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key() {
     println!("{}", rows(&drawn).join("\n"));
     assert_eq!(
         unframed(&rows(&drawn)[22]),
-        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
         "a pane with a card in it, the link up, writes live and every time on it trustworthy"
     );
     assert_eq!(
         pressable(&app(), &ordinary),
-        (true, true),
+        (false, true),
         "the ordinary screen refused a key it had just drawn"
     );
 
@@ -2438,13 +2549,13 @@ fn the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key() {
     let drawn = render(&opened(), &listing);
     assert_eq!(
         unframed(&rows(&drawn)[22]),
-        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
         "a browser pane with rows in it:\n{}",
         rows(&drawn).join("\n")
     );
     assert_eq!(
         pressable(&opened(), &listing),
-        (true, true),
+        (false, true),
         "the browser refused a key it had just drawn"
     );
 
@@ -2522,9 +2633,11 @@ fn the_ordinary_screen_is_the_only_one_that_offers_a_mutating_key() {
 #[test]
 fn a_kind_that_cannot_scale_or_restart_is_not_offered_that_key() {
     let now = now();
-    let both = "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit";
-    let only_r = "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit";
-    let only_s = "↑↓ move  ⏎ open  s scale  / filter  ? all keys  q quit";
+    // **Two lines, not four** (`screens/widgets.md` § 2a, 2026-09-24): `s` is withheld from every
+    // offer ([`crate::views::SCALE_IS_BUILT`]), so a kind either restarts or it has no mutating key
+    // on the line at all. The names say which — `both` and `only_s` described footers no reader can
+    // reach any more.
+    let restarts = "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit";
     let neither = "↑↓ move  ⏎ open  / filter  ? all keys  q quit";
     // **One Alerts pane, several cards, and the cursor put somewhere in it** — the footer it draws
     // and what that footer leaves pressable, which are one value and are read as one.
@@ -2551,10 +2664,13 @@ fn a_kind_that_cannot_scale_or_restart_is_not_offered_that_key() {
         )
     };
     for (kind, expected, live) in [
-        (ObjectKind::Deployment, both, (true, true)),
-        (ObjectKind::StatefulSet, both, (true, true)),
-        (ObjectKind::DaemonSet, only_r, (false, true)),
-        (ObjectKind::ReplicaSet, only_s, (true, false)),
+        (ObjectKind::Deployment, restarts, (false, true)),
+        (ObjectKind::StatefulSet, restarts, (false, true)),
+        (ObjectKind::DaemonSet, restarts, (false, true)),
+        // **A bare ReplicaSet scales and does not restart, so today it has no mutating key at all**
+        // — the row that would start passing again on its own if the withholding were reverted
+        // without this table.
+        (ObjectKind::ReplicaSet, neither, (false, false)),
         (ObjectKind::Node, neither, (false, false)),
         (ObjectKind::Pod, neither, (false, false)),
         (ObjectKind::Job, neither, (false, false)),
@@ -2579,7 +2695,7 @@ fn a_kind_that_cannot_scale_or_restart_is_not_offered_that_key() {
     ] {
         // **The partner card is always a kind with a different answer**, so a renderer reading the
         // store's first card rather than the selected one draws the partner's line and fails.
-        let partner = match expected == both {
+        let partner = match expected == restarts {
             true => ObjectKind::Node,
             false => ObjectKind::Deployment,
         };
@@ -2618,7 +2734,7 @@ fn a_kind_that_cannot_scale_or_restart_is_not_offered_that_key() {
         ),
         (
             [ObjectKind::Node, ObjectKind::Deployment],
-            "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+            "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
         ),
         (
             [ObjectKind::Node, ObjectKind::DaemonSet],
@@ -2644,10 +2760,10 @@ fn a_kind_that_cannot_scale_or_restart_is_not_offered_that_key() {
     // be offered `s` at all.
     let listed = Pane::Ready(table("table-deployments"));
     for (group, plural, expected, live) in [
-        ("apps", "deployments", both, (true, true)),
-        ("apps", "statefulsets", both, (true, true)),
-        ("apps", "daemonsets", only_r, (false, true)),
-        ("apps", "replicasets", only_s, (true, false)),
+        ("apps", "deployments", restarts, (false, true)),
+        ("apps", "statefulsets", restarts, (false, true)),
+        ("apps", "daemonsets", restarts, (false, true)),
+        ("apps", "replicasets", neither, (false, false)),
         ("", "pods", neither, (false, false)),
         ("", "nodes", neither, (false, false)),
         ("", "configmaps", neither, (false, false)),
@@ -2719,12 +2835,12 @@ fn a_namespace_scoped_login_that_may_act_keeps_its_keys() {
     println!("{}", rows(&drawn).join("\n"));
     assert_eq!(
         unframed(&rows(&drawn)[22]),
-        "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+        "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
         "a refusal that came back with cards is a selection, not a dead link"
     );
     assert_eq!(
         pressable(&app(), &developer),
-        (true, true),
+        (false, true),
         "a namespace-scoped login could not reach the keys its own grant allows"
     );
     assert!(
@@ -3398,7 +3514,10 @@ fn banner_indents(drawn: &Buffer) -> Vec<usize> {
         // which reads as a 57-column indent to anything that counts leading spaces.
         .map(|line| pane(line).trim_end_matches('│').to_owned())
         .take_while(|line| {
+            // **[`MARKER`] comes off before the band is looked for**, for [`said_above`]'s own
+            // reason: the selected card draws `▸ ●` and is still the row a banner ends at.
             let head = line.trim_start();
+            let head = head.strip_prefix(MARKER).unwrap_or(head);
             !head.starts_with('●') && !head.starts_with('▲')
         })
         .filter(|line| !line.trim().is_empty())
@@ -6438,7 +6557,7 @@ fn scrolling_a_detail_pane_moves_the_body_and_nothing_above_it() {
     let moved = detailed(
         &App {
             tab: Tab::Yaml,
-            scroll: 3,
+            scroll: offsets(Tab::Yaml, 3),
             ..App::default()
         },
         &open.open(),
@@ -6494,7 +6613,7 @@ fn follow_pins_to_the_last_line_and_a_wild_offset_stops_at_the_end() {
     );
     let mut app = App {
         tab: Tab::Logs,
-        scroll: 900,
+        scroll: offsets(Tab::Logs, 900),
         ..App::default()
     };
     let wild = detailed_into(&mut app, &open.open());
@@ -6506,7 +6625,7 @@ fn follow_pins_to_the_last_line_and_a_wild_offset_stops_at_the_end() {
     // `k` would have spent hundreds of presses walking back to an end the screen was already
     // drawing (`crate::views::App::scroll`).
     assert!(
-        app.scroll < 900,
+        app.scroll[Tab::Logs.at()] < 900,
         "the offset the frame clamped on screen went back into the state as 900"
     );
 }
@@ -6810,7 +6929,7 @@ fn the_cut_withdrawal_stays_on_screen_while_the_events_scroll() {
         detailed(
             &App {
                 tab: Tab::Events,
-                scroll,
+                scroll: offsets(Tab::Events, scroll),
                 ..App::default()
             },
             &open.open(),
@@ -6988,7 +7107,7 @@ fn the_footer_is_the_apps_answer_and_not_the_callers() {
     for (app, expected) in [
         (
             app(),
-            "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+            "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
         ),
         (
             App {
@@ -7056,7 +7175,7 @@ fn a_detail_tab_changes_the_footer_and_only_while_one_is_open() {
         let closed = render(&on(tab), &screen(&alerts, &now));
         assert_eq!(
             footer_of(&closed),
-            "↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit",
+            "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
             "{tab:?} drew a detail footer with no detail open"
         );
     }
@@ -7537,24 +7656,23 @@ fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
 /// plural is `ops::removal`, which is private in a frozen file; making it `pub` for a test is not
 /// a trade this box gets to make. Two of the three rows are proven — a reader must not take this
 /// test as covering the third.
+///
+/// **`s`'s row is no longer one of the two, and that is the ruling rather than a gap**
+/// (`screens/help.md` § When a key is refused, 2026-09-24): that row carries the fixed *not built
+/// yet* sentence in every state, so there is nothing for a refusal to append a plural to, and `s`
+/// is withheld before `may_i_in` is ever asked. What is left is `r`'s clause, which is where the
+/// drift this test exists to catch would show. The `s` row is asserted *unchanged* below instead,
+/// so a clause growing back on it fails here rather than quietly reappearing.
 #[test]
 fn every_clause_names_the_plural_its_own_operation_would_send() {
     let mut seen = 0;
     for (kind, plural) in KINDS {
-        for (operation, resource, row, names) in [
-            (
-                "scale",
-                crate::ops::scalable(kind),
-                "    s ",
-                format!("{plural}/scale"),
-            ),
-            (
-                "restart",
-                crate::ops::restartable(kind),
-                "    r ",
-                format!(" {plural})"),
-            ),
-        ] {
+        for (operation, resource, row, names) in [(
+            "restart",
+            crate::ops::restartable(kind),
+            "    r ",
+            format!(" {plural})"),
+        )] {
             // A kind the operation does not reach is never asked and is never *refused* — it is
             // withheld, `screens/states.md`'s own word and its own later box.
             let Ok(resource) = resource else { continue };
@@ -7575,9 +7693,23 @@ fn every_clause_names_the_plural_its_own_operation_would_send() {
         }
     }
     assert_eq!(
-        seen, 6,
-        "scale reaches three kinds and restart three; a kind stopped being measured"
+        seen, 3,
+        "restart reaches three kinds; a kind stopped being measured"
     );
+    // **And `s`'s row takes no clause, whatever this login may not do** — every kind, both
+    // refusals, one fixed sentence (`screens/help.md` § When a key is refused).
+    for kind in ["deployments", "statefulsets", "replicasets"] {
+        let drawn = key_map(HELP, refusing(true, true, true, kind), false, None);
+        let row = drawn
+            .lines()
+            .find(|line| line.starts_with("    s "))
+            .expect("the `s` row");
+        assert_eq!(
+            row.trim_end(),
+            "    s       not built yet — there is no way yet to type a copy count",
+            "a clause grew back on the `s` row for {kind}"
+        );
+    }
 }
 
 /// **Every rewrite lands on the row it is for, found by that row's own text, wherever the block
@@ -8873,7 +9005,17 @@ fn mockup_dialog(nth: usize) -> Vec<String> {
             (Some(_), false) => open.as_mut().expect("open").push(line.to_owned()),
             (Some(_), true) => {
                 let block = open.take().expect("open");
-                if block.first().is_some_and(|line| line.starts_with(" nodes")) {
+                // **The *Choosing how many* box is specified and not built**
+                // (`screens/dialogs.md` § Choosing how many, before the confirm box, 2026-09-24:
+                // *"this section exists so a later box has something to build against, not because
+                // any of it is on screen today"*). Nothing in `ui.rs` draws it — `s` is the key
+                // that would open it and there is no state to type a number into — so it is
+                // skipped here rather than renumbering the eleven boxes this file does draw. The
+                // box that builds it takes this filter off in the same turn.
+                let unbuilt = block
+                    .iter()
+                    .any(|line| line.contains("How many do you want?"));
+                if !unbuilt && block.first().is_some_and(|line| line.starts_with(" nodes")) {
                     blocks.push(block);
                 }
             }
@@ -10856,42 +10998,42 @@ fn enter_is_dim_and_unoffered_and_the_slot_says_why_wherever_it_does_nothing() {
             picking(&dangling, live()),
             &dangling,
             Some(6),
-            "↑↓ move  / filter  esc cancel",
+            "↑↓ move  type to filter  esc cancel",
         ),
         (
             "every row undefined",
             picking(&undefined, live()),
             &undefined,
             Some(7),
-            "/ filter  esc cancel",
+            "type to filter  esc cancel",
         ),
         (
             "a filter that shows only undefined rows",
             moved(&filtered, live(), 0, "-cluster"),
             &filtered,
             Some(7),
-            "/ filter  esc clear filter",
+            "type to filter  esc clear filter",
         ),
         (
             "a filter that hides every row",
             moved(&four, live(), 0, "prod-uk"),
             &four,
             Some(8),
-            "/ filter  esc clear filter",
+            "type to filter  esc clear filter",
         ),
         (
             "a kubeconfig with no contexts",
             picking(&none, live()),
             &none,
             Some(9),
-            "/ filter  esc cancel",
+            "type to filter  esc cancel",
         ),
         (
             "the live row",
             picking(&four, live()),
             &four,
             None,
-            "↑↓ move  / filter  ⏎ switch  esc cancel",
+            "↑↓ move  type to filter  ⏎ switch  esc cancel",
         ),
     ] {
         let drawn = render_at(MIN_WIDTH, 30, &app, &pick_over(&alerts, &now, &[], rows));
@@ -11016,7 +11158,7 @@ fn enter_is_dim_and_unoffered_and_the_slot_says_why_wherever_it_does_nothing() {
     let shadowed = contexts_of(&FOUR.replace("name: staging,", "name: prod-eu,"));
     assert!(shadowed[1].shadowed);
     let (box_, frame) = picked(&moved(&shadowed, live(), 1, ""), &shadowed);
-    assert_eq!(unframed(&frame[22]), "↑↓ move  / filter  esc cancel");
+    assert_eq!(unframed(&frame[22]), "↑↓ move  type to filter  esc cancel");
     assert!(
         inside(&box_).contains("Every lookup by that name, ⏎ here included, finds it first"),
         "{}",
@@ -12298,8 +12440,11 @@ fn a_canary_and_its_stable_sibling_are_two_objects_on_every_surface_that_names_o
         card.findings[0].timestamp = Some(stamp);
         let listed = Pane::Ready(vec![card]);
         let drawn = render(&app(), &screen(&listed, &now));
+        // **[`unmarked`], because the page's four loose rows are excerpts and not a pane**: one
+        // card on its own has no sibling to be selected over, so the file draws the columns and
+        // not the cursor.
         assert_eq!(
-            spaced(&pane(&row(&drawn, " ago"))),
+            spaced(&unmarked(&row(&drawn, " ago"))),
             spaced(&cards[nth]),
             "the Alerts card, row {nth}"
         );
@@ -15035,7 +15180,7 @@ fn a_block_taller_than_the_pane_keeps_the_tabs_own_sentence_and_scrolls_for_the_
     let scrolled = detailed(
         &App {
             tab: Tab::Describe,
-            scroll: 8,
+            scroll: offsets(Tab::Describe, 8),
             ..App::default()
         },
         &held,

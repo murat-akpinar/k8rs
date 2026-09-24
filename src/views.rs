@@ -42,26 +42,31 @@
 //! only sort in this file is [`cards`]', over `Severity` and a `Time`, both of which were never
 //! strings.
 
-// The renderer that reads all of this is `ui.rs`. Same attribute, same position and same accepted
-// blind spot as `theme.rs`'s and `ops.rs`'s (NOTES § D38) — and, like `theme.rs`'s, **it does not
-// expire by itself: it is deleted by hand.**
+// The module-wide `dead_code` expectation that stood here until 2026-09-23 is **gone**, with
+// `ui.rs`'s, in the turn that gave `ui::draw` a caller (NOTES § D38's accepted blind spot, closed
+// where its own comment said it would be). What is left is per item and named: every
+// `#[expect(dead_code, …)]` below carries the box that reaches it, so an unwired function is
+// reported by the build instead of by a reader.
 //
-// **It said *Phase 11 deletes it* and Phase 11 closed without it, so the deadline was measured
-// rather than moved** (2026-09-19). `ui.rs` reads most of this and the key handler the rest, but
-// nothing outside `#[cfg(test)]` reads `ui.rs` — the loop that will is the `main.rs` wiring box —
-// and an
-// `#[allow]`ed module is a *live root* to rustc's reachability pass, not a live caller. So with
-// `ui.rs`'s own expectation in place and this one removed, the build is **27 dead-code warnings**
-// over this file; with both removed it is **244**, 179 of them in `ui.rs` and 65 here. Both
-// expectations come off in the same turn, and that turn is the one that wires `main.rs`.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the loop that reaches this state through `ui.rs` is the `main.rs` wiring box \
-                  (todo.md § Phase 12)"
-    )
-)]
+// **Every one of them is wrapped in `cfg_attr(not(test))`, and that is not copied from the module
+// attribute it replaced — it is measured.** `theme.rs`'s own comment records that a *module-wide*
+// `dead_code` expectation is never reported unfulfilled in this crate; a **per-item** one is, under
+// `cargo clippy --all-targets`, because the tests below construct variants the product does not
+// reach yet. Unwrapped, they turned a green build into one
+// `unfulfilled_lint_expectations` warning each under `-D warnings` (measured 2026-09-23). The
+// wrapper keeps the claim where it belongs: *nothing outside a test reaches this*.
+//
+// **Two numbers live here and they count different things** (both measured, 2026-09-24):
+// **fourteen** `dead_code` *warnings* were what removing the two module attributes reported — the
+// unit rustc counts, so one warning covered `Modal`'s two unreached variants together — and
+// **fifteen** per-item `expect`s are what replaced them, thirteen in this file and two in `ui.rs`,
+// because an attribute goes on an item and not on a warning.
+//
+// **And a reason may not name a box that does not exist** (PM ruling, 2026-09-24, after `tester`
+// grepped `todo.md` 4565–4732): Phase 12 has no detail-tab fetch box, no permission-probe box and
+// no scale-count box, so those reasons say *no box yet* and name the work instead. The four that do
+// cite a box — three for **the cluster picker is wired** and one for **flags from
+// `std::env::args`** — cite boxes that are in the file.
 
 use crate::analysis::Row as ReportRow;
 use crate::k8s::{
@@ -1016,6 +1021,14 @@ pub enum Modal {
     /// no container to pick, and a box with no rows is not drawn and its footer is not offered —
     /// there is no second `Gone` for it, because picking a container is not a pending mutation
     /// and has nothing to reassure anybody about.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "`c` opens it off the pod read, and **no box fetches the four detail tabs \
+                      yet** — Phase 12 has none; the tabs draw `Loading` until one exists"
+        )
+    )]
     ContainerPick(Cursor),
     /// **The cluster picker — on `X`, and by itself at startup** (`screens/context.md`,
     /// NOTES § D16, § D116). One list and one key map both ways; [`Picker::startup`] is the whole
@@ -1029,6 +1042,14 @@ pub enum Modal {
     /// **It carries what the driver's own sentences read, and no sentence** (NOTES § D264
     /// ruling 1): the reason is [`because`]'s, the scope [`scope`]'s and the next step
     /// [`next_step`]'s, the same three a `--once` run that could not read pods prints.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "built from a failed second `connect()` — the cluster picker box's (todo.md \
+                      § Phase 12)"
+        )
+    )]
     Unconnected {
         /// The picked context's name as drawn — [`Choice::name`], `None` being [`UNNAMED`].
         to: Option<String>,
@@ -1121,6 +1142,14 @@ pub enum Connection {
     /// **A context connected earlier in this run and none is live now** — a switch failed, or has
     /// not answered yet. **It carries the context that was last live**, its name as drawn, so a
     /// second and third failed switch in a row still name it (NOTES § D264 ruling 15).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "an expired login opens the picker with it — the cluster picker box's, with \
+                      NOTES § D265 ruling 4 (todo.md § Phase 12)"
+        )
+    )]
     Dropped(Option<String>),
     /// **The `(current)` row is the live context** — its name as drawn. The rows must then be
     /// `k8s::contexts` asked for that context, so its row is the one marked current.
@@ -1155,6 +1184,14 @@ pub enum Chosen<'a> {
     Stay,
     /// **Connect to this row** (NOTES § D264 ruling 8): the caller connects with [`Choice::key`],
     /// the file's own spelling, and draws [`Choice::name`].
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by the caller that connects again — the cluster picker box's (todo.md \
+                      § Phase 12)"
+        )
+    )]
     Connect {
         /// The row `⏎` was pressed on.
         row: &'a Choice,
@@ -1394,6 +1431,14 @@ impl Object {
     }
 
     /// The cluster's own name for this instance, or `None` where there is none to trust.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the caller that re-reads an object and compares this before confirming is \
+                      v0.4's `edit`; nothing in v0.1 reads it back (NOTES § D22)"
+        )
+    )]
     pub fn uid(&self) -> Option<&str> {
         self.uid.as_deref()
     }
@@ -1834,6 +1879,14 @@ impl Log {
 /// **`rules::in_namespace` is not called from here**, though it is the same three lines: it is
 /// private, `rules.rs` is frozen, and it carries this identical defect — reusing it would mean
 /// inheriting the bug being fixed. The duplication is the PM's box, not this one's.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "private to the three lines below, which are logged when the read each names \
+                  is issued — and no box issues those reads yet"
+    )
+)]
 fn in_namespace(namespace: Option<&str>) -> String {
     match namespace.unwrap_or_default() {
         "" => String::new(),
@@ -1853,6 +1906,14 @@ fn in_namespace(namespace: Option<&str>) -> String {
 /// word cannot be wrong while the pane keeps its shape — and `rules::describe` spells it the same
 /// way for the same reason. A describe tab over another kind changes that pane's type first, and
 /// this line with it.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "logged when the read it names is issued, and no box issues it yet — Phase 12 \
+                  has no detail-tab fetch box"
+    )
+)]
 pub fn describe_line(id: &ObjectId) -> String {
     format!(
         "$ kubectl describe pod {}{}",
@@ -1890,6 +1951,14 @@ pub fn describe_line(id: &ObjectId) -> String {
 /// that answers *No resources found in payments namespace* while the pane above it is showing
 /// the events (`k8s-admin`, 2026-09-07). There is exactly one right answer here because there was
 /// exactly one request, and this argument is it.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "logged when the read it names is issued, and no box issues it yet — Phase 12 \
+                  has no detail-tab fetch box"
+    )
+)]
 pub fn events_line(resource: &str, id: &ObjectId, namespace: &str) -> String {
     format!(
         "$ kubectl events --for {resource}/{}{}",
@@ -1914,6 +1983,14 @@ pub fn events_line(resource: &str, id: &ObjectId, namespace: &str) -> String {
 ///
 /// **The resource word is the caller's**, [`events_line`]'s reason exactly — and this is the tab
 /// that has a second kind to open on today, `screens/detail.md` § A Secret with no keys.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "logged when the read it names is issued, and no box issues it yet — Phase 12 \
+                  has no detail-tab fetch box"
+    )
+)]
 pub fn yaml_line(resource: &str, id: &ObjectId) -> String {
     format!(
         "$ kubectl get {resource} {}{} -o yaml --show-managed-fields",
@@ -2029,6 +2106,36 @@ impl Tab {
     }
 }
 
+/// **Which of the two panels the keys are moving in** (`screens/help.md`: `tab  next panel`).
+///
+/// **It is the one piece of state `screens/widgets.md` § 3 does not name, and `tab` cannot be
+/// bound without it** (PM ruling, 2026-09-23, recorded because the brief did not decide it): `↑↓`
+/// and `⏎` mean *the sidebar's rows* or *the pane's rows* and the two cursors are already separate
+/// fields — what was missing was which of them a key is talking to. **What it does not do is
+/// change what anything draws**: the sidebar marks its own selected row either way, and the
+/// content pane's selection has never been marked at all, so *which panel has focus* is not
+/// visible on screen. That is a screen question and it is `screens/`'s to answer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Panel {
+    /// The sidebar — `ALERTS`, the browsable kinds, the reports.
+    Sidebar,
+    /// **The content pane, which is where a run starts.** `screens/alerts.md`'s footer is that
+    /// pane's — `↑↓ move  ⏎ open  s scale` all act on the object under its cursor — so a reader
+    /// who presses `↓` before anything else is moving through the cards.
+    #[default]
+    Content,
+}
+
+impl Panel {
+    /// `tab`. **Two panels, so there is no order to get wrong**; a third would make this a list.
+    pub fn next(self) -> Panel {
+        match self {
+            Panel::Sidebar => Panel::Content,
+            Panel::Content => Panel::Sidebar,
+        }
+    }
+}
+
 /// **Everything the screen is looking at.** `ui.rs` draws this and nothing else, which is the
 /// whole of todo.md § Phase 10's goal: a renderer that is a pure function of one value cannot rot
 /// into a renderer that remembers.
@@ -2094,9 +2201,26 @@ pub struct App {
     pub typing: Option<Typing>,
     /// Which detail tab is open, when something is open.
     pub tab: Tab,
-    /// **The free-text panes' own scroll offset** — logs, yaml, describe **and events**. Lists and
-    /// tables do not use it: ratatui keeps a selection in view by itself, so their scrolling is
-    /// [`App::content`]'s (`screens/widgets.md` § 4).
+    /// **Which panel `↑↓` and `⏎` are talking to** ([`Panel`]) — `tab` is what moves it.
+    pub focus: Panel,
+    /// **The free-text panes' own scroll offsets — one per tab, indexed by [`Tab::at`]** — logs,
+    /// yaml, describe **and events**. Lists and tables do not use them: ratatui keeps a selection
+    /// in view by itself, so their scrolling is [`App::content`]'s (`screens/widgets.md` § 4).
+    ///
+    /// **Four numbers and not one, which is `screens/widgets.md` § 4's own ruling** — *"one offset
+    /// per tab, not one shared by all four"*. A `Paragraph` has no `ListState` to isolate one
+    /// tab's scrolling from another's the way a list gets for free, so this product keeps four
+    /// numbers instead: yaml at row 400, `]` to a three-row describe pane and back, and yaml is
+    /// still at 400 rather than at whatever describe's own body clamped a shared number down to
+    /// (NOTES § D272 § 1, `tester`'s measured case — the defect storing the clamp created).
+    ///
+    /// **A resize discards all four, and so does closing the detail slot and opening it again** —
+    /// that section's own two rules, both of them the key handler's to carry out
+    /// ([`Self::rewound`])
+    /// because neither a resize nor an `esc` is a fact this file can see. The row an offset names
+    /// is a row of *wrapped, rendered* text, so it means nothing at a width it was not measured at
+    /// (PRIOR-ART § D3), and a re-opened tab is reading a buffer that was fetched again from
+    /// scratch.
     ///
     /// **Events was not on that list until Phase 11 drew it** (`screens/detail.md` § More events
     /// than the pane): that pane is a `Paragraph` with an offset like the other three, not a list
@@ -2121,8 +2245,8 @@ pub struct App {
     ///
     /// **It is the same reason a `ListState` is handed to its widget by `&mut`** — that section's
     /// *"a selection that moves can never leave it pointing at the wrong window"* — applied to the
-    /// one offset on this product that is stored between frames.
-    pub scroll: u16,
+    /// four offsets on this product that are stored between frames.
+    pub scroll: [u16; Tab::ALL.len()],
     /// **Follow mode, the log tab's `f`** — the offset is pinned to the bottom while it is on, and
     /// any manual scroll turns it off. The standard `tail -f` behaviour, and the only way a stream
     /// and a scrollbar coexist without fighting (`screens/widgets.md` § 4).
@@ -2226,6 +2350,14 @@ impl Refused {
     /// word, and dropping the mark to protect the `?` clause would hide a refusal the login
     /// actually has. [`Self::default`] — nothing selected, nothing asked — is the one shape where
     /// an empty `resource` is right, and it marks nothing.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "built from `ops::may_i_in`'s answers, and no box wires that probe yet — \
+                      the console draws every key unmarked (NOTES § D229 ruling 4's fail-open)"
+        )
+    )]
     pub fn of(
         resource: &'static str,
         scale: [Option<&Verdict>; Self::SCALE_VERBS.len()],
@@ -2318,6 +2450,14 @@ pub fn picking(open: Detailing) -> bool {
 /// same rule read across a set: an operation the login cannot complete is not lit because most of
 /// what it needs was granted. An empty set — an operation with nothing asked — is lit, which is
 /// `any`'s own answer and is the *not asked* case above.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "private to `Refused::of`, and no box wires the `ops::may_i_in` probe it is \
+                  built from"
+    )
+)]
 fn refuses(answers: &[Option<&Verdict>]) -> bool {
     answers
         .iter()
@@ -2451,21 +2591,52 @@ pub enum Offer {
     },
 }
 
+/// **Whether there is anywhere for a reader to type a target count yet** — `false`, and that is the
+/// whole of why `s scale` reaches no footer (`screens/help.md` § Rules and `screens/dialogs.md`
+/// § Choosing how many, before the confirm box, both 2026-09-24).
+///
+/// **A named `false` rather than a deleted call**: the box that draws that step turns this into
+/// `true` and nothing else moves, and one `grep` finds every consequence of the ruling.
+const SCALE_IS_BUILT: bool = false;
+
 /// **Which mutating key is being asked about.** The two had one answer until the kind became part
 /// of it, and they no longer do: `s` is live on a Deployment and dead on a DaemonSet in the same
 /// frame ([`Offer::Act`]).
 ///
-/// **`ctrl-d delete` is not a variant, and that is not an omission.** It is on neither list footer
-/// — D259 took it off both for width before any of this existed — and its kind gate is private to
-/// `ops.rs`, so there is nothing here to ask yet. Its answer today is *any* [`Offer::Act`]
-/// whatever the kind, because `ops::delete` serves all six including a node; Phase 12's `ctrl-d`
-/// box is where that becomes a third arm rather than a guess made here.
+/// **`ctrl-d delete` is the third arm, and it was not one until the key was bound** (2026-09-23,
+/// the `main.rs` wiring box — which is the box this type's own doc said would add it). It is on
+/// neither list footer — D259 took it off both for width — so nothing draws from it; what it
+/// decides is whether the press reaches anything.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op {
     /// `s scale`.
+    ///
+    /// **Nothing asks this yet, and the reason is a screen that has not been drawn**: a scale needs
+    /// a target count, and no file in `screens/` says how the reader enters one — there is no
+    /// mockup of the step between pressing `s` and the confirmation box, and [`Typing`] has no
+    /// state for a number. So the key reaches nothing rather than inventing the step
+    /// (`main.rs`'s router, 2026-09-23; reported to the PM as the ruling that unblocks it).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "`screens/dialogs.md` § Choosing how many specifies the step and marks it \
+                      *not built*; no box builds it yet ([`SCALE_IS_BUILT`])"
+        )
+    )]
     Scale,
     /// `r restart`.
     Restart,
+    /// **`ctrl-d delete`, which every kind an [`Offer::Act`] can be about supports** —
+    /// `ops::delete` serves all six including a node, so unlike the two above there is no kind
+    /// question left for this one to ask. What is left is the run-level half every mutating key
+    /// shares, and that is [`App::may_mutate`]'s own three conditions.
+    ///
+    /// **The kind gate still exists and it is the caller's**: `ops::delete` refuses a kind it does
+    /// not serve, and `main.rs`'s driver resolves the word against its own `KINDS` before building
+    /// a mutation at all — so a ConfigMap under the browser's cursor answers `true` here and
+    /// reaches nothing, which is the same place a kind with no `/scale` reaches.
+    Delete,
 }
 
 impl Offer {
@@ -2497,7 +2668,23 @@ impl Offer {
     /// question: the sentence is the headless driver's, printed on a line somebody typed.
     pub fn act(group: &str, kind: &str) -> Offer {
         Offer::Act {
-            scalable: crate::ops::scalable(kind).is_ok_and(|served| served.group == group),
+            // **`s` is withheld here, for every kind, every login and every run**
+            // ([`SCALE_IS_BUILT`], `screens/help.md` § Rules and `screens/widgets.md` § 2a: *"`s
+            // scale` is never part of it: `s` is withheld from `Offer::Act` … so this line never
+            // has it to curate away in the first place"*). Scale's confirm box has always assumed a
+            // target count already exists — `--replicas=3` in every mockup — and the step that
+            // produces one is `screens/dialogs.md` § Choosing how many, before the confirm box,
+            // marked there **specified, not built**.
+            //
+            // **Withheld and not refused, which is the distinction this type exists to keep**
+            // (`screens/help.md` § When a key is refused): the key is off the line entirely, the
+            // way a kind with no `/scale` already takes it off, so no verdict about it is claimed
+            // and `?` says *not built yet* instead.
+            //
+            // **`crate::ops::scalable` is still asked** — it is the answer this goes back to when
+            // the count step lands, and one word turns it back on.
+            scalable: SCALE_IS_BUILT
+                && crate::ops::scalable(kind).is_ok_and(|served| served.group == group),
             restartable: crate::ops::restartable(kind).is_ok_and(|served| served.group == group),
         }
     }
@@ -2519,6 +2706,11 @@ impl Offer {
             } => match op {
                 Op::Scale => scalable,
                 Op::Restart => restartable,
+                // **Every kind that can be an `Act` can be deleted** ([`Op::Delete`]) — the pair
+                // above is about the two subresource-shaped operations and says nothing about this
+                // one, which is why reading it for `ctrl-d` withheld the key on the one kind
+                // `ops::delete` was written for (`main.rs`'s router, 2026-09-23).
+                Op::Delete => true,
             },
             Offer::Nothing { .. }
             | Offer::Filter { .. }
@@ -2583,6 +2775,14 @@ impl App {
     ///
     /// Called on `⏎`, before the connection answers: a switch that then fails stays on the context
     /// that was chosen, and so does this.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "called beside the second `connect()` — the cluster picker box's, with \
+                      NOTES § D264 ruling 13 (todo.md § Phase 12)"
+        )
+    )]
     pub fn switched(&mut self, log: &mut Log) {
         *self = App::default();
         *log = Log::default();
@@ -2808,15 +3008,24 @@ impl App {
             // behind it to cancel back onto, and `⏎` is dropped — not dimmed — where it would do
             // nothing (NOTES § D264 ruling 2) — and `↑↓` with it where no row can be landed on at
             // all, a list that shows none included (rulings 16 and 18). `esc`'s word is the box
-            // button's own, `clear filter` while `/` holds text ([`Picker::verbs`], ruling 31).
+            // button's own, `clear filter` while the filter holds text ([`Picker::verbs`],
+            // ruling 31).
+            //
+            // **`type to filter` and not `/ filter`, because there is no such key here**
+            // (`screens/context.md` § The picker, rewritten 2026-09-24: *"There is no dedicated key
+            // that opens it, unlike `/` on Alerts and Resources … every printable character — `/`
+            // included, for an ARN context name's own tail — narrows the list the instant it is
+            // typed, and the footer says `type to filter` rather than naming a key that does not
+            // exist"*). A footer that named `/` would name a key the box does not have, which is
+            // `screens/widgets.md` § 2a's own closed-set rule read the other way round.
             Some(Modal::ContextPick(picker)) => {
                 let (go, leave) = picker.verbs();
                 let keys = if picker.nowhere(contexts) {
-                    format!("/ filter  esc {leave}")
+                    format!("type to filter  esc {leave}")
                 } else if picker.inert(contexts) {
-                    format!("↑↓ move  / filter  esc {leave}")
+                    format!("↑↓ move  type to filter  esc {leave}")
                 } else {
-                    format!("↑↓ move  / filter  ⏎ {go}  esc {leave}")
+                    format!("↑↓ move  type to filter  ⏎ {go}  esc {leave}")
                 };
                 return (Cow::Owned(keys), "");
             }
@@ -2939,10 +3148,13 @@ impl App {
                 Offer::Move { switch: true } => {
                     "↑↓ move  ⏎ open  X switch cluster  / filter  ? all keys  q quit"
                 }
-                // **The four rows of `screens/widgets.md` § 2a's first table and the five of the
-                // second, as nine literals** (NOTES § D259 ruling 4): the one footer a refusal can
-                // reach still spells every state of itself at compile time. The first table's four
-                // are a kind that supports both operations — a Deployment, a StatefulSet.
+                // **Nine literals, of which [`SCALE_IS_BUILT`] currently makes four unreachable**
+                // (NOTES § D259 ruling 4): the one footer a refusal can reach still spells every
+                // state of itself at compile time. `screens/widgets.md` § 2a draws eight states
+                // today and none of them carries `s` — the four below that do are the rows that
+                // come back the day the count step lands, and they are kept *here*, beside the
+                // constant that suppresses them, so that flipping it is one edit and cannot leave a
+                // key live on a line that does not name it.
                 Offer::Act {
                     scalable: true,
                     restartable: true,
@@ -3193,9 +3405,30 @@ impl App {
     /// the row `screens/detail.md` § When the buffer fills leaves unnamed when it says turning
     /// follow off freezes the *view* and not the stream under it.
     /// The toggle itself is the `main.rs` wiring box's; there is no method for it here yet.
+    ///
+    /// **It moves the open tab's own offset and never a shared one** ([`App::scroll`],
+    /// `screens/widgets.md` § 4): which of the four is [`App::tab`]'s answer, read here rather
+    /// than passed in, so a key handler cannot scroll one tab's body by another's number.
     pub fn scroll_by(&mut self, lines: i16) {
         self.following = false;
-        self.scroll = self.scroll.saturating_add_signed(lines);
+        let at = self.tab.at();
+        self.scroll[at] = self.scroll[at].saturating_add_signed(lines);
+    }
+
+    /// **Every free-text offset back to the top of its own tab** — a resize, and the detail slot
+    /// closing and opening again (`screens/widgets.md` § 4, `screens/detail.md` § Switching tabs
+    /// keeps your place, which says what this does *not* cover: `[` and `]`).
+    ///
+    /// **It is the key handler's because neither cause is visible here.** A resize is a terminal
+    /// event and *the slot was closed* is `crate::ui::Screen::detail`'s, so this file can only
+    /// offer the one operation both of them need — and offering it once is what keeps the two
+    /// callers from each zeroing a different subset of the four.
+    ///
+    /// **[`Self::following`] is deliberately untouched**: a followed pane ignores its stored
+    /// offset every frame, so a reader who re-opens a log lands pinned to the tail rather than at
+    /// a zero pretending to be one (that section's last paragraph).
+    pub fn rewound(&mut self) {
+        self.scroll = [0; Tab::ALL.len()];
     }
 }
 

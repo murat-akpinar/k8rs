@@ -23,7 +23,7 @@ own `Table` printing — the exact columns `kubectl get` would show.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get deployments -n payments                              │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -92,20 +92,23 @@ own `Table` printing — the exact columns `kubectl get` would show.
   [widgets.md § 2b](widgets.md#2b-typing-into-a-filter) and
   [states.md § The filter hides every row](states.md#the-filter-hides-every-row)
   are shared with [alerts.md](alerts.md), the same way the footer itself is.
-- **`s`/`r` on the selected row are marked the same way as on Alerts, and no
-  differently for being over a table instead of a card** — `s no scale`,
-  `r no restart`, from the same `may_i_in` result Alerts reads
+- **`r` on the selected row is marked the same way as on Alerts, and no
+  differently for being over a table instead of a card** — `r no restart`,
+  from the same `may_i_in` result Alerts reads
   ([widgets.md § The footer](widgets.md#2a-the-footer),
   [help.md § When a key is refused](help.md#when-a-key-is-refused)). One
   mechanism, one place it is spelled out, cited from both list screens rather
-  than drawn twice.
-- **This is the screen where a kind lacking either key entirely is the
-  common case, not the exception** — most rows this browser can reach (a
-  ConfigMap, a Service, a PersistentVolume, a Node, a CRD) support neither
-  operation. The row does not mark a `no` on a key it was never asked about;
-  it drops the key, the same way it drops for a single-container pod's
-  `c container` on Detail. Every combination and its column count are
-  [widgets.md § The footer](widgets.md#2a-the-footer)'s, not redrawn here.
+  than drawn twice. `s` never reaches this line at all — withheld from every
+  kind, login and run (help.md's own Rules list) — so there is no `s no
+  scale` to mark here either.
+- **This is the screen where a kind lacking `r` entirely is the common
+  case, not the exception** — most rows this browser can reach (a
+  ConfigMap, a Service, a PersistentVolume, a Node, a bare ReplicaSet, a
+  CRD) do not support it. The row does not mark a `no` on a key it was never
+  asked about; it drops the key, the same way it drops for a
+  single-container pod's `c container` on Detail. Every combination and its
+  column count are [widgets.md § The footer](widgets.md#2a-the-footer)'s,
+  not redrawn here.
 - **Alerts bleed through.** A row whose object has a finding is marked (`●`),
   so the browser never disagrees with the Alerts view.
 - **The `ns:` label follows the kind and disappears for the cluster-wide

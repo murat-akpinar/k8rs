@@ -6,7 +6,7 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│                                               │
-│  RESOURCES         │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│  RESOURCES         │▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
 │   workloads        │    Containers exceeded their memory limit and │
 │   network          │    were killed by the kernel (OOMKilled)      │
 │   storage          │    limit 256Mi · exit 137 · 47 restarts       │
@@ -25,7 +25,7 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 │ $ kubectl get statefulsets -A --watch                              │
 │ $ kubectl get daemonsets -A --watch                                │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,19 +55,24 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
   [states.md § The filter hides every row](states.md#the-filter-hides-every-row)
   are shared with [resources.md](resources.md), the same way the footer
   itself is.
-- **An `s`/`r` this login may not use on the selected card is marked on this
-  footer, not hidden** — `s no scale`, `r no restart`, whichever `may_i_in`
-  answers `Verdict::No` for. The wording, the column arithmetic and the fuller
-  reason behind `?` are [widgets.md § The footer](widgets.md#2a-the-footer)'s
-  and [help.md § When a key is refused](help.md#when-a-key-is-refused)'s, not
-  repeated here — this list is the only other place either key is drawn.
-- **A card's own kind decides which of `s`/`r` its footer carries, and a
-  kind that cannot use one at all drops the key instead of marking it** —
-  a Node, a bare Pod, a DaemonSet (`r` only) or a bare ReplicaSet (`s`
-  only), the opposite move from the row above: nothing was refused, there
-  was never anything to refuse. **Every card on this screen is subject to
-  this, the tallest-card mockup below included** — a bare-pod card such as
-  `default/healthy-sidecar` draws neither key. The column counts for each
+- **An `r` this login may not use on the selected card is marked on this
+  footer, not hidden** — `r no restart`, whichever `may_i_in`
+  answers `Verdict::No` for. `s` never reaches this line at all — it is
+  withheld from every kind, every login and every run (help.md's own Rules
+  list), so there is no `s no scale` to draw today. The wording, the column
+  arithmetic and the fuller reason behind `?` are
+  [widgets.md § The footer](widgets.md#2a-the-footer)'s and
+  [help.md § When a key is refused](help.md#when-a-key-is-refused)'s, not
+  repeated here — this list is the only other place `r` is drawn.
+- **A card's own kind decides whether `r` is on its footer at all, and a
+  kind that cannot restart drops the key instead of marking it** —
+  a Node, a bare Pod, a bare ReplicaSet or a ConfigMap all draw neither key
+  now, the same as each other: nothing was refused, there was never
+  anything to restart, and `s` was never there to draw either way. A
+  DaemonSet still draws `r` on its own, unaffected — it never carried `s`
+  in the first place. **Every card on this screen is subject to this, the
+  tallest-card mockup below included** — a bare-pod card such as
+  `default/healthy-sidecar` draws no key at all. The column counts for each
   combination are [widgets.md § The footer](widgets.md#2a-the-footer)'s, not
   redrawn here.
 - **One card per owner, never per pod.** `payments/web · 3 of 5 pods`, not
@@ -165,6 +170,58 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
   screen, not an edge case nobody will see.
 - Every string here passes the glossary test: a newcomer reads it without
   looking anything up.
+
+### The selected card
+
+**A reversal.** `screens/widgets.md` § 2 used to say *"No card carries a
+selection marker"* — `theme::SELECTION` was the sidebar's alone, and every
+mockup on this page drew a card the same way selected or not, on purpose:
+before Phase 12's event loop, nothing read the cursor to act on it, so a
+marker would have taught a fact with no consequence. `⏎`, `s`, `r` and
+`ctrl-d` now all act on whichever card `ListState` is actually sitting on,
+which means a reader who cannot see that card is one keypress from
+confirming a restart or a delete on an object they only guessed at — a
+worse failure than the one the old rule was written to avoid. **Silence
+about the selection is no longer the safer choice.**
+
+The marker is `▸`, the same glyph and the same word `theme::SELECTION`
+already carries in the sidebar and in [resources.md](resources.md)'s own
+table rows ([widgets.md § 2](widgets.md#2-element--widget)) — not a sixth
+symbol invented for this one pane. It draws on the card's own **identity
+line only** — the heading a reader's eye already goes to first, exactly
+where a Resources row puts it — never repeated down the evidence or remedy
+lines beneath it; a cursor is one fact, and marking every line of a
+twelve-line card would read as several.
+
+**It costs no width this page has not already spent.** Every card is
+rendered inside `ui::padded`'s existing two-column left margin
+(`src/ui.rs`'s `PAD`), blank on every card today — the same two columns
+`theme::SELECTION`'s own `▸ ` already needs in the sidebar. The marker fills
+that margin on the selected card's identity line instead of leaving it
+blank; every column budget in [§ How wide a card is, and how
+tall](#how-wide-a-card-is-and-how-tall) is unchanged; both this file's own
+70-column mockups and the real 80-column floor draw exactly as wide as they
+already did.
+
+**No `views.rs` type changes.** `ui::alerts` already receives the selected
+index through the `ListState` it builds for scrolling
+([widgets.md § 2](widgets.md#2-element--widget)); drawing `▸` on the row
+that index names is a rendering decision inside `ui.rs`, the same shape
+`resources.md`'s own row already uses. This is a `ui.rs` change, not a
+`views.rs` one.
+
+**Every mockup on this page that draws more than zero cards now carries it
+on the first one — the same default `ListState` opens on — and a mockup
+with none has nothing to carry it, which is stated on the page rather than
+left silent** ([states.md § Rules that hold across every state on this
+page](states.md#rules-that-hold-across-every-state-on-this-page)). Three
+other files echo this page's own card text and are deliberately unmarked,
+each for a different reason and not an oversight: `once.md` prints it to
+stdout, a surface with no cursor at all to mark; `detail.md` shows the one
+object a card's own `⏎` already opened, never a second list of cards to
+choose among; and `analysis.md`'s report rows are a different widget —
+single-line, not this page's three-to-twelve-line `ListItem` — so whether
+they need their own marker is a question this page does not answer.
 
 ## How wide a card is, and how tall
 

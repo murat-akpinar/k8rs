@@ -207,7 +207,7 @@ more column from the name beside it.
 | Outer frame | `Block::bordered()` | — | no titles — the header is its own row |
 | Sidebar (ALERTS / RESOURCES / ANALYSIS + children) | `List` | `ListState` | flat `Vec<NavItem>`; group headers are unselectable rows, `↑↓` skips them |
 | Sidebar counts (`3 ● 7 ▲`, `1 ▲`, `30d`, `12`) | right-aligned `Span` in the same `ListItem` | — | part of the row, not a second column |
-| Finding card (Alerts) | `List` of **multi-line** `ListItem` | `ListState` | one `ListItem` = one card = **three to twelve `Line`s** + a blank, wrapped and capped by [alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall). **No card carries a selection marker** — `theme::SELECTION` is the sidebar's, and every mockup on this screen draws a card the same way selected or not; `ListState` is here only for the other half of its job, keeping a tall card's action in view rather than scrolling past it (§4). `ListItem` does not wrap — `ui.rs` wraps the card's four parts into `Line`s itself, at the pane's current width, every frame |
+| Finding card (Alerts) | `List` of **multi-line** `ListItem` | `ListState` | one `ListItem` = one card = **three to twelve `Line`s** + a blank, wrapped and capped by [alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall). **The selected card carries `theme::SELECTION` on its own identity line, in the same two-column gutter every card already reserves** — see [alerts.md § The selected card](alerts.md#the-selected-card) for the reasoning and the reversal. `ListState` is also here for the other half of its job, keeping a tall card's action in view rather than scrolling past it (§4). `ListItem` does not wrap — `ui.rs` wraps the card's four parts into `Line`s itself, at the pane's current width, every frame |
 | Resource table | `Table` | `TableState` | rows and header both come from the server's `Table` response; widths `Constraint::Min(len(header))` per column, so nothing is hard-coded per kind ([invariant 12](../CLAUDE.md)) |
 | Finding marker in a table row (`●`) | `Span` prepended to the first `Cell` | — | how Alerts bleeds through into the browser |
 | Detail tabs (logs · describe · yaml · events) | `Tabs` | `usize` index in the view state | `[` `]` move it |
@@ -308,15 +308,18 @@ budget — the curation rule below is what keeps it that way. (The one footer
 that is *not* fixed text,
 [while a call is running](dialogs.md#while-the-call-is-running), is a
 different exception, a few paragraphs down, and it reaches the full 76 by
-design, not by accident.) **One fixed footer already does not fit that
-budget**: the both-refused row in the table below is 71 real columns, past
-the 66 a 70-column page allows. A fixed footer that needs the extra room is
-drawn at the real 80-column width instead — ten columns more than a
-70-column page, not six — the same move
+design, not by accident.) **`s` is never on this footer at all** — withheld
+for a build reason that holds regardless of kind, login or run (help.md's
+own Rules list) — so the widest fixed line this page draws is now `r no
+restart`'s own 59 columns, comfortably inside the 66-column budget; the
+table below states this once, counted rather than assumed. A fixed footer
+that needs more than 70 columns is still drawn at the real 80-column width
+instead — the same move
 [help.md § When a key is refused](help.md#when-a-key-is-refused) already
 makes for its own over-70 rows, and the same move [alerts.md](alerts.md) and
-[detail.md](detail.md) make for other lines too wide for 70; never a fifth
-truncation invented for the footer alone.
+[detail.md](detail.md) make for other lines too wide for 70 — but that is no
+longer this page's own footer's problem to solve; never a fifth truncation
+invented for the footer alone.
 
 **`? all keys` and `q quit` are one closed pair, drawn last, and they are what
 never gives way — with exactly one named exception, below: while a call is
@@ -339,12 +342,15 @@ list-view footer even though both work from one. Two places apply that same
 choice to a key that used to be shown and no longer is, once the anchor pair
 was added back in:
 
-- **Alerts and Resources share one footer** — `↑↓ move  ⏎ open  s scale
-  r restart  / filter  ? all keys  q quit` — because both are "a list with a
-  selected object" in the same sense. `l logs` and `ctrl-d delete` give way:
-  the first is one `⏎` and one `[`/`]` from either list already, and the
-  second is no more central to either than `describe`/`yaml` already were —
-  both stay reachable through `?`, neither stops working.
+- **Alerts and Resources share one footer** — `↑↓ move  ⏎ open  r restart
+  / filter  ? all keys  q quit` — because both are "a list with a selected
+  object" in the same sense. `s scale` is never part of it: `s` is withheld
+  from `Offer::Act` for every kind, every login and every run, so this line
+  never has it to curate away in the first place (help.md's own Rules
+  list). `l logs` and `ctrl-d delete` give way: the first is one `⏎` and one
+  `[`/`]` from either list already, and the second is no more central to
+  either than `describe`/`yaml` already were — both stay reachable through
+  `?`, neither stops working.
 - **The logs tab keeps `f follow` and `c container`, and gives up `⇧p
   previous` and `/ search`** — the two kept are what a reader reaches for on
   nearly every open pane; `⇧p` only matters once a container has crashed, and
@@ -369,27 +375,34 @@ longer by one word.
 **Withheld now has a per-object cause as well as its run-level ones, and it
 draws exactly the same as every cause already listed for it: nothing
 selected, disconnected, `--read-only` and the rest all read as "not on the
-line," and so does this.** A Node cannot be scaled by anyone and a
-DaemonSet has no `/scale` subresource — this is a fact about the selected
-object's *kind*, true whatever the session state and whatever this login
-may do, and it is not a permission question, so `may_i_in` is never asked
-and the key is never marked `no` — `s no scale` on a Node would claim a
-verdict nobody was asked to give
+line," and so does this.** A Node cannot be restarted by anyone and a bare
+ReplicaSet has no `rollout restart` to run — a restart of a replicaset is a
+word with no meaning
+([dialogs.md § Delete](dialogs.md#delete--the-name-has-to-be-typed-and-nothing-is-checked-first)) —
+this is a fact about the selected object's *kind*, true whatever the
+session state and whatever this login may do, and it is not a permission
+question, so `may_i_in` is never asked and the key is never marked `no` —
+`r no restart` on a bare ReplicaSet would claim a verdict nobody was asked
+to give
 ([D261 ruling 8](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
 **`c container` is this rule's own precedent, already shipped**: it drops
 from the footer entirely on a single-container pod rather than sitting
 there unusable
 ([detail.md § Choosing a container](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose)) —
 a key that cannot work is a key that is not drawn, never a key drawn dim or
-marked, and `s`/`r` on a kind that does not support them follow the same
-rule. A reader still tells *refused* from *unsupported* apart at a glance,
+marked, and `r` on a kind that does not support it follows the same rule.
+`s` never reaches this line at all today, for a different, build-level
+reason with nothing to do with kind (help.md's own Rules list) — it is
+withheld the same way, but it is not this bullet's own case, since there is
+no kind for which `s` is offered to compare against. A reader still tells
+*refused* from *unsupported* apart at a glance,
 because the two are different shapes and not the same shape twice: refused
 is the ordinary line plus one word (`no`) per key; unsupported is the
 ordinary line minus one key. Nothing on this screen is ever both. The rows
 are counted below, after the refused table they extend.
 
-- **The word is `no`, inserted between the key and its label — `s no scale`,
-  `r no restart` — never a symbol.** [`theme.rs`](../src/theme.rs) gives two
+- **The word is `no`, inserted between the key and its label — `r no
+  restart` — never a symbol.** [`theme.rs`](../src/theme.rs) gives two
   non-colour carriers, `Signal::Mark` and `Signal::Reverse`; `Reverse` already
   means *press this* twice over (`FOCUS`, a modal's live confirm button), and
   reusing it here would tell the reader to press the one key they may not. A
@@ -399,10 +412,10 @@ are counted below, after the refused table they extend.
   was never what decided between them. What does not earn its keep is the
   vocabulary cost: `● ▲ ○` and `⚠` are one small set, taught once in
   [rule 4](README.md#the-five-rules-every-screen-obeys) and read the same way
-  on every screen since; a fifth glyph invented for this one job — three
-  keys, one shared footer — would need its own legend before a reader who
-  had not met it before knew what it meant, in colour or out of it. `no` is
-  not new
+  on every screen since; a fifth glyph invented for this one job — one key,
+  one shared footer, now that `s` is never on it to share the job with —
+  would need its own legend before a reader who had not met it before knew
+  what it meant, in colour or out of it. `no` is not new
   vocabulary and needs none: it is the same word this product already
   reaches for when there is nothing to soften
   ([states.md](states.md#you-can-only-see-some-namespaces) — *"your user
@@ -411,14 +424,13 @@ are counted below, after the refused table they extend.
   every `Signal::Mark` here already has to.
 - **The reason is `?`'s, not this line's — counted, not assumed.** The
   ceiling is 76 columns at the 80×24 floor (above); today's Alerts/Resources
-  footer is 65, leaving 11. `no` costs 3 columns a key (`s scale` → `s no
-  scale`, `r restart` → `r no restart`); both refused at once costs 6,
-  landing at 71 — inside the ceiling with 5 columns to spare. The shortest
-  honest reason this box could write for one key —
-  `get+patch deployments/scale` — is 27 columns on its own, before the
-  punctuation that would introduce it; there is no version of *both refused,
-  plus why, for each* that fits 11 columns, so the reason does not try to
-  live here. It is one `?` away, drawn
+  footer, `r` supported and unrefused, is 56 columns, leaving 20. `no` costs
+  3 columns (`r restart` → `r no restart`), landing at 59 — inside the
+  ceiling with 17 to spare. The reason still does not try to live here: the
+  shortest honest one, `patch deployments` (18 columns), plus the
+  punctuation to introduce it, is one convention this page keeps in exactly
+  one place — a mark on the crowded line, the sentence on the roomy one, not
+  two competing homes for the same fact. It is one `?` away, drawn
   in [help.md § When a key is refused](help.md#when-a-key-is-refused) — the
   same trade the browser's row and the evidence line already make: the
   crowded surface marks, the roomy one explains
@@ -426,39 +438,35 @@ are counted below, after the refused table they extend.
 
   | State | Alerts / Resources footer | Columns |
   |---|---|---|
-  | neither refused (today's footer, unchanged) | `↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit` | 65 |
-  | `s` refused | `↑↓ move  ⏎ open  s no scale  r restart  / filter  ? all keys  q quit` | 68 |
-  | `r` refused | `↑↓ move  ⏎ open  s scale  r no restart  / filter  ? all keys  q quit` | 68 |
-  | both refused | `↑↓ move  ⏎ open  s no scale  r no restart  / filter  ? all keys  q quit` | 71 |
+  | `r` supported (a Deployment, a StatefulSet or a DaemonSet), not refused | `↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit` | 56 |
+  | `r` supported, refused | `↑↓ move  ⏎ open  r no restart  / filter  ? all keys  q quit` | 59 |
+  | `r` not supported (a Node, a bare Pod, a bare ReplicaSet or a ConfigMap) | `↑↓ move  ⏎ open  / filter  ? all keys  q quit` | 45 |
 
-  **The four rows above all assume a kind that supports both operations — a
-  Deployment or a StatefulSet, the running example everywhere else in this
-  product.** A kind that supports only one, or neither, is a shorter footer,
-  never a `no`-marked key for the one it lacks — the key that does not apply
-  is not on the line at all. Measured off the same two operations
-  [D261 ruling 8](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
-  already counted against the API: `scale` reaches a Deployment, a
-  StatefulSet or a bare ReplicaSet, never a DaemonSet; `restart` reaches a
-  Deployment, a StatefulSet or a DaemonSet, never a bare ReplicaSet; neither
-  reaches a Pod, a ConfigMap or a Node.
-
-  | State | Alerts / Resources footer | Columns |
-  |---|---|---|
-  | only `r` supported (a DaemonSet), not refused | `↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit` | 56 |
-  | only `r` supported (a DaemonSet), refused | `↑↓ move  ⏎ open  r no restart  / filter  ? all keys  q quit` | 59 |
-  | only `s` supported (a bare ReplicaSet), not refused | `↑↓ move  ⏎ open  s scale  / filter  ? all keys  q quit` | 54 |
-  | only `s` supported (a bare ReplicaSet), refused | `↑↓ move  ⏎ open  s no scale  / filter  ? all keys  q quit` | 57 |
-  | neither supported (a Node, a bare Pod, a ConfigMap, …) | `↑↓ move  ⏎ open  / filter  ? all keys  q quit` | 45 |
+  **This is every shape this footer draws now that `s` is never on it**
+  (help.md's own Rules list) — `scale` reaching a Deployment, a StatefulSet
+  or a bare ReplicaSet has nothing to do with this line any more; only
+  `restart`'s own kind support decides which row draws, and `restart`
+  reaches a Deployment, a StatefulSet or a DaemonSet, never a bare
+  ReplicaSet, a Pod, a ConfigMap or a Node
+  ([D261 ruling 8](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
+  A bare ReplicaSet used to draw `s scale` alone and a DaemonSet used to draw
+  `r restart` alone — two different rows, 54 and 56 columns — and now both
+  read as whichever of the two rows above actually applies to them: a bare
+  ReplicaSet joins the *not supported* row (45, the same as a Node), and a
+  DaemonSet keeps the *supported* row (56) it already had, unchanged,
+  because removing a key that was never on its line changes nothing about
+  it.
 
   None of these approaches the 76-column ceiling — the widest line on this
-  page is still the *both refused* row above, at 71; dropping a key can only
-  shorten a line that adding `no` to two keys already proved fits. Where the
-  key that is missing is the one refused, there is nothing to mark: the
-  unsupported key was never asked about, so it has no verdict to draw and no
-  row in this table needs one.
+  page is the *refused* row above, at 59, twelve columns short of the *both
+  refused* row this table used to carry before `s` left it (71). Where `r`
+  is the key that is missing, there is nothing to mark: the unsupported key
+  was never asked about, so it has no verdict to draw and no row in this
+  table needs one.
 
 - **`Verdict::Yes`, `Verdict::CouldNotTell` and *not asked yet* draw the
-  ordinary key, unmarked — the *neither refused* row above, exactly.**
+  ordinary key, unmarked — the *`r` supported, not refused* row above,
+  exactly.**
   ([D229 ruling 4](../NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05):
   a probe that could not be answered may never be the reason a permitted key
   is hidden or dimmed, and the first frame of any run — before `may_i_in` has
@@ -512,7 +520,7 @@ different facts. Drawn in
 **One state is neither an ordinary footer nor a modal, and it is the one
 place a footer's own text can run long: [while a call is running](dialogs.md#while-the-call-is-running) —
 and only on Alerts and Resources.** Those two are the only ordinary footers
-that name `s` and `r`, and marking either `no` right now would say the wrong
+that name `r` at all, and marking it `no` right now would say the wrong
 thing (dialogs.md's own reasoning: `no` means a permission this login lacks,
 and a call finishing is a wait). So on Alerts and Resources alone, the whole
 line is replaced: `?` still opens Help, but reads `? keys` rather than the
@@ -546,7 +554,7 @@ the file that owns it, cited here rather than copied:
 | Detail — yaml tab, a Secret with keys | ordinary, anchor always present, adds `v reveal` — the pair's own named exception applies (above): `q quit` alone | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
 | Empty kind in the browser | ordinary, narrowed to what there is an object to act on — anchor still present | [states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser) |
 | Still loading | ordinary, narrowed to the anchor alone — nothing exists yet to move a cursor across | [states.md § Still loading](states.md#still-loading) |
-| Alerts, a filter hides every row | ordinary, `↑↓ move` and `⏎ open` kept (the sidebar's own precedent, [states.md § Nothing is broken](states.md#nothing-is-broken)), `s scale`/`r restart` dropped, `esc clear filter` gained | [states.md § The filter hides every row](states.md#the-filter-hides-every-row) |
+| Alerts, a filter hides every row | ordinary, `↑↓ move` and `⏎ open` kept (the sidebar's own precedent, [states.md § Nothing is broken](states.md#nothing-is-broken)), `r restart` dropped, `esc clear filter` gained | [states.md § The filter hides every row](states.md#the-filter-hides-every-row) |
 | Resources, a filter hides every row | ordinary, narrowed to `/ filter` and the anchor, `esc clear filter` gained — the empty-kind-in-the-browser shape, above, not Alerts' | [states.md § The filter hides every row](states.md#the-filter-hides-every-row) |
 | Disconnected · login expired · clock skew · namespace-scoped · nothing-is-broken · the audit log could not be opened | ordinary, mutations withheld, anchor always present | [states.md](states.md), each state's own mockup |
 | While a call is running, over Alerts or Resources | not a modal — see the rule above | [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
@@ -560,10 +568,14 @@ the file that owns it, cited here rather than copied:
 
 ## 2b. Typing into a filter
 
-`/` and `n` on Alerts and Resources open the same kind of typing session the
-cluster picker already has — one `Input` with focus, live-narrowing the list
-on every keystroke — and until now nothing said what the footer looks like
-while it runs, or what `esc` and `⏎` do in it: `views::Filters` existed with
+`/` and `n` on Alerts and Resources open a typing session shaped like the
+cluster picker's own filter — one `Input`, live-narrowing the list on every
+keystroke — though unlike the picker's, which needs no key to open it at all
+because it has nothing else for a letter to mean
+([context.md § The picker](context.md#the-picker)), these two need one,
+because `s`, `r`, `l`, `d` and `y` already mean something else on both
+screens. Until now nothing said what the footer looks like while it runs,
+or what `esc` and `⏎` do in it: `views::Filters` existed with
 no typing state anywhere in `views.rs` or `ui.rs`, and the reader could not
 tell whether `esc` was about to clear a filter or leave the screen because the
 filter itself was drawn nowhere (`backlog.md`, found by `k8s-admin`,
@@ -670,12 +682,13 @@ screen, `esc` already clears a committed filter one field at a time, exactly
 as above, and did before this box existed. This is [backlog.md:2538](../backlog.md)'s
 own complaint in a second place: a key that is genuinely bound and does
 something is drawn nowhere. **It is not added to the ordinary at-rest
-footer** — measured, not assumed: `↑↓ move  ⏎ open  s scale  r restart  /
-filter  ? all keys  q quit` is 65 columns, both `s`/`r` refused already
-reaches 71 ([§ 2a](#2a-the-footer)), and the shortest honest label,
-`esc clear filter`, costs 18 more with its gap — 89 in the worst case,
-against the same 76 ceiling every other footer on this page answers to.
-There is no wording short enough to fit the compound case, so `esc`'s
+footer** — measured, not assumed: `↑↓ move  ⏎ open  r restart  /
+filter  ? all keys  q quit` is 56 columns, `r` refused already reaches 59
+([§ 2a](#2a-the-footer)), and the shortest honest label,
+`esc clear filter`, costs 18 more with its gap — 77 in the worst case, one
+column past the same 76 ceiling every other footer on this page answers to.
+Dropping `s` narrowed this from 89 to 77, but not far enough: there is still
+no wording short enough to fit the compound case, so `esc`'s
 filter-clearing joins `l logs`, `d describe`, `y view as YAML` and
 `ctrl-d delete` in the bucket [§ 2a](#2a-the-footer) already has for a key
 that is bound, real, and not the one this crowded line spends room naming —
@@ -683,7 +696,7 @@ discoverable the same way those are, and named on the pane itself
 ([§ A committed filter is drawn at rest, too, below](#a-committed-filter-is-drawn-at-rest-too)), not repeated a
 second time on a line that cannot afford it. **The one footer that *can*
 afford it is [states.md § The filter hides every row](states.md#the-filter-hides-every-row)'s**:
-`⏎ open`, `s scale` and `r restart` are already gone there because nothing
+`⏎ open` and `r restart` are already gone there because nothing
 is selected, which is exactly the room `esc clear filter` needs — and it is
 the same wording the picker's own equivalent state already uses, so the two
 screens stop being two vocabularies for one fact.
@@ -758,7 +771,7 @@ different list:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get statefulsets -A --watch                              │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -819,7 +832,7 @@ row it is already grouped with:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get deployments -n payments                              │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 

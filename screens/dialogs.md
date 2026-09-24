@@ -22,11 +22,28 @@ language **above** the command, never instead of it.
 │    └──────────────────────────────────────────────────────────┘    │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl scale deployment/web --replicas=3 -n payments            │
+│ $ kubectl get pods -n payments                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ ⏎ do it  esc cancel                                                │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+**The strip shows whatever was already there, not this dialog's own
+command.** `$ kubectl get pods -n payments` above stands for *an earlier,
+unrelated read* — the same stand-in [§ The object went away while the
+dialog was open](#the-object-went-away-while-the-dialog-was-open) already
+draws for exactly that reason. Nothing has been sent yet at the frame drawn
+above: the dry-run is still to come ([§ While the check is still on the
+wire](#while-the-check-is-still-on-the-wire), next), and the real mutation
+only exists once `⏎ do it` is actually pressed. Putting `$ kubectl scale …`
+on the strip here would print a command before anyone agreed to run it —
+exactly what [D233 ruling 1](../NOTES.md#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05)
+already forbids. **This does not lose the teaching**, because the box's own
+frame already carries the identical line, one row above the buttons — a
+reader learns the command by reading the dialog, not the strip, for as long
+as the dialog is still asking rather than doing. [§ Rules for every dialog
+on this page](#rules-for-every-dialog-on-this-page) states this once, for
+every box on this file that used to show its own command here.
 
 The two consequence lines are the only part of the box that changes with the
 relation between what is running now and what was asked for — title,
@@ -113,11 +130,18 @@ check to wait on (§ *The verdict line* below).
 │    └──────────────────────────────────────────────────────────┘    │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl scale deployment/web --replicas=3 -n payments            │
+│ $ kubectl get pods -n payments                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ waiting for the cluster                                            │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+**The strip is unchanged from the box above, on purpose — a dry-run already
+on the wire is still not the mutation the reader agreed to.** It is a real
+call, but it is k8rs's own check, not the write the button beside it still
+has not been pressed for; showing `$ kubectl scale …` here would read as
+*sent* to a reader who has not pressed anything yet. [§ Scale](#scale--confirm-with-dry-run)'s
+own note above states the rule this box follows rather than repeating it.
 
 Three things changed from the answered box above, and nothing else did —
 same width, same nine content rows: the verdict's own row is reserved the
@@ -421,6 +445,128 @@ That break is the terminal's doing, not k8rs's — a wider terminal draws it
 somewhere else, or not at all, and nothing about what was sent changes either
 way.
 
+## Choosing how many, before the confirm box
+
+**Specified here, not built** — this section exists so a later box has
+something to build against, not because any of it is on screen today. `s` is
+withheld from every footer until it is (`screens/help.md` § Rules), because
+Scale's own confirm box, drawn above, has always assumed a target count
+already exists by the time it opens — `--replicas=3` in every mockup on this
+page — and nothing in `screens/` has ever said where that `3` came from.
+This is the missing step: what a reader sees between pressing `s` and Scale's
+confirm box, for a kind that supports scaling and a login that may use it.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│    ┌ Scale payments/web ──────────────────────────────────────┐    │
+│    │                                                          │    │
+│    │  Right now: 2 copies.                                    │    │
+│    │                                                          │    │
+│    │  How many do you want?                                   │    │
+│    │  ┌────────────────────────────────────────────────────┐  │    │
+│    │  │ 3_                                                 │  │    │
+│    │  └────────────────────────────────────────────────────┘  │    │
+│    │                                                          │    │
+│    │              [ ⏎ next ]     [ esc cancel ]               │    │
+│    └──────────────────────────────────────────────────────────┘    │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl get pods -n payments                                     │
+├────────────────────────────────────────────────────────────────────┤
+│ type a number to enable  esc cancel                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**The frame is Scale's own, not a second dialog kind.** Same nested-box
+width (60/58, this page's own [§ Scale](#scale--confirm-with-dry-run)), same
+title — `Scale payments/web` never changes across this step and the confirm
+box that follows it, because both are one flow the reader experiences as one
+dialog with two pages. `⏎ next` replaces `⏎ do it` because nothing is sent
+yet; pressing it with a valid number swaps this box for the existing Scale
+confirm box above, target count in hand, and that box's own dry-run starts
+exactly as it does today.
+
+**The strip stays exactly as it was before `s` was pressed.** Nothing on
+this page has been sent by the time this box is open — not even a dry-run —
+so [§ While the check is still on the wire](#while-the-check-is-still-on-the-wire)'s
+own rule already covers it: the command log's line for this mutation
+appears once its real call actually goes out, never before. `$ kubectl get
+pods -n payments` above is a stand-in for *whatever was already there*, the
+same convention [§ The object went away while the dialog was
+open](#the-object-went-away-while-the-dialog-was-open) already uses.
+
+**Where "Right now: 2 copies." comes from, and what stands there while it is
+still unknown.** `s` only ever reaches a Deployment, a StatefulSet or a bare
+ReplicaSet ([`ops::SCALABLE`](../src/ops.rs)), and all three expose the same
+generic `scale` subresource — so one `GET .../scale`, asked the instant this
+box opens, answers for every kind `s` can ever be pressed on; there is no
+kind this step reaches whose current count is structurally unreadable. Until
+it answers, the line reads dim, `Right now: reading…`, the same ellipsis
+[dialogs.md § While the check is still on the wire](#while-the-check-is-still-on-the-wire)
+uses for a wait already on screen, and the field below is empty rather than
+guessed into holding a number nobody has confirmed. If the read fails —
+denied, or the object is gone before the click that opened this box is even
+finished being handled — the line says so plainly instead of guessing:
+`Right now: k8rs could not read this.` The field stays empty and typing is
+still live; a reader who knows what they want can still type it, and the
+confirm box's own dry-run is what actually checks whether the write may
+happen at all.
+
+**This read is not the mutation's own dry-run, and `esc` is never inert
+here.** Nothing this box does can be undone because nothing it does writes
+anything — the `GET` above is exactly as read-only as the browser's own
+watches — so unlike [§ While the check is still on the wire](#while-the-check-is-still-on-the-wire),
+where `esc` waits out a real `dryRun=All` already on the wire, `esc` on this
+page closes the box the instant it is pressed, read pending or not.
+
+**Validating what was typed.** The field starts pre-filled with the current
+count once it is known, cursor at the end, so pressing `⏎` with nothing
+retyped repeats [§ Scale](#scale--confirm-with-dry-run)'s own *unchanged*
+case rather than a special one here. `⌫` and ordinary digit keys edit it the
+same way the delete dialog's typed-name field already does
+([§ Delete](#delete--the-name-has-to-be-typed-and-nothing-is-checked-first));
+only digits are accepted, because a copy count is never negative and never a
+fraction. `[ ⏎ next ]` stays dim, the same way `[ ⏎ do it ]` already does
+before a name is typed, until the field holds at least one digit — an empty
+field is not zero, it is nothing typed yet, and the two must not read the
+same. A typed `0` is valid and live: [§ Scale](#scale--confirm-with-dry-run)
+already has a full box for *down, to zero*, and this step does not repeat
+that warning early, because Scale's own confirm box is exactly where it
+belongs, once for whatever count is actually asked for. There is no upper
+bound this box enforces on its own — an unreasonable count is the cluster's
+own admission control to refuse, on the real write, not a guess this screen
+makes about someone else's quota.
+
+**What a numeric typing state has to hold, since `views::Typing` has none
+today.** The two existing states, `/` and `n`, are each one `Input` — a
+string buffer and nothing else — because both narrow a list that is already
+on screen and belongs to no one object in particular. This one is different
+in a way that matters: it is scoped to the one object `s` was pressed on, the
+same way `Dialog` already tracks its object for the confirm box that follows
+(`screens/dialogs.md § Rules for every dialog on this page`, rule 1) — a
+watch delivering a change to some *other* object while this box is open must
+not retarget it. So a numeric state needs, at minimum: which object it is
+for (kind, namespace/name — enough to build the `GET .../scale` and, later,
+the `PATCH`); the typed digits themselves; and the current count as **three
+states, not one `Option`** — *still reading*, *known*, and *could not read
+it* each draw a different line above the field, and collapsing *reading* and
+*failed* into the same `None` is the same mistake `views::Pane`'s own
+`ready()` removal was written to prevent
+([NOTES § D246](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)),
+one type over.
+
+**What this box does not decide, because a later box does.** Whether the
+transition from this box to Scale's confirm box is one `Dialog` with an
+internal page or two `Modal` variants in sequence is `views.rs`'s call, not
+this page's; either reads identically on screen, and nothing above depends
+on which. Whether the `GET .../scale` read is itself shown as a `$ kubectl`
+line somewhere is also left open — this page follows [§ While the check is
+still on the wire](#while-the-check-is-still-on-the-wire)'s own precedent of
+not teaching a read that only feeds a sentence, but a reviewer may rule
+otherwise before this is built.
+
 ## Restart — confirm with dry-run
 
 `r` on a deployment, a statefulset or a daemonset opens this. Unlike scale,
@@ -454,11 +600,16 @@ them — and they are fixed text, not this file's to reword (D224).
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl rollout restart deployment/web -n payments               │
+│ $ kubectl get pods -n payments                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ ⏎ do it  esc cancel                                                │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+**The strip is unchanged from before `r` was pressed, the same rule as
+Scale's** ([§ Rules for every dialog on this page](#rules-for-every-dialog-on-this-page),
+rule 7) — the frame's own `$` line, one row above the buttons, is what
+teaches this command while the dialog is still asking.
 
 **This box is wider than scale's, and shorter on blank lines, and both are
 the same decision** — [widgets.md § 5](widgets.md#5-the-modal-layer) has the
@@ -528,7 +679,7 @@ not moved, over a command that would have told the operator so itself
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl rollout restart deployment/web -n payments               │
+│ $ kubectl get pods -n payments                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ ⏎ do it  esc cancel                                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -573,7 +724,7 @@ variant:
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl rollout restart deployment/web -n payments               │
+│ $ kubectl get pods -n payments                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ waiting for the cluster                                            │
 └────────────────────────────────────────────────────────────────────┘
@@ -779,22 +930,29 @@ has not checked whether anything will.
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl delete pod/web-7d9f4 -n payments                         │
+│ $ kubectl get pods -n payments                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ type the name to enable  esc cancel                                │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-**The `$` line was missing from this box before, in the nested frame and on
-the log strip both** — a gap against rule 3 below ("the command is shown"),
-now closed on both surfaces the same way § Scale's and § Restart's already
-were: `kubectl delete pod/web-7d9f4 -n payments`, the kind spelled out in
-full, no `--dry-run` and no `propagationPolicy` flag. **Every `Confirm` box
-draws its `$` line inside the frame, delete included** — the strip only
-appends the instant the operator agrees to something
-([`views::Log`](../src/views.rs), NOTES § D233 ruling 1), so it cannot carry
-the command the reader is looking at *before* agreeing to anything; only the
-frame can. **The two boxes below pay for that row differently, because they
+**The `$` line was missing from this box before, in the nested frame** — a
+gap against rule 3 below ("the command is shown"), now closed the same way
+§ Scale's and § Restart's own frames already were: `kubectl delete
+pod/web-7d9f4 -n payments`, the kind spelled out in full, no `--dry-run` and
+no `propagationPolicy` flag. **Every `Confirm` box draws its `$` line inside
+the frame, delete included, and the strip stays exactly as it was before the
+dialog opened** — it only appends the instant the operator actually agrees
+to something ([`views::Log`](../src/views.rs),
+[D233 ruling 1](../NOTES.md#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05)),
+and for `delete` specifically nothing is sent at all until the typed name is
+confirmed
+([D225 ruling 1](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)) —
+so `$ kubectl get pods -n payments` above stands for whatever unrelated
+command was already on the strip, not this delete; only the frame teaches
+it while the dialog is still asking
+([§ Rules for every dialog on this page](#rules-for-every-dialog-on-this-page),
+rule 7). **The two boxes below pay for that row differently, because they
 do not have the same room to pay it from.** `Delete pod` had two rows of
 slack — 11 content rows against the 13 ceiling — and spends both: a blank
 before the `$` line and one after it. `Delete node` had none — it was
@@ -892,7 +1050,7 @@ below: the bare `node-3`, never `infra/node-3`.
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl delete node/node-3                                       │
+│ $ kubectl get nodes --watch                                        │
 ├────────────────────────────────────────────────────────────────────┤
 │ type the name to enable  esc cancel                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -1129,11 +1287,27 @@ whether it was the check or the real call that hit it:
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl scale deployment/web --replicas=9 -n payments  → rejected│
+│ $ kubectl get pods -n payments                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc dismiss  ⏎ open                                                │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+**Drawn here for `scale`, whose 409 is always the check's** — the dry-run
+that hit it never armed the button, so nothing real was ever sent and the
+strip stays exactly as it was before `s` was pressed, the same rule as every
+other still-open dialog on this page
+([§ Rules for every dialog on this page](#rules-for-every-dialog-on-this-page),
+rule 7). **`delete` reaching this same state is the one case on this page
+where that is not true**, because `delete` has no check to hit a `409`
+at — its only call is the real one, so a `delete` landing here already sent
+`$ kubectl delete pod/web-7d9f4 -n payments` for real, and the strip should
+show it with the outcome mark [§ The command log's own line, while a call is
+running or just after](#the-command-logs-own-line-while-a-call-is-running-or-just-after)
+already draws for a real send, not the unrelated placeholder above. This
+page does not draw that variant separately — the sentence in the box is
+identical either way (above), and only the strip differs, on a fact
+(`checkable`) this file already states elsewhere rather than a second box.
 
 The sentence is built from the same two named clauses
 [`views::because`](../src/views.rs)'s own `Fault::Conflict` arm uses —
@@ -1255,11 +1429,21 @@ own quoted words:
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl scale deployment/web --replicas=9 -n payments  → rejected│
+│ $ kubectl get pods -n payments                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc dismiss  ⏎ open                                                │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+**States 1a, 1b and 1c are all the check, never the real change, so none of
+them ever puts anything new on the strip** — the same rule as every other
+still-open dialog on this page
+([§ Rules for every dialog on this page](#rules-for-every-dialog-on-this-page),
+rule 7): the button never arms, so there is no *"the real change"* for
+`views::Log` to have sent. `$ kubectl get pods -n payments` above stands for
+whatever was already there, the same stand-in [§ The object went away while
+the dialog was open](#the-object-went-away-while-the-dialog-was-open)
+already draws.
 
 **No two blank rows stack when there is nothing to quote — 1a and 1b above
 draw the corrected spacing.** The box used to open a blank row for the
@@ -1624,16 +1808,18 @@ $ kubectl rollout restart deployment/payments-api -n payment...   → rejected
 ### Detail tabs and Analysis keep their own footer, not this line
 
 The reason Alerts' and Resources' footers are replaced outright by the line
-above is that `s scale` and `r restart` sit on them, and marking either `no`
+above is that `r restart` sits on them, and marking it `no`
 right now would say the wrong thing — `no` is this product's own word for a
 permission this login lacks
 ([help.md § When a key is refused](help.md#when-a-key-is-refused)), and a
 call in flight is a wait, not a permission. Those two footers have no third
 word for "off for now" that is not one of those two wrong ones, so the whole
-line is replaced instead.
+line is replaced instead. `s scale` is never on either footer at all today
+— withheld from every kind, login and run (help.md's own Rules list) — so
+it is not part of this problem either way.
 
 **A detail tab's footer and Analysis's never had that problem, because
-neither ever names `s` or `r` at all**
+neither ever names `r` at all**
 ([widgets.md § 2a](widgets.md#2a-the-footer)'s own closed mode list: the logs
 tab reads `[ ] tabs  f follow  c container  esc back  ? all keys  q quit`;
 describe/yaml/events read `[ ] tabs  esc back  ? all keys  q quit`; Analysis
@@ -1744,3 +1930,30 @@ indicator. Counts, not a spinner — a changing number is information
    records only what worked cannot answer "what did they try".
 6. Under `--read-only` none of this is reachable: the keys are unbound and the
    code path does not exist.
+7. **The command log strip never carries a mutation's own line while its
+   dialog is still open — dry-run included — and it carries it the instant
+   the real call actually goes out.** `views::Log::sent` appends with the
+   running mark ([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)),
+   and appending on dialog-open would put that mark on a command nobody has
+   agreed to yet; for `delete`, which sends no dry-run at all
+   ([D225 ruling 1](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)),
+   it would put the mark on a command that has not been sent at all. A dialog
+   that is open teaches its command through its own frame, one row above its
+   buttons — every `Confirm` on this page already draws that row
+   ([D260](../NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)) —
+   so nothing is lost by the strip staying quiet until [§ While the call is
+   running](#while-the-call-is-running) actually starts it. **Every
+   still-open box on this page is drawn to this rule** — Scale's, Restart's
+   and Delete's own frames, and each of the check's own outcome boxes in
+   [§ The cluster said no](#the-cluster-said-no) — the one exception being
+   `delete`'s own real call landing in that section's *409* state, where the
+   command really was sent and the strip carries it with the outcome mark
+   instead, exactly as [§ The command log's own line, while a call is
+   running or just after](#the-command-logs-own-line-while-a-call-is-running-or-just-after)
+   already draws for any other real send
+   ([D233 ruling 1](../NOTES.md#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05)
+   already said *append on `Answer::Confirmed`, nothing on `Cancelled`,
+   `Gone` or `Changed`*; this rule is that same ruling, stated once for the
+   whole page rather than re-argued per box, and settling that *the call
+   actually goes out* is what `Confirmed` means — the real mutation, never a
+   dry-run still checking).

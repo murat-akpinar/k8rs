@@ -4616,7 +4616,7 @@ which also corrected the mechanism that box used to order).
       ([D272](NOTES.md#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20) § 4 ·
       [reports/2026-09-20-the-four-behaviours.md](reports/2026-09-20-the-four-behaviours.md))
 
-- [ ] `main.rs`: single `tokio::select!` (watch streams · crossterm events ·
+- [x] `main.rs`: single `tokio::select!` (watch streams · crossterm events ·
       Ctrl-C), draw-on-change with ~100ms coalescing, block when idle.
       **Decide where the audit `File` lives before the app struct is designed, not
       after** ([D232](NOTES.md#d232--in-flight-needs-no-new-callback-one-at-a-time-is-already-structural-and-the-freeze-risk-is-whether-perform-can-be-driven-beside-an-event-loop-2026-09-05)).
@@ -4649,7 +4649,9 @@ which also corrected the mechanism that box used to order).
       the reader 16 lines and a *reset per tab* does not cover it; and the two
       `dead_code` expectations come off here, together, once `ui::draw` has a
       caller
-- [ ] **A coalescing test that ends quiet and asserts the final state** — the
+      ([D274](NOTES.md#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24) ·
+      [reports/2026-09-24-the-console-event-loop.md](reports/2026-09-24-the-console-event-loop.md))
+- [x] **A coalescing test that ends quiet and asserts the final state** — the
       loop above draws on change with ~100 ms coalescing, which is invariant 7
       and also the exact manoeuvre k9s merged and reverted a month later
       ([#3989](https://github.com/derailed/k9s/pull/3989) →
@@ -4661,6 +4663,8 @@ which also corrected the mechanism that box used to order).
       defect is a redraw that never comes, so the assertion has to be made after
       the quiet, not during the noise
       ([PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted))
+      ([D274](NOTES.md#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24) ·
+      [reports/2026-09-24-the-console-event-loop.md](reports/2026-09-24-the-console-event-loop.md))
 - [ ] **Ctrl-Z (SIGTSTP) hands the terminal back properly** — leave raw mode
       and the alternate screen on suspend, re-enter on resume. Without it the
       shell gets a raw-mode terminal and `fg` returns to a dead screen. It is

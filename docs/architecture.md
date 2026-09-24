@@ -141,7 +141,7 @@ that cost once, then receives only deltas.
 
 ```
 src/
-  main.rs      event loop, terminal setup/teardown, view routing
+  main.rs      event loop, key routing, terminal setup (teardown: Phase 12)
   k8s.rs       connect(context), discovery, watches, prune -> store (reads only)
   ops.rs       every write. The ONLY file that may mutate the cluster
   rules.rs     analyze(&Snapshot) -> Vec<Finding>     ← the product lives here
@@ -285,15 +285,44 @@ runs without a selected object.
 
 ### Async model
 
-One `tokio::select!` loop in `main.rs` over three sources:
+One `tokio::select!` loop in `main.rs`, `biased`, over four arms:
 
-1. the watcher stream (cluster changes)
-2. crossterm `EventStream` (keyboard)
-3. Ctrl-C
+1. the frame the coalescer owes
+2. the key channel
+3. the mutation on the wire, when there is one
+4. the merged watch streams (cluster changes)
 
-Drawing happens only when one of these fires. No separate UI thread, no
-channel layer, no actors. Terminal restore is guaranteed via a `Drop` guard
-plus a panic hook — a TUI must never leave the terminal in raw mode.
+Drawing happens only when one of these fires, and the loop blocks when none of
+them can (invariant 7). No actors, and **nothing draws off the loop's own task** —
+the single other thread in the process reads keys and forwards them, because
+`crossterm::event::read()` blocks and a blocking read may not sit on the runtime.
+It holds no state and touches no frame.
+
+**Keys arrive over a channel rather than a stream, and that is a fact about this
+dependency tree rather than a preference.** crossterm's `event-stream` feature is
+**off** here — measured with `cargo tree -e features -i crossterm`, which resolves
+0.29.0 with `bracketed-paste`, `derive-more`, `events`, `underline-color` and
+`windows` — so `crossterm::event::EventStream` does not exist in this build. A
+`std::thread` reads `event::read()` and sends into a `tokio::sync::mpsc`, which the
+loop selects on. It buys two things beyond compiling: no second crossterm version
+in the manifest, and a loop that is a function over a channel, which is the only
+reason the coalescing test can feed a storm with no terminal attached
+([NOTES § D274](../NOTES.md#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24)).
+
+**Ctrl-C is a key, not a signal.** Raw mode clears `ISIG`, so the terminal never
+raises `SIGINT` while the console is up; the router treats `ctrl-c` exactly as `q`,
+refusals included. `tokio`'s `signal` feature stays unnamed for that reason.
+
+**The coalescer is a throttle, not a debounce.** The ~100 ms deadline is set by the
+*first* event of a burst and is never pushed out, so a frame lands at most that far
+behind and the last event of a burst is inside it by construction. A debounce that
+resets its deadline per event is the manoeuvre k9s merged and reverted a month
+later, and it shows stale data for ever
+([PRIOR-ART § A5](../PRIOR-ART.md#a5--the-perf-fix-that-got-reverted)).
+
+Terminal restore through a `Drop` guard plus a panic hook is **specified and not
+yet built** — it is its own box in Phase 12, and until it lands a panic can leave
+the terminal in raw mode.
 
 ## Build order — forward-only (pyramid)
 

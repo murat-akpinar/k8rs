@@ -426,7 +426,7 @@ forbidden.
 │   workloads        │    What you see below is from 40 seconds ago. │
 │   network          │    Retrying…                                  │
 │   storage          │                                               │
-│   config           │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   config           │▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
 │   cluster          │    Containers exceeded their memory limit     │
 │  ANALYSIS          │                                               │
 │   capacity      1 ▲│                                               │
@@ -808,7 +808,7 @@ than inventing a second constant:
 │   network          │    older ones can read smaller than they      │
 │   storage          │    really are.                                │
 │   config           │                                               │
-│   cluster          │  ● payments/web  ·  3 of 5 pods               │
+│   cluster          │▸ ● payments/web  ·  3 of 5 pods               │
 │  ANALYSIS          │    Containers exceeded their memory limit     │
 │   capacity      1 ▲│                                               │
 │   certificates  30d│  ▲ shop/api  ·  2 of 6 pods        1 min ago  │
@@ -864,7 +864,7 @@ found this box's first draft missed entirely.
 │   workloads        │    ahead), so times can read larger than they │
 │   network          │    really are.                                │
 │   storage          │                                               │
-│   config           │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   config           │▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
 │   cluster          │    Containers exceeded their memory limit     │
 │  ANALYSIS          │    and were killed by the kernel (OOMKilled)  │
 │   capacity      1 ▲│    limit 256Mi · exit 137 · 47 restarts       │
@@ -959,7 +959,7 @@ trust *any* time on the page should be told that before being told which
 │   drain safety     │  One node check is off: spotting a node someone         │
 │   posture          │  started emptying and did not finish needs every pod…   │
 │   restarts         │                                                         │
-│   waste            │  ● payments/web  ·  3 of 5 pods                         │
+│   waste            │▸ ● payments/web  ·  3 of 5 pods                         │
 │   versions         │    Containers exceeded their memory limit               │
 │                    │                                                         │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
@@ -1103,7 +1103,7 @@ on the cluster-wide list falls back instead of failing
 │  ANALYSIS          │  someone started emptying and did not finish  │
 │   capacity         │  needs every pod in the cluster.              │
 │   certificates  30d│                                               │
-│   drain safety     │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   drain safety     │▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
 │   posture          │    Containers exceeded their memory limit and │
 │   restarts         │    were killed by the kernel (OOMKilled)      │
 │   waste            │                                               │
@@ -1111,25 +1111,31 @@ on the cluster-wide list falls back instead of failing
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get pods -n payments --watch                             │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  / filter  ? all keys  q quit  │
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-- **`s scale` and `r restart` stay, and the header reads `admin`, not
-  `read-only` — a namespace scope is not a permission and this file no
-  longer says it is.** Whether a mutating key is reachable rides on the
-  connection and the audit log, never on which namespace a session happens
-  to be scoped to: a developer with a `RoleBinding` in `payments` — the most
-  common non-admin RBAC shape there is — may scale and restart there, and so
-  may an admin who simply typed `--namespace payments`. This mockup's own
-  login is an ordinary admin session that happens to be namespace-scoped.
-  **`read-only` is a separate fact from the scope, and the two must not
-  share a wire**: a login that is *actually* read-only, or whose audit log
-  [could not open](#the-audit-log-could-not-be-opened), withholds both keys
-  for that reason wherever it is true, namespace-scoped or not — the header
+- **`r restart` stays, and the header reads `admin`, not `read-only` — a
+  namespace scope is not a permission and this file no longer says it is.**
+  Whether a mutating key is reachable rides on the connection and the audit
+  log, never on which namespace a session happens to be scoped to: a
+  developer with a `RoleBinding` in `payments` — the most common non-admin
+  RBAC shape there is — may restart there, and so may an admin who simply
+  typed `--namespace payments`. This mockup's own login is an ordinary admin
+  session that happens to be namespace-scoped. **`read-only` is a separate
+  fact from the scope, and the two must not share a wire**: a login that is
+  *actually* read-only, or whose audit log
+  [could not open](#the-audit-log-could-not-be-opened), withholds `r` for
+  that reason wherever it is true, namespace-scoped or not — the header
   word belongs to the cause, never to the scope, so a later box wiring
   *namespace fallback → read-only* would be reopening the same confusion
   this bullet exists to close.
+- **`s scale` is absent from this line for a different, unrelated reason,
+  and its absence says nothing about this scope or this login.** `s` is
+  withheld from every kind, every login and every run today, a build fact
+  and not a permission one (help.md's own Rules list) — so a reader must not
+  read *no `s` here* as evidence that a namespace-scoped session cannot
+  scale. It cannot yet, but neither can any other session on this build.
 
 ### The second paragraph is the point of this screen
 
@@ -1161,7 +1167,7 @@ a node and this view has a fraction of them
   bottom of the findings to learn the list was incomplete has already believed
   it.
 
-### The same screen, three ways it can differ
+### The same screen, four ways it can differ
 
 - **Two causes, one scope.** `--namespace payments` and a 403 on the
   cluster-wide pod list produce the identical state — `ClusterSnapshot` carries
@@ -1181,6 +1187,78 @@ a node and this view has a fraction of them
   rule, different cause. It names the verb and the resource because that is the
   string the reader has to hand to whoever owns the cluster, which is the rule
   every other 403 on this page already follows.
+- **If deployments, statefulsets or daemonsets are not listable either, the
+  banner gains one more sentence — naming every one of them that is off
+  together, never one sentence per kind.** This is the pane-wide fact behind
+  [alerts.md](alerts.md#every-count-this-card-can-have)'s own per-card
+  silence — a card drops `of 5` to a bare `pods` when the owner it would
+  count against cannot be read — and it is independent of namespace scope: a
+  cluster-wide run missing only these three watches draws the same second
+  sentence with no namespace paragraph above it at all. One kind missing
+  reads *"Deployments aren't checked at all either — your user can't list
+  them. Missing permission: list deployments.apps."*; more than one joins
+  the names, English-list style — *"Deployments and statefulsets aren't
+  checked at all either — your user can't list them. Missing permissions:
+  list deployments.apps, list statefulsets.apps."* **Nodes and workloads are
+  independent facts and both can be missing at once** —
+  [§ Nodes and deployments both refused](#nodes-and-deployments-both-refused),
+  below, draws exactly that, and names which one gives way first when both
+  cannot fit.
+
+#### Nodes and deployments both refused
+
+Two watches down for two unrelated reasons, cluster-wide — nothing here
+requires `--namespace`, and none is drawn:
+
+```
+                                k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     0 ● 1 ▲│  Nodes are not checked at all — your user     │
+│  RESOURCES         │  can't list them. Missing permission: list    │
+│   workloads        │  nodes.                                       │
+│   network          │                                               │
+│   storage          │  Deployments aren't checked at all either —   │
+│   config           │  your user can't list them. Missing           │
+│   cluster          │  permission: list deployments.apps.           │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│▸ ▲ shop/api  ·  2 pods           12 min ago   │
+│   certificates  30d│    Running, but not receiving traffic — the   │
+│   drain safety     │    readiness check is failing                 │
+│   posture          │    → check the app's /healthz endpoint        │
+│   restarts         │                                               │
+│   waste            │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch                                      │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**`k8rs` stays centred here, unlike the namespace-scoped mockups above** —
+those lose it to `ns: payments` crowding the right zone
+([widgets.md § 1a](widgets.md#1a-the-header-row)); this run is cluster-wide,
+so the right zone has the room and the centred name stays.
+
+- **The header's left zone is blank, not `nodes 0/0`.** A vital this login
+  cannot read is blank, never a guessed zero
+  ([widgets.md § 1a](widgets.md#1a-the-header-row)) — the same rule the
+  namespace-scope variant already follows when nodes alone are missing.
+- **`shop/api` reads `2 pods`, not `2 of 6 pods`.** The denominator was
+  always the workload watch's, and it is one of the two refused here
+  ([alerts.md § every count this card can have](alerts.md#every-count-this-card-can-have)) —
+  the same fallback a namespace-scoped run already uses, for a different
+  cause.
+- **The node clause ranks above the workload clause, and the workload
+  clause is what gives way first if room runs short.** Node visibility is
+  this page's older, more established fact — the namespace-scope variant
+  already carried it alone — and [§ Nothing broken, and something not
+  checked](#nothing-broken-and-something-not-checked)'s own stacking rule
+  already gives way in the order a cause was added to this file, the same
+  reason the audit sentence gives way first there
+  ([NOTES § D263 ruling 5](../NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)).
+  A banner whose share falls under two rows draws nothing at all, the same
+  floor that rule already sets — silence is still not allowed, so this
+  applies to trimming a clause's own wrap before it is ever dropped whole.
 
 ### Nothing broken, and something not checked
 
@@ -1251,7 +1329,7 @@ draws for the first time.
 │   config           │  k8rs will not change anything until that is  │
 │   cluster          │  fixed, and reading your cluster still works  │
 │  ANALYSIS          │                                               │
-│   capacity      1 ▲│  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   capacity      1 ▲│▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
 │   certificates  30d│    Containers exceeded their memory limit     │
 │   drain safety     │                                               │
 │   posture          │                                               │
@@ -1383,7 +1461,7 @@ in the same run.
 │   drain safety     │  written to that log before it is sent, so    │
 │   posture          │  k8rs will not change anything until that is… │
 │   restarts         │                                               │
-│   waste            │  ● payments/web  ·  3 of 5 pods               │
+│   waste            │▸ ● payments/web  ·  3 of 5 pods               │
 │   versions         │    Containers exceeded their memory limit     │
 │                    │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
@@ -1454,7 +1532,7 @@ open, the other measured combination.
 │   drain safety     │  k8rs could not open its audit log at         │
 │   posture          │  /home/you/.local/state/k8rs/audit.log (under…│
 │   restarts         │                                               │
-│   waste            │  ● payments/web  ·  3 of 5 pods               │
+│   waste            │▸ ● payments/web  ·  3 of 5 pods               │
 │   versions         │    Containers exceeded their memory limit     │
 │                    │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
@@ -1551,7 +1629,7 @@ at 80 they get one line of it rather than none.
 │   drain safety     │  One node check is off: spotting a node someone         │
 │   posture          │  started emptying and did not finish needs every pod…   │
 │   restarts         │                                                         │
-│   waste            │  ● payments/web  ·  3 of 5 pods                         │
+│   waste            │▸ ● payments/web  ·  3 of 5 pods                         │
 │   versions         │    Containers exceeded their memory limit               │
 │                    │                                                         │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
@@ -1910,6 +1988,15 @@ produce is a promise the screen cannot keep
   have appeared.** Silence is the one thing it may not do: an alert list with a
   disabled rule behind it looks identical to an alert list that found nothing,
   and the second is the claim the whole product rests on.
+- **Every card this page draws under a degraded banner still carries `▸` on
+  its identity line, the same reversal [alerts.md § The selected
+  card](alerts.md#the-selected-card) makes for the ordinary screen** — `⏎`,
+  and wherever the footer still offers them `s`/`r`, act on whichever card
+  the reader is on regardless of what else is wrong with the page, so this
+  page's own cards are never the one place that promise goes unmarked. A
+  mockup with two cards marks only the first, the same default `ListState`
+  opens on; a mockup with none — `nothing is broken`, still loading, a
+  filter that hides every row — has nothing for the marker to sit on.
 - **A write that cannot be audited is a write that cannot happen, and k8rs
   says so and reads on rather than exiting.**
   [§ The audit log could not be opened](#the-audit-log-could-not-be-opened),

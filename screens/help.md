@@ -17,7 +17,7 @@ tool for beginners may not hide its verbs behind memory.
 │    d  describe — the object and what happened to it                │
 │    y  view as YAML                                                 │
 │  Changing things (each one asks first, and shows the command)      │
-│    s       run more or fewer copies       (scale)                  │
+│    s       not built yet — there is no way yet to type a copy count│
 │            works on a deployment, a statefulset and a replicaset   │
 │    r       restart, at its own pace       (rollout restart)        │
 │            works on a deployment, a statefulset and a daemonset    │
@@ -94,6 +94,26 @@ Rules:
   [D265 ruling 5](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
   Drawn whole at [§ Under a dead-writes
   run](#under-a-dead-writes-run).
+- **`s` is one of those missing keys today, for a reason no run-level state
+  covers: entering a target count has no screen of its own yet.** Nothing
+  in `screens/` draws the step between pressing `s` and Scale's confirm box,
+  and `views::Typing` has no state to hold a number — so `s` is withheld
+  from `Offer::Act` the same way a kind that cannot scale already withholds
+  it, and never reaches the footer for any kind, any login, any run. `?`
+  cannot repeat `(scale)` as if the key did something, so its row reads the
+  fixed sentence below in every state this file draws, refused or not, kind
+  or not, until a later box gives it somewhere to type into (the step itself
+  is sketched in [dialogs.md § Choosing how many, before the confirm
+  box](dialogs.md#choosing-how-many-before-the-confirm-box), marked there as
+  specified and not built):
+  ```
+      s       not built yet — there is no way yet to type a copy count
+  ```
+  `r` and `ctrl-d` are unaffected — each already opens a working confirm
+  box, so neither loses its row or its `works on …` line. `s`'s own
+  `works on …` line is unaffected too, for the same reason the sentence
+  above stays fixed regardless of what is selected: it still answers a
+  future *what kind*, not *is this built*.
 - v0.2+ operations join this screen as they land (cordon, drain, rollout undo,
   then exec and port-forward, then edit) — see
   [NOTES § Operations](../NOTES.md#operations--the-full-admin-surface).
@@ -207,7 +227,7 @@ In **Changing things**, the heading and its five rows, unchanged beneath it:
 
 ```
   Changing things (paused while a change is running)
-    s       run more or fewer copies       (scale)
+    s       not built yet — there is no way yet to type a copy count
             works on a deployment, a statefulset and a replicaset
     r       restart, at its own pace       (rollout restart)
             works on a deployment, a statefulset and a daemonset
@@ -370,16 +390,19 @@ disagreeing stops a cluster switch, so only *Changing things* changes:
 
 The mockup above is the case this login can use every key it lists, or
 nothing is selected yet — the ordinary case, and unchanged. When an object
-*is* selected and `may_i_in` comes back `Verdict::No` for one of the three
-mutating keys, that key's own row in *Changing things* gains one clause; no
-other row and no other block on this screen changes
+*is* selected and `may_i_in` comes back `Verdict::No` for `r` or `ctrl-d`,
+that key's own row in *Changing things* gains one clause; no other row and
+no other block on this screen changes
 ([D23](../NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards),
 [D229](../NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)).
-The three keys are independent — one refused, two, or all three, in any
-combination — and each row only ever answers for itself; the worst case,
-drawn below, is all three at once, with `payments/web` selected (the running
-example everywhere else in this product) and this login able to `list` and
-`watch` it but nothing more:
+**`s` never reaches this state at all.** It is withheld before `may_i_in` is
+ever asked (the Rules list above), so its row here reads the same fixed
+sentence the mockup at the top of this file carries, whatever this login may
+do. `r` and `ctrl-d` are independent of each other — one refused, or both —
+and each row only ever answers for itself; the worst case, drawn below, is
+both at once, with `payments/web` selected (the running example everywhere
+else in this product) and this login able to `list` and `watch` it but
+nothing more:
 
 **Drawn at the real 80-column floor, not this file's usual 70-column page —
 each row is one line in the real UI and is shown as one line here, the same
@@ -388,7 +411,7 @@ for its own over-70 row:**
 
 ```
   Changing things (each one asks first, and shows the command)
-    s       run more or fewer copies   (scale — get+patch deployments/scale)
+    s       not built yet — there is no way yet to type a copy count
             works on a deployment, a statefulset and a replicaset
     r       restart, at its own pace   (rollout restart — patch deployments)
             works on a deployment, a statefulset and a daemonset
@@ -404,41 +427,43 @@ Counted, not estimated:
 
 | Row | Columns (`deployments`) | Columns (`statefulsets`) |
 |---|---|---|
-| `s`, refused | 76 | 77 |
+| `s`, not built | 68 | 68 |
 | `r`, refused | 76 | 77 |
 | `ctrl-d`, refused | 70 | 71 |
 
-`statefulsets` is the longest plural either operation names — `scale` also
-reaches a bare `replicasets` (11, same as `deployments`), `restart` also
-reaches `daemonsets` (10, shorter still) — so it is the case that decides the
-ceiling, not the one this file's running example happens to draw. All six
+`s`'s row never varies by kind — the sentence is fixed, the same 68 columns
+whatever is selected — so it never enters the ceiling comparison below at
+all. `statefulsets` is the longest plural `restart` names (`daemonsets`, 10,
+is shorter) — so it is `r`'s own refused row that decides the ceiling, not
+the one this file's running example happens to draw. All four remaining
 counts fit inside the 78-column ceiling a body row has at the floor
 (`src/ui_tests.rs::mockup`'s own `MIN_WIDTH - 2` assertion, measured at HEAD).
 **No row is added and none is removed**: the sixteen-row body this screen is
-tested against is unchanged in count, only in the text of up to three of its
+tested against is unchanged in count, only in the text of up to two of its
 lines.
 
-- **The clause extends the existing jargon parenthesis for `s` and `r`, and
-  opens a new one for `ctrl-d`.** `(scale)` and `(rollout restart)` already
-  taught the kubectl term this key stands for; adding *why not* inside the
-  same parenthesis keeps one bracket meaning *the technical detail*, rather
-  than a second bracket beside the first that a reader has to learn means
-  something else. `ctrl-d`'s row has no such parenthesis to extend — its own
-  em dash already separates the key from *"you type the name to confirm"* —
-  so its reason opens a fresh one instead of reusing that dash for a second
-  job.
-- **The opening `(` moves from the row's 44th character to its 40th on every
-  refused row, `s`'s included now that its own clause names two verbs.**
-  Positions here are 1-based, the way an editor's own column indicator counts
-  — everywhere else in this section "columns" measures a length, not a
-  position, and the two are not interchangeable. The baseline has both `s`
-  and `r` opening `(` at the 44th character (`(scale)`, `(rollout restart)`).
-  Holding either refused row's `(` there pushes it past the 78-column
-  ceiling, so both give up the same four characters of alignment with the
-  baseline and open at the 40th instead — the counts are in the table above.
-  The two refused rows now line up with *each other*, not with the baseline
-  above them — the same trade every column budget on this page already makes
-  when a longer string has nowhere else to give.
+- **The clause extends the existing jargon parenthesis for `r`, and opens a
+  new one for `ctrl-d`.** `(rollout restart)` already taught the kubectl
+  term this key stands for; adding *why not* inside the same parenthesis
+  keeps one bracket meaning *the technical detail*, rather than a second
+  bracket beside the first that a reader has to learn means something else.
+  `ctrl-d`'s row has no such parenthesis to extend — its own em dash already
+  separates the key from *"you type the name to confirm"* — so its reason
+  opens a fresh one instead of reusing that dash for a second job. `s` gains
+  no clause here at all: its row already carries the fixed *not built yet*
+  sentence everywhere on this screen, so there is nothing for a refusal to
+  append to.
+- **The opening `(` moves from the row's 44th character to its 40th on `r`'s
+  refused row.** Positions here are 1-based, the way an editor's own column
+  indicator counts — everywhere else in this section "columns" measures a
+  length, not a position, and the two are not interchangeable. The baseline
+  has `r` opening `(` at the 44th character (`(rollout restart)`). Holding it
+  there pushes the refused row past the 78-column ceiling — `(rollout
+  restart — patch statefulsets)` alone reaches 81 at that position — so it
+  gives up four characters of alignment with the baseline and opens at the
+  40th instead; the counts are in the table above. `ctrl-d`'s new
+  parenthesis needs no such shift, because it has no baseline position to
+  hold onto in the first place.
 - **The resource named is the selected object's own kind, not a fixed
   string, and this whole section presumes the kind supports the operation at
   all — a key the kind does not support is out of its scope.**
@@ -468,9 +493,11 @@ lines.
   ([detail.md § Choosing a container](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose))
   but this screen's own key map names `c container` all the same, container
   count aside. `s` and `r` follow it: each keeps its own `works on …` line
-  from the mockup at the top of this file, unchanged by what is selected,
-  and only a `Verdict::No` on the object actually selected ever changes the
-  row above it.
+  from the mockup at the top of this file, unchanged by what is selected.
+  For `r`, only a `Verdict::No` on the object actually selected ever changes
+  the row above its `works on …` line; `s`'s own row above it never changes
+  at all, because nothing this login could do makes `may_i_in` get asked for
+  it (the Rules list above).
 - **The verb and resource are named because [states.md](states.md) already
   set the pattern for a missing permission on this product** — *"Missing
   permission: list nodes"*
