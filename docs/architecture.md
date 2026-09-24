@@ -311,7 +311,12 @@ reason the coalescing test can feed a storm with no terminal attached
 
 **Ctrl-C is a key, not a signal.** Raw mode clears `ISIG`, so the terminal never
 raises `SIGINT` while the console is up; the router treats `ctrl-c` exactly as `q`,
-refusals included. `tokio`'s `signal` feature stays unnamed for that reason.
+refusals included. **Ctrl-Z is a key for the same reason — and a signal as well,
+because a stop can also arrive from outside.** `SIGTSTP` and `SIGCONT` are watched
+and forwarded into the same channel the keys use, so a ctrl-z, an external
+`kill -TSTP` and an uncatchable `kill -STOP` all resume through one path; without
+the `SIGCONT` arm a resumed console has a cooked terminal and a dead keyboard
+([NOTES § D277](../NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)).
 
 **The coalescer is a throttle, not a debounce.** The ~100 ms deadline is set by the
 *first* event of a burst and is never pushed out, so a frame lands at most that far
@@ -320,9 +325,13 @@ resets its deadline per event is the manoeuvre k9s merged and reverted a month
 later, and it shows stale data for ever
 ([PRIOR-ART § A5](../PRIOR-ART.md#a5--the-perf-fix-that-got-reverted)).
 
-Terminal restore through a `Drop` guard plus a panic hook is **specified and not
-yet built** — it is its own box in Phase 12, and until it lands a panic can leave
-the terminal in raw mode.
+Terminal restore is a `Drop` guard placed **before** `ratatui::try_init()` — which
+does not fail atomically — plus a panic hook that **chains** ratatui's rather than
+replacing it, so the terminal is handed back on an early return, a panic and a
+suspend alike. The leave/enter pair is one function used by all three, and it is
+the pair v0.4's `e` hands to `$EDITOR`
+([NOTES § D24](../NOTES.md#d24--ctrl-z) ·
+[§ D277](../NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)).
 
 ## Build order — forward-only (pyramid)
 

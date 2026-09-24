@@ -7228,6 +7228,15 @@ struct Console<'a> {
     /// **`Nothing` until the first frame**, which is right rather than merely safe: no footer has
     /// been drawn, so no key it would have carried is live.
     offer: views::Offer,
+    /// **Whether a stop can be come back from — `SIGCONT` armed** ([`watching_for_stops`]).
+    ///
+    /// **`false` makes `ctrl-z` do nothing at all, and that is the ruling** (PM, 2026-09-24): the
+    /// recovery lives only under [`Woke::Resumed`], so without that arm a `ctrl-z` hands the
+    /// terminal back and nothing ever takes it back — `fg` to a cooked tty and a dead keyboard,
+    /// which is the failure this box exists to remove and which the red run for it measured. Never
+    /// hand back a terminal you cannot take back; a key that does nothing is what `ctrl-z` did
+    /// before this box, and raw mode means the terminal raises nothing either way.
+    resumable: bool,
 }
 
 /// **What `⏎` opened over the view** — one value, never two `Option`s (`ui::Detailed`, NOTES §
@@ -7336,6 +7345,9 @@ enum Did {
     /// **The reader answered an open confirmation** — `Some` is *go ahead*, carrying whatever was
     /// typed into it; `None` is a cancellation.
     Answered(Option<String>),
+    /// **`ctrl-z`** — the one key whose consequence is not on the screen but under it, so it is
+    /// answered where the `Terminal` is ([`stopped`], NOTES § D24).
+    Suspend,
 }
 
 /// **The console's whole run** — `None` is the reader quitting, `Some` the sentence that goes to
@@ -7459,6 +7471,8 @@ async fn console() -> Option<String> {
         contexts,
         opened: None,
         offer: views::Offer::Nothing { switch: false },
+        // **Nothing is armed yet**, and nothing can press a key before the channel below exists.
+        resumable: false,
     };
     // **The same lines the headless driver prints on stderr, in the strip the reader reads them
     // in** ([`command_log`]): the probe, the version, discovery and the five watches, spelled once.
@@ -7492,10 +7506,22 @@ async fn console() -> Option<String> {
     // path [`at_a_keyboard`] cannot rule out, since a tty that exists and then refuses raw mode is
     // an `io::Error` and not a missing device. Nothing is drawn yet, so the sentence lands on a
     // screen the reader can read (`screens/states.md` § Before the TUI ever starts).
+    // **The guard is armed *before* the call it guards, because that call can fail halfway**
+    // (`tester` F4): `try_init` is `enable_raw_mode` then `EnterAlternateScreen` then
+    // `Terminal::new` (`ratatui-0.30.2/src/init.rs:397`), and it answers `Err` from any of the
+    // three — so the `return` below can be reached with raw mode on, the alternate screen up, or
+    // both. [`handed_back`] undoes nothing when nothing was taken, so arming it early costs a
+    // no-op and buys the sub-case.
+    let _restoring = Restoring;
     let mut terminal = match ratatui::try_init() {
         Ok(terminal) => terminal,
         Err(failed) => return Some(broken_terminal(&failed)),
     };
+    // **After `try_init` succeeded, so the hook this chains is the restoring one that call
+    // installed** (`screens/widgets.md` § 1).
+    chain_panic_hook(|| {
+        let _ = handed_back(&mut std::io::stdout());
+    });
     // **After `init()` and not before**: `event::read()` starts reading stdin the moment the thread
     // runs, and until raw mode is on that stdin is line-buffered — a key struck in that window is
     // held by the tty until Enter (`examples/spike_tui.rs`, which measured it).
@@ -7505,16 +7531,31 @@ async fn console() -> Option<String> {
     // is detached on purpose — a `spawn_blocking` task parked in `event::read()` cannot be
     // cancelled and would hold runtime shutdown open forever.
     let (pressing, mut keys) = tokio::sync::mpsc::unbounded_channel();
+    // **Job control's two signals go down the same channel** ([`Woke`]), so the loop keeps one
+    // receiver and one `select!`.
+    //
+    // **What that buys is ordering against keys and not against the draw**: `owing.due()` is the
+    // first biased arm and the watch arm can owe a frame while the terminal is still handed back,
+    // so a frame between the resume and [`Woke::Resumed`] is bounded by [`COALESCE`] rather than
+    // excluded. `tester`'s `scripts/suspend-test.py` checks it as a fact — *nothing was drawn
+    // before the alternate screen came back* — and has not seen one against a live cluster's watch
+    // traffic (2026-09-24).
+    //
+    // **What it answers is whether `ctrl-z` may stop at all** ([`Console::resumable`]): the arming
+    // of `SIGCONT` is the one thing the key depends on that a key cannot provide.
+    console.resumable = watching_for_stops(&pressing);
     std::thread::spawn(move || {
         while let Ok(event) = ratatui::crossterm::event::read() {
-            if pressing.send(event).is_err() {
+            if pressing.send(Woke::Key(event)).is_err() {
                 break;
             }
         }
     });
 
     let now = wall_clock();
-    let ended = loop {
+    // **The loop is the function's own tail, because [`Restoring`] is what follows it** — a `let`
+    // between the two would only be there to give the removed `ratatui::restore()` a line.
+    loop {
         let halt = pump(
             &mut console,
             &mut terminal,
@@ -7576,10 +7617,291 @@ async fn console() -> Option<String> {
                 }
             }
         }
-    };
-    ratatui::restore();
-    ended
+    }
 }
+
+// --- THE TERMINAL HANDOVER START ---
+//
+// **One pair, and every path that gives the terminal up or takes it back calls it** — `ctrl-z` and
+// an external `kill -TSTP` through [`stopped`], every resume through [`resumed`], the panic hook,
+// the `Drop` guard, and `e`'s editor in v0.4 (NOTES § D24, PRIOR-ART § D4: *"leaving raw mode and
+// re-entering it is one function used by every path"*). k9s has a different bug for each of its
+// paths, which is what a copy per path costs.
+
+/// **The escape sequences of the handover, both directions in one function** — `ours` takes the
+/// alternate screen with the cursor hidden, `!ours` gives it back with the cursor shown.
+///
+/// **One function because the two are inverses**, and a second one is how a pair stops being that.
+/// **A sink and not `stdout` because that is what makes the composition assertable with no tty in
+/// the room**: raw mode is an `ioctl` on a real fd, these are bytes.
+///
+/// **Showing the cursor is ours and ratatui does not do it** — measured against ratatui 0.30.2:
+/// `Terminal::draw` hides the cursor on every frame that sets no position, only `Terminal::drop`
+/// shows it again, and `ratatui::restore` never touches it. A suspend drops no `Terminal`, so
+/// without this the shell gets a prompt with no cursor on it.
+fn handover(out: &mut impl std::io::Write, ours: bool) -> std::io::Result<()> {
+    use ratatui::crossterm::{cursor, execute, terminal};
+    if ours {
+        execute!(out, terminal::EnterAlternateScreen, cursor::Hide)
+    } else {
+        execute!(out, terminal::LeaveAlternateScreen, cursor::Show)
+    }
+}
+
+/// **Raw mode off and the screen handed back to the shell** — invariant 8, and D24's *"leave raw
+/// mode, leave the alternate screen"*.
+///
+/// **The `ioctl` is asked for first and the screen is written whatever it answered**, which is the
+/// one thing the `?` shape got wrong: raw mode has more side effects than the screen buffer, so it
+/// goes first (ratatui's own order in `try_restore`) — but a terminal left half handed back is
+/// worse than either failure, so both are attempted and a failure of either comes back. Both
+/// failing is one run ending, so which of the two it names does not need deciding.
+///
+/// **The sink is the seam**: `stdout` is what every caller passes, and a test passes a `Vec`,
+/// because the two `ioctl`s are the only part of this pair a suite with no tty cannot reach.
+fn handed_back(out: &mut impl std::io::Write) -> std::io::Result<()> {
+    let mode = ratatui::crossterm::terminal::disable_raw_mode();
+    handover(out, false)?;
+    mode
+}
+
+/// **The screen taken back on the way in** — [`handed_back`]'s inverse, in the same shape and for
+/// the same reasons.
+///
+/// **It is never called on its own, and that is not a style rule** (`crossterm-0.29.0`
+/// `src/terminal/sys/unix.rs:108`, read): `enable_raw_mode` returns `Ok(())` and touches nothing
+/// while `TERMINAL_MODE_PRIOR_RAW_MODE` is still `Some` — which it is after a stop nobody handed
+/// the terminal back for. [`resumed`] is why every route in goes through [`handed_back`] first.
+fn taken_back(out: &mut impl std::io::Write) -> std::io::Result<()> {
+    let mode = ratatui::crossterm::terminal::enable_raw_mode();
+    handover(out, true)?;
+    mode
+}
+
+/// **The sentence a half of the handover costs, with the half named** — one format so the two
+/// directions cannot come to say one failure two ways, and `what` so neither says the other's
+/// (invariant 14, `tester` F5).
+fn handover_failed(what: &str, problem: &std::io::Error) -> String {
+    format!(
+        "k8rs: the terminal could not be {what} — {}",
+        sanitize(&problem.to_string())
+    )
+}
+
+/// **Hand the terminal back and stop this process for real** — `ctrl-z`, and an external
+/// `kill -TSTP` that [`Woke::Stopping`] turned into the same path (NOTES § D24, § D276).
+///
+/// **`SIGSTOP` and not `SIGTSTP`**: we hold a `SIGTSTP` handler, so raising that one would only
+/// call ourselves back. `SIGSTOP` cannot be caught by anybody, which is exactly what a stop is for.
+///
+/// **Coming back is not here**, and that is the ruling this round turned on: a resume always
+/// arrives as `SIGCONT` — from `fg`, from `kill -CONT`, and from the one stop nothing can catch —
+/// so the recovery lives in [`resumed`] under that signal and every route back runs the same code
+/// (`k8s-admin`, `reports/2026-09-24-the-terminal-handover.md`).
+///
+/// **No test calls this, because it would stop the test binary** and the suite would hang until
+/// somebody went looking. What proves it is `scripts/suspend-test.py` — `just suspend`, 30 checks
+/// against the real binary on a real pty.
+fn stopped() -> Result<(), String> {
+    handed_back(&mut std::io::stdout())
+        .map_err(|problem| handover_failed("handed back", &problem))?;
+    // SAFETY: `raise` takes an `int` and touches no memory of ours; it delivers the signal to this
+    // process and nothing is read back through a pointer (NOTES § D276).
+    unsafe { libc::raise(libc::SIGSTOP) };
+    Ok(())
+}
+
+/// **Everything a resume owes, whichever stop it is coming back from** — `SIGCONT` is the only
+/// signal a `kill -STOP` can be recovered through, so it is the one door and not a second one
+/// beside the key.
+///
+/// **[`handed_back`] first, and it is not a no-op** (`tester` F4, `k8s-admin` finding 1):
+/// crossterm's `enable_raw_mode` returns `Ok(())` without touching the tty while it believes raw
+/// mode is already on, and after an external `SIGTSTP` — or a `SIGSTOP` — it does believe that,
+/// because nothing called `disable_raw_mode`. Measured on a pty: the tty comes back **cooked**
+/// (`ICANON=1 ECHO=1 ISIG=1`) and every key is line-buffered until Enter, which is PRIOR-ART § D4's
+/// *"the panels redraw but the arrow keys are dead"* exactly.
+fn resumed<B: ratatui::backend::Backend>(
+    out: &mut impl std::io::Write,
+    terminal: &mut ratatui::Terminal<B>,
+) -> Result<(), String> {
+    handed_back(out).map_err(|problem| handover_failed("handed back", &problem))?;
+    taken_back(out).map_err(|problem| handover_failed("taken back", &problem))?;
+    repainted(terminal)
+}
+
+/// **What a resumed terminal needs before the next frame: the screen cleared, and the whole frame
+/// sent instead of the difference** — both of which `Terminal::resize` does, over the area the
+/// terminal has *now*, which is the only area it could honestly be given (`Terminal::autoresize`
+/// reads it the same way).
+///
+/// **It is not `Terminal::clear`, and that is measured rather than preferred** (ratatui 0.30.2):
+/// `clear` opens with `get_cursor_position`, which writes a `CSI 6n` and reads the terminal's
+/// answer *off stdin* — and stdin belongs to the key thread, which swallows it. The run died on the
+/// first `fg` with *"the screen could not be drawn — The cursor position could not be read within a
+/// normal duration"* (test host, 2026-09-24, a real `ctrl-z` in `bash -i` on a pty). `resize` reads
+/// the size through an `ioctl` and clears through `clear_viewport`, and touches stdin nowhere.
+fn repainted<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
+) -> Result<(), String> {
+    let area = terminal.size();
+    area.and_then(|area| terminal.resize(area.into()))
+        .map_err(|failed| broken_terminal(&failed))
+}
+
+/// **Whatever ends the run, the terminal goes back** — invariant 8, as a `Drop` and not a line at
+/// the end of [`console`]: every early return from the moment before `ratatui::try_init` onwards
+/// leaves the shell in raw mode with the alternate screen up otherwise, and there is no
+/// `ratatui::restore()` call left to keep in step with it.
+///
+/// **Armed before `try_init` and not after** (`tester` F4): that call takes raw mode and the
+/// alternate screen in two steps and answers `Err` from either, so the failure this guard is most
+/// needed for happens *inside* it.
+struct Restoring;
+
+impl Drop for Restoring {
+    fn drop(&mut self) {
+        use std::io::Write;
+        if let Err(problem) = handed_back(&mut std::io::stdout()) {
+            // **What is said on the way out carries an `io::Error` and nothing else** — no
+            // `k8s::Config`, no session, nothing that has ever held a token (invariant 8,
+            // `docs/security.md` § Token hygiene). `ratatui::restore` reports the same failure the
+            // same way.
+            let _ = writeln!(
+                std::io::stderr(),
+                "k8rs: the terminal could not be restored — {}",
+                sanitize(&problem.to_string())
+            );
+        }
+    }
+}
+
+/// **A panic hook that restores the terminal and *then* runs the hook it replaced** — installed
+/// once, straight after `ratatui::try_init`, so the hook it takes is the restoring one that call
+/// installed.
+///
+/// **Chained and never replaced** (`screens/widgets.md` § 1): replacing ratatui's own hook is how
+/// the terminal ends up corrupted after a panic, and what ours adds in front of it is the cursor —
+/// ratatui's restore leaves it as the last frame left it, which is hidden.
+///
+/// **`restore` is a parameter because the whole of this is otherwise unreachable from a test**
+/// (`tester` F1): a panic hook is process-global, no `PanicHookInfo` can be built outside a real
+/// panic, and a test that installs a counting stand-in *underneath* cannot tell a chain from a
+/// no-op — measured, the first version of that test passed with this function's body emptied. With
+/// the restoring half handed in, the order the two halves append themselves in is the assertion.
+///
+/// **What no test reaches is the argument the one product caller passes** (`tester` and `k8s-admin`
+/// both, 2026-09-24): that it is [`handed_back`] going in rather than anything else is assertable
+/// only from inside a real panic on a real terminal, and it is accepted as the last unreachable
+/// corner rather than wrapped in a mechanism to make it look covered.
+///
+/// **Nothing here formats anything but the `PanicHookInfo` it was handed** (invariant 8): the types
+/// that can hold a credential derive no `Debug`, and this adds no message of its own for one to
+/// reach.
+fn chain_panic_hook(restore: impl Fn() + Send + Sync + 'static) {
+    let ratatuis = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore();
+        ratatuis(info);
+    }));
+}
+
+/// **What wakes the loop from the terminal: a key, and the two signals job control speaks**
+/// (`k8s-admin`, `reports/2026-09-24-the-terminal-handover.md`).
+///
+/// **One channel and not three, because a second receiver is a second parameter of [`pump`]** — and
+/// [`pump`] is at clippy's argument limit already. What the key thread sends and what the signal
+/// tasks send are the same kind of thing: something happened at the terminal.
+#[derive(Clone)]
+enum Woke {
+    /// One event off the terminal — a key, a resize, anything `crossterm` reports.
+    Key(ratatui::crossterm::event::Event),
+    /// **`SIGTSTP` from outside** — another terminal's `kill -TSTP`. Registering a handler replaces
+    /// the default action, so the stop is ours to perform and ours to hand the terminal back for.
+    Stopping,
+    /// **`SIGCONT`** — `fg`, `kill -CONT`, or the return from our own `SIGSTOP`. Every way back in.
+    Resumed,
+}
+
+/// **The two signals forwarded into the key channel, and whether a stop can be recovered from** —
+/// `SignalKind::from_raw` and `libc`'s two numbers, which is what NOTES § D276 budgeted `libc` for.
+///
+/// **The two halves are not symmetric, and the answer is about `SIGCONT` alone** (PM ruling,
+/// 2026-09-24):
+///
+/// - **`SIGCONT` failing is not free.** Every recovery there is lives under [`Woke::Resumed`], so
+///   with no arm on it a `ctrl-z` would hand the terminal back and nothing would take it back. The
+///   `false` this answers with is what makes [`may_stop`] refuse the key outright — never hand back
+///   a terminal you cannot take back.
+/// - **`SIGTSTP` failing alone *is* free.** An external `kill -TSTP` falls back to the kernel's own
+///   default action, which stops the process without our handover, and `SIGCONT` still recovers it.
+///   Nothing about the key changes.
+///
+/// **Which is why `SIGCONT` is armed first and `SIGTSTP` only after it** — arming `SIGTSTP` alone
+/// replaces that default action with a handler that would then refuse to stop, turning an external
+/// `kill -TSTP` into a signal that does nothing at all.
+///
+/// **One mutant of this function is unkillable, and the next reader should not go hunting for the
+/// test** (`tester`, 2026-09-24): *replace `watching_for_stops -> bool` with `true`*. Nothing
+/// catches it and nothing can — `tokio::signal::unix::signal()` succeeds inside a runtime and
+/// *panics* outside one, so the `Err` branch has no input a test can hand it, and on any host where
+/// arming works `true` is also the honest answer, so `just suspend` agrees with the mutant too. Its
+/// two siblings are caught: `-> false` and a deleted `!` both make `ctrl-z` inert, which reddens
+/// `scripts/suspend-test.py`'s *ctrl-z stopped the process*.
+fn watching_for_stops(pressing: &tokio::sync::mpsc::UnboundedSender<Woke>) -> bool {
+    if !forwarding(pressing, libc::SIGCONT, Woke::Resumed) {
+        return false;
+    }
+    let _ = forwarding(pressing, libc::SIGTSTP, Woke::Stopping);
+    true
+}
+
+/// **One signal, forwarded into the key channel until the console is gone** — `false` when the
+/// registration itself was refused, which is the only thing [`watching_for_stops`] decides on.
+fn forwarding(
+    pressing: &tokio::sync::mpsc::UnboundedSender<Woke>,
+    number: i32,
+    woke: Woke,
+) -> bool {
+    let Ok(mut signals) =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::from_raw(number))
+    else {
+        return false;
+    };
+    let waking = pressing.clone();
+    tokio::spawn(async move {
+        while signals.recv().await.is_some() {
+            if waking.send(woke.clone()).is_err() {
+                break;
+            }
+        }
+    });
+    true
+}
+
+/// **Whether a stop may happen at all right now** — two questions, and a `false` from either is a
+/// key that silently does nothing.
+///
+/// **Can we come back?** [`Console::resumable`] — `SIGCONT` armed. Never hand back a terminal you
+/// cannot take back (PM ruling, 2026-09-24).
+///
+/// **Is a dry-run on the wire?** `views::Dialog::waiting`, the same predicate that makes `esc`
+/// inert in [`over_modal`] (NOTES § D214).
+///
+/// **The stop is what is refused, because the wait cannot be told it happened**:
+/// `ops::CHECK_DEADLINE` is 35 s of `CLOCK_MONOTONIC`, which runs while a process is stopped, so a
+/// reader who suspends over an open confirmation comes back to *"k8rs waited 35 seconds to check
+/// this change and nothing came back"* — a sentence that points at a slow or unreachable API server
+/// when nothing was ever slow (`k8s-admin` finding 3). The refusal is bounded by those same 35 s.
+///
+/// **The *real* call is not refused, and that is the other half of the ruling**: a `SIGSTOP` loses
+/// no future, the call is still in flight when the process comes back, and its audit line lands
+/// then (invariant 4).
+fn may_stop(console: &Console<'_>) -> bool {
+    console.resumable
+        && !matches!(&console.app.modal, Some(views::Modal::Confirm(dialog)) if dialog.waiting())
+}
+// --- THE TERMINAL HANDOVER END ---
 
 /// **Whether the connected context turns TLS verification off** — `ui::Screen::insecure`, read off
 /// the `current` row of `k8s::contexts` and nothing else (todo.md § Phase 12, NOTES § D265
@@ -7715,7 +8037,7 @@ async fn pump<B: ratatui::backend::Backend>(
     terminal: &mut ratatui::Terminal<B>,
     store: &mut k8s::Store,
     updates: &mut Updates,
-    keys: &mut tokio::sync::mpsc::UnboundedReceiver<ratatui::crossterm::event::Event>,
+    keys: &mut tokio::sync::mpsc::UnboundedReceiver<Woke>,
     at: &Watching,
     mut running: Option<Running<'_, '_>>,
 ) -> Halt {
@@ -7736,16 +8058,52 @@ async fn pump<B: ratatui::backend::Backend>(
                     return Halt::Failed(said);
                 }
             }
-            event = keys.recv() => {
-                let Some(event) = event else { return Halt::Quit };
-                match keyed(console, event, store) {
-                    Did::Quit => return Halt::Quit,
-                    Did::Nothing => {}
-                    Did::Changed => owing.now(),
-                    Did::Mutate(asked) => return Halt::Mutate(asked),
-                    Did::Answered(reply) => {
-                        if let Some(running) = running.as_ref() {
-                            let _ = running.answering.send(reply);
+            woke = keys.recv() => {
+                let Some(woke) = woke else { return Halt::Quit };
+                match woke {
+                    Woke::Key(event) => match keyed(console, event, store) {
+                        Did::Quit => return Halt::Quit,
+                        Did::Nothing => {}
+                        Did::Changed => owing.now(),
+                        // **`Failed` and not ignored**: a handover that did not happen is a shell
+                        // left in raw mode, which is the whole of what this key is for
+                        // (NOTES § D24). No frame is owed here — the resume draws it, under
+                        // `Woke::Resumed`, and it is the same frame however the stop was asked for.
+                        Did::Suspend => {
+                            if let Err(said) = stopped() {
+                                return Halt::Failed(said);
+                            }
+                        }
+                        Did::Mutate(asked) => return Halt::Mutate(asked),
+                        Did::Answered(reply) => {
+                            if let Some(running) = running.as_ref() {
+                                let _ = running.answering.send(reply);
+                            }
+                            owing.now();
+                        }
+                    },
+                    // **An external `kill -TSTP` is the key's own path** — we hold the handler, so
+                    // the default stop never happens and the terminal is handed back first.
+                    //
+                    // **[`may_stop`] here is belt and braces, and one half of it is redundant by
+                    // construction**: [`watching_for_stops`] returns before arming `SIGTSTP` when
+                    // `SIGCONT` could not be armed, so a `Woke::Stopping` that arrives at all
+                    // implies [`Console::resumable`]. What can still refuse it is the dry-run
+                    // window, which is the same clock `ctrl-z` waits on and bounded the same way —
+                    // the `resumable` half is not bounded at all, it lasts the run.
+                    Woke::Stopping => {
+                        // `&&` and not a nested `if`, because the second half must not be reached
+                        // when the first refuses: `stopped()` *is* the stop.
+                        if may_stop(console) && let Err(said) = stopped() {
+                            return Halt::Failed(said);
+                        }
+                    }
+                    // **The only door out of a `kill -STOP`**, which nothing can catch — and the
+                    // door `fg` comes through too (`k8s-admin`,
+                    // `reports/2026-09-24-the-terminal-handover.md` § 3).
+                    Woke::Resumed => {
+                        if let Err(said) = resumed(&mut std::io::stdout(), terminal) {
+                            return Halt::Failed(said);
                         }
                         owing.now();
                     }
@@ -8123,6 +8481,22 @@ fn pressed(
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
     let open = detailing(console);
     let control = key.modifiers.contains(KeyModifiers::CONTROL);
+    // **`ctrl-z` is not a command, so it is answered above the modes** — it changes nothing in
+    // `views::App` and nothing on the screen, so unlike every other key it cannot be *refused* by a
+    // filter that has focus or a dialog that is open, and a shell the reader cannot get back to is
+    // not a state a modal should be able to hold them in (NOTES § D24). The two windows it *is*
+    // refused in are [`may_stop`]'s, and neither of them is a mode either: one is a clock — a
+    // dry-run on the wire, bounded by `ops::CHECK_DEADLINE` — and the other is an arming,
+    // `SIGCONT`, which lasts the whole run and is the difference between stopping and not coming
+    // back. The two `ctrl` keys the map does carry are answered below, with the guard that refuses
+    // the rest.
+    if control && key.code == KeyCode::Char('z') {
+        return if may_stop(console) {
+            Did::Suspend
+        } else {
+            Did::Nothing
+        };
+    }
     // **While a filter has focus every printable key is text** — `s`, `q`, `X` and `?` included
     // (`screens/widgets.md` § 2b: *the footer is fully replaced, not curated*). The two arrows are
     // that section's named exception and still move the selection over the narrowed list.
@@ -8180,10 +8554,11 @@ fn pressed(
         return wanting(console, cards, DELETE);
     }
     // **`ctrl-d` and `ctrl-c` are the only two the map has, and both are answered above** — so a
-    // `ctrl` held with anything else is not the plain letter (`screens/help.md`). Without this,
-    // `ctrl-r` restarted, `ctrl-l` opened a log and `ctrl-f` toggled follow, because the arms below
-    // read `key.code` and nothing else (`k8s-admin`, 2026-09-24,
-    // `reports/2026-09-24-the-console-event-loop.md` § 1).
+    // `ctrl` held with anything else is not the plain letter (`screens/help.md`). `ctrl-z` is a
+    // third `ctrl` key and no part of that map, which is why it is answered above the modes and
+    // not here (NOTES § D24). Without this guard, `ctrl-r` restarted, `ctrl-l` opened a log and
+    // `ctrl-f` toggled follow, because the arms below read `key.code` and nothing else
+    // (`k8s-admin`, 2026-09-24, `reports/2026-09-24-the-console-event-loop.md` § 1).
     if control {
         return Did::Nothing;
     }

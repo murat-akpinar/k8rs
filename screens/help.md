@@ -15,7 +15,7 @@ tool for beginners may not hide its verbs behind memory.
 │    l  logs, with the log from before a crash                       │
 │       in the log tab:  f follow · c container · ⇧p previous        │
 │    d  describe — the object and what happened to it                │
-│    y  view as YAML                                                 │
+│    y  view as YAML            ctrl-z  back to your shell — type fg │
 │  Changing things (each one asks first, and shows the command)      │
 │    s       not built yet — there is no way yet to type a copy count│
 │            works on a deployment, a statefulset and a replicaset   │
@@ -114,6 +114,79 @@ Rules:
   `works on …` line is unaffected too, for the same reason the sentence
   above stays fixed regardless of what is selected: it still answers a
   future *what kind*, not *is this built*.
+- **`ctrl-z` is answered above the filter and above an open modal, with two
+  exceptions — and each is the right one.** The router checks it before
+  a filter has focus and before a modal's own keys are read, because a shell
+  the reader cannot get back to is not a state a modal should be able to hold
+  them in ([NOTES § D24](../NOTES.md#d24--ctrl-z)). **Two things do hold it,
+  and they differ in kind, not just in cause.** One is bounded: a Confirm
+  dialog's own check still on the wire
+  ([`Dialog::waiting`](../src/views.rs),
+  [dialogs.md § While the check is still on the wire](dialogs.md#while-the-check-is-still-on-the-wire),
+  [NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04),
+  [§ D273](../NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20)).
+  The reason is the reader's, not the code's: stepping away mid-check and
+  coming back later would have k8rs report a cluster problem that never
+  happened — *"k8rs waited 35 seconds … and heard nothing back,"* pointing at
+  a slow or unreachable API server for a delay the reader caused by leaving.
+  `ctrl-z` goes silently inert for that one window, exactly as `esc` already
+  does — no new row, no refusal line, no message — and the check itself is
+  bounded at 35 seconds regardless, so nobody is held in a shell they cannot
+  reach for long; both keys work again the instant it answers.
+  **The other lasts the whole run, and it has nothing to do with a wait:**
+  `ctrl-z` only stops the process if the console could arm the signal it
+  comes back through — without `SIGCONT` armed, nothing can ever take the
+  terminal back from the shell (`Console::resumable`,
+  [`may_stop`](../src/main.rs),
+  [NOTES § D277 ruling 7](../NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)).
+  A key that hands the reader's terminal to the shell and can never get it
+  back is worse than a key that does nothing, so an unarmed console makes
+  `ctrl-z` silently do nothing for the rest of the run — the row still reads
+  `back to your shell — type fg`, unmarked, because that state has no mockup
+  of its own: it cannot be produced from a test and is unreachable on a
+  working host, so a help screen nobody can see would be surface spent for
+  nothing (invariant 13). If it is ever seen in the wild,
+  [D259](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+  ruling 5's *swap the block for a sentence* is where it belongs, not a new
+  state here. It has no footer row to give up either: it was never offered
+  from one, the way
+  `ctrl-d` was before
+  [D259](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+  took it off both list footers, and this page is the only place it is
+  written down at all. Its row carries no `works on …` line — nothing this
+  login may or may not do changes what it does — and no line in the command
+  log strip, because it is not a mutation and runs no command of its own to
+  show (invariants 1, 4). The word is *not* `suspend`: the row says what
+  actually happens instead — the shell comes back — and names the way back,
+  the same shape invariant 14 already asks of every other row here.
+- **The row lands beside `y`, not beside `X`.** Both rows have blank columns
+  to spare today, but `X`'s are not idle in every state this file draws:
+  [§ While the call is running](#while-the-call-is-running) rewrites that
+  exact row to append `(paused while a change is running)` after `switch
+  cluster`, and the row is 66 characters once it does — of the row's
+  68-column content width ([§1's own budget](widgets.md#1-the-frame)) — with
+  no room left for a second key. `y`'s row is never rewritten anywhere on
+  this page, so it is the one home a later state cannot collide with.
+  **Recount, not adjustment: still sixteen rows, seventy and eighty
+  columns.** `y`'s row had 49 blank columns after `view as YAML`. `ctrl-z`
+  and its label use 36 of them: six for the key, a two-column gap — the same
+  gap `ctrl-d` already takes for its own six-character key, above, rather
+  than the wider gap a shorter key like `esc` leaves — and 28 for `back to
+  your shell — type fg`, one short of the 29 that remain once that gap is
+  spent. Its label still opens under the same column every other right-hand
+  label on this page already opens under; only the key's own field starts
+  two columns earlier than theirs, because the key itself is longer, not
+  because the label moved. Twelve blank columns stay between `view as YAML`
+  and `ctrl-z`, and one stays blank after the label, before the border — the
+  49 columns this row had to spend are still fully accounted for. The
+  80-column mockup under [§ Under a dead-writes
+  run](#under-a-dead-writes-run) carries the identical text with ten more
+  blank columns before its own border, never a longer sentence — the two
+  mockups draw one fixed script at two widths, not two different ones. Every
+  row in both mockups is still exactly 70 and 80 columns
+  (`scripts/screens-check.py`), the body is still the sixteen rows
+  [§1's own budget](widgets.md#1-the-frame) already fixed, and the 24-row
+  floor above is unchanged.
 - v0.2+ operations join this screen as they land (cordon, drain, rollout undo,
   then exec and port-forward, then edit) — see
   [NOTES § Operations](../NOTES.md#operations--the-full-admin-surface).
@@ -142,7 +215,7 @@ command log strip, the same `?`/`q` footer this file draws everywhere else.
 │    l  logs, with the log from before a crash                                 │
 │       in the log tab:  f follow · c container · ⇧p previous                  │
 │    d  describe — the object and what happened to it                          │
-│    y  view as YAML                                                           │
+│    y  view as YAML            ctrl-z  back to your shell — type fg           │
 │  Changing things (off for this whole run)                                    │
 │    k8rs was started with --read-only — quit and start it again without it    │
 │                                                                              │

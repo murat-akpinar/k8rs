@@ -186,12 +186,14 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
    the temp file behind `e` edit: mode 0600, removed after use.
 9. **Free text from the API is untrusted.** Strip control characters before it
    reaches the screen, or a crafted pod name rewrites the user's terminal.
-10. **No new dependencies without asking.** The **twelve** allowed crates:
+10. **No new dependencies without asking.** The **thirteen** allowed crates:
     `kube`, `k8s-openapi`, `ratatui`, `crossterm`, `tokio`, `anyhow`,
     `serde_json`, `serde_yaml_ng`, `x509-parser`, `similar`, `futures-util`,
-    `tokio-rustls`. `similar` arrives only in v0.4 with `edit` — approved is not
-    present. **No `clap`**: the threshold is not *a flag that takes a value*, it
-    is **subcommands, generated help, or a mutual-exclusion table**
+    `tokio-rustls`, `libc`. `similar` arrives only in v0.4 with `edit` — approved
+    is not present. `libc` is `raise` and three signal constants and nothing else
+    ([D276](NOTES.md#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24)).
+    **No `clap`**: the threshold is not *a flag that takes a value*, it is
+    **subcommands, generated help, or a mutual-exclusion table**
     ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
     No `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
@@ -214,7 +216,9 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     needs *naming***: that is what the eleventh and twelfth were, each adding no
     compiled code and leaving `Cargo.lock` at 213 packages
     ([D143](NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22) ·
-    [D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
+    [D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28) ·
+    [D276](NOTES.md#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24),
+    the lock unmoved at 319).
     `clap` and `tracing` are not that case. Nothing here calls `dangerous()`:
     `tokio-rustls` is handed `kube::client::ConfigExt`'s `ClientConfig`, built
     from the same kubeconfig CA the real client uses.

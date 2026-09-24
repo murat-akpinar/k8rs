@@ -90,6 +90,17 @@ python3 scripts/write-guard.py
 # fix" that unpins an action is a red build rather than a line nobody re-reads.
 python3 scripts/security-guard.py --self-test
 python3 scripts/security-guard.py
+# The half of the terminal handover no test in this repo can see: `TestBackend`
+# answers a `CSI 6n` out of a field, so the suite is green with a `Terminal::clear`
+# in the repaint — and on a real `fg` the run ends instead of redrawing
+# (NOTES § D24).
+python3 scripts/handover-guard.py --self-test
+python3 scripts/handover-guard.py
+# The live half of the same box is `just suspend`, which needs a pty and a built
+# binary and so cannot run here (NOTES § D277 ruling 7). This is the half that
+# can: every check in it fed a healthy transcript and then one broken variant of
+# itself, so a red run there names which door of the three failed.
+python3 scripts/suspend-test.py --self-test
 # Every fixture is trusted because a jq predicate in cluster.sh said it reached
 # the state its rule is about. Those predicates only ever ran against a live
 # cluster, where too-loose and too-tight look identical.

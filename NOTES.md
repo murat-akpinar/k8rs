@@ -297,6 +297,8 @@ its line moving with it.
 - [D273](#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20) — the wiring box has no `call` closure, so the bound D272 ordered goes inside the contract and `ops.rs` reopens for one change
 - [D274](#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24) — the console event loop: the six rulings the brief needed, the strip line that moved to the confirmation, `s` withheld, the `over_modal` survivors invariant 2 had no test for, and the PM repeating D136
 - [D275](#d275--the-wait-loop-watched-for-the-commands-own-name-so-it-matched-itself-and-never-ended-2026-09-24) — the wait loop watched for the command's own name, so it matched itself and never ended
+- [D276](#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24) — the thirteenth crate was already compiled, and the terminal handover is one family
+- [D277](#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24) — the handover round: a measurement that read the shell instead of the job, one door for three ways of stopping, and a test that passed with its subject deleted
 
 ## Why it exists — where the gap is
 
@@ -24294,3 +24296,158 @@ bounded** — `timeout` on the `ssh`, sized to the run it is waiting for.
 said cleanup on the last line is not cleanup and the resource is not always a
 file; a watcher is a resource too, and an unbounded one outlives the session that
 could have reaped it.
+
+### D276 — the thirteenth crate was already compiled, and the terminal handover is one family (2026-09-24)
+
+Two rulings Phase 12's next box could not be briefed without.
+
+**1. `libc` is named, as the thirteenth crate.** Ctrl-Z
+([D24](#d24--ctrl-z)) has to actually suspend the process, and raw mode is why
+that is not free: raw mode clears `ISIG`, so SIGTSTP is never delivered —
+`ctrl-z` arrives as a *key*, exactly as `ctrl-c` already does in the console.
+Handing the terminal back therefore ends in `raise(SIGSTOP)`, and coming back
+needs SIGCONT; neither `std` nor `tokio` offers either. `tokio::signal::unix`
+can watch a signal but takes the platform's raw number, which is the same
+missing half.
+
+`libc` **0.2.189 is already in `Cargo.lock`**, reached through `tokio` — naming
+it compiles nothing new and leaves the lock at **319 packages**, which is the
+narrow case invariant 10 allows and the shape both earlier reversals took
+([D143](#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22) ·
+[D178](#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
+Asked and approved by the user, 2026-09-24. **What it is for is exactly three
+things** — `raise`, and the `SIGSTOP` / `SIGTSTP` / `SIGCONT` constants — and
+not a general licence for FFI.
+
+**The alternative refused, and why it is not the lazier one.** A hand-written
+`extern "C" { fn raise(…) }` with the signal numbers spelled out adds no
+dependency line at all — but the numbers differ between Linux and macOS
+(`SIGSTOP` is 19 and 17, `SIGTSTP` 20 and 18), and CI's matrix builds
+`aarch64-apple-darwin` and `x86_64-apple-darwin` beside the two musl targets.
+The failure would be a wrong signal raised on a target nobody tests by hand,
+which is worse than a name in a manifest.
+
+**2. Ctrl-Z and the panic-safe teardown are one family.** Both boxes call the
+same pair of functions — leave raw mode and the alternate screen, re-enter
+them — and [PRIOR-ART § D4](PRIOR-ART.md#d4--the-terminal-after-a-subprocess)
+is explicit that this is one function and not one per path. Briefed apart, the
+second one grows the second copy; briefed together, the family is the unit
+([D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)).
+The phase head named only the event loop as a family because these two were not
+yet read against each other.
+
+### D277 — the handover round: a measurement that read the shell instead of the job, one door for three ways of stopping, and a test that passed with its subject deleted (2026-09-24)
+
+Phase 12's Ctrl-Z + panic-teardown family, after two review rounds. What the
+turn decided, and the three defects worth keeping.
+
+**1. The measurement measured the wrong object.** The first version watched no
+signal at all, and the ruling that justified it cited `stty -g` before and after
+an external `kill -TSTP`: identical, therefore no harm. The identity is real and
+means nothing — `stty -g` run *in the shell* reads the **shell's** termios, and
+bash and zsh save and restore their own per job. The job's modes are a different
+object, and nobody restores those. `k8s-admin` read them from the pty instead:
+after `fg`, `ICANON=1 ECHO=1 ISIG=1` — cooked. For k8rs that is every key
+line-buffered, keystrokes echoing over the frame, and `ctrl-c` turned back into a
+real SIGINT, whose default action terminates without unwinding, so the `Drop`
+guard never runs and the terminal keeps the alternate screen. That is
+[PRIOR-ART § D4](PRIOR-ART.md#d4--the-terminal-after-a-subprocess)'s k9s #1690
+— *the panels redraw but the arrow keys are dead* — which this family is marked
+as covering.
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+says the definition says what it is and only the object says what it does; this
+adds the case where a *real* measurement is taken of the object standing next to
+the one in question.
+
+**2. One door, because the one that cannot be caught decides the design.**
+`kill -STOP` reaches no handler ever, so a `SIGTSTP` arm alone cannot recover
+from it and **`SIGCONT` is the load-bearing half**. So every stop now leaves and
+every resume arrives through one pair: `Woke::{Key, Stopping, Resumed}`, with the
+two signals forwarded into the *existing* key channel rather than a second
+receiver — a key and a signal are both *something happened at the terminal*, and
+`pump` was already at clippy's seven-argument limit. The key path therefore
+depends on the SIGCONT arm too, which the red run shows: with the arms
+registered but doing nothing, ctrl-z stops and `fg` comes back to a cooked tty.
+
+**The trap underneath it**, verified in the dependency rather than assumed:
+`taken_back()` on its own silently does nothing.
+`crossterm-0.29.0/src/terminal/sys/unix.rs:108` returns `Ok(())` from
+`enable_raw_mode` whenever `TERMINAL_MODE_PRIOR_RAW_MODE.is_some()` — which it
+still is when nothing called `disable_raw_mode`. Every resume hands back first.
+
+**3. `ctrl-z` is refused in exactly one window, and it is not the one it looks
+like.** The *real* call is never refused: `SIGSTOP` loses no future, the audit
+line lands on resume, invariant 4 holds. The **dry-run** window is refused,
+silently, on the same `Dialog::waiting()` predicate that already makes `esc`
+inert ([D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) ·
+[D273](#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20)),
+because `tokio::time::timeout` runs on `CLOCK_MONOTONIC`, which keeps advancing
+while the process is stopped: suspend during the check, come back two minutes
+later, and k8rs says *it waited 35 seconds and nothing came back* — a sentence
+that sends someone at the control plane at 3am for a delay they caused
+themselves. Bounded at 35 s, so nobody is held long in a shell they cannot
+reach.
+
+**4. `libc`'s bound is now literally met, and the feature beside it was free.**
+`grep -rn 'libc::' src/` returns three lines — `raise(SIGSTOP)`, `SIGTSTP`,
+`SIGCONT` — which is what
+[D276](#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24)
+budgeted. Reaching a signal from inside the runtime needs `tokio`'s `signal`
+feature: measured before writing it down, `cargo tree -e features,no-dev -i
+tokio` prints the identical feature list either way — `signal` was already on
+through `hyper-util`/`kube-client` — and `Cargo.lock` stays at **319**.
+
+**5. Two tests that passed with their subject deleted, one layer apart.** The
+first asserted a counting stand-in ran once after `chain_panic_hook()` — true
+with the function's body emptied, because with no chain installed the stand-in
+*is* the hook. The second, written to fix it, had the same shape one layer
+along. What closed it was making the restoring half a **parameter**, so the test
+asserts the *order* of two recorded events: an order cannot be faked by a no-op.
+The generated mutant `replace chain_panic_hook with ()` is dead.
+
+**6. `try_init` does not fail atomically, so the guard goes above it.**
+`ratatui-0.30.2/src/init.rs:397-402` is `set_panic_hook` → `enable_raw_mode` →
+`EnterAlternateScreen` → `Terminal::new`, returning `Err` from any of the last
+three. The guard now exists before the call, and `handed_back()` is a no-op when
+nothing was taken — the previous placement left raw mode on for a failure at
+step three or four, and the deleted `ratatui::restore()` had sat after the same
+early return.
+
+**7. Never hand back a terminal you cannot take back.** The recovery lives only
+under `SIGCONT`, so a registration that fails is not the free loss the first
+draft's comment called it: with no `SIGCONT` arm, `ctrl-z` gives the screen up
+and nothing ever takes it back. `Console::resumable` carries what was armed and
+`may_stop` asks it first, so a console that could not arm the resume simply does
+not stop — which is what the key did before this box. **The two signals are not
+symmetric and the order follows from that**: `SIGCONT` is armed first and
+`SIGTSTP` only behind it, because catching `SIGTSTP` while `SIGCONT` failed
+replaces the kernel's stop with a handler that then refuses to stop, and
+`kill -TSTP` would do nothing at all — worse than either half alone. `SIGTSTP`
+failing by itself is genuinely free: the kernel's default action stops the
+process and `SIGCONT` still recovers it.
+
+**No screen state is drawn for it, ruled rather than missed.** `help.md` keeps
+offering `ctrl-z  back to your shell — type fg` even though an unarmed console
+answers that key with nothing, for the whole run and silently. The state cannot
+be produced from a test — `tokio::signal::unix::signal()` succeeds inside a
+runtime and panics outside one — and is unreachable on a working host, so a help
+state nobody can see is new surface for nothing (invariant 13). The honesty goes
+in that page's Rules bullet instead. If it is ever seen in the wild,
+[D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+ruling 5's *swap the block for a sentence* is where it belongs.
+
+**And one mutant in this family is unkillable, which is recorded rather than
+chased**: `watching_for_stops -> bool with true`. The `Err` branch has no
+reachable input from a test, and on a host where arming works `true` is also the
+honest answer, so even the pty run agrees with the mutant. Its two siblings are
+caught by `just suspend`, because both make `ctrl-z` inert and that reddens
+*"ctrl-z stopped the process"*.
+
+**8. What has no committed coverage, and the ruling.** `stopped()` cannot be
+unit-tested (it would `SIGSTOP` the suite), the two `select!` arms need a real
+tty, and the panic hook's behaviour on one is still proven by construction. The
+pty driver that does prove them is promoted out of `tmp/` into `scripts/` with a
+`just` recipe of its own — **on demand, not inside `just check`**, which has no
+tty in CI, the same shape `e2e.sh` already has. A family whose central claim is
+proven only by a run nobody can repeat is a green build that proves nothing
+([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)).

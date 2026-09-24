@@ -138,11 +138,21 @@ body → Layout::horizontal([
   itself carries the reason ([analysis.md](analysis.md#capacity-when-you-can-only-see-one-namespace)).
   A fourth symbol meaning "not checked" is not the answer — it needs a legend,
   and the three severity symbols are the whole vocabulary.
-- Terminal setup is `ratatui::init()` / `ratatui::restore()`. `init()` already
+- **Terminal setup is `ratatui::try_init()` going in and a `Drop` guard coming
+  out, never a paired `ratatui::restore()` call.** `try_init()` already
   installs a panic hook that restores the terminal — but
   [invariant 8](../CLAUDE.md) needs a second guarantee, that no credential
   reaches stderr, so our hook **chains** ratatui's rather than replacing it.
-  Replacing it is how the terminal ends up corrupted after a panic.
+  Replacing it is how the terminal ends up corrupted after a panic. Teardown
+  itself is a guard, not a line at the end of the run: an early return between
+  `try_init()` and that line would otherwise leave the shell in raw mode with
+  the alternate screen still up, so the guard's `Drop` calls it instead,
+  wherever the run actually ends — nothing to remember at each return. Going
+  in and coming out are the same one-line-each pair everywhere the terminal
+  changes hands — `handed_back()` gives it up, `taken_back()` takes it back —
+  and both the guard and `ctrl-z` ([help.md](help.md)) call it; v0.4's `e`
+  will call the same pair to hand the terminal to `$EDITOR`
+  ([NOTES § D24](../NOTES.md#d24--ctrl-z)).
 
 ## 1b. How long ago it happened — one ladder, every screen
 

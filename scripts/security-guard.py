@@ -76,18 +76,21 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # --- what each check is allowed to see -----------------------------------
 
-# The twelve of invariant 10 (CLAUDE.md § Hard invariants). A thirteenth is a
+# The thirteen of invariant 10 (CLAUDE.md § Hard invariants). A fourteenth is a
 # recorded decision, so it lands here and in CLAUDE.md in the same change —
-# which is exactly the review this line exists to force. It forced both
+# which is exactly the review this line exists to force. It forced all three
 # reversals of "no new dependencies", and each is a crate the build already
 # linked, so it names something rather than adding compiled code:
 # `futures-util` for `Stream`, which `kube-runtime` returns and `std` does not
-# have (NOTES § D143), and `tokio-rustls` for the connector C2 needs to drive
-# its own handshake and read the API server's certificate (NOTES § D178).
+# have (NOTES § D143), `tokio-rustls` for the connector C2 needs to drive
+# its own handshake and read the API server's certificate (NOTES § D178), and
+# `libc` for `raise(SIGSTOP)` — raw mode clears `ISIG`, so a console that is
+# told `ctrl-z` has to suspend itself, and neither `std` nor `tokio` offers the
+# call or the platform's number for it (NOTES § D276).
 ALLOWED_CRATES = {
     "kube", "k8s-openapi", "ratatui", "crossterm", "tokio",
     "anyhow", "serde_json", "serde_yaml_ng", "x509-parser", "similar",
-    "futures-util", "tokio-rustls",
+    "futures-util", "tokio-rustls", "libc",
 }
 
 # Reserved names that cannot resolve to a real service (RFC 2606 / RFC 6761),

@@ -3327,3 +3327,43 @@ long-form version and stays the authority.*
   followed the mockups. With the follow-indicator gap above, the net is that the pane an operator
   lives in during an incident gives no position feedback at all. Pre-existing, a screen ruling
   before it is a code box. Found by `k8s-admin`, same report, 2026-09-20.
+
+- **The cleanup path takes a lock the thing that broke may already hold.** The panic
+  hook calls `handed_back()` → `crossterm::terminal::disable_raw_mode()`, which takes
+  `parking_lot::Mutex` (`crossterm-0.29.0/src/terminal/sys/unix.rs:14,148`), and that
+  mutex is not reentrant: a panic raised *inside* crossterm's own critical section
+  deadlocks the hook, so the process hangs with a raw terminal and prints nothing. Two
+  ioctls wide, so vanishingly unlikely — and **not new**: `ratatui::restore()` had the
+  same shape and ratatui's own chained hook still does. Recorded for the class, which
+  is invisible until it happens: *the cleanup path depends on the thing that broke*.
+  Found by `k8s-admin` ([reports/2026-09-24-the-terminal-handover.md](reports/2026-09-24-the-terminal-handover.md)
+  finding 7), 2026-09-24.
+
+- **`raise` stops one process; a tty ctrl-z stops the whole foreground group — and v0.4
+  is where that difference starts to matter.** `suspended()` uses
+  `libc::raise(libc::SIGSTOP)`, which signals this process only. Today nothing else is
+  in the group and a pipeline never opens a console at all (`at_a_keyboard`,
+  `src/main.rs:437`, needs a tty at both ends), so the two are indistinguishable. When
+  v0.4's `e` spawns `$EDITOR` into the same process group, a ctrl-z pressed while the
+  editor is up would stop the editor and not k8rs, or the reverse, depending on who
+  holds the terminal. The handover pair is already the shared one D24 asked for; what is
+  undecided is the *group*. Found by `k8s-admin`, same report § question 1, 2026-09-24.
+
+- **Two edges of a suspend during a write, bounded and unproven.** `ctrl-z` is deliberately
+  not refused while the **real** call is on the wire (D276's family; the refusal covers only
+  the dry-run window): SIGSTOP freezes every thread, so the audit line is delayed to `fg`,
+  not lost. Two cases nobody has run, both needing a cluster: a suspend longer than the API
+  server's request timeout, where an applied write is recorded as a connection error; and
+  `kill -9` while the process is stopped, where the server applied a write that no audit
+  line records. Neither is created by the handover — a laptop lid does the same — and both
+  are invariant 4's edge rather than its breach. Found by `tester`, step 5 of the handover
+  family, 2026-09-24.
+
+- **`just check`'s cross matrix silently checks nothing on the test host.** The run prints the
+  skip loudly and still exits `0`: all four release targets (`aarch64`/`x86_64` × musl and
+  darwin) are skipped because their std is not installed there, so since D267 moved every run
+  to that host, `just cross` has been a step that reports rather than a step that builds. CI
+  still runs them, which is why a break shows up at the push instead of at the gate — exactly
+  the shape `just check` exists to prevent (CLAUDE.md § Running it: a missing step is an
+  invisible gap). Fix is `rustup target add` ×4 on the host plus the linkers `cross` wants,
+  or a recorded decision that the matrix is CI's alone. Found by `tester`, 2026-09-24.

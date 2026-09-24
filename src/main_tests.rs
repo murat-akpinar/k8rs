@@ -13476,6 +13476,9 @@ fn bare_console<'a>() -> Console<'a> {
         // the same value `console()` starts with, so a test that presses a mutating key has to draw
         // a frame first, exactly as a reader does.
         offer: views::Offer::Nothing { switch: false },
+        // **Armed, which is every run that reached a keyboard** — the refusal `false` buys is its
+        // own test ([`ctrl_z_does_nothing_at_all_when_the_resume_could_not_be_armed`]).
+        resumable: true,
     }
 }
 
@@ -13514,12 +13517,12 @@ async fn a_storm_that_goes_quiet_ends_on_the_last_event_and_costs_one_frame() {
     // would paint the frame this test is trying to catch the coalescer not painting.
     tokio::spawn(async move {
         tokio::time::sleep(COALESCE * 10).await;
-        let _ = pressing.send(ratatui::crossterm::event::Event::Key(
+        let _ = pressing.send(Woke::Key(ratatui::crossterm::event::Event::Key(
             ratatui::crossterm::event::KeyEvent::new(
                 ratatui::crossterm::event::KeyCode::Char('q'),
                 ratatui::crossterm::event::KeyModifiers::NONE,
             ),
-        ));
+        )));
     });
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
@@ -13668,6 +13671,263 @@ fn q_and_ctrl_c_quit_and_a_write_on_the_wire_refuses_both() {
             "{pressed:?} quit out of a write that was still running"
         );
     }
+}
+
+/// **`ctrl-z` is answered from every mode and leaves that mode alone** (NOTES § D24): the handover
+/// is not a command, so neither a filter with focus nor an open dialog can swallow it — and those
+/// two are exactly the states [`pressed`] answers *before* it reaches the key map, which is why a
+/// key added to the map would have been unreachable from both.
+#[test]
+fn ctrl_z_suspends_from_every_mode_and_leaves_that_mode_alone() {
+    let store = a_cluster_with_cards();
+    let ctrl_z = || control(ratatui::crossterm::event::KeyCode::Char('z'));
+
+    let mut console = bare_console();
+    assert!(
+        matches!(keyed(&mut console, ctrl_z(), &store), Did::Suspend),
+        "`ctrl-z` with no mode open reached nothing"
+    );
+
+    // **While a filter has focus every printable key is text, and `ctrl-z` is not one of them**
+    // (`screens/widgets.md` § 2b).
+    let mut typing = bare_console();
+    let _ = keyed(&mut typing, typed('/'), &store);
+    assert!(typing.app.typing.is_some(), "`/` did not open the filter");
+    assert!(
+        matches!(keyed(&mut typing, ctrl_z(), &store), Did::Suspend),
+        "`ctrl-z` while typing was swallowed by the filter"
+    );
+    assert_eq!(
+        typing.app.typed().map(views::Input::text),
+        Some(""),
+        "`ctrl-z` put a `z` in the filter"
+    );
+
+    // **And from under a modal, which it leaves open**: `fg` comes back to the screen the reader
+    // left, so the suspend is not a `esc`.
+    let mut modal = bare_console();
+    modal.app.modal = Some(views::Modal::Help);
+    assert!(
+        matches!(keyed(&mut modal, ctrl_z(), &store), Did::Suspend),
+        "`ctrl-z` under Help reached nothing"
+    );
+    assert_eq!(
+        modal.app.modal,
+        Some(views::Modal::Help),
+        "the suspend closed Help"
+    );
+
+    // A bare `z` is not the key — `screens/help.md` binds no `z` at all.
+    assert!(
+        matches!(keyed(&mut bare_console(), typed('z'), &store), Did::Nothing),
+        "a bare `z` suspended the process"
+    );
+}
+
+/// **A console that could not arm `SIGCONT` does not stop at all** (PM ruling, 2026-09-24,
+/// [`may_stop`]): every recovery there is lives under `Woke::Resumed`, so a `ctrl-z` without it
+/// hands the terminal back and nothing ever takes it back — `fg` to a cooked tty and a dead
+/// keyboard, which is the failure this whole family exists to remove and which the red run for the
+/// signal arms measured. Never hand back a terminal you cannot take back.
+///
+/// **A key that does nothing is honest here**: it is what `ctrl-z` did before this box, and raw
+/// mode means the terminal raises nothing either way.
+#[test]
+fn ctrl_z_does_nothing_at_all_when_the_resume_could_not_be_armed() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    console.resumable = false;
+    assert!(
+        matches!(
+            keyed(
+                &mut console,
+                control(ratatui::crossterm::event::KeyCode::Char('z')),
+                &store
+            ),
+            Did::Nothing
+        ),
+        "`ctrl-z` handed the terminal back with nothing armed to take it back"
+    );
+}
+
+/// **The handover is two inverse sequences and each carries the cursor** (NOTES § D24,
+/// PRIOR-ART § D4) — the alternate screen *and* the cursor, which is the half `ratatui::restore`
+/// does not carry and the half a suspend cannot get from `Terminal::drop`.
+///
+/// **It is the sequence that is asserted and not the `ioctl`**: raw mode needs a real tty, these
+/// are bytes, and the bytes are what a `fg` that came back to a dead screen would be missing.
+///
+/// **Nothing here calls [`stopped`]**, which would stop the test binary with `SIGSTOP` and hang the
+/// suite until somebody found it — the composition is what a test can hold.
+#[test]
+fn the_handover_is_two_inverse_sequences_and_each_carries_the_cursor() {
+    let (mut given, mut taken) = (Vec::new(), Vec::new());
+    handover(&mut given, false).expect("a `Vec` takes the sequence");
+    handover(&mut taken, true).expect("a `Vec` takes the sequence");
+    let given = String::from_utf8(given).expect("the sequence is text");
+    let taken = String::from_utf8(taken).expect("the sequence is text");
+    // The canary: an empty sink passes every absence below (CLAUDE.md § A derived list asserts it
+    // found something).
+    assert!(
+        !given.is_empty() && !taken.is_empty(),
+        "the handover wrote nothing at all"
+    );
+
+    for (direction, wrote, alternate, cursor) in [
+        (
+            "handing the terminal back",
+            &given,
+            "\x1b[?1049l",
+            "\x1b[?25h",
+        ),
+        (
+            "taking the terminal back",
+            &taken,
+            "\x1b[?1049h",
+            "\x1b[?25l",
+        ),
+    ] {
+        assert!(
+            wrote.contains(alternate),
+            "{direction} left the alternate screen alone: {wrote:?}"
+        );
+        assert!(
+            wrote.contains(cursor),
+            "{direction} left the cursor alone: {wrote:?}"
+        );
+    }
+    // **Inverses, which is the claim a pair of one-way assertions does not make**: neither
+    // direction may carry the other's half, or a resume would hide the cursor it just showed.
+    assert!(
+        !given.contains("\x1b[?1049h") && !given.contains("\x1b[?25l"),
+        "handing the terminal back also took it: {given:?}"
+    );
+    assert!(
+        !taken.contains("\x1b[?1049l") && !taken.contains("\x1b[?25h"),
+        "taking the terminal back also gave it away: {taken:?}"
+    );
+}
+
+/// **The hook restores the terminal and *then* runs the one it replaced** (`screens/widgets.md`
+/// § 1, invariant 8) — and the stand-in underneath is what makes both halves visible: it stands in
+/// for ratatui's own restoring hook, so the list it appends to is the order the panic path ran in.
+///
+/// **This is the test `tester` F1 sent back, and the shape it sent back is why the seam moved.** A
+/// version that only counted the stand-in passed with `chain_panic_hook`'s body emptied — measured,
+/// not argued: with no chain installed the stand-in *is* the hook and runs anyway. What cannot pass
+/// is an order, so the restoring half is handed in and the order is the claim.
+///
+/// **The hook is process-global and this binary runs `main_tests`, `ops_tests` and `rules_tests` on
+/// N threads with six deliberate panic sites**, so the stand-in records only this thread's panic
+/// and forwards every other thread's to the hook it replaced — a stand-in that swallowed them would
+/// take away another thread's failure message for as long as this test holds the hook.
+#[test]
+fn the_panic_hook_restores_the_terminal_before_the_hook_it_chains_prints() {
+    let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (restoring, printing) = (std::sync::Arc::clone(&order), std::sync::Arc::clone(&order));
+    let mine = std::thread::current().id();
+    let libtest: std::sync::Arc<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync> =
+        std::sync::Arc::from(std::panic::take_hook());
+    let forwarding = std::sync::Arc::clone(&libtest);
+    std::panic::set_hook(Box::new(move |info| {
+        if std::thread::current().id() == mine {
+            printing
+                .lock()
+                .expect("the order")
+                .push("the hook underneath ran");
+        } else {
+            (*forwarding)(info);
+        }
+    }));
+    chain_panic_hook(move || {
+        // **The same thread guard as the stand-in below, and for the same reason**: without it
+        // another thread's panic appends here and reddens this test for somebody else's failure.
+        if std::thread::current().id() == mine {
+            restoring
+                .lock()
+                .expect("the order")
+                .push("the terminal went back");
+        }
+    });
+    let panicked = std::panic::catch_unwind(|| panic!("a canary, not a failure"));
+    std::panic::set_hook(Box::new(move |info| (*libtest)(info)));
+
+    assert!(panicked.is_err(), "the canary did not panic");
+    assert_eq!(
+        *order.lock().expect("the order"),
+        ["the terminal went back", "the hook underneath ran"],
+        "the panic path did not restore first and forward second"
+    );
+}
+
+/// **Each half of the pair writes its own direction** (`tester` F2) — the wrappers, not just
+/// [`handover`]: swapping the argument in either of them leaves the sequences perfectly inverse and
+/// the terminal perfectly wrong.
+///
+/// **The `ioctl` is the part no suite without a tty can reach**, so it is the part not asserted:
+/// `taken_back` answers `Err` here because `enable_raw_mode` has no terminal to work on, and the
+/// bytes it wrote before saying so are the claim.
+#[test]
+fn each_half_of_the_pair_writes_its_own_direction() {
+    let (mut back, mut taken) = (Vec::new(), Vec::new());
+    handed_back(&mut back).expect("handing a `Vec` back cannot fail: no raw mode was ever on");
+    let _ = taken_back(&mut taken);
+    let back = String::from_utf8(back).expect("the sequence is text");
+    let taken = String::from_utf8(taken).expect("the sequence is text");
+
+    assert!(
+        back.contains("\x1b[?1049l") && back.contains("\x1b[?25h"),
+        "`handed_back` did not give the screen and the cursor back: {back:?}"
+    );
+    assert!(
+        taken.contains("\x1b[?1049h") && taken.contains("\x1b[?25l"),
+        "`taken_back` did not take the screen and the cursor: {taken:?}"
+    );
+}
+
+/// **A resume hands the terminal back before it takes it, and then repaints** — the order is the
+/// whole of `k8s-admin` finding 1 and `tester` F4: `crossterm`'s `enable_raw_mode` returns `Ok(())`
+/// and touches no tty while it believes raw mode is on, so after an external `SIGTSTP` — which
+/// disabled nothing — a `taken_back` on its own leaves the terminal **cooked** and every key
+/// line-buffered, with the frame redrawn over the top of it.
+#[test]
+fn a_resume_gives_the_terminal_back_before_it_takes_it_and_then_repaints() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+    let at = Watching {
+        renewal: None,
+        coverage: k8s::Coverage::Cluster,
+    };
+    drawn(&mut terminal, &mut console, &store, &at).expect("the frame draws");
+    assert!(
+        screened(&terminal).contains("ALERTS"),
+        "not a console frame"
+    );
+
+    let mut wrote = Vec::new();
+    // `Err` here is the `enable_raw_mode` with no tty, the one part of this a suite cannot hold.
+    let _ = resumed(&mut wrote, &mut terminal);
+    let wrote = String::from_utf8(wrote).expect("the sequence is text");
+    let gave = wrote
+        .find("\x1b[?1049l")
+        .expect("the resume never gave the screen back");
+    let took = wrote
+        .find("\x1b[?1049h")
+        .expect("the resume never took the screen");
+    assert!(
+        gave < took,
+        "the resume took the terminal without giving it back first, so raw mode stayed off: \
+         {wrote:?}"
+    );
+
+    drawn(&mut terminal, &mut console, &store, &at).expect("the frame draws");
+    assert!(
+        screened(&terminal).contains("ALERTS"),
+        "the frame after a resume was the difference against a screen that is gone:\n{}",
+        screened(&terminal)
+    );
 }
 
 /// **`?` opens the key map and either of the two keys its own footer names closes it**
@@ -14883,7 +15143,13 @@ fn framed(console: &mut Console<'_>, store: &k8s::Store) -> String {
         coverage: k8s::Coverage::Cluster,
     };
     drawn(&mut terminal, console, store, &at).expect("the frame draws");
-    let buffer = terminal.backend().buffer().clone();
+    screened(&terminal)
+}
+
+/// **What a test backend is holding, as lines** — [`framed`]'s own reading, split out for the test
+/// that draws twice into one terminal and asks what was on it in between.
+fn screened(terminal: &ratatui::Terminal<ratatui::backend::TestBackend>) -> String {
+    let buffer = terminal.backend().buffer();
     (0..buffer.area.height)
         .map(|row| {
             (0..buffer.area.width)
@@ -14892,6 +15158,48 @@ fn framed(console: &mut Console<'_>, store: &k8s::Store) -> String {
         })
         .collect::<Vec<String>>()
         .join("\n")
+}
+
+/// **A resumed terminal is cleared, and the frame after it is sent whole** (NOTES § D24,
+/// [`repainted`]) — the two halves of the repaint, and each of them is passed by code that does
+/// only the other: a screen cleared without the buffer reset draws nothing at all next frame, and a
+/// buffer reset without the clear leaves the shell's scrollback under our cells.
+///
+/// **This is the claim the real run made fail.** `Terminal::clear` — the obvious call — reads the
+/// cursor position off stdin, which the key thread owns, so `fg` ended the run instead of redrawing
+/// it (test host, 2026-09-24). A `TestBackend` answers that read from a field and would have
+/// passed.
+#[test]
+fn a_repaint_clears_the_screen_and_makes_the_next_frame_a_whole_one() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+    let at = Watching {
+        renewal: None,
+        coverage: k8s::Coverage::Cluster,
+    };
+    drawn(&mut terminal, &mut console, &store, &at).expect("the frame draws");
+    // The canary: what follows is about a frame that was really there.
+    assert!(
+        screened(&terminal).contains("ALERTS"),
+        "not a console frame:\n{}",
+        screened(&terminal)
+    );
+
+    repainted(&mut terminal).expect("the repaint");
+    assert!(
+        !screened(&terminal).contains("ALERTS"),
+        "the screen kept the frame a suspend gave away:\n{}",
+        screened(&terminal)
+    );
+
+    drawn(&mut terminal, &mut console, &store, &at).expect("the frame draws");
+    assert!(
+        screened(&terminal).contains("ALERTS"),
+        "the frame after a repaint was the difference against a screen that is gone:\n{}",
+        screened(&terminal)
+    );
 }
 
 /// **The three frames this wiring can draw, read off the screen** — still loading, cards, and the
@@ -15233,10 +15541,17 @@ fn a_confirmation_refuses_every_key_its_footer_does_not_name() {
     installed(&mut console, Published::Opening(an_open_dialog()));
 
     // While the check is out: no key does anything, and the box stays.
+    //
+    // **`ctrl-z` is in this list and is answered nowhere near the others** (NOTES § D24,
+    // `k8s-admin` finding 3): `ops::CHECK_DEADLINE` is 35 s of `CLOCK_MONOTONIC` and that clock
+    // runs while a process is stopped, so a suspend over an open confirmation comes back to *"k8rs
+    // waited 35 seconds to check this change and nothing came back"* — about a cluster that was
+    // never slow. It is the one window [`may_stop`] closes.
     for pressed in [
         key(ratatui::crossterm::event::KeyCode::Enter),
         key(ratatui::crossterm::event::KeyCode::Esc),
         typed('q'),
+        control(ratatui::crossterm::event::KeyCode::Char('z')),
     ] {
         assert!(
             matches!(keyed(&mut console, pressed.clone(), &store), Did::Nothing),
@@ -15267,6 +15582,22 @@ fn a_confirmation_refuses_every_key_its_footer_does_not_name() {
             asks: None,
         },
     );
+    // **And `ctrl-z` works again the instant it answers** (`screens/help.md` § Rules: *"both keys
+    // work again the instant it answers"*). This is the other side of the window above, and the
+    // only assertion that can tell [`may_stop`]'s `waiting()` from a guard that asked merely *is a
+    // box open* — measured: dropping it leaves all 1540 green (`tester`, 2026-09-24).
+    assert!(
+        matches!(
+            keyed(
+                &mut console,
+                control(ratatui::crossterm::event::KeyCode::Char('z')),
+                &store
+            ),
+            Did::Suspend
+        ),
+        "`ctrl-z` stayed inert after the check had answered"
+    );
+
     let answered = keyed(
         &mut console,
         key(ratatui::crossterm::event::KeyCode::Enter),
@@ -16206,12 +16537,12 @@ async fn a_storm_that_keeps_coming_is_still_redrawn_inside_the_window() {
     // Long after the storm, for the reason the quiet-storm test sends it late: a key draws at once.
     tokio::spawn(async move {
         tokio::time::sleep(spans * 4).await;
-        let _ = pressing.send(ratatui::crossterm::event::Event::Key(
+        let _ = pressing.send(Woke::Key(ratatui::crossterm::event::Event::Key(
             ratatui::crossterm::event::KeyEvent::new(
                 ratatui::crossterm::event::KeyCode::Char('q'),
                 ratatui::crossterm::event::KeyModifiers::NONE,
             ),
-        ));
+        )));
     });
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))

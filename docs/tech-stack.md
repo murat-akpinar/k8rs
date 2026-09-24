@@ -20,9 +20,10 @@
 | X.509 | **x509-parser** | Certificate expiry warnings. Hand-parsing ASN.1 dates in a security-adjacent path is the wrong place to be clever. |
 | Diff | **similar** *(v0.4)* | The diff shown before an edit is applied — the thing that makes `e` safe to press. Approved, but it enters the build with `edit`, not before. |
 
-Full dependency list (**twelve** crates approved; eleven ship in v0.1, `similar`
-arrives with `edit` in v0.4). **The last two were reversals of invariant 10 and
-neither added compiled code**, which is the only shape that reversal takes here.
+Full dependency list (**thirteen** crates approved; twelve ship in v0.1,
+`similar` arrives with `edit` in v0.4). **The last three were reversals of
+invariant 10 and none added compiled code**, which is the only shape that
+reversal takes here.
 The eleventh, `futures-util`: `kube-runtime` returns `impl Stream`, `Stream` is
 not in `std`, and the crate was already linked under `kube-client`
 ([NOTES § D143](../NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)).
@@ -45,14 +46,15 @@ x509-parser     # certificate expiry
 similar         # edit diff
 futures-util    # StreamExt::next — the only way to drive kube's watcher
 tokio-rustls    # C2's handshake — re-exports rustls, so one name covers both
+libc            # raise(SIGSTOP) and three signal constants — Ctrl-Z, nothing else
 ```
 
 Three of these were added by the 2026-08-11 scope reversal — `serde_yaml_ng`,
 `x509-parser` and `similar`. Everything above them predates it; the two below
-were the invariant-10 reversals above.
+were the invariant-10 reversals above, with `libc` the third.
 
 **What is actually in `Cargo.toml` today** — approved is not the same as present,
-and **three** of the twelve have not arrived yet: `crossterm`, `anyhow` and
+and **three** of the thirteen have not arrived yet: `crossterm`, `anyhow` and
 `similar`. Counted with
 `for c in …; do grep -qE "^$c = " Cargo.toml || echo $c; done`, not recalled —
 this line said *four* before `futures-util` landed and *five* while
@@ -71,6 +73,7 @@ manifest cannot drift away from the one `ratatui-crossterm` chose.
 | `futures-util` | `0.3.34` | Phase 5 | `std`, no defaults — the narrow crate, not the `futures` facade |
 | `tokio-rustls` | `0.26.4` | Phase 5 | no defaults — the connector C2's handshake is driven with |
 | `serde_yaml_ng` | `0.10.0` | Phase 6 | — — the first arrival that is not free: `Cargo.lock` 213 → 218 |
+| `libc` | `0.2.189` | Phase 12 | default features, which `tokio` already enables anyway — `raise` plus `SIGSTOP`/`SIGTSTP`/`SIGCONT`; already linked under `tokio`, so `Cargo.lock` stays at 319 ([D276](../NOTES.md#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24)) |
 | `serde_json` | `1` | Phase 3, as a **dev**-dependency | — |
 | `ratatui` | `0.30.2` | Phase 8, as a **dev**-dependency ([D238](../NOTES.md#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)); moved into `[dependencies]` by Phase 11's layout box, the change that first draws a screen ([D249](../NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)) | — — arriving cost `Cargo.lock` 218 → 319; **the move itself resolves nothing new** — the lock is unchanged at 319 — and what it does change is where those packages sit: `cargo tree -e no-dev` matched **zero** ratatui lines when D238 wrote that row and matches them now, over 257 distinct packages in the graph `cargo install` builds (measured 2026-09-06) |
 

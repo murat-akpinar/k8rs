@@ -378,6 +378,13 @@ const TITLE: &str = " Keys ";
 /// fit. The two separators are what bought them. It is denser, the screen file says so, and every
 /// full-body mockup on that page is drawn without a separator row.
 ///
+/// **`ctrl-z` shares `y`'s row, and which row it shares is the screen file's ruling** (that file's
+/// § Rules, 2026-09-24): `y`'s is the one row no other state on this page ever rewrites — `X`'s is,
+/// under *While the call is running* — so a second key can sit in its right-hand column without a
+/// state being able to take half the row away. It is under *Looking at things*, so a dead-writes
+/// run keeps it while the whole *Changing things* block goes (NOTES § D259 ruling 5, § D265). No
+/// row was added and none removed: still sixteen.
+///
 /// **`s`'s row says the key is not built yet, in every state this screen draws** (that file's
 /// § Rules, rewritten 2026-09-24): entering a target count has no screen of its own —
 /// `screens/dialogs.md` § Choosing how many, before the confirm box specifies the step and says
@@ -393,7 +400,7 @@ const HELP: &str = "  Moving around
     l  logs, with the log from before a crash
        in the log tab:  f follow · c container · ⇧p previous
     d  describe — the object and what happened to it
-    y  view as YAML
+    y  view as YAML            ctrl-z  back to your shell — type fg
   Changing things (each one asks first, and shows the command)
     s       not built yet — there is no way yet to type a copy count
             works on a deployment, a statefulset and a replicaset

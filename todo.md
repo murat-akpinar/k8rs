@@ -4665,15 +4665,31 @@ which also corrected the mechanism that box used to order).
       ([PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted))
       ([D274](NOTES.md#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24) ·
       [reports/2026-09-24-the-console-event-loop.md](reports/2026-09-24-the-console-event-loop.md))
-- [ ] **Ctrl-Z (SIGTSTP) hands the terminal back properly** — leave raw mode
+- [x] **Ctrl-Z (SIGTSTP) hands the terminal back properly** — leave raw mode
       and the alternate screen on suspend, re-enter on resume. Without it the
       shell gets a raw-mode terminal and `fg` returns to a dead screen. It is
       the same handover `e` needs in v0.4, so it is written once here and
-      reused ([NOTES § D24](NOTES.md#d24--ctrl-z))
-- [ ] Panic-safe terminal teardown (`Drop` guard + panic hook, no token in
+      reused ([NOTES § D24](NOTES.md#d24--ctrl-z)).
+      Landed 2026-09-24 with the box below, as one family
+      ([D276](NOTES.md#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24) ·
+      [D277](NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)):
+      the key, an external `kill -TSTP` and an uncatchable `kill -STOP` all come
+      back through one `SIGCONT` door, and `ctrl-z` does not stop at all when
+      that door could not be armed. **Proven by `just suspend`**
+      (`scripts/suspend-test.py`, 30 checks against the real binary on a real
+      pty, three stop doors), because nothing in the suite can reach a raw-mode
+      `ioctl` or a `SIGSTOP`
+- [x] Panic-safe terminal teardown (`Drop` guard + panic hook, no token in
       backtraces). There is no temp file to clean up in v0.1 — `edit` is the
       only thing that makes one, and it lands in v0.4 with that clause added
-      back to this gate
+      back to this gate.
+      Landed 2026-09-24: the guard is armed **before** `ratatui::try_init()`,
+      which does not fail atomically, and the hook **chains** ratatui's rather
+      than replacing it ([screens/widgets.md](screens/widgets.md) § 1). No
+      product code panics — zero `unwrap`/`expect`/`panic!` across the eight
+      files — so no payload of ours can carry a credential
+      ([D277](NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)
+      ruling 5 holds what the test could and could not be made to prove)
 - [ ] Flags from `std::env::args`: `--read-only`, `--context`, `--namespace`,
       `--once`. Four booleans-and-strings is still not a reason for clap; the
       threshold is a flag needing validation, or a subcommand

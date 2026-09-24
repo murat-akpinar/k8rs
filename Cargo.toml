@@ -49,6 +49,14 @@ exclude = [
 k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
 x509-parser = "0.18.1"
 
+# **`raise(SIGSTOP)` and three signal constants — that is the whole of it**
+# (NOTES § D276). Raw mode clears `ISIG`, so Ctrl-Z arrives as a key and
+# suspending is something the program has to do to itself; `std` and `tokio`
+# offer neither the call nor the numbers, and the numbers differ on the two
+# darwin targets CI builds. Already linked under `tokio`, so naming it leaves
+# `Cargo.lock` at 319 packages.
+libc = "0.2.189"
+
 # The client and the watch machinery Phase 5 is built on. **4.2.0 is the version
 # that pairs with the pin above**, read off the crates.io index rather than
 # guessed: kube 4.x requires `k8s-openapi ^0.28.0` and 3.1.0 requires `^0.27.0`,
@@ -77,9 +85,9 @@ kube = { version = "4.2.0", default-features = false, features = [
     "ring",
 ] }
 
-# Required by kube-rs, and later the single `select!` loop. Two features now —
-# a runtime and `#[tokio::main]`; `signal` and `time` arrive with the box that
-# needs them rather than being reserved here.
+# Required by kube-rs, and later the single `select!` loop. A runtime and
+# `#[tokio::main]`, plus the three named below as the boxes that need them
+# arrived.
 tokio = { version = "1.53.1", default-features = false, features = [
     "rt-multi-thread",
     "macros",
@@ -101,6 +109,15 @@ tokio = { version = "1.53.1", default-features = false, features = [
     # adds no code; naming it is what stops a *bound on a security-relevant wait*
     # from resting on a transitive crate's feature choice.
     "time",
+    # **`signal` for job control, and it is the box's own requirement**
+    # ([NOTES § D24](NOTES.md), `k8s-admin`
+    # `reports/2026-09-24-the-terminal-handover.md` § 3). `kill -STOP` cannot be
+    # caught, so `SIGCONT` is the only signal a resume can be recovered through,
+    # and `tokio::signal::unix` is the only way to reach one from inside the
+    # single `select!` without a second loop (invariant 7). Measured, not
+    # assumed: see the report in the turn that added it — `cargo tree` and the
+    # `Cargo.lock` package count before and after.
+    "signal",
 ] }
 
 # **The eleventh crate, and the first reversal of invariant 10** (D178 is the
