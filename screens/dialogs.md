@@ -9,28 +9,38 @@ language **above** the command, never instead of it.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│    ┌ Scale payments/web ──────────────────────────────────────┐    │
-│    │                                                          │    │
-│    │  This starts 1 more copy of your app.                    │    │
-│    │  Right now: 2 copies. After: 3 copies.                   │    │
-│    │                                                          │    │
-│    │  The cluster checked it first and accepted it.           │    │
-│    │                                                          │    │
-│    │  $ kubectl scale deployment/web --replicas=3 -n payments │    │
-│    │                                                          │    │
-│    │              [ ⏎ do it ]    [ esc cancel ]               │    │
-│    └──────────────────────────────────────────────────────────┘    │
+│   ┌ Scale payments/web ─────────────────────────────────────────┐  │
+│   │                                                             │  │
+│   │  This starts 1 more copy of your app.                       │  │
+│   │  Right now: 2 copies. After: 3 copies.                      │  │
+│   │                                                             │  │
+│   │  The cluster checked it first and accepted it.              │  │
+│   │                                                             │  │
+│   │  $ kubectl --context prod-eu scale deployment/web -n paymen…│  │
+│   │                                                             │  │
+│   │                [ ⏎ do it ]    [ esc cancel ]                │  │
+│   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ ⏎ do it  esc cancel                                                │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+**This box is [`CROWDED_BOX`](widgets.md#5-the-modal-layer) now, 61 columns of
+interior, not the 58 this section used to draw** — [`CONFIRM_BOX`] is retired,
+not merely unused today: read against every `$` line on this page (below),
+`--context` makes 58 columns unreachable for **any** command this box could
+ever draw, not just this one, because `--context` is unconditional
+([§ The context flag never disappears without a trace either](#the-context-flag-never-disappears-without-a-trace-either),
+below). `box_width`'s own choice between the two collapses to one value for
+every `Confirm` with a `$` line — `dev-ui`'s to simplify, not this file's to
+keep drawing a branch that can no longer be taken.
+
 **The strip shows whatever was already there, not this dialog's own
-command.** `$ kubectl get pods -n payments` above stands for *an earlier,
-unrelated read* — the same stand-in [§ The object went away while the
+command.** `$ kubectl --context prod-eu get pods -n payments` above stands
+for *an earlier, unrelated read* — the same stand-in [§ The object went away while the
 dialog was open](#the-object-went-away-while-the-dialog-was-open) already
 draws for exactly that reason. Nothing has been sent yet at the frame drawn
 above: the dry-run is still to come ([§ While the check is still on the
@@ -117,20 +127,20 @@ check to wait on (§ *The verdict line* below).
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│    ┌ Scale payments/web ──────────────────────────────────────┐    │
-│    │                                                          │    │
-│    │  This starts 1 more copy of your app.                    │    │
-│    │  Right now: 2 copies. After: 3 copies.                   │    │
-│    │                                                          │    │
-│    │  Checking with the cluster — up to 35 seconds…           │    │
-│    │                                                          │    │
-│    │  $ kubectl scale deployment/web --replicas=3 -n payments │    │
-│    │                                                          │    │
-│    │              [ ⏎ do it ]    [ esc cancel ]               │    │
-│    └──────────────────────────────────────────────────────────┘    │
+│   ┌ Scale payments/web ─────────────────────────────────────────┐  │
+│   │                                                             │  │
+│   │  This starts 1 more copy of your app.                       │  │
+│   │  Right now: 2 copies. After: 3 copies.                      │  │
+│   │                                                             │  │
+│   │  Checking with the cluster — up to 35 seconds…              │  │
+│   │                                                             │  │
+│   │  $ kubectl --context prod-eu scale deployment/web -n paymen…│  │
+│   │                                                             │  │
+│   │                [ ⏎ do it ]    [ esc cancel ]                │  │
+│   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ waiting for the cluster                                            │
 └────────────────────────────────────────────────────────────────────┘
@@ -245,12 +255,14 @@ and the frame that follows draws a live `esc dismiss`
 
 ### When the object's own name does not fit
 
-`payments/web` is short enough that the title and the `$` line never have to
-give way. A real cluster's names are not always that short, and two
-Deployments that differ only in their own tail — a canary and a stable
-rollout of the same service — used to draw byte-identical boxes: the old rule
-cut the combined `namespace/name` from its tail, which is exactly where the
-two differ
+`payments/web` is short enough that the **title** never has to give way —
+but the `$` line now does, for every object on this page, the instant
+`--context` joins it
+([§ Scale, above](#scale--confirm-with-dry-run)). A real cluster's names are
+not always as short as `web` either, and two Deployments that differ only in
+their own tail — a canary and a stable rollout of the same service — used to
+draw byte-identical boxes: the old rule cut the combined `namespace/name`
+from its tail, which is exactly where the two differ
 ([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
 Both the title and the `$` line now use [the identity cut](widgets.md#7-text-that-came-from-the-api),
 front-cutting the namespace and keeping the object's own name in full — the
@@ -280,31 +292,32 @@ below); then `-n`'s own **value**, character by character, never its flag
 name, which the strip's identical line can still lose
 ([§ The namespace flag never disappears without a
 trace](#the-namespace-flag-never-disappears-without-a-trace), below, for why
-and for what `box_width` does about it); only if the bare
-`kubectl <verb> <kind>/<name>` still does not fit does the **name** itself —
-never the `kind/` in front of it — give way, the same front-cut way as the
-title:
+and for what `box_width` does about it); then, only once `-n`'s value is
+already bare, `--context`'s own **value**, character by character too, never
+its flag name
+([§ The context flag never disappears without a trace
+either](#the-context-flag-never-disappears-without-a-trace-either), below);
+only if `kubectl --context… <verb> <kind>/<name> -n…`, every value already
+bare, still does not fit does the **name** itself — never the `kind/` in
+front of it — give way, the same front-cut way as the title:
 
 ```
-$ kubectl scale deployment/…ckout-worker-service-canary -n…
-$ kubectl scale deployment/…ckout-worker-service-stable -n…
+$ kubectl --context… scale deployment/…r-service-canary -n…
+$ kubectl --context… scale deployment/…r-service-stable -n…
 
-$ kubectl rollout restart deployment/…er-service-canary -n…
-$ kubectl rollout restart deployment/…er-service-stable -n…
+$ kubectl --context… rollout restart deployment/…canary -n…
+$ kubectl --context… rollout restart deployment/…stable -n…
 ```
 
-Both boxes above are `CROWDED_BOX` now, not `CONFIRM_BOX` — restart already
-needed the wider box (§ *Printed instead of drawn*, below, on why restart's
-box is the crowded one); scale needs it too, the moment its own `$` line
-needs any cut at all
-([§ The namespace flag never disappears without a
-trace](#the-namespace-flag-never-disappears-without-a-trace), below, ruling
-2) — with nothing left over: `--replicas=3` is gone, the name has front-cut
-to fit, and `-n` is still standing — only its value gave way, down to the
-bare flag. That is the honest floor of what this line can say at 80×24 for a
-name this long: still a line a reader can tell two Deployments apart by, and
-still one that tells the reader a namespace belongs here, which the box it
-replaces was not.
+Both boxes above are `CROWDED_BOX` — the only width a `Confirm` with a `$`
+line ever draws now
+([§ Scale, above](#scale--confirm-with-dry-run)). Nothing is left over:
+`--replicas=3` is gone, `-n` and `--context` have both already given up their
+whole value for a bare flag, and the name has still had to front-cut to fit.
+That is the honest floor of what this line can say at 80×24 for a name this
+long: still a line a reader can tell two Deployments apart by, and still one
+that tells the reader a namespace and a context both belong here, which the
+box it replaces was not.
 
 ### The namespace flag never disappears without a trace
 
@@ -374,34 +387,160 @@ this width.**
    [the identity cut's own case 3](widgets.md#7-text-that-came-from-the-api)
    already front-cutting the name itself, where this line's floor and the
    strip's meet again.
-2. **`box_width` reads the `$` line too, not only the consequence.**
-   `CONFIRM_BOX` wins only when the whole `$` line — `kind/name`, every
-   flag, `-n`'s value in full — already fits its own room with **no cut of
-   any kind**. The moment any cut is needed at all, `box_width` picks
-   `CROWDED_BOX` first, the same way it already does for a consequence that
-   does not fit at `CONFIRM_BOX`'s own room — so a longer name spends its
-   three extra columns before ruling 1's own cut ever has to choose what to
-   drop. Measured, this is exactly enough for the worked example above:
-   `kubectl scale deployment/checkout-worker --replicas=3 -n…` is 57
-   columns, `CROWDED_BOX`'s own `$`-line budget to the character. **No
-   third box width** — reusing the existing wider standard is what keeps
-   [widgets.md § 5](widgets.md#5-the-modal-layer)'s "three standard widths,
-   never a bespoke fit per mockup" true of this rule too.
+2. **`box_width` reads the `$` line too, not only the consequence.** With
+   `CONFIRM_BOX` retired ([§ Scale, above](#scale--confirm-with-dry-run)),
+   every `Confirm` with a `$` line draws at `CROWDED_BOX` regardless — but
+   the reasoning this ruling states outlives the box it was written against:
+   a longer name (or context) spends the width `box_width` gives it before
+   ruling 1's own cut, or ruling 3's, below, ever has to choose what to drop.
+   **Measured, at `CROWDED_BOX`'s 57-column budget, the worked example above
+   now needs both floors, not one**: `kubectl --context prod-eu scale
+   deployment/checkout-worker --replicas=3 -n payments-production` is 94
+   columns uncut; `--replicas=3` gives way
+   whole (ruling 1's own first step, unchanged), `-n`'s value gives way to a
+   bare flag (ruling 1) and `--context`'s value still has to give up all but
+   one character to fit beside it:
+   ```
+   $ kubectl --context p… scale deployment/checkout-worker -n…
+   ```
+   57 columns, to the character — one more floor spent than this section
+   used to need, because `--context` did not exist here when ruling 2 was
+   first written. **No third box width** — reusing the existing wider
+   standard is what keeps [widgets.md § 5](widgets.md#5-the-modal-layer)'s
+   "three standard widths, never a bespoke fit per mockup" true of this rule
+   too.
 
-Restart and Delete never reach ruling 2 in practice — `-n` is their only
-flag, so `CROWDED_BOX` is already where their own consequence or typed-name
-field puts them regardless — and ruling 1 alone is already exactly what
-their own boxes draw today:
-`$ kubectl rollout restart deployment/checkout-worker -n pa…` and
-`$ kubectl delete pod/checkout-worker-7d9f4b6c8-x2k9w -n pa…`
-([reports/2026-09-20-the-four-behaviours.md §
-5](../reports/2026-09-20-the-four-behaviours.md#5-commandcut-over-the-lines-the-product-composes-at-their-drawn-widths)) —
-unchanged by this section, and the reason ruling 1 is written as a general
-rule rather than a scale-specific patch: it was already true wherever `-n`
-happened to be the only flag standing, and now it is true wherever `-n` is
-not.
+**Restart and Delete no longer stop at ruling 1 either, now that `--context`
+is on every line.** This section used to end here, because `-n` was the only
+flag either of them ever had to protect and ruling 1 alone already answered
+for both. That stopped being true the moment `--context` joined the head
+([§ The context flag never disappears without a trace
+either](#the-context-flag-never-disappears-without-a-trace-either), next) —
+today's own worked restart example already needs it
+([§ Restart, above](#restart--confirm-with-dry-run)) even at the short demo
+name this page opens with, `payments/web`, let alone a name as long as
+`checkout-worker`'s:
+`$ kubectl --context… rollout restart deployment/…worker -n…` and
+`$ kubectl --context… delete pod/…worker-7d9f4b6c8-x2k9w -n…`
+— both past ruling 1 and past the context floor and into the identity cut's
+own front-cut of the name, the same floor
+[§ When the object's own name does not fit](#when-the-objects-own-name-does-not-fit)
+already draws for scale and restart on the canary/stable pair.
 
-### Printed instead of drawn — scale on the headless surface
+### The context flag never disappears without a trace either
+
+`--context` sits in front of the object's own `kind/name` token
+([NOTES § D8](../NOTES.md#d8--invariant-4-was-not-literally-true),
+[context.md § What the command log shows](context.md#what-the-command-log-shows--and-what-it-must-not)) —
+every taught command carries it, whether or not the reader typed `--context`
+themselves, because the line has to reach the same cluster whether the reader
+named it or the picker did
+([context.md](context.md), `dev-ui`'s ruling). That makes it part of
+[`command_cut`](widgets.md#7-text-that-came-from-the-api)'s protected head, the
+same head the object's own `kind/name` token already never gives way whole
+from — so, structurally, **a cut $ line can never silently name the wrong
+cluster**: pasting a truncated command either runs against the connected
+cluster in full, or fails outright for a missing flag, never against some
+other context (`--context`'s value may shrink; the flag itself is never one of
+the words a trailing-flag walk-back can drop).
+
+**But `command_cut` did not yet have a floor for what happens once the
+protected head itself — `kubectl --context <value> <verb> <kind>/<name>` —
+does not fit `room`, only a rule for what happens once it does.** Before this
+round, the one fallback for *the head alone is too wide* front-cut the
+object's own name (already shown for the canary/stable pair, above) or, where
+even the `fixed` prefix up to the object's own `/` already spent the whole
+budget, fell straight to a raw tail-cut of the **entire line** — the one
+fallback [`command_cut`]'s own doc comment already called *"never reached at
+the 80×24 floor."* `--context` was the thing that made it reachable: measured
+against exactly this page's own opening demo, `payments/web` in `prod-eu`,
+restart's protected head alone — `kubectl --context prod-eu rollout restart
+deployment/web` — is 56 columns, three over the 53 `CROWDED_BOX` leaves for
+it once `-n`'s value has already gone bare, and the existing fallback answers
+with `deployment…`: the whole word `deployment` kept, the `/web` after it —
+the object's own name, the one thing this box exists to confirm — gone
+entirely, with nothing marking that anything was ever there.
+
+**The fix is the same shape ruling 1 above already gave `-n`, extended one
+flag further in, with one difference: `--context`'s value degrades only once
+`-n`'s already has, and its flag never disappears whole, not even at the
+identity cut's own extreme.** Both differences are the same fact stated
+twice: a namespace typo is a mistake contained to one cluster the reader
+already meant to reach; a context that silently vanished is not. So the order
+this line's floors give way in, weakest first:
+
+1. Every trailing flag but `-n`, whole (`--replicas=3`) — unchanged, ruling 1
+   above.
+2. `-n`'s own value, character by character, down to a bare `-n…` —
+   unchanged, ruling 1 above.
+3. **`--context`'s own value, character by character, down to a bare
+   `--context…` — new.** The flag name is never one of the words this line
+   drops; only what follows it shrinks, exactly the protection `-n`'s flag
+   already has, one step earlier in the order because a namespace is worth
+   less to protect than a cluster.
+4. Only once both flags are already bare and the line still does not fit does
+   the object's own name front-cut, the identity cut's own case 3 — the same
+   floor § *When the object's own name does not fit* already draws, now
+   reached one flag later than it used to be.
+
+Measured against this page's own restart demo, `payments/web` in `prod-eu`,
+at step 3: `kubectl --context pro… rollout restart deployment/web -n…` — 57
+columns, `CROWDED_BOX`'s own budget to the character, drawn in full at
+[§ Restart, above](#restart--confirm-with-dry-run). `checkout-worker`'s own
+longer name needs step 4 too, drawn at
+[§ When the object's own name does not fit](#when-the-objects-own-name-does-not-fit)
+and again in the previous section's own closing paragraph.
+
+**This floor belongs inside [`command_cut`] itself, not a dialog-only
+wrapper.** `-n`'s own floor lives in [`namespaced_cut`], a wrapper the strip
+never calls — the strip is free to drop `-n` whole once its value is spent,
+because by the time the strip draws that line the real call has already gone
+out with the right namespace on it
+([§ The namespace flag never disappears without a
+trace](#the-namespace-flag-never-disappears-without-a-trace), ruling 1). No
+such argument excuses `--context`: the strip's own command log line carries
+`--context` on every read too, not only on a mutation
+([context.md § What the command log shows](context.md#what-the-command-log-shows--and-what-it-must-not)),
+and a strip line that silently dropped it would teach exactly the same wrong
+lesson a dialog's `$` line would. `--context`'s value therefore degrades
+inside [`command_cut`] itself, where every caller — the strip's own
+[`STRIP_CUT`], the dialog's [`CUT`], and [`namespaced_cut`]'s own call into it
+for the head — gets the floor for free, the same "one rule, six call sites"
+shape the identity cut already has
+([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)). **This is a
+`dev-ui` change, not a `screens/` one** — the rule above is what the line has
+to draw; `command_cut`'s own word-by-word walk is where it is implemented.
+
+### A context name long enough to need this on its own
+
+`prod-eu` is nine characters and already needs step 3 on restart's own demo,
+above — a real kubeconfig is not always that short. GKE's own naming
+convention, `gke_<project>_<zone>_<cluster>`, routinely runs past 40:
+`gke_my-project-12345_us-central1_prod-cluster` is 45. Measured at
+`CROWDED_BOX`'s 57-column budget, every kind this page confirms:
+
+```
+$ kubectl --context gke_my-projec… scale deployment/web -n…
+$ kubectl --context gke… rollout restart deployment/web -n…
+$ kubectl --context gke_my-projec… delete pod/web-7d9f4 -n…
+```
+
+Restart gives up the most of the three — its own longer verb leaves the
+least room, the same reason it reached step 3 first on the short demo name
+too — but every one of them still names `deployment/web` or `pod/web-7d9f4`
+in full: the object never pays for the context's own length, whatever that
+length is, because ruling 4's floor sits *after* every character of it is
+already spent. **Cluster-scoped delete has the most room of the four**,
+because nothing competes with `--context` for it — no `-n`, no trailing
+flag:
+
+```
+$ kubectl --context gke_my-project-1234… delete node/node-3
+```
+
+Still legible as *which cluster, roughly* and unambiguous about *which
+node* — the one identity this box exists to confirm never gives way to make
+room for a name k8rs did not choose the length of.
 
 The box above draws the consequence as two lines, but there is exactly one
 `consequence: String` on `ops::Mutation` — no second field for the count
@@ -438,7 +577,7 @@ column count runs out, so this is what actually reaches the screen:
 deployment/web in payments
 This stops all 3 copies of your app — nothing will be left running. Right now: 3
  copies. After: 0 copies.
-$ kubectl scale deployment/web --replicas=0 -n payments
+$ kubectl --context prod-eu scale deployment/web --replicas=0 -n payments
 ```
 
 That break is the terminal's doing, not k8rs's — a wider terminal draws it
@@ -460,27 +599,27 @@ confirm box, for a kind that supports scaling and a login that may use it.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│    ┌ Scale payments/web ──────────────────────────────────────┐    │
-│    │                                                          │    │
-│    │  Right now: 2 copies.                                    │    │
-│    │                                                          │    │
-│    │  How many do you want?                                   │    │
-│    │  ┌────────────────────────────────────────────────────┐  │    │
-│    │  │ 3_                                                 │  │    │
-│    │  └────────────────────────────────────────────────────┘  │    │
-│    │                                                          │    │
-│    │              [ ⏎ next ]     [ esc cancel ]               │    │
-│    └──────────────────────────────────────────────────────────┘    │
+│   ┌ Scale payments/web ─────────────────────────────────────────┐  │
+│   │                                                             │  │
+│   │  Right now: 2 copies.                                       │  │
+│   │                                                             │  │
+│   │  How many do you want?                                      │  │
+│   │  ┌───────────────────────────────────────────────────────┐  │  │
+│   │  │ 3_                                                    │  │  │
+│   │  └───────────────────────────────────────────────────────┘  │  │
+│   │                                                             │  │
+│   │                [ ⏎ next ]     [ esc cancel ]                │  │
+│   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ type a number to enable  esc cancel                                │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 **The frame is Scale's own, not a second dialog kind.** Same nested-box
-width (60/58, this page's own [§ Scale](#scale--confirm-with-dry-run)), same
+width (63/61, this page's own [§ Scale](#scale--confirm-with-dry-run)), same
 title — `Scale payments/web` never changes across this step and the confirm
 box that follows it, because both are one flow the reader experiences as one
 dialog with two pages. `⏎ next` replaces `⏎ do it` because nothing is sent
@@ -492,8 +631,9 @@ exactly as it does today.
 this page has been sent by the time this box is open — not even a dry-run —
 so [§ While the check is still on the wire](#while-the-check-is-still-on-the-wire)'s
 own rule already covers it: the command log's line for this mutation
-appears once its real call actually goes out, never before. `$ kubectl get
-pods -n payments` above is a stand-in for *whatever was already there*, the
+appears once its real call actually goes out, never before. `$ kubectl
+--context prod-eu get pods -n payments` above is a stand-in for *whatever was
+already there*, the
 same convention [§ The object went away while the dialog was
 open](#the-object-went-away-while-the-dialog-was-open) already uses.
 
@@ -594,13 +734,13 @@ them — and they are fixed text, not this file's to reword (D224).
 │   │  A paused deployment will not start until you resume it.    │  │
 │   │  The cluster checked it first and accepted it.              │  │
 │   │                                                             │  │
-│   │  $ kubectl rollout restart deployment/web -n payments       │  │
+│   │  $ kubectl --context pro… rollout restart deployment/web -n…│  │
 │   │                                                             │  │
 │   │                [ ⏎ do it ]    [ esc cancel ]                │  │
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ ⏎ do it  esc cancel                                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -611,21 +751,24 @@ Scale's** ([§ Rules for every dialog on this page](#rules-for-every-dialog-on-t
 rule 7) — the frame's own `$` line, one row above the buttons, is what
 teaches this command while the dialog is still asking.
 
-**This box is wider than scale's, and shorter on blank lines, and both are
-the same decision** — [widgets.md § 5](widgets.md#5-the-modal-layer) has the
-general rule; this section used to derive it on its own instead. Scale's
-nested box is 58 columns of interior with a 4-column margin on each side;
-none of the three consequence sentences here fit that box without either
-dropping a clause D224 put there on purpose or running past 24 rows once the
-paused warning is added below. So the box widens to the next standard, 61,
-with the left margin narrowing to 3 to keep the right margin clear of the
-outer frame at 2 — and the blank line that would ordinarily sit between the
-consequence and the dry-run verdict (the one scale keeps) is gone, because
-the paused variant below needs that row and the two states of one dialog
-should not be shaped differently. The consequence is still one string,
-wrapped to the box width exactly as scale's is (§ *Printed instead of drawn*
-below) — the wrap points shown are this box's choice of where to break for
-readability, not a second field.
+**This box is drawn at the same 61 columns Scale's now is, and that used to
+be two different reasons landing on two different widths.** Before `--context`
+joined every taught command, none of the three consequence sentences here fit
+[`CONFIRM_BOX`]'s 58 columns without either dropping a clause D224 put there on
+purpose or running past 24 rows once the paused warning is added below, so
+this box alone widened to [`CROWDED_BOX`]'s 61. **`CONFIRM_BOX` is retired now**
+([§ Scale, above](#scale--confirm-with-dry-run)) — every command on this page
+carries `--context`, so no `$` line ever fits 58 columns any more, and Scale's
+own box moved to 61 for that reason before Restart's consequence ever gets a
+vote. The two dialogs land on the same width for two different, unrelated
+facts — one page-wide (`--context`), one this dialog's own (D224's three
+sentences) — not because either caused the other. The blank line that would
+ordinarily sit between the consequence and the dry-run verdict (the one scale
+keeps) is still gone here, because the paused variant below still needs that
+row and the two states of one dialog should not be shaped differently. The
+consequence is still one string, wrapped to the box width exactly as scale's
+is (§ *Printed instead of drawn* below) — the wrap points shown are this box's
+choice of where to break for readability, not a second field.
 
 The statefulset and daemonset consequences are the same shape, wrapped the
 same way, in a box that is otherwise identical but for the title and the `$`
@@ -635,11 +778,17 @@ line:
   with a new one, working down from the highest-numbered copy. How many stop
   at the same time, how far down it goes, and whether it waits for you to
   delete a copy yourself are all settings on this statefulset."
-  `$ kubectl rollout restart statefulset/web -n payments`
+  `$ kubectl --context pr… rollout restart statefulset/web -n…`
 - **daemonset** — "This asks Kubernetes to replace the copy of your app on
   each node it runs on. How many nodes it takes at a time, and whether it
   waits for you to delete a copy yourself, are settings on this daemonset."
-  `$ kubectl rollout restart daemonset/web -n payments`
+  `$ kubectl --context prod… rollout restart daemonset/web -n…`
+
+Both already need the context floor
+([§ The context flag never disappears without a trace either](#the-context-flag-never-disappears-without-a-trace-either),
+below) — `statefulset` is a longer kind word than `deployment` and `daemonset`
+sits between the two — so both give up more of `prod-eu` than the deployment
+example above does, at the same 57-column budget.
 
 **The dry-run verdict is real even though the taught command has no
 `--dry-run` flag.** `kubectl rollout restart` cannot check itself; the
@@ -673,13 +822,13 @@ not moved, over a command that would have told the operator so itself
 │   │  the command above will refuse to run until then.           │  │
 │   │  The cluster checked it first and accepted it.              │  │
 │   │                                                             │  │
-│   │  $ kubectl rollout restart deployment/web -n payments       │  │
+│   │  $ kubectl --context pro… rollout restart deployment/web -n…│  │
 │   │                                                             │  │
 │   │                [ ⏎ do it ]    [ esc cancel ]                │  │
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ ⏎ do it  esc cancel                                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -718,13 +867,13 @@ variant:
 │   │  A paused deployment will not start until you resume it.    │  │
 │   │  Checking with the cluster — up to 35 seconds…              │  │
 │   │                                                             │  │
-│   │  $ kubectl rollout restart deployment/web -n payments       │  │
+│   │  $ kubectl --context pro… rollout restart deployment/web -n…│  │
 │   │                                                             │  │
 │   │                [ ⏎ do it ]    [ esc cancel ]                │  │
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ waiting for the cluster                                            │
 └────────────────────────────────────────────────────────────────────┘
@@ -825,7 +974,7 @@ deployment/web in payments
 This asks Kubernetes to replace every copy of your app with a new one. How many 
 stop at the same time is a setting on this deployment — it can be a few, or all 
 of them at once. A paused deployment will not start until you resume it.
-$ kubectl rollout restart deployment/web -n payments
+$ kubectl --context prod-eu rollout restart deployment/web -n payments
 This deployment is paused, so nothing will be replaced until somebody resumes it
  with kubectl rollout resume — and the command above will refuse to run until th
 en.
@@ -919,7 +1068,7 @@ has not checked whether anything will.
 │   │  replace it — k8rs has not checked whether anything did.    │  │
 │   │  k8rs did not check this one with the cluster first.        │  │
 │   │                                                             │  │
-│   │  $ kubectl delete pod/web-7d9f4 -n payments                 │  │
+│   │  $ kubectl --context prod-eu delete pod/web-7d9f4 -n paymen…│  │
 │   │                                                             │  │
 │   │  Type the pod's name to confirm:                            │  │
 │   │  ┌───────────────────────────────────────────────────────┐  │  │
@@ -930,7 +1079,7 @@ has not checked whether anything will.
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ type the name to enable  esc cancel                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -938,17 +1087,21 @@ has not checked whether anything will.
 
 **The `$` line was missing from this box before, in the nested frame** — a
 gap against rule 3 below ("the command is shown"), now closed the same way
-§ Scale's and § Restart's own frames already were: `kubectl delete
-pod/web-7d9f4 -n payments`, the kind spelled out in full, no `--dry-run` and
-no `propagationPolicy` flag. **Every `Confirm` box draws its `$` line inside
-the frame, delete included, and the strip stays exactly as it was before the
-dialog opened** — it only appends the instant the operator actually agrees
-to something ([`views::Log`](../src/views.rs),
+§ Scale's and § Restart's own frames already were: `kubectl --context prod-eu
+delete pod/web-7d9f4 -n payments` — 57 columns of room and 60 to show, so
+`-n`'s value already gives up its last character to the context floor
+([§ The context flag never disappears without a trace
+either](#the-context-flag-never-disappears-without-a-trace-either)) — the
+kind spelled out in full, no `--dry-run` and no `propagationPolicy` flag.
+**Every `Confirm` box draws its `$` line inside the frame, delete included,
+and the strip stays exactly as it was before the dialog opened** — it only
+appends the instant the operator actually agrees to something
+([`views::Log`](../src/views.rs),
 [D233 ruling 1](../NOTES.md#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05)),
 and for `delete` specifically nothing is sent at all until the typed name is
 confirmed
 ([D225 ruling 1](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)) —
-so `$ kubectl get pods -n payments` above stands for whatever unrelated
+so `$ kubectl --context prod-eu get pods -n payments` above stands for whatever unrelated
 command was already on the strip, not this delete; only the frame teaches
 it while the dialog is still asking
 ([§ Rules for every dialog on this page](#rules-for-every-dialog-on-this-page),
@@ -974,8 +1127,8 @@ leaves them; the mechanism does not change per operation, only the numbers.
 **This box narrows to 61 columns of interior for the same reason § Restart's
 did** — the general rule is [widgets.md § 5](widgets.md#5-the-modal-layer)'s,
 not derived separately here. The two sentences and the typed-name field
-together do not fit § Scale's 58, and 61 is as far as the nested box goes
-before it touches the outer frame. The blank line that would ordinarily sit
+together do not fit retired [`CONFIRM_BOX`]'s 58, and 61 is as far as the
+nested box goes before it touches the outer frame. The blank line that would ordinarily sit
 between the consequence and the verdict is gone, for the same reason
 § Restart's paused variant dropped it: the row it would occupy is spent on
 the typed-name field that § Scale's and § Restart's boxes do not have. **This
@@ -1001,26 +1154,29 @@ the same one three times:
   every copy of the app it runs. k8rs has not read what may be attached to
   it, and something there may delay this or act first — left alone,
   nothing is left running."
-  `$ kubectl delete deployment/web -n payments`
+  `$ kubectl --context prod-eu delete deployment/web -n payme…`
 - **statefulset** — "This asks the cluster to remove the statefulset and
   every copy of the app it runs. k8rs has not read what may be attached to
   it, and something there may delay this or act first — left alone,
   nothing is left running."
-  `$ kubectl delete statefulset/web -n payments`
+  `$ kubectl --context prod-eu delete statefulset/web -n paym…`
 - **daemonset** — "This asks the cluster to remove the daemonset and the
   copy of the app it runs on every node. k8rs has not read what may be
   attached to it, and something there may delay this or act first — left
   alone, nothing is left running."
-  `$ kubectl delete daemonset/web -n payments`
+  `$ kubectl --context prod-eu delete daemonset/web -n paymen…`
 - **replicaset** — "This removes the replicaset and every pod it manages.
   Whatever created it will normally replace it — k8rs has not checked
   whether anything did."
-  `$ kubectl delete replicaset/web-9f3a2 -n payments`
+  `$ kubectl --context prod-eu delete replicaset/web-9f3a2 -n…`
 
 *Left alone* carries the same weight *asks* does above: it names the common
 case — nothing attached, nothing to hold the delete up — without claiming
 it is the only one, which "nothing is left running" did on its own until
-this round.
+this round. All four already need the namespace floor at this width, now
+that `--context` sits in front of every one of them
+([§ The context flag never disappears without a trace
+either](#the-context-flag-never-disappears-without-a-trace-either)).
 
 ### Node — the one a beginner reads backwards
 
@@ -1040,7 +1196,7 @@ below: the bare `node-3`, never `infra/node-3`.
 │   │  delay this or act first. Left alone, its pods are deleted  │  │
 │   │  and the machine keeps running until its kubelet restarts.  │  │
 │   │  k8rs did not check this one with the cluster first.        │  │
-│   │  $ kubectl delete node/node-3                               │  │
+│   │  $ kubectl --context prod-eu delete node/node-3             │  │
 │   │  Type the node's name to confirm:                           │  │
 │   │  ┌───────────────────────────────────────────────────────┐  │  │
 │   │  │ node-_                                                │  │  │
@@ -1050,7 +1206,7 @@ below: the bare `node-3`, never `infra/node-3`.
 │   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get nodes --watch                                        │
+│ $ kubectl --context prod-eu get nodes --watch                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ type the name to enable  esc cancel                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -1178,7 +1334,7 @@ $ echo web-7d9f4 | k8rs ops delete pod/web-7d9f4 -n payments
 pod/web-7d9f4 in payments
 This removes the pod. Whatever created it will normally replace it — k8rs has no
 t checked whether anything did.
-$ kubectl delete pod/web-7d9f4 -n payments
+$ kubectl --context prod-eu delete pod/web-7d9f4 -n payments
 k8rs did not check this one with the cluster first
 type the object's own name and press enter to go ahead — anything else stops it:
 k8rs: the change was made
@@ -1202,7 +1358,7 @@ node/node-3
 This asks the cluster to remove its record of node-3, not the machine. Something
  attached to it, unread by k8rs, may delay this or act first. Left alone, its po
 ds are deleted and the machine keeps running until its kubelet restarts.
-$ kubectl delete node/node-3
+$ kubectl --context prod-eu delete node/node-3
 k8rs did not check this one with the cluster first
 type the object's own name and press enter to go ahead — anything else stops it:
 k8rs: the cluster accepted this and the object is still there — something is del
@@ -1287,7 +1443,7 @@ whether it was the check or the real call that hit it:
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc dismiss  ⏎ open                                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -1301,7 +1457,7 @@ other still-open dialog on this page
 rule 7). **`delete` reaching this same state is the one case on this page
 where that is not true**, because `delete` has no check to hit a `409`
 at — its only call is the real one, so a `delete` landing here already sent
-`$ kubectl delete pod/web-7d9f4 -n payments` for real, and the strip should
+`$ kubectl --context prod-eu delete pod/web-7d9f4 -n payments` for real, and the strip should
 show it with the outcome mark [§ The command log's own line, while a call is
 running or just after](#the-command-logs-own-line-while-a-call-is-running-or-just-after)
 already draws for a real send, not the unrelated placeholder above. This
@@ -1429,7 +1585,7 @@ own quoted words:
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc dismiss  ⏎ open                                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -1440,8 +1596,8 @@ them ever puts anything new on the strip** — the same rule as every other
 still-open dialog on this page
 ([§ Rules for every dialog on this page](#rules-for-every-dialog-on-this-page),
 rule 7): the button never arms, so there is no *"the real change"* for
-`views::Log` to have sent. `$ kubectl get pods -n payments` above stands for
-whatever was already there, the same stand-in [§ The object went away while
+`views::Log` to have sent. `$ kubectl --context prod-eu get pods -n payments`
+above stands for whatever was already there, the same stand-in [§ The object went away while
 the dialog was open](#the-object-went-away-while-the-dialog-was-open)
 already draws.
 
@@ -1528,7 +1684,7 @@ deleted while you were typing its name
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -n payments                                     │
+│ $ kubectl --context prod-eu get pods -n payments                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc dismiss                                                        │
 └────────────────────────────────────────────────────────────────────┘
@@ -1883,7 +2039,7 @@ indicator. Counts, not a spinner — a changing number is information
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl drain node-3 --ignore-daemonsets   …                     │
+│ $ kubectl --context prod-eu drain node-3 --ignore-daemonsets   …   │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc stop draining                                                  │
 └────────────────────────────────────────────────────────────────────┘

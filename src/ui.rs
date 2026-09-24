@@ -197,12 +197,16 @@ const STRIP_CUT: &str = "...";
 /// margins are not a second choice: they are whatever centring one of these in the body leaves,
 /// which is [`boxed`]'s one `Rect::centered` and never a table of hand-computed rectangles.
 ///
-/// The default, for a `Confirm` whose content fits it (`screens/dialogs.md` § Scale).
-const CONFIRM_BOX: u16 = 58;
-
-/// **[`CONFIRM_BOX`] does not fit** — a consequence past [`CONSEQUENCE_LINES`], or the
-/// typed-name field (`screens/dialogs.md` § Restart, § Delete). It is close to the real ceiling:
-/// the smaller margin cannot drop below 2 without touching the outer frame, and 61 leaves 2.
+/// **The width every `Confirm` is drawn at** — `screens/dialogs.md` § Scale, § Restart, § Delete.
+/// It is close to the real ceiling: the smaller margin cannot drop below 2 without touching the
+/// outer frame, and 61 leaves 2.
+///
+/// **There were two, and `CONFIRM_BOX`'s 58 is retired** (`screens/dialogs.md` § Scale, the
+/// paragraph under its box; NOTES § D278). A `Confirm` used to drop to 58 where its whole command
+/// already fit that box's own `$` room; since every taught line carries `--context`
+/// unconditionally, no command such a box can draw fits 58 any more — so the narrower width was
+/// not merely unused, it was unreachable, and a branch nothing can take is a branch no mutation
+/// sweep can kill.
 const CROWDED_BOX: u16 = 61;
 
 /// **A dismiss-only box** — `Refused` and `Gone`, which have no `$ kubectl …` line and no input
@@ -215,13 +219,23 @@ const DISMISS_BOX: u16 = 54;
 /// on the box and not on what is left of it after a pad.
 ///
 /// **Two columns is measured rather than chosen**: at `61 - 2` the restart and delete
-/// consequences wrap onto exactly the lines `screens/dialogs.md` draws them on, and at `58 - 2`
-/// the scale box holds its 55-column `$ kubectl scale …` line whole, which is the widest single
-/// thing any box has to fit.
+/// consequences wrap onto exactly the lines `screens/dialogs.md` draws them on.
+///
+/// **The second half of that measurement is gone with `CONFIRM_BOX`** (NOTES § D278). It read
+/// *"at `58 - 2` the scale box holds its 55-column `$ kubectl scale …` line whole, which is the
+/// widest single thing any box has to fit"*, and both halves stopped being true when every
+/// taught line grew `--context`: there is no 58-column box any more, and the `$` line is no
+/// longer the widest thing that has to fit **whole** — it is the one thing on these boxes that is
+/// now always cut ([`command_cut`], [`namespaced_cut`], [`context_cut`]).
 const MODAL_MARGIN: &str = "  ";
 
-/// **The two lines § Scale draws its consequence on** — and the test for whether a `Confirm` box
-/// can stay at [`CONFIRM_BOX`] (`screens/dialogs.md` § Scale, *the box draws these as two lines*).
+/// **The two lines § Scale draws its consequence on** — and the test for whether the blank row
+/// between the consequence and the verdict is kept (`screens/dialogs.md` § Scale, *the box draws
+/// these as two lines*; `screens/widgets.md` § 5).
+///
+/// **It used to decide the box's width too, and that half retired with `CONFIRM_BOX`**
+/// (NOTES § D278). What it says has not changed — *this box's text is short enough to have a row
+/// to spare* — only which of the two things that row buys.
 const CONSEQUENCE_LINES: usize = 2;
 
 /// **The columns the container picker guarantees a name, whatever its state word costs**
@@ -291,7 +305,7 @@ const BUTTON_GAP: &str = "    ";
 /// **How far in from each side of the body the cluster picker's box sits** — read off
 /// `screens/context.md` § The picker, whose 62-column box sits three columns in on a 68-column
 /// body. **The margin is fixed and the box is not**: a wider terminal widens the name slot and
-/// nothing else (that file's § The tag column), which is why this is not one of [`CONFIRM_BOX`]'s
+/// nothing else (that file's § The tag column), which is why this is not one of [`CROWDED_BOX`]'s
 /// three widths.
 const PICK_MARGIN: u16 = 3;
 
@@ -679,8 +693,9 @@ pub struct Screen<'a> {
     /// its order. A caller holding that join could say `admin` over dead keys.
     pub context: Stripped,
     /// **The connected context's kubeconfig sets `insecure-skip-tls-verify`**, which [`header`]
-    /// draws as the zone's TLS warning. Its writer is Phase 12, from the `current` row of
-    /// `k8s::contexts(&kubeconfig, context)` (NOTES § D265 ruling 8).
+    /// draws as the zone's TLS warning. It is written from the `current` row of
+    /// `k8s::contexts(&kubeconfig, context)` — the row `--context` asked for and not the
+    /// kubeconfig's own, which is `crate::main`'s `tls_unverified` (NOTES § D265 ruling 8).
     pub insecure: bool,
     /// The Alerts list, in the three answers a pane has (`crate::views::Pane`) — and a refusal
     /// carries whatever did come back with it, which is what the banner is drawn *over*.
@@ -845,15 +860,11 @@ pub enum Writes<'a> {
     /// was introduced to close.
     ///
     /// **It carries no sentence and drops no banner**: [`header`] says `read-only`, and [`help`]'s
-    /// *Changing things* row says the flag was asked for ([`Writes::why`], NOTES § D265). Nothing
-    /// in product code constructs it yet — the command line reaches it at Phase 12's flags box.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "`--read-only` off the command line is the flags box (todo.md § Phase 12)"
-        )
-    )]
+    /// *Changing things* row says the flag was asked for ([`Writes::why`], NOTES § D265).
+    ///
+    /// **`crate::main`'s `opening` is what constructs it**, off `--read-only` on the command line
+    /// (todo.md § Phase 12's flags box) — and that run opens no audit log at all, so this variant
+    /// and [`Writes::Unaudited`] cannot both be true of one run.
     ReadOnly,
     /// **[`crate::ops::audit_log`] could not open the log**, carrying the sentence it returned.
     Unaudited(&'a str),
@@ -1989,8 +2000,8 @@ fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, scr
 /// **The width is the caller's only choice and the margins are nobody's.** `Rect::centered` is
 /// `Layout` twice — vertical then horizontal — which is the one helper § 5 requires every modal
 /// to share, and what it leaves each side is the margin. At the 68 columns that file measures
-/// against, [`CONFIRM_BOX`] leaves 4/4, [`CROWDED_BOX`] 3/2 and [`DISMISS_BOX`] 6/6; at the real
-/// floor's 78 the same call leaves 9/9, 8/7 and 11/11. **Neither set is written down anywhere in
+/// against, [`CROWDED_BOX`] leaves 3/2 and [`DISMISS_BOX`] 6/6; at the real floor's 78 the same
+/// call leaves 8/7 and 11/11. **Neither set is written down anywhere in
 /// this file**, which is the point of § 5's *not six hand-computed rectangles*.
 ///
 /// **It answers with the box's inner area**, which is where [`pick`] draws its [`scrollbar`].
@@ -2052,22 +2063,16 @@ fn margined<'a>(text: &str, columns: usize, style: Style) -> Vec<Line<'a>> {
 /// `screens/dialogs.md` § Restart's *the two states of one dialog should not be shaped
 /// differently*, which is why its plain box is drawn at the width its paused variant needs.
 ///
-/// **The `$` line has a vote and it is *no cut at all*** (`screens/dialogs.md` § The namespace
-/// flag never disappears without a trace, ruling 2; `screens/widgets.md` § 5's table).
-/// [`CONFIRM_BOX`] wins only where the whole command — `kind/name`, every flag, `-n`'s value in
-/// full — already fits that box's own `$` room; the moment any cut is needed, the wider box is
-/// what a longer name spends before [`namespaced_cut`] has to choose what to drop. Measured:
-/// `kubectl scale deployment/checkout-worker --replicas=3 -n…` is 57 columns, which is
-/// [`CROWDED_BOX`]'s own `$` budget to the character, and at [`CONFIRM_BOX`] the same scale lost
-/// `-n payments-production` whole (`reports/2026-09-20-the-four-behaviours.md` § 5).
-fn box_width(dialog: &views::Dialog) -> u16 {
-    let fits = wrapped(&dialog.consequence, room(CONFIRM_BOX)).len() <= CONSEQUENCE_LINES;
-    let whole = width(&dialog.kubectl) <= command_room(CONFIRM_BOX);
-    if dialog.asks.is_none() && fits && whole {
-        CONFIRM_BOX
-    } else {
-        CROWDED_BOX
-    }
+/// **There is one width now, and this is where the second one used to be chosen**
+/// (`screens/dialogs.md` § Scale, NOTES § D278). The narrow box won only where the whole command
+/// — `kind/name`, every flag, `-n`'s value in full — already fit its own `$` room, 54 columns.
+/// Every taught line carries `--context` now, and the shortest such command any of these boxes
+/// draws is past that before its object is named, so the condition is permanently false rather
+/// than merely unused: `dialog.asks`, the consequence's wrapped length and the command's width
+/// cannot between them reach it. A branch nothing can take is a branch no mutation sweep can
+/// kill, so it is gone rather than left standing with a comment.
+fn box_width(_dialog: &views::Dialog) -> u16 {
+    CROWDED_BOX
 }
 
 /// **The columns a box's `$ kubectl …` line has for the command itself** — [`room`] less the `$`
@@ -2213,10 +2218,12 @@ fn typed_name(dialog: &views::Dialog, columns: usize, screen: &Screen) -> Vec<Li
 /// the field, so a `$` row inside it would put the frame two rows past the 24 this product is
 /// drawn to.
 ///
-/// **The blank row between the consequence and the verdict belongs to the [`CONFIRM_BOX`] box**
-/// (`screens/widgets.md` § 5: kept whenever there is room, dropped first — before any sentence is
-/// cut — whenever there is not). A box that had to widen is a box that had no room, so widening
-/// is what spends it: § Scale keeps the row, § Restart and § Delete do not.
+/// **The blank row between the consequence and the verdict is gone with the narrow box**
+/// (NOTES § D278). It was drawn only at `CONFIRM_BOX`, on the argument that a box which had to
+/// widen is a box that had no room — and since every taught line carries `--context`, no
+/// `Confirm` reaches that width, so the row was already unreachable before it was removed. What
+/// `screens/widgets.md` § 5 still governs is the four blanks below, which are given up in order
+/// while the box is over [`MODAL_ROWS`].
 fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Screen) {
     let width = box_width(dialog);
     let columns = room(width);
@@ -2244,12 +2251,22 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
     // the command and the field it belongs to, then the one under the verdict; the row above the
     // buttons is the last to go, because a button pressed by mistake is what these boxes exist to
     // prevent.
-    let full = hard
-        + consequence.len()
-        + warning.len()
-        + usize::from(width == CONFIRM_BOX)
-        + usize::from(field > 0)
-        + 2;
+    // **The blank between the consequence and the verdict is kept where the box does not need
+    // that row for something else** — an extra sentence, or the typed-name field
+    // (`screens/widgets.md` § 5, which names both). It was `width == CONFIRM_BOX` and went with
+    // the narrow box (NOTES § D278); [`CONSEQUENCE_LINES`] is what that width was really reading,
+    // and it is read here directly now. § Scale's two rows keep it; § Restart's four and
+    // § Delete's field do not. It is still [`give`]'s to drop first when the ceiling bites.
+    let spare_row = consequence.len() + warning.len() <= CONSEQUENCE_LINES && field == 0;
+    // **`spare_row` is deliberately not in this sum, and that is provable rather than an
+    // oversight.** It needs `consequence.len() + warning.len() <= CONSEQUENCE_LINES` and no
+    // field, which caps the sum at `hard` (4) + 2 + 0 + 0 + 2 = 8 — five rows under
+    // [`MODAL_ROWS`]. A box that keeps the row therefore can never be over the ceiling, so
+    // counting it here could only ever change `over` from 0 to 0. `just mutants-diff` is what
+    // asked: with the term in, `+` → `-` on it was unobservable by construction, and a term no
+    // fixture can reach is a term no test can defend. **If [`CONSEQUENCE_LINES`] rises or
+    // `MODAL_ROWS` falls until the two can overlap, it comes back with a fixture that sees it.**
+    let full = hard + consequence.len() + warning.len() + usize::from(field > 0) + 2;
     let mut over = full.saturating_sub(MODAL_ROWS);
     let give = |over: &mut usize, wanted: bool| {
         if wanted && *over > 0 {
@@ -2259,9 +2276,7 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
             wanted
         }
     };
-    // **`b1` belongs to the [`CONFIRM_BOX`] box** — a box that had to widen is a box that had no
-    // room, so widening is what spends it (§ Scale keeps this row, § Restart and § Delete do not).
-    let under_text = give(&mut over, width == CONFIRM_BOX);
+    let under_text = give(&mut over, spare_row);
     let under_command = give(&mut over, field > 0);
     let under_verdict = give(&mut over, true);
     let above_buttons = give(&mut over, true);
@@ -5927,8 +5942,18 @@ fn command_cut<'a>(line: &'a str, columns: usize, mark: &str) -> Cow<'a, str> {
     if let Some(at) = kept {
         return Cow::Owned(format!("{}{mark}", line[..at].trim_end()));
     }
-    let object = line[..head_end].rfind([' ', '/']).map_or(0, |at| at + 1);
-    let (fixed, name) = line[..head_end].split_at(object);
+    // **The head itself does not fit, and [`CONTEXT_FLAG`]'s value is what pays before the object
+    // does** (`screens/dialogs.md` § The context flag never disappears without a trace either).
+    // A head that fits once its context is spent is the whole answer; one that does not hands the
+    // *shortened* head on, so the object front-cut below pays after every character of the
+    // context is already gone and never instead of it.
+    let head_text = match context_cut(&line[..head_end], columns, mark) {
+        Some(cut) if width(&cut) <= columns => return Cow::Owned(cut),
+        Some(cut) => Cow::Owned(cut),
+        None => Cow::Borrowed(&line[..head_end]),
+    };
+    let object = head_text.rfind([' ', '/']).map_or(0, |at| at + 1);
+    let (fixed, name) = head_text.split_at(object);
     match columns
         .checked_sub(width(fixed))
         .map(|left| front(name, left, mark))
@@ -5936,6 +5961,100 @@ fn command_cut<'a>(line: &'a str, columns: usize, mark: &str) -> Cow<'a, str> {
         Some(name) if !name.is_empty() => Cow::Owned(format!("{fixed}{name}")),
         _ => tailed(line, columns, mark),
     }
+}
+
+/// **The flag every taught `kubectl` line carries, with the spaces that make its value the next
+/// word** (NOTES § D278 ruling 5, `screens/context.md` § What the command log shows).
+const CONTEXT_FLAG: &str = " --context ";
+
+/// **[`CONTEXT_FLAG`]'s own value, spent a character at a time so the object never pays for a
+/// name k8rs did not choose the length of** (`screens/dialogs.md` § The context flag never
+/// disappears without a trace either; § A context name long enough to need this on its own).
+/// `None` is *this line has no `--context` on it*, which is every line drawn before that flag
+/// existed and every one a kubeconfig gave no context name for.
+///
+/// **It is inside [`command_cut`] and not a wrapper beside it, which is where the `-n` floor
+/// lives.** [`namespaced_cut`] can be a wrapper because the strip is free to drop `-n` whole: by
+/// the time the strip draws that line the real call has already gone out with the right namespace
+/// on it. No such argument excuses this flag — the strip's own command log carries `--context` on
+/// every *read* too, and a strip line that silently dropped it would teach the same wrong lesson
+/// a `$` line would. So every caller gets the floor: the strip's [`STRIP_CUT`], a box's [`CUT`],
+/// and [`namespaced_cut`]'s own call in for the head.
+///
+/// **The flag name itself is never one of the words that drop.** Where not one character of the
+/// value fits, the space before it goes with the value and `--context…` stands — so a cut `$`
+/// line can never silently name the wrong cluster: pasted, it either reaches the connected
+/// cluster or fails outright for a missing value, never some *other* context.
+///
+/// **It answers best-effort rather than refusing**, because a head still too wide with the value
+/// wholly gone is not this floor's failure: it is the object front-cut's turn, and that cut has
+/// to be made against the head this already shortened (`screens/dialogs.md` § When the object's
+/// own name does not fit, whose canary/stable pair draws both cuts on one line).
+/// **How `ops::pasteable` closes a single-quoted word, and the four bytes that are not it** —
+/// close, escape, quote, reopen, which is the only way a `'` can appear inside one.
+const QUOTE_ESCAPE: &str = r"'\''";
+
+/// **Where a quoted value ends** — the offset of the first `'` in `quoted` that is not the start
+/// of a [`QUOTE_ESCAPE`], or `None` where nothing closes it.
+///
+/// **It parses what `ops::pasteable` writes and does not re-derive the rule** (NOTES § D278
+/// ruling 5): the quoting belongs to that function, and a second spelling of *when a quote is a
+/// close* here is how the writer and the reader come to disagree.
+///
+/// **The naive `find('\'')` was wrong on exactly one framing and `tester` found it** (2026-09-24,
+/// NOTES § D31): for a context named `it's prod`, `pasteable` writes `'it'\''s prod'`, whose
+/// first inner `'` is the escape's own — so the value was read as `'it'` and everything after it
+/// joined `rest`, which [`context_cut`] holds out of the budget. The cluster's name paid the
+/// whole cut and the object front-cut to `deployment/…b` beside a surviving `\''s prod'`. That is
+/// the same sentence the space framing already taught, reached through the escape instead.
+fn closing_quote(quoted: &str) -> Option<usize> {
+    // **[`str::match_indices`] drives this and a cursor does not, so it ends whatever the
+    // arithmetic below says.** Written as a `while let` over `quoted[at..].find('\'')` with `at`
+    // advanced by hand, `just mutants-diff` turned `here + QUOTE_ESCAPE.len()` into `here *
+    // QUOTE_ESCAPE.len()` — zero at the first quote, so `at` never moved and the mutant **hung**
+    // rather than failing (2026-09-24, reported as a 90-second TIMEOUT). A parser that can spin
+    // is worse than one that answers wrongly: the wrong answer is caught by a test and the spin
+    // takes the frame with it. `skip` now only *filters* the quotes this iterator already found.
+    let mut skip = 0;
+    for (at, _) in quoted.match_indices('\'') {
+        if at < skip {
+            continue;
+        }
+        if quoted[at..].starts_with(QUOTE_ESCAPE) {
+            skip = at + QUOTE_ESCAPE.len();
+            continue;
+        }
+        return Some(at);
+    }
+    None
+}
+
+fn context_cut(head: &str, columns: usize, mark: &str) -> Option<String> {
+    let at = head.find(CONTEXT_FLAG)?;
+    let from = at + CONTEXT_FLAG.len();
+    // **A quoted value is one word however many spaces are inside it** (`ops::pasteable`, which
+    // quotes a context name the shell would not read whole — `--context 'prod eu'`). Split on
+    // the first space instead and the tail of the name becomes part of `rest`, which survives
+    // the cut the *name* was supposed to pay for: measured, `'prod eu; echo pwned'` kept
+    // `eu; echo pwned'` and lost `'prod`, which teaches a line naming no cluster at all.
+    let end = match head[from..].strip_prefix('\'') {
+        Some(quoted) => closing_quote(quoted).map_or(head.len(), |close| from + 1 + close + 1),
+        None => head[from..]
+            .find(' ')
+            .map_or(head.len(), |next| from + next),
+    };
+    let (before, value, rest) = (&head[..from], &head[from..end], &head[end..]);
+    // The space before the value belongs to the value, and goes when nothing of it is kept.
+    let bare = format!("{}{mark}{rest}", &head[..from - 1]);
+    Some(
+        match columns
+            .checked_sub(width(before) + width(mark) + width(rest))
+            .map(|spare| fits(value, spare))
+        {
+            Some(part) if !part.is_empty() => format!("{before}{part}{mark}{rest}"),
+            _ => bare,
+        },
+    )
 }
 
 /// **The flag a `Confirm`'s `$` line protects, with the space that makes it the second-to-last

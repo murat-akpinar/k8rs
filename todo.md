@@ -4690,9 +4690,21 @@ which also corrected the mechanism that box used to order).
       files — so no payload of ours can carry a credential
       ([D277](NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)
       ruling 5 holds what the test could and could not be made to prove)
-- [ ] Flags from `std::env::args`: `--read-only`, `--context`, `--namespace`,
+- [x] Flags from `std::env::args`: `--read-only`, `--context`, `--namespace`,
       `--once`. Four booleans-and-strings is still not a reason for clap; the
-      threshold is a flag needing validation, or a subcommand
+      threshold is a flag needing validation, or a subcommand.
+      Landed 2026-09-24 over four review rounds
+      ([D278](NOTES.md#d278--the-flags-box-what-had-to-be-ruled-before-it-could-be-briefed-a-record-that-named-the-wrong-cluster-and-opsrs-reopens-for-a-taught-command-2026-09-24) ·
+      [reports/2026-09-24-the-console-flags.md](reports/2026-09-24-the-console-flags.md)).
+      `--once` never opens a console; a stray word beside a console flag is
+      refused rather than dropped in silence; `--read-only` reaches
+      `ui::Writes::ReadOnly` and opens **no audit log at all**; the record's
+      `server` is read from the context actually connected to; every taught
+      `kubectl` line carries `--context`, shell-quoted by `ops::pasteable`
+      (the Phase 7 freeze reopened for one change, D278 ruling 5); a repeated
+      flag is **last-wins** as `kubectl` resolves it; and `USAGE` leads with the
+      console form, whose text `screens/states.md`
+      § *The command line's own synopsis* now owns.
 - [ ] **One place decides which context is used, and it is not three**:
       `--context` beats the startup picker, the picker beats `current-context`.
       `--once` and a non-tty stdin never open it — a picker in a pipeline is a

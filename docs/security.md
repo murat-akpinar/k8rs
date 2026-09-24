@@ -490,7 +490,7 @@ not be what k8rs wrote
 Two lines per attempted mutation:
 
 ```
-2026-09-05T10:17:38.70883222Z attempt · deployment/web · context prod-eu · server https://10.0.0.1:6443 · namespace payments · uid 3713e7a9-73ee-4a4e-bb7c-663a8abe51f3 (what k8rs read, not what it changed) · kubectl: kubectl scale deployment/web --replicas=5 -n payments · call: PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion not sent
+2026-09-05T10:17:38.70883222Z attempt · deployment/web · context prod-eu · server https://10.0.0.1:6443 · namespace payments · uid 3713e7a9-73ee-4a4e-bb7c-663a8abe51f3 (what k8rs read, not what it changed) · kubectl: kubectl --context prod-eu scale deployment/web --replicas=5 -n payments · call: PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion not sent
 result · attempt 2026-09-05T10:17:38.70883222Z · recorded 2026-09-05T10:17:38.713311965Z · deployment/web · dry-run: the cluster checked it first and accepted it · the change was made
 ```
 

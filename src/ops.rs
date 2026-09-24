@@ -1408,6 +1408,55 @@ fn gap(value: Option<&str>, absent: &str, prefix: &str) -> String {
     }
 }
 
+/// **One word of a taught `kubectl` line, safe to paste** — bare where every character reads as
+/// itself in a POSIX shell, single-quoted otherwise, with `'\''` for a `'` the quotes cannot hold.
+///
+/// **An allowlist and not an escape list**, which is invariant 1's shape one file over: what is
+/// left bare is enumerated and everything else — known or not — is quoted. `kind-k8rs`,
+/// `gke_project_zone_cluster` and an EKS ARN are all bare, so the ordinary line is the one
+/// `screens/context.md` draws.
+///
+/// **It is `pub` and it lives here because the pyramid runs `ops.rs` → `main.rs`** (invariant 11,
+/// CLAUDE.md § Single point of change): both taught surfaces quote by this one rule, and a second
+/// copy is where two of them drift apart.
+///
+/// k8rs executes nothing — the security gate's *the command log is display text* row is
+/// untouched. What a taught line may not do is differ from the command k8rs ran
+/// (invariant 4, NOTES § D8, § D278 ruling 5).
+pub fn pasteable(word: &str) -> String {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.:/@+=".contains(c))
+    {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', r"'\''"))
+}
+
+/// **The `--context <name>` every taught `kubectl` line carries** (NOTES § D278 ruling 5), placed
+/// by each of [`scale`], [`restart`] and [`delete`] immediately after `kubectl` and before the
+/// verb — the position `screens/context.md` § What the command log shows draws, and the one
+/// `kubectl` reads as a global flag rather than as the verb's own.
+///
+/// **An unnamed context drops the segment whole**, never `--context` with nothing after it — the
+/// gap [`Record::attempt_line`] records as *not named* ([`gap`]) has no honest flag form, and a
+/// bare `kubectl` line is still the command k8rs ran.
+///
+/// **Stripped before the gap is decided, and that is why it is not left to [`Record::of`]'s strip
+/// of the finished line** (invariant 9). Measured: a context named `U+202E` went through
+/// [`pasteable`] raw, was quoted for the character it carried, and came out of the line strip as
+/// `--context ''` — the empty-valued flag the paragraph above refuses, reached by a name that is
+/// not empty until it is cleaned. It is [`IDENTIFIER`], the cap [`Record::of`] gives the context
+/// field, so the flag's value and the record's own `context` cannot come out differently.
+fn context_segment(context: &str) -> String {
+    let context = cleaned(context, IDENTIFIER);
+    if context.is_empty() {
+        return String::new();
+    }
+    format!(" --context {}", pasteable(&context))
+}
+
 /// **What happened to the mutation, in one sentence per [`Outcome`]** (invariant 14).
 ///
 /// **The cluster's own words are not in here**, because both readers append them through
@@ -1851,7 +1900,8 @@ where
     // § Scale). `deploy` is real kubectl shorthand and buys nothing invariant 4 needs; this line's
     // whole job is teaching a newcomer a command they can read (invariant 14).
     let kubectl = format!(
-        "kubectl scale {object} --replicas={} -n {namespace}",
+        "kubectl{} scale {object} --replicas={} -n {namespace}",
+        context_segment(scaling.context),
         scaling.count
     );
     // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
@@ -2362,7 +2412,10 @@ where
     // **The kind is spelled out — `deployment/web`, never `deploy/web`** (`screens/dialogs.md`
     // § Scale), and there is no dry-run flag on it because `kubectl rollout restart` has none
     // (NOTES § D223 ruling 4).
-    let kubectl = format!("kubectl rollout restart {object} -n {namespace}");
+    let kubectl = format!(
+        "kubectl{} rollout restart {object} -n {namespace}",
+        context_segment(restarting.context)
+    );
     // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
     // name a path the request did not take: `Api::patch` is `Request::patch`, which is this base
     // and the name — no subresource, which is what makes this the first operation to reach it
@@ -2727,9 +2780,10 @@ where
     // § Scale) — and the line carries no flag at all: `propagationPolicy: Background` is what
     // `kubectl delete` sends when none is given, so what k8rs sends is what this line does
     // ([`Pass::delete`], NOTES § D225 ruling 5). No `--dry-run` either, because none was run.
+    let context = context_segment(deleting.context);
     let kubectl = match deleting.namespace {
-        Some(namespace) => format!("kubectl delete {object} -n {namespace}"),
-        None => format!("kubectl delete {object}"),
+        Some(namespace) => format!("kubectl{context} delete {object} -n {namespace}"),
+        None => format!("kubectl{context} delete {object}"),
     };
     // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
     // name a path the request did not take: `Api::delete` is `Request::delete`, which is this base

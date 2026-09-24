@@ -1416,14 +1416,15 @@ draws for the first time.
   mechanism is built**: the header derives `admin`/`read-only` from
   `Screen::writes` in every state, one signal for both causes, never two
   ([D265](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)
-  rulings 1 and 3). **What is not yet true is the command line's own end of
-  it**: nothing constructs `Writes::ReadOnly` from `--read-only` — that
-  waits on Phase 12's flags box. Nothing stops a future box adding a
-  *second* word beside `read-only`, if an operator review later finds one
-  genuinely wanted (a full disk is worth fixing; `--read-only` was asked
-  for) — but that is a reason to widen a mechanism that already exists, not
-  a reason to invent a second header segment here, ahead of the box that
-  owns § 1a's own zone table.
+  rulings 1 and 3). **The command line's own end of it is built too**:
+  Phase 12's flags box wires `crate::main`'s `opening` to construct
+  `Writes::ReadOnly` from `--read-only` on the command line, and the
+  `dead_code` expectation that marked it unreachable is gone with it.
+  Nothing stops a future box adding a *second* word beside `read-only`, if
+  an operator review later finds one genuinely wanted (a full disk is worth
+  fixing; `--read-only` was asked for) — but that is a reason to widen a
+  mechanism that already exists, not a reason to invent a second header
+  segment here, ahead of the box that owns § 1a's own zone table.
 - **`s scale` and `r restart` are withheld, never marked `no`, for the same
   reason `--read-only` withholds them and not the reason a `may_i_in` refusal
   does.** `Verdict::No` is an answer about *this login's grant*; nothing
@@ -1960,6 +1961,99 @@ replaced**: `pods_unread` never had that string to print — this stage runs
 before the header exists to read it from — and a line the binary cannot
 produce is a promise the screen cannot keep
 ([NOTES § D190](../NOTES.md#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)).
+
+### The command line's own synopsis
+
+Everything above this line is a correctly-typed line whose *environment*
+refused it — no kubeconfig, an expired certificate, RBAC. `USAGE` is the
+other half of this page: what a *malformed* line gets instead — a mistyped
+flag, too few arguments (`k8rs --analysis` alone), or, since this box, a
+syntactically fine console line with no terminal to draw it on. `src/main.rs`'s
+`USAGE` constant is byte for byte what every one of those prints. There was
+no screens/ authority for that text before this box; there is now, and
+`docs/architecture.md`'s CLI table quotes the same text and has to match it.
+
+Measured, the synopsis is one unwrapped printed line, 609 columns — past
+this page's frame by a wide margin, so quoted rather than fenced, the same
+treatment the RBAC-refusal sentences above get for the same reason:
+
+*"usage: k8rs [--read-only] [--context `<name>`] [--namespace `<name>`]   |
+k8rs [--analysis] `<file.json>`...   |   k8rs --once|--live [--analysis]
+[--context `<name>`] [--namespace `<name>`]   |   k8rs --logs --object
+`<[namespace/]pod>` [--container `<name>`] [--previous] [--follow]
+[--context `<name>`] [--namespace `<name>`]   |   k8rs --describe|--yaml
+--object `<[namespace/]name>` [--kind `<kind>`] [--context `<name>`]
+[--namespace `<name>`]   |   k8rs [--read-only] ops `<operation>`
+`<kind>`/`<name>` [`<value>`] --namespace `<name>`   |   k8rs ops may-i
+`<verb>` `<resource>`.`<group>`[/`<name>`] [--subresource `<name>`]
+[--namespace `<name>`]"*
+
+followed by two explanatory lines — the first unchanged, the second rewritten
+in this same box. *"Each file holds Kubernetes objects as JSON: one object,
+or a list of them."* stays. What this build prints today —
+*"Without --once, --live, --logs, --describe, --yaml or ops this build reads
+files only — it cannot reach a cluster."* — does not survive the console
+line above it: a bare `k8rs` now reaches a cluster with none of those six
+words on it, so that clause is false the instant this box ships. It becomes:
+
+*"A path on the line is always the file-driven form, and nothing else;
+without one, this build opens a console instead of reading nothing —
+--once, --live, --logs, --describe, --yaml and ops are its other doors to a
+cluster. --read-only refuses every operation this build can reach, so a run
+that carries it can ask (ops may-i) and never change anything."*
+
+**The ruling this box was missing: yes, the console gets a form on this
+line, and it leads.** `USAGE` had six alternatives and not one of them was
+the plain console — neither the bare `k8rs` a beginner types first, nor
+`k8rs [--read-only] [--context <name>] [--namespace <name>]`, the line above
+adds. `READ_ONLY`'s own doc in `src/main.rs` made exactly this argument for
+itself — *the synopsis is the only place a reader learns a flag exists*,
+measured at zero mentions anywhere the binary printed before it landed — and
+the same argument reaches the console as a whole, not only the one flag: a
+reader who has never read `NOTES.md` has no other page that tells them
+typing `k8rs` alone opens anything.
+
+- **It leads because it needs the least.** Every other alternative asks for
+  something first — a path, a mode word, `--object`, a subcommand. The
+  console needs none of that; a bare `k8rs` at a keyboard is enough
+  (`opening`, PM ruling 2026-09-23). The form that used to lead this line
+  needs a `<file.json>` argument to mean anything, which is a strange thing
+  to ask a first-time reader to supply before they have seen the tool run
+  once.
+- **The trailing sentence changes with it, and this is the one place that
+  has to be caught in the same turn.** *"Without --once, --live, --logs,
+  --describe, --yaml or ops this build reads files only — it cannot reach a
+  cluster"* was true right up until the console line above it; adding the
+  console without touching this sentence would have shipped a synopsis that
+  contradicts its own second line. The fix does not drop the six words — a
+  reader still needs to know each of them reaches a cluster too — it just
+  stops claiming a bare `k8rs` cannot.
+- **Every flag on it is released, not scaffolding**
+  ([CLAUDE.md invariant 10](../CLAUDE.md)): `--read-only`, `--context` and
+  `--namespace` are three of the five flags that survive Phase 12's end,
+  where `--logs`, `--describe`/`--yaml` and their neighbours two alternatives
+  down do not. A synopsis missing the one line guaranteed to outlive this
+  phase, while carrying four about to be deleted, had the omission backwards
+  — and it stays backwards a moment longer, since the six-line version is
+  what ships until the dev turn that reads this section lands it.
+- **`--analysis` is not on it, on purpose.** It draws the seven extra panes
+  under the findings in the temporary driver's own printed report and in
+  `--once`; the console's Analysis view is a sidebar entry a reader opens
+  with a key ([analysis.md](analysis.md)), not a flag a line can carry, so
+  there is nothing here for `--analysis` to mean.
+- **A piped console line now reads its own line back, and that is the
+  second half of the ruling.** `k8rs --read-only | cat` has no terminal to
+  draw a console on ([`opening`](../src/main.rs)'s own doc, `at_a_keyboard`),
+  so it prints `USAGE` and exits 2 — and where that page used to say nothing
+  about `--read-only`, `--context` or `--namespace` at all, it now shows the
+  reader their own words two words into the synopsis, immediately followed
+  by the alternative that names `--once`: the form that does answer one
+  question on stdout and exit, which is what a pipeline actually wants. No
+  separate *"this needs a terminal"* sentence is added ahead of it — that
+  would be a second thing to read before reaching the same place, the exact
+  reasoning `main.rs`'s own doc on [`opening`](../src/main.rs) already gives
+  for the bare `k8rs` case, and it now covers the flagged one too.
+
 
 ## Rules that hold across every state on this page
 

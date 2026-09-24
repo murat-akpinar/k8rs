@@ -299,6 +299,7 @@ its line moving with it.
 - [D275](#d275--the-wait-loop-watched-for-the-commands-own-name-so-it-matched-itself-and-never-ended-2026-09-24) — the wait loop watched for the command's own name, so it matched itself and never ended
 - [D276](#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24) — the thirteenth crate was already compiled, and the terminal handover is one family
 - [D277](#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24) — the handover round: a measurement that read the shell instead of the job, one door for three ways of stopping, and a test that passed with its subject deleted
+- [D278](#d278--the-flags-box-what-had-to-be-ruled-before-it-could-be-briefed-a-record-that-named-the-wrong-cluster-and-opsrs-reopens-for-a-taught-command-2026-09-24) — the flags box: what had to be ruled before it could be briefed, a record that named the wrong cluster, and `ops.rs` reopens for a taught command
 
 ## Why it exists — where the gap is
 
@@ -24451,3 +24452,187 @@ pty driver that does prove them is promoted out of `tmp/` into `scripts/` with a
 tty in CI, the same shape `e2e.sh` already has. A family whose central claim is
 proven only by a run nobody can repeat is a green build that proves nothing
 ([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)).
+
+
+### D278 — the flags box: what had to be ruled before it could be briefed, a record that named the wrong cluster, and `ops.rs` reopens for a taught command (2026-09-24)
+
+Phase 12's flags box: `--read-only`, `--context`, `--namespace`/`-n` reach the
+console, and `--once` does not open one. The four flags already parsed — for the
+temporary driver only. `console()` connected with `None, None`, and
+`ui::Writes::ReadOnly` was a variant nothing constructed, carrying a `dead_code`
+expectation that named this box as its reason.
+
+**1. `--read-only` beats `Unaudited`, and such a run opens no audit log at all.**
+Not a new rule — the console was the surface that had not caught up.
+[docs/security.md § Write safety](docs/security.md#write-safety-model)
+already states it for the headless line and `just e2e` already asserts it
+against kind: *"`--read-only` opened no audit log at all"*. What decided it for
+the console is `ui::Writes::why`'s own sentence: `Unaudited` says *fix that, then
+start k8rs again*, which is **false advice** while the flag stands, since fixing
+the log restores nothing. And nothing reachable under the flag needs the file —
+`ops::may_i` and `ops::may_i_in` take no writer, and they are the only things
+[D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3 keeps reachable. [D21](#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)'s *says so
+and continues* is about a log that **failed**, not one nobody will write to: its
+antecedent is absent, not weakened (`k8s-admin` attacked this ruling and it
+held). The cost, named rather than hidden: a habitual `--read-only` user is never
+told their state directory is broken, and learns it the night they drop the flag.
+
+**2. A stray word beside a console flag is refused.** `mistyped`'s
+stray-positional block was gated on `live_context(args).is_some()`, which is
+`None` for a console line — so `k8rs --read-only pod.json` would have read the
+file and **dropped `--read-only` in silence**, the single worst flag to drop that
+way. The gate is now `cluster_reader`, which is both the condition and the
+subject of the sentence, so the two cannot come apart. A bare `k8rs -x file.json`
+with no console flag is untouched, which is `NAMESPACE_SHORT`'s standing promise.
+
+**3. `--once` keeps the temporary driver**, unchanged — `live_context` answers
+`Some` for it and that arm sits above the console arm.
+
+**4. The console connected to one cluster and recorded another.** `server` came
+from `current_server`, which hard-codes `k8s::contexts(kubeconfig, None)`; the
+connection moved to `opening.context` and the record did not. `k8rs --context
+staging`, restart a Deployment, and the audit line reads `context staging · server
+<prod's URL>` — and `ops::Mutation::server` exists *precisely* because a context
+name does not identify a cluster, so the field added to backstop the name was the
+only wrong one. [Invariant 4](CLAUDE.md), *neither record may lie*. `server` is
+now derived from the `contexts` vec already in hand, so the two cannot disagree
+again. Found by `k8s-admin`; the headless caller had written the precondition out
+loud (*"`None`, because an `ops` line takes no `--context`"*) and the console
+became the caller that falsified it.
+
+**5. Every taught `kubectl` line carries `--context`, and `ops.rs` reopens for
+it.** Measured: **zero** of the `kubectl` lines k8rs shows carried a context
+segment. `screens/context.md` had already specified
+`kubectl --context staging get pods -A --watch` and *"Every command line after a
+switch carries `--context <name>`"*, citing invariant 4 and
+[D8](#d8--invariant-4-was-not-literally-true) — an unimplemented spec, not a new
+design question. The hazard is the command log's whole purpose working against
+it: an operator on `--context staging` is shown
+`kubectl rollout restart deployment/web -n payments`, pastes it, and it runs
+against **their** current kubectl context. A displayed command that is a working,
+different, destructive command.
+
+**The context name is the first unbounded, arbitrary string ever to reach a
+taught command, and it is shell-quoted.** Every other value on one is a DNS
+label or a subdomain the API or `mistyped` has already bounded; a context name
+is whatever the kubeconfig says. Measured on the real binary, against a copy of
+a kubeconfig whose context had been renamed `prod eu; echo pwned`:
+
+```
+$ kubectl --context prod eu; echo pwned get --raw /version
+```
+
+k8rs executes nothing and that security-gate row is untouched — **the command
+log exists to be pasted**, and that is the whole exposure. `pasteable` is an
+**allowlist** of what every POSIX shell reads as itself
+(`[A-Za-z0-9] -_.:/@+=`), single quotes for anything else, and `'\''` for a
+quote inside — the closing-escaping-reopening every shell accepts. An allowlist
+rather than an escape list for the reason
+[invariant 1](CLAUDE.md) gives for the write ban: a list of what is dangerous
+is wrong the day something new is, and a list of what is safe is not.
+
+**Sharing the helper did not make the two callers agree, and that is the part
+worth keeping.** `ops.rs` cleans and *then* tests the gap; `main.rs`'s `kubectl`
+tested `!name.is_empty()` on the **raw** name and sanitized afterwards. For a
+context named with a lone `U+202E` or a `\u{7}` the raw name is non-empty, the
+filter passes, `sanitize` empties it, and `pasteable("")` skips its allowlist
+early return and returns `''` — so `main.rs` produced
+`$ kubectl --context ''`, the empty-valued flag this ruling forbids, on the one
+input the shared helper was introduced to make both surfaces agree on. Its own
+doc comment two lines above stated the rule it was breaking. **One helper is not
+one behaviour: the order the callers call it in is part of the contract, and
+only reading the finished tree catches that** — `dev-core` fixed its half and
+could not see `main.rs`; `dev-ui` wrote its half before `ops.rs` existed. Found
+by the PM at step 7, which is the pass that reads the result rather than a slice
+([CLAUDE.md § The cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it)).
+
+**It lives in `ops.rs` as `pub fn` because the pyramid runs `ops.rs → main.rs`.**
+`ops.rs` cannot call up, both taught surfaces need one spelling, and two copies
+of a quoting rule is exactly where they would drift apart (CLAUDE.md § *Single
+point of change*).
+
+**The clean runs before the gap is decided, not after** — `dev-core`'s own
+second pass caught this, measured. Quoting the raw name and leaving the strip to
+the finished line produced `kubectl --context '' scale …` for a name made only
+of characters invariant 9 removes: the empty-valued flag this ruling forbids,
+reached the long way round. `context_segment` now does `cleaned(context,
+IDENTIFIER)` first, which is the same cap `Record::of` gives the record's own
+`context` field, so the flag's value and the record cannot come out differently.
+
+`ops.rs` is frozen after Phase 7, so this is a recorded reversal, as
+[D273](#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20)
+was. **What makes it cheap is that no plumbing is added**: `context` is already a
+field on `Mutation` and on all three operation structs, already written to the
+audit line — the three taught commands simply never interpolated it.
+
+**6. A repeated `--context` or `--namespace` is last-wins, reversing a documented
+first-wins.** `kubectl` is last-wins. Both `context_arg` and `value_of` carried a
+doc deferring the fix to *"Phase 12's real parsing"* — and this box **is** that
+parsing, so the deferral had run out. The shape that decided it: `alias
+kp='k8rs --context prod'`, then `kp --context staging` answers **prod**; a wrapper
+nobody can override is worse than no wrapper. `--once` has no header to mitigate
+it and is the released form that goes in a pipeline. This reaches `value_of`'s
+other callers — `namespace_arg`, `object_arg`, `container_arg`,
+`subresource_arg` — so it is a change on the **write path** and is recorded as
+one. The write path's refusal of a repeated flag is unaffected and still right;
+only its stated *argument* was the deleted premise, and five prose claims said
+first-wins after the code stopped doing it (`tester`).
+
+**7. `USAGE` gets a console form, and it leads.** It had six alternatives, none
+of them the console, and closed with *"Without --once, --live, --logs,
+--describe, --yaml or ops this build reads files only — it cannot reach a
+cluster"* — printed directly underneath this box's own refusal saying a console
+flag **does** reach one. Two sentences in one write to stderr that cannot both be
+true. `screens/states.md` § *The command line's own synopsis* is now the
+authority for `USAGE`'s text, which had no `screens/` owner before — a string
+with no screen behind it is how this repo's other divergences started. The
+designer's own second pass caught that adding the console form falsifies the
+trailing sentence, and rewrote it in the same edit.
+
+**8. A refusal's subject must be true of the flag as well as of the run.**
+*"`--read-only` opens the console"* clears
+[D190](#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)
+— it is true of *this* run — and still teaches a wrong general fact, since
+`k8rs --read-only ops delete …` opens no console. Invariant 14. Its first
+replacement, *"`--namespace` on its own opens the console"*, is false on a line
+carrying three console flags, which is the same defect one door over: the unit
+test had seven rows and every one fed a single flag.
+
+**10. The confirm box cuts rather than widens, and the widened head exposed a
+defect older than this box.** The taught line grew 53 → 73 columns against
+budgets of **54** (`CONFIRM_BOX`) and **57** (`CROWDED_BOX`), so every scale
+confirm now takes the crowded box *and* is still cut. **Widening was rejected on
+its own arithmetic**: the interior caps at 72 columns against the 78-column body
+a modal centres in at the 80×24 floor, which rescues only the shortest demo and
+busts again on any context name past about nine characters, at the cost of
+re-deriving every consequence's wrap points on the page. So `CONFIRM_BOX` is
+retired — `box_width`'s condition can no longer be true for any command a
+`Confirm` draws, and a branch nothing reaches is one no mutation sweep can kill.
+
+**The defect the wider head exposed**: with `--context` inside `command_cut`'s
+protected head, the existing fallback drops the object's own `/name` at
+*ordinary* widths. Verified rather than taken on report — the restart demo
+`payments/web` in `prod-eu` is 68 columns with a head of 56, while
+`namespaced_cut` computes `spare = columns - (width(" -n") + width(CUT))` =
+`57 - 4` = **53**; 56 > 53, so the head does not fit and the name is front-cut to
+`deployment…`. That falsifies `command_cut`'s own *"never reached at the 80×24
+floor"* and the stated invariant that the object never gives way whole. The floor
+goes **inside `command_cut`**, not in a dialog wrapper, so the strip inherits it.
+**The priority order, and the asymmetry in it is deliberate**: trailing flags go
+whole, then `-n`'s value down to bare, then `--context`'s value character by
+character — the flag itself never drops — and only then the object's name from
+its front. `--context` is protected more weakly than the object and more strongly
+than the namespace because **a namespace typo is a contained mistake and a
+silently wrong cluster is not**.
+
+**9. Two process facts, neither of them about the code.** *One command runs in
+the mirror at a time* was not held: `src/main.rs` and `src/main_tests.rs` moved
+**four times** while `tester` held the gate, and it caught a mirror mid-write —
+`cargo fmt --check` failing on a state that never existed at rest. A review
+running against a moving tree reports on a build nobody has, which is
+[D180](#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)'s
+lesson arriving through the reviewer instead of the sweep. And **the dev's gate
+has no guards in it** by design (`fmt`/`clippy`/`test`/`mutants-diff`), which is
+why one 102-column line survived three consecutive edit rounds: nothing the dev
+runs can see `scripts/width-guard.py`.

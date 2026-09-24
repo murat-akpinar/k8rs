@@ -99,12 +99,17 @@ use views::{NAMESPACE, because, sanitize};
 /// reserved so a future `--exit-code` has somewhere to go (NOTES § D17).
 ///
 /// Every decision is in a function over values that is tested — [`run`] for what to report,
-/// [`live_context`] for which of the two this run is, [`ops_line`] for whether it is the
+/// [`live_context`] for which of the two this run is, [`opening`] for whether it is the console
+/// and what the console was asked for, [`ops_line`] for whether it is the
 /// subcommand instead, [`cluster_run`] for how long a cluster run
 /// may take and [`live`] for what it prints,
 /// [`stdout_failure`] for what a failed write costs, [`runtime_failure`] for what a runtime that
 /// would not start says — and what is left here is argv, the choice of stream, starting the
 /// runtime, and calling `exit`.
+///
+/// **[`opening`] and [`audit_log_for`] joined that list at the flags box** (todo.md § Phase 12),
+/// for the reason `runtime_failure` did: [`console`] took no parameters and decided the whole of
+/// `--read-only`, `--context` and `--namespace` inline, where no test could reach any of it.
 ///
 /// **`runtime_failure` joined that list on 2026-08-27** and the sentence above is why: its arm was
 /// spelled inline here, so nothing could reach it, and it was throwing an io error away with a
@@ -145,46 +150,51 @@ fn main() {
                         },
                         Err(failed) => runtime_failure(&failed),
                     },
-                    // **A bare `k8rs` — no argv words at all — opens the console** (PM ruling,
-                    // 2026-09-23; todo.md § Phase 12). It adds no flag: every other line on this
-                    // driver behaves exactly as it did, and the flags the console will read are
-                    // that phase's own later box.
+                    // **A bare `k8rs`, or one carrying only the console's own flags, opens the
+                    // console** (PM ruling, 2026-09-23; todo.md § Phase 12's flags box).
+                    // [`opening`] is the whole of *which line that is* and carries what the four
+                    // flags asked for, so nothing about them is decided in this expression.
                     //
-                    // **With no terminal attached it is [`USAGE`] and not a console**, which is
-                    // [`at_a_keyboard`]'s own reason: the reader is in a pipeline, and what they
-                    // need is the line that names `--once`.
-                    None if args.is_empty() && {
-                        let (reading, drawing) = ends_are_terminals();
-                        at_a_keyboard(reading, drawing)
-                    } =>
-                    {
-                        match tokio::runtime::Builder::new_multi_thread()
-                            .enable_all()
-                            .build()
-                        {
-                            Ok(runtime) => match runtime.block_on(console()) {
-                                Some(sentence) => sentence,
-                                None => return,
-                            },
-                            Err(failed) => runtime_failure(&failed),
+                    // **With no terminal attached it is [`USAGE`] and not a console, whatever is
+                    // on the line**, which is [`at_a_keyboard`]'s own reason: the reader is in a
+                    // pipeline, and what they need is the line that names `--once`. It is spelled
+                    // here rather than left to [`run`], which would read `--read-only` as a path
+                    // and answer about a file nobody named.
+                    None => match opening(&args) {
+                        Some(opening) => {
+                            let (reading, drawing) = ends_are_terminals();
+                            if !at_a_keyboard(reading, drawing) {
+                                USAGE.to_string()
+                            } else {
+                                match tokio::runtime::Builder::new_multi_thread()
+                                    .enable_all()
+                                    .build()
+                                {
+                                    Ok(runtime) => match runtime.block_on(console(&opening)) {
+                                        Some(sentence) => sentence,
+                                        None => return,
+                                    },
+                                    Err(failed) => runtime_failure(&failed),
+                                }
+                            }
                         }
-                    }
-                    None => match run(&args) {
-                        // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!`
-                        // *panics* when the write fails, and a reader that closed the pipe is
-                        // `head` doing its job. That printed a backtrace and exited 101 — a code
-                        // D17's table does not have ([`stdout_failure`]).
-                        Ok(report) => match writeln!(std::io::stdout(), "{report}") {
-                            Ok(()) => return,
-                            Err(failed) => match stdout_failure(&failed) {
-                                Some(sentence) => sentence,
-                                None => return,
+                        None => match run(&args) {
+                            // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!`
+                            // *panics* when the write fails, and a reader that closed the pipe is
+                            // `head` doing its job. That printed a backtrace and exited 101 — a
+                            // code D17's table does not have ([`stdout_failure`]).
+                            Ok(report) => match writeln!(std::io::stdout(), "{report}") {
+                                Ok(()) => return,
+                                Err(failed) => match stdout_failure(&failed) {
+                                    Some(sentence) => sentence,
+                                    None => return,
+                                },
                             },
+                            // Printed as it was handed over. Everything in it that came from
+                            // outside was stripped where it entered the sentence, and everything
+                            // else is ours ([`sanitize`]).
+                            Err(problem) => problem,
                         },
-                        // Printed as it was handed over. Everything in it that came from
-                        // outside was stripped where it entered the sentence, and everything
-                        // else is ours ([`sanitize`]).
-                        Err(problem) => problem,
                     },
                 },
             }),
@@ -315,8 +325,10 @@ fn runtime_failure(error: &std::io::Error) -> String {
 }
 
 /// The three lines a run with no arguments gets. **Three, and `tests/binary.rs` counts them**:
-/// the file-driven form, the cluster one, and what the first of them still cannot do — a usage
-/// that named only half the binary would be the driver lying about itself.
+/// the seven forms, what a file holds, and which of the forms reach a cluster — a usage that
+/// named only half the binary would be the driver lying about itself. The third line said *what
+/// the first form still cannot do* until the console got a form of its own, and the console is
+/// the form with nothing on it at all.
 ///
 /// **`--once|--live` and not a second synopsis line**, because the two differ in one word: both
 /// read a cluster, and everything after the mode word is the same. The line count is asserted
@@ -330,11 +342,22 @@ fn runtime_failure(error: &std::io::Error) -> String {
 /// only place a reader learns a mode exists — and the per-operation detail stays in
 /// [`ops_usage`], which `k8rs ops` prints.
 ///
+/// **The console leads the line, and the last line was rewritten with it**
+/// (`screens/states.md` § The command line's own synopsis, which is this text's authority and
+/// did not exist before the flags box). Seven alternatives now, and the console's is first
+/// because it is the only one that asks for nothing first — no path, no mode word, no `--object`,
+/// no subcommand. **The trailing sentence had to move in the same edit**: *without --once,
+/// --live, --logs, --describe, --yaml or ops this build reads files only — it cannot reach a
+/// cluster* is false the instant a bare `k8rs` opens a console ([`opening`]), and the refusal at
+/// [`mistyped`]'s end prints the two together, so one write to stderr carried both halves of the
+/// contradiction.
+///
 /// **The synopsis is one printed line written across two source lines**, and the `\` that joins
 /// them keeps the three spaces before it: `scripts/width-guard.py` refuses a source line past 100
 /// columns and `cargo fmt` will not wrap a string literal — it pulls the whole `const` back onto
 /// one line however this is indented, so the break has to be inside the literal.
-const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   \
+const USAGE: &str = "usage: k8rs [--read-only] [--context <name>] [--namespace <name>]   |   \
+     k8rs [--analysis] <file.json>...   |   \
      k8rs --once|--live [--analysis] [--context <name>] [--namespace <name>]   |   \
      k8rs --logs --object <[namespace/]pod> [--container <name>] [--previous] [--follow] \
      [--context <name>] [--namespace <name>]   |   \
@@ -344,9 +367,10 @@ const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   \
      k8rs ops may-i <verb> <resource>.<group>[/<name>] [--subresource <name>] \
      [--namespace <name>]\n\
      Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
-     Without --once, --live, --logs, --describe, --yaml or ops this build reads files only — it \
-     cannot reach a cluster. --read-only refuses every operation, so a run that carries it can \
-     ask (ops may-i) and never change anything.";
+     A path on the line is always the file-driven form, and nothing else; without one, this \
+     build opens a console instead of reading nothing — --once, --live, --logs, --describe, \
+     --yaml and ops are its other doors to a cluster. --read-only refuses every operation this \
+     build can reach, so a run that carries it can ask (ops may-i) and never change anything.";
 
 /// **Part of the released surface and not scaffolding** (NOTES § D188): `analysis.rs`'s seven
 /// reports are whole-cluster answers rather than per-object cards, so they are a second report
@@ -406,10 +430,12 @@ fn run(args: &[String]) -> Result<String, String> {
 /// read keys *and* paint cells (`screens/context.md`'s own rule for the startup picker: *"`--once`,
 /// or stdin is not a terminal | never opens"*).
 ///
-/// **A bare `k8rs` in a pipeline is [`USAGE`] and not a refusal of its own**, which is what that
+/// **A console line in a pipeline is [`USAGE`] and not a refusal of its own**, which is what that
 /// line is for: it names `--once`, the form that answers one question on stdout and exits
 /// (NOTES § D17). A sentence saying *this needs a terminal* would be a second thing to read before
-/// reaching the same place.
+/// reaching the same place. **That holds for every line [`opening`] answers `Some` to and not only
+/// the bare one** — `k8rs --read-only | cat` reaches it too, and since the flags box `main` prints
+/// the usage there rather than letting [`run`] answer about `--read-only` as a filename.
 ///
 /// **It is what stops `ratatui::init()` being reached with no tty at all.** That call *panics* —
 /// measured, `failed to initialize terminal: No such device or address`, a backtrace on stderr and
@@ -1555,8 +1581,15 @@ fn pane(name: &str, report: &analysis::Report) -> String {
                         .iter()
                         .map(|paragraph| format!("      {}", sanitize(paragraph))),
                 );
+                // **The stripped value decides here too**, the rule the evidence line above
+                // states and [`kubectl`] broke (`k8s-admin`, 2026-09-24). No `analysis::Row`
+                // builds an action out of anything a cluster said — every one is fixed prose —
+                // so nothing reaches this that a strip can empty; the order is put right anyway,
+                // because a guard that is correct only for the inputs it happens to get is the
+                // one that goes wrong when a later box widens them.
+                let action = sanitize(action);
                 if !action.is_empty() {
-                    lines.push(format!("      → {}", sanitize(action)));
+                    lines.push(format!("      → {action}"));
                 }
             }
             // Read and never selected, so it carries no glyph and nothing is indented under it.
@@ -1660,10 +1693,16 @@ fn once_wanted(args: &[String]) -> bool {
 /// 2026-09-05 described a build where it did nothing, and three of those sentences were still
 /// here after it did (NOTES § D234).
 ///
-/// **What makes it hold is a guard at a single door.** [`ops_line`] is the one route from argv
-/// into any mutation — `ops::scale`, `ops::restart` and `ops::delete` have one call site each,
-/// reached through [`ops_started`] ← [`ops_performed`] ← [`main`] — and the refusal sits in it,
-/// above the word-order check and above everything [`ops_run`] does.
+/// **What makes it hold is a guard at each door, and since the flags box there are two.**
+/// [`ops_line`] is the headless route from argv into a mutation — `ops::scale`, `ops::restart`
+/// and `ops::delete` have one call site each, reached through [`ops_started`] ←
+/// [`ops_performed`] ← [`main`] — and its refusal sits above the word-order check and above
+/// everything [`ops_run`] does. [`opening`] is the console's, and its guard is `ui::Writes::
+/// ReadOnly`: `ui::offered` reads `ui::withheld` and hands the frame an `Offer` with no mutating
+/// key in it, so `views::App::may_mutate` answers no and [`wanting`] reaches nothing. **A run
+/// that carries the flag also opens no audit log** ([`audit_log_for`]), which leaves the
+/// `Halt::Mutate` arm in [`console`] with no `File` to write to even if a key ever got past the
+/// first two — belt and braces, and the belt is the `Offer`.
 ///
 /// **That is [invariant 2](CLAUDE.md)'s intent and not a weakening of it.** *Unreachable rather
 /// than merely unbound* was written against a UI that stops **drawing** a key while the path
@@ -1689,10 +1728,18 @@ fn once_wanted(args: &[String]) -> bool {
 /// half happened three boxes ago and the second half did not.
 const READ_ONLY: &str = "--read-only";
 
-/// The context `--live` connects to, when the run names one. **The real `--context` flag is
-/// Phase 12's** — this is the same spelling so the muscle memory transfers, and it is here at
-/// all because the machine that runs the reconnect proof does not have to be the machine whose
-/// current context is the test cluster.
+/// **Which context k8rs connects to** — the console's ([`opening`]) and, on the temporary driver,
+/// `--live`'s and `--once`'s. One spelling for both, read by one parser ([`context_arg`]).
+///
+/// **Released and not scaffolding, since the flags box** (todo.md § Phase 12). It arrived here
+/// early, for `--live`, because the machine that runs the reconnect proof does not have to be the
+/// machine whose current context is the test cluster; what that bought was the muscle memory
+/// already being right when the console came to read it.
+///
+/// **What it picks is not only the connection**: `k8s::contexts` is handed the same value, so the
+/// `current` row the header's TLS warning is read off is the row k8rs is actually on
+/// (`ui::Screen::insecure`, NOTES § D265 ruling 8). Reading one and not the other is the
+/// disagreement NOTES § D174 closed one door over.
 const CONTEXT: &str = "--context";
 
 /// **`kubectl`'s own short spelling of [`NAMESPACE`]**, because the muscle memory is the point:
@@ -1725,10 +1772,10 @@ const NAMESPACE_SHORT: &str = "-n";
 
 /// **Which cluster this run reads, or `None` when it reads files.**
 ///
-/// Three answers in one: `None` is the file-driven path this driver had before, `Some(None)` is a
-/// cluster run on the kubeconfig's own current context, and `Some(Some(name))` is
-/// `--context name`. The nesting is the same shape [`k8s::connect`] takes, so nothing translates
-/// between them.
+/// Three answers in one: `None` is *not this driver's cluster path* — a file, or the console
+/// [`opening`] answers for — `Some(None)` is a cluster run on the kubeconfig's own current
+/// context, and `Some(Some(name))` is `--context name`. The nesting is the same shape
+/// [`k8s::connect`] takes, so nothing translates between them.
 ///
 /// **[`ONCE`] and [`LIVE`] answer this question identically, because it is not the question they
 /// differ on.** Which cluster is one decision and how long to stay is another; the second is
@@ -1736,21 +1783,35 @@ const NAMESPACE_SHORT: &str = "-n";
 /// two. `--once --live` together is a cluster run with a stopping point — the narrower of the two
 /// wins, the same way `--live` already wins over a path.
 ///
+/// **Which context, in either spelling, is [`context_arg`]'s** — one parser, so the cluster run
+/// and the console cannot come to answer different contexts for one line.
+///
+/// **A cluster flag wins over anything else on the line, and this function is the second line of
+/// that rather than the first.** The two inputs are a cluster and a file, and a run that silently
+/// merged them would print a report about neither — so a path beside `--once` or `--live` is now
+/// **refused**, by [`mistyped`], which runs first and has somewhere to print. This function still
+/// ignores it, for the reason [`context_arg`] still ignores `--context --live`: it alone must not
+/// be able to answer *the file, plus a cluster*.
+fn live_context(args: &[String]) -> Option<Option<&str>> {
+    if args.iter().all(|arg| arg != LIVE) && !once_wanted(args) && verbs(args).is_empty() {
+        return None;
+    }
+    Some(context_arg(args).flatten())
+}
+
+/// **Which context this line names, in either spelling and whatever mode it is in** — the one
+/// parser for [`CONTEXT`], read by [`live_context`] for a cluster run and by [`opening`] for a
+/// console, so a second spelling of *which context* cannot grow beside the first.
+///
+/// **`None` is *no `--context` on the line at all***, which is the kubeconfig's current context on
+/// purpose; `Some(None)` is the flag with nothing usable after it, which [`mistyped`] refuses in
+/// all three spellings before anything connects with the answer.
+///
 /// **Both spellings, because the wrong one silently watched the wrong cluster.** `--context=NAME`
 /// is what GNU getopt and `kubectl` accept, and matching only `--context NAME` let the other form
 /// fall through to the kubeconfig's *current* context with no message at all — which, for a flag
-/// whose whole job is to point the reconnect proof at a cluster that is not the current one, is
-/// the worst available failure (`tester`, 2026-08-27).
-///
-/// **`--context` with nothing after it at all was the silent-wrong-cluster failure until
-/// 2026-08-30, and it is refused now** (`k8s-admin`, twice). `k8rs --live --context` with nothing
-/// following — what `--context $CTX` unquoted becomes when `CTX` is unset — fell through to
-/// `Some(None)` and watched the current cluster in silence, and `k8rs --once --context && kubectl
-/// apply -f prod/` made that a green light about the wrong cluster. [`mistyped`] refuses all
-/// three spellings of nothing before this function is reached, so the `Some(None)` this can still
-/// answer is *no `--context` on the line at all*, which is the kubeconfig's current context on
-/// purpose. **What is left to Phase 12's real flag parsing is the general shape** — an option
-/// that declares it requires a value — and not this flag's own hole.
+/// whose whole job is to point at a cluster that is not the current one, is the worst available
+/// failure (`tester`, 2026-08-27).
 ///
 /// **A value that starts with `--` never becomes a context name here, and the sentence about it
 /// is [`mistyped`]'s.** `--context --live` used to mean *the context named `--live`*, and the
@@ -1758,25 +1819,25 @@ const NAMESPACE_SHORT: &str = "-n";
 /// below stopped that and then swallowed it instead — `k8rs --live --context --live` connected to
 /// the current context and said nothing, which is the same silent-wrong-cluster failure through
 /// the other door (`k8s-admin`, 2026-08-27) — so the refusal is `mistyped`'s, which runs first and
-/// has somewhere to print. The `filter` stays as the second line: this function alone must not be
+/// has somewhere to print. The `filter` stays as the second line: no reader of this flag may be
 /// able to answer *the context named `--live`*. `--context=--live` is not refused: an `=` says the
-/// value was meant.
+/// value was meant, which is why this is not [`value_of`].
 ///
-/// **A repeated `--context` is first-wins.** `kubectl` is last-wins and the real `--context` flag
-/// — Phase 12's, not this scaffolding's — should follow `kubectl` rather than this. It is stated
-/// here because it was stated nowhere, and an unwritten tie-break is the one that changes by
-/// accident.
+/// **A repeated `--context` is last-wins**, which is `kubectl`'s rule — and [`value_of`]'s since
+/// the same box, so the two parsers this file has still agree with each other.
 ///
-/// **A cluster flag wins over anything else on the line, and this function is the second line of
-/// that rather than the first.** The two inputs are a cluster and a file, and a run that silently
-/// merged them would print a report about neither — so a path beside `--once` or `--live` is now
-/// **refused**, by [`mistyped`], which runs first and has somewhere to print. This function still
-/// ignores it, for the reason it still ignores `--context --live`: it alone must not be able to
-/// answer *the file, plus a cluster*.
-fn live_context(args: &[String]) -> Option<Option<&str>> {
-    if args.iter().all(|arg| arg != LIVE) && !once_wanted(args) && verbs(args).is_empty() {
-        return None;
-    }
+/// **It was first-wins until the flags box, and the shape that decides it is a wrapper**
+/// (`k8s-admin`, 2026-09-24): `alias kp='k8rs --context prod'`, then `kp --context staging`.
+/// Every getopt tool and `kubectl` itself answer *staging*; first-wins answers *prod*, and a
+/// wrapper nobody can override is worse than no wrapper. This flag is released as of that box, so
+/// the deferral both parsers used to carry — *Phase 12's real parsing is where the two should be
+/// made to agree* — had run out: that box **is** the real parsing. The same parser also serves
+/// `--once`, which prints no header to notice the wrong cluster on and is the form that goes in a
+/// pipeline.
+fn context_arg(args: &[String]) -> Option<Option<&str>> {
+    // **The scan does not stop at a match, it keeps the last one** — that is the whole of
+    // last-wins, and a `return` in either arm below is how it was first-wins.
+    let mut found = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         // `--context=NAME`. Written as two strips rather than one `"--context="` literal, so the
@@ -1785,21 +1846,21 @@ fn live_context(args: &[String]) -> Option<Option<&str>> {
             .strip_prefix(CONTEXT)
             .and_then(|rest| rest.strip_prefix('='))
         {
-            return Some(Some(attached));
+            found = Some(Some(attached));
+            continue;
         }
-        // `--context NAME`. **Nothing usable after it never reaches here** — [`mistyped`] runs
-        // first and refuses all three spellings of it, which is where the sentence about it can
-        // be printed. The `filter` is this function's second line and not its first: it alone
-        // must not be able to answer *the context named `--live`*.
+        // `--context NAME`. **Nothing usable after it never reaches a connection** — [`mistyped`]
+        // runs first and refuses all three spellings of it, which is where the sentence about it
+        // can be printed. The `filter` is this function's second line and not its first.
         if arg == CONTEXT {
-            return Some(
+            found = Some(
                 rest.next()
                     .map(String::as_str)
                     .filter(|value| !value.starts_with(FLAG)),
             );
         }
     }
-    Some(None)
+    found
 }
 
 /// **What follows `--namespace` or `-n` on this line** — the one parser for both flags and both
@@ -1809,20 +1870,19 @@ fn live_context(args: &[String]) -> Option<Option<&str>> {
 /// impossible one: `k8rs --live -n "$NS"` with `NS` unset is exactly that word at the end of the
 /// line, and it is the commonest way to get here.
 ///
-/// **One function, because [`mistyped`] and [`live_namespace`] must not disagree about which word
-/// is the value.** Two parsers over one flag is how a run gets refused for a namespace it is not
-/// about to use, or accepts a word this one would have refused — and the shape is already in this
-/// file once, at [`live_context`], where the *value* checks and the *reading* are split across
-/// two functions and each doc has to explain what the other does not catch.
+/// **One function, because its three readers must not disagree about which word is the value** —
+/// [`mistyped`], which judges it, [`live_namespace`] for a cluster run and [`opening`] for a
+/// console. Two parsers over one flag is how a run gets refused for a namespace it is not about to
+/// use, or accepts a word this one would have refused.
 ///
 /// **Both spellings, for [`live_context`]'s reason**: matching only `--namespace NAME` lets
 /// `--namespace=NAME` fall through to *every namespace*, which is silently the widest possible
 /// scope for a flag whose whole purpose is to narrow one.
 ///
-/// **First wins on repeats, which is [`live_context`]'s rule and not `kubectl`'s.** `kubectl` is
-/// last-wins. It is written down rather than argued because an unwritten tie-break is the one
-/// that changes by accident, and Phase 12's real flag parsing is where the two should be made to
-/// agree — with each other and with `kubectl`.
+/// **Last wins on repeats, which is `kubectl`'s rule** and [`value_of`]'s, where both were
+/// first-wins until the flags box released this flag on the console ([`context_arg`], which
+/// carries the wrapper the change turns on). It is written down rather than argued because an
+/// unwritten tie-break is the one that changes by accident.
 ///
 /// **Nothing here judges the value**; [`mistyped`] does, once, so there is one sentence and one
 /// place it comes from. So this will hand back `Some(Some("--live"))` for
@@ -1860,14 +1920,124 @@ fn subresource_arg(args: &[String]) -> Option<Option<&str>> {
 /// **Reached only after [`mistyped`] has passed**, which is what makes the value safe to hand on
 /// without a second check here — and why this returns the value rather than a `Result`.
 ///
-/// **In file mode the flag and its value are read as paths**, so `k8rs -n payments pod.json`
-/// comes back *`-n`: No such file or directory*. That is exactly what `--context` beside it does
-/// today and it is [`mistyped`]'s own documented limit — a flag that is real but useless in this
-/// mode is accepted rather than refused, and Phase 12's real flag parsing is where an option that
-/// requires a value can say which modes it belongs to. It is written here so the next reader of
-/// this flag does not discover it from the error.
+/// **There is no file mode left to leak into, since the flags box** (todo.md § Phase 12). The
+/// flag and its value used to be read as *paths* beside a `.json` — `k8rs -n payments pod.json`
+/// came back *`-n`: No such file or directory* — because nothing but `--once` and `--live` made a
+/// line a cluster line. [`opening`] makes this flag one of the four that open a console, so
+/// [`mistyped`] refuses the pair the way it already refuses `--once pod.json`: a cluster and a
+/// file are two inputs and k8rs reads one of them.
 fn live_namespace(args: &[String]) -> Option<&str> {
     namespace_arg(args).flatten()
+}
+
+/// **What a line that opens the console asked for** — the four flags `k8rs` ships with no
+/// subcommand and no file (todo.md § Phase 12's flags box, [`USAGE`]).
+///
+/// **A struct and not three loose values**, for [`Ended`]'s reason one screen over:
+/// [`Self::context`] and [`Self::namespace`] are both `Option<&str>`, they are only ever built
+/// together, and a pair of them in an argument list is a swap nothing would catch — a run
+/// narrowed to the namespace `prod` on the context `payments`.
+struct Opening<'a> {
+    /// [`READ_ONLY`] was asked for: `ui::Writes::ReadOnly`, and no audit log opened at all
+    /// ([`audit_log_for`]).
+    read_only: bool,
+    /// [`CONTEXT`], or `None` for the kubeconfig's current context.
+    context: Option<&'a str>,
+    /// [`NAMESPACE`] or [`NAMESPACE_SHORT`], or `None` for *do not narrow here*
+    /// ([`live_namespace`], which says what `k8s.rs` does with the `None`).
+    namespace: Option<&'a str>,
+}
+
+/// **Whether this line opens the console, and what it asked for** — `None` when it does not.
+///
+/// **A bare `k8rs` and a line of console flags are one answer**, which is the whole of the flags
+/// box: `k8rs --read-only` fell through this arm to the file-driven report before it, read
+/// `--read-only` as a path, and dropped the one flag on the line that may not be dropped in
+/// silence.
+///
+/// **The cluster flags are asked first and take the line.** `--once`, `--live` and the three
+/// detail verbs keep the temporary driver — `--once` especially, which is released and is a
+/// command in a pipeline rather than a screen (NOTES § D17, `screens/once.md`). So this and
+/// [`live_context`] partition every line between them, and no line is both.
+///
+/// **What makes a line a console line is [`console_flag`] and not this function**, so the sentence
+/// [`mistyped`] refuses a path with can name the same flag this one connected with.
+fn opening(args: &[String]) -> Option<Opening<'_>> {
+    if live_context(args).is_some() || (!args.is_empty() && console_flag(args).is_none()) {
+        return None;
+    }
+    Some(Opening {
+        read_only: args.iter().any(|arg| arg == READ_ONLY),
+        context: context_arg(args).flatten(),
+        namespace: namespace_arg(args).flatten(),
+    })
+}
+
+/// **The first flag on this line that opens a console**, or `None` when none does.
+///
+/// **It answers with the flag and never with the word that carried it**, which is invariant 9's
+/// neighbour: `--context=<8 KiB>` is a word argv can make as long as it likes and nothing has
+/// bounded it at this point — [`mistyped`] bounds `--namespace`'s value and nothing bounds
+/// `--context`'s — so what [`cluster_reader`] prints back is one of four `&'static str`s and not
+/// what was typed (the security gate's *sizes are bounded* row).
+///
+/// **Both spellings of the three that take a value, because a line is a console line however it
+/// was written.** The attached form is a strip per flag rather than four more literals, so each
+/// flag is still spelled once in this file.
+///
+/// **The loop offers [`READ_ONLY`] that spelling too and no line can use it** (`k8s-admin`,
+/// 2026-09-24): `--read-only` takes no value, and `--read-only=true` is refused by [`mistyped`]'s
+/// `known` list — which runs before [`opening`] is reached — as a flag k8rs does not have. So
+/// there is no line on which this answers through the `=` arm while `Opening::read_only` is
+/// `false`, and the uniform loop is one rule rather than a hole. It is written down because the
+/// doc said *both spellings of each* for a round, which was the claim that is not true.
+fn console_flag(args: &[String]) -> Option<&'static str> {
+    for arg in args {
+        for flag in [READ_ONLY, CONTEXT, NAMESPACE, NAMESPACE_SHORT] {
+            if arg == flag
+                || arg
+                    .strip_prefix(flag)
+                    .is_some_and(|rest| rest.starts_with('='))
+            {
+                return Some(flag);
+            }
+        }
+    }
+    None
+}
+
+/// **What on this line reads a cluster** — the subject of the sentence [`mistyped`] refuses a path
+/// beside it with, and `None` when nothing on the line does.
+///
+/// **It is the gate as well as the subject, so the two cannot come apart.** A line that reaches a
+/// cluster and a line that may not also name a file are the same line; before the console had
+/// flags they were `live_context(args).is_some()` in one place and a `match` over three cases in
+/// another, and the flags box would have had to widen both.
+///
+/// **A console line names its flag rather than a mode it does not carry** (NOTES § D190's class):
+/// `k8rs --read-only pod.json` answering *"--live reads a cluster"* is a message about a run with
+/// no `--live` on it, and the flag the reader typed is the actionable word anyway.
+///
+/// **The console's clause is a claim about the flag and about nothing else on the line, and it
+/// took two rounds to get there** (`k8s-admin` and `tester`, 2026-09-24). It read
+/// *"--read-only opens the console"*, true of the run and **false of the flag** —
+/// `k8rs --read-only ops delete …` opens none. *"--read-only on its own opens the console"* fixed
+/// that and broke the other half: measured against the built binary,
+/// `k8rs --namespace=payments --context=prod-eu --read-only pod.json` answered
+/// *"--namespace on its own …"* about a line carrying two more flags.
+///
+/// **So it claims membership and stops.** *Belongs to the console* is true of all four flags,
+/// true whatever else the line holds, and denies nothing — `--context` belongs to `--once` too,
+/// and `--read-only` to `ops`. What makes the run's own case is the clause after it: the console
+/// reads a cluster, and a file is the other input.
+fn cluster_reader(args: &[String]) -> Option<String> {
+    if let Some(verb) = verbs(args).first() {
+        return Some((*verb).to_string());
+    }
+    if live_context(args).is_some() {
+        return Some(if once_wanted(args) { ONCE } else { LIVE }.to_string());
+    }
+    console_flag(args).map(|flag| format!("{flag} belongs to the console, which"))
 }
 
 /// **What a refused value is called in the sentence that refuses it** — stripped, bounded, and
@@ -2330,10 +2500,17 @@ fn mistyped(args: &[String]) -> Option<String> {
     // flag k8rs does not have gets. `-n=payments` is the one one-dash word that is real, and
     // `-nginx` was refused further up.
     //
-    // **Only on a cluster run.** With no cluster flag there is no ambiguity and `k8rs -x
-    // file.json` stays a path, which is what [`NAMESPACE_SHORT`]'s doc promises and what the
-    // `--` test in `known` above is for.
-    if live_context(args).is_some() {
+    // **A console flag is one of the flags this applies to, since the flags box** (todo.md
+    // § Phase 12). `k8rs --read-only pod.json` passed every check above, missed the console arm
+    // for not being a bare `k8rs`, and read the file with `--read-only` **silently dropped** —
+    // which is the same *a cluster and a file are two inputs* rule one door over, on the single
+    // worst flag to drop without a word. [`cluster_reader`] is both the gate and the subject of
+    // the sentence, so a flag that opens a console cannot be in one and missing from the other.
+    //
+    // **Only on a line that reaches a cluster.** With neither a cluster flag nor a console flag
+    // there is no ambiguity and `k8rs -x file.json` stays a path, which is what
+    // [`NAMESPACE_SHORT`]'s doc promises and what the `--` test in `known` above is for.
+    if let Some(reads) = cluster_reader(args) {
         let mut rest = args.iter();
         while let Some(arg) = rest.next() {
             if arg == CONTEXT
@@ -2370,15 +2547,11 @@ fn mistyped(args: &[String]) -> Option<String> {
             // not true of the run it is about, which is the class NOTES § D190 is named for
             // (`dev-core`'s own run, 2026-08-30).
             // **The verb that is on the line wins over the two breadth flags**, which is the
-            // same rule the sentence already had for [`LOGS`] — now read off [`verbs`] so a
-            // fourth verb cannot be added without joining it.
-            let mode = match (verbs.first(), once_wanted(args)) {
-                (Some(verb), _) => verb,
-                (None, true) => ONCE,
-                (None, false) => LIVE,
-            };
+            // same rule the sentence already had for [`LOGS`] — and over both of those, a line
+            // with neither names the console flag it does carry ([`cluster_reader`], which is
+            // where all four answers now live so the gate above and this subject cannot differ).
             return Some(format!(
-                "k8rs: {mode} reads a cluster, so k8rs cannot also read {} — run it with the \
+                "k8rs: {reads} reads a cluster, so k8rs cannot also read {} — run it with the \
                  flag, or with the file, not both\n{USAGE}",
                 sanitize(arg)
             ));
@@ -2902,21 +3075,25 @@ fn greeting(session: &k8s::Session) -> Vec<String> {
 /// prints exactly this and nothing more, because on that path the report lists and the watches
 /// never happen. A wall is where *here are the requests I did make* is the most useful thing on
 /// the screen, and printing the whole log there would name reads that never ran.
-fn connect_log(coverage: &k8s::Coverage, context_namespace: Option<&str>) -> Vec<String> {
+fn connect_log(
+    kubectl: &str,
+    coverage: &k8s::Coverage,
+    context_namespace: Option<&str>,
+) -> Vec<String> {
     let mut log = Vec::new();
     // **`k8s::coverage`'s own branches, read back off what it answered** — never a second guess at
     // which requests it sent. The cluster-wide probe is always cluster-wide, whatever scope the
     // run ended up with; only the fallback probe names a namespace.
-    let cluster_wide = "$ kubectl get --raw '/api/v1/pods?limit=1'";
+    let cluster_wide = format!("{kubectl} get --raw '/api/v1/pods?limit=1'");
     match coverage {
         // Typing `--namespace` answers the question the probe exists to ask, so nothing is sent.
         k8s::Coverage::Asked(_) => {}
         // Answered cluster-wide: one request, no fallback needed.
-        k8s::Coverage::Cluster => log.push(cluster_wide.to_string()),
+        k8s::Coverage::Cluster => log.push(cluster_wide.clone()),
         // Refused cluster-wide. The second probe went out only when the file held no namespace to
         // fall back to instead — the doc above has why the filter has to be the same one.
         k8s::Coverage::Refused(_) | k8s::Coverage::Blind(_) => {
-            log.push(cluster_wide.to_string());
+            log.push(cluster_wide.clone());
             if context_namespace
                 .filter(|named| k8s::namespace_name(named))
                 .is_none()
@@ -2926,15 +3103,58 @@ fn connect_log(coverage: &k8s::Coverage, context_namespace: Option<&str>) -> Vec
                 // only reachable when the context named nothing, so it is that constant, and
                 // taking it from here means the line cannot drift from where the request went.
                 log.push(format!(
-                    "$ kubectl get --raw '/api/v1/namespaces/{}/pods?limit=1'",
+                    "{kubectl} get --raw '/api/v1/namespaces/{}/pods?limit=1'",
                     sanitize(coverage.namespace().unwrap_or(""))
                 ));
             }
         }
     }
-    log.push("$ kubectl get --raw /version".to_string());
-    log.push("$ kubectl api-resources --verbs=list".to_string());
+    log.push(format!("{kubectl} get --raw /version"));
+    log.push(format!("{kubectl} api-resources --verbs=list"));
     log
+}
+
+/// **`$ kubectl`, with `--context <name>` on it when k8rs connected to a named context** — the
+/// head every line of the command log is built from, spelled once for the reason `{scope}` is
+/// ([`command_log`]).
+///
+/// **Every line carries it, not only the lines after a switch** (`screens/context.md` § What the
+/// command log shows, invariant 4, NOTES § D8). That section writes the rule for the context
+/// switcher — *every command line after a switch carries `--context <name>`* — and the reason it
+/// gives is not about switching: the line has to be one the reader can paste and get **the same
+/// cluster**, and `kubectl` without the flag reads their `current-context`, which is a different
+/// cluster the moment k8rs was started with `--context` or the reader runs `use-context` later.
+/// A line that is only honest immediately after a switch is a line that goes quietly wrong.
+///
+/// **It is the *connected* context and never the flag that was typed.** A run that named no
+/// `--context` still gets the flag, because what makes the paste reproduce the read is which
+/// cluster k8rs was on — which is exactly why the rule above covers a switch, where the reader
+/// typed no flag at all. `k8s::Session::context` is that name, already stripped and bounded to
+/// `k8s::IDENTIFIER` where it was read.
+///
+/// **The gap is the one shape that drops the segment**: `None`, or a name that stripped to
+/// nothing (NOTES § D202's third state, which `ops::Record::attempt_line` spells *not named*).
+/// `--context ` with an empty value after it is a line that does not run, so there is nothing to
+/// teach — the bare `$ kubectl` is still true of what k8rs sent.
+///
+/// **Immediately after `kubectl` and before the verb**, which is the spelling the screen draws
+/// and the only one `kubectl` accepts for a global flag ahead of a subcommand.
+fn kubectl(context: Option<&str>) -> String {
+    // **Stripped first, and the *stripped* value decides the gap** (`k8s-admin`'s step-7 pass,
+    // 2026-09-24; the same order `ops::context_segment` uses so the two taught surfaces cannot
+    // diverge on the one input the shared quoting rule was introduced to make them agree on).
+    // Tested raw, a name made only of characters [`sanitize`] removes — a lone `U+202E`, a
+    // `\u{7}` — passed the emptiness check, stripped to nothing, and `ops::pasteable` quoted the
+    // nothing: `$ kubectl --context ''`, the empty-valued flag the paragraph above refuses. It is
+    // the rule [`render`]'s own evidence line already states one screen up — *the sanitized value
+    // decides, not the raw one*.
+    match context.map(sanitize).filter(|name| !name.is_empty()) {
+        // **`ops::pasteable` and never a copy of it** (NOTES § D278 ruling 5, CLAUDE.md § Single
+        // point of change): the read lines here and the three taught mutation lines one file
+        // down quote by one rule, and a second spelling is where the two drift apart.
+        Some(name) => format!("$ kubectl {CONTEXT} {}", ops::pasteable(&name)),
+        None => "$ kubectl".to_string(),
+    }
 }
 
 /// The command log on its way to stderr, from the two places that write one — the ordinary run
@@ -2947,19 +3167,22 @@ fn log_to(err: &mut impl std::io::Write, lines: Vec<String>) {
 
 fn command_log(
     analysis: bool,
+    kubectl: &str,
     coverage: &k8s::Coverage,
     context_namespace: Option<&str>,
 ) -> Vec<String> {
     // `-A` or `-n payments`, written once: five of these lines follow the scope under
     // [`ANALYSIS`] and four of the five watches do, and a second spelling of *which namespace* is
-    // another place it can be forgotten in one.
+    // another place it can be forgotten in one. **`kubectl` is the same idea one word earlier**
+    // and arrives already built, because it is the caller that knows which context connected
+    // ([`kubectl`]).
     let scope = match coverage.namespace() {
         Some(namespace) => format!(" -n {}", sanitize(namespace)),
         None => " -A".to_string(),
     };
-    let mut log = connect_log(coverage, context_namespace);
+    let mut log = connect_log(kubectl, coverage, context_namespace);
     if analysis {
-        log.push("$ kubectl get certificatesigningrequests".to_string());
+        log.push(format!("{kubectl} get certificatesigningrequests"));
         for kind in [
             "replicasets",
             "services",
@@ -2967,19 +3190,19 @@ fn command_log(
             "persistentvolumeclaims",
             "poddisruptionbudgets",
         ] {
-            log.push(format!("$ kubectl get {kind}{scope}"));
+            log.push(format!("{kubectl} get {kind}{scope}"));
         }
         // **`kubectl top nodes` and not a raw path into `metrics.k8s.io`** — the command a reader
         // already knows for this question, and the one line here that is not a `kubectl get`. It
         // prints once whether the reading is [`ONCE`]'s single fetch or `--live`'s thirty-second
         // poll (`k8s::node_usage_poll`): a line means *this read began*, not *this stream is still
         // open*.
-        log.push("$ kubectl top nodes".to_string());
+        log.push(format!("{kubectl} top nodes"));
     }
-    log.push(format!("$ kubectl get pods{scope} --watch"));
-    log.push("$ kubectl get nodes --watch".to_string());
+    log.push(format!("{kubectl} get pods{scope} --watch"));
+    log.push(format!("{kubectl} get nodes --watch"));
     for kind in ["deployments", "statefulsets", "daemonsets"] {
-        log.push(format!("$ kubectl get {kind}{scope} --watch"));
+        log.push(format!("{kubectl} get {kind}{scope} --watch"));
     }
     log
 }
@@ -3430,7 +3653,11 @@ async fn live(
         // reason — by then the whole log is true.
         log_to(
             &mut std::io::stderr(),
-            connect_log(&session.coverage, session.namespace.as_deref()),
+            connect_log(
+                &kubectl(session.context.as_deref()),
+                &session.coverage,
+                session.namespace.as_deref(),
+            ),
         );
         return Some(why);
     }
@@ -3593,6 +3820,10 @@ async fn live(
         &mut err,
         command_log(
             analysis,
+            // **The context that was *connected*, not the `--context` on the line** — a run that
+            // named none still teaches the flag, because what makes the paste reproduce the read
+            // is which cluster k8rs was on ([`kubectl`]).
+            &kubectl(session.context.as_deref()),
             &coverage,
             // **The context's own namespace and not [`k8s::Session::namespace_scope`]** — this is
             // the field `k8s::coverage` branched on, and the two differ on every scoped run.
@@ -4080,10 +4311,19 @@ const OBJECT_READ: std::time::Duration = k8s::REPORT_FETCH;
 /// [`namespace_arg`], [`object_arg`] and [`container_arg`] all are.
 ///
 /// **`Some(None)` is the flag with nothing usable after it**, which is a real state and the
-/// commonest way to reach it is `--object "$POD"` with `POD` unset. **First wins on a repeat**,
-/// which is [`live_context`]'s rule and not `kubectl`'s (`kubectl` is last-wins); it is written
-/// down because an unwritten tie-break is the one that changes by accident, and Phase 12's real
-/// parsing is where the two should be made to agree.
+/// commonest way to reach it is `--object "$POD"` with `POD` unset.
+///
+/// **Last wins on a repeat**, which is `kubectl`'s rule and every getopt tool's, and which this
+/// was not until the flags box ([`context_arg`], whose doc carries the wrapper the change turns
+/// on). The deferral both parsers used to carry named *Phase 12's real parsing* as the place to
+/// fix it, and that box shipped `--namespace`/`-n` as a released console flag.
+///
+/// **It is right for all four flags this serves and not only the released one.** `--object`,
+/// `--container`, `--kind` and `--subresource` name one thing each, and a second one on the line
+/// is a correction — a reader who edits the end of a recalled command expects the edit to win.
+/// **Nothing depends on the old rule**: [`mistyped`] judges whatever this answers, so the value
+/// checked is always the value used, and its *three shapes of nothing* checks scan the whole line
+/// rather than a match, so they are unaffected by which match this keeps.
 ///
 /// **Nothing here judges the value.** [`mistyped`] does, once, so there is one sentence per flag
 /// and one place it comes from — which is the whole reason this is one function: two parsers over
@@ -4091,6 +4331,9 @@ const OBJECT_READ: std::time::Duration = k8s::REPORT_FETCH;
 ///
 /// `flags` is a slice because `--namespace` has two spellings and the others have one.
 fn value_of<'a>(args: &'a [String], flags: &[&str]) -> Option<Option<&'a str>> {
+    // **The scan runs to the end and keeps the last match** — a `return` in either arm below is
+    // how this was first-wins.
+    let mut found = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         // `--flag=VALUE`. Written as a strip per flag rather than a second literal per flag, so
@@ -4100,14 +4343,16 @@ fn value_of<'a>(args: &'a [String], flags: &[&str]) -> Option<Option<&'a str>> {
                 .strip_prefix(flag)
                 .and_then(|rest| rest.strip_prefix('='))
             {
-                return Some(Some(attached));
+                found = Some(Some(attached));
             }
         }
         if flags.contains(&arg.as_str()) {
-            return Some(rest.next().map(String::as_str));
+            // **The next word is consumed whether or not it is kept**, which is what keeps
+            // `--namespace a --namespace b` from reading `--namespace` as `b`'s own value.
+            found = Some(rest.next().map(String::as_str));
         }
     }
-    None
+    found
 }
 
 /// **Which object this line names**, or `None` when [`OBJECT`] is not on it ([`value_of`]).
@@ -5794,10 +6039,15 @@ fn flag_word(word: &str) -> bool {
 /// every sibling refusal on this line already cuts.
 ///
 /// **The namespace may be named once**, and a second one is refused rather than resolved (PM
-/// ruling, 2026-09-04). [`value_of`]'s documented first-wins is right for the read path and
-/// cannot be carried onto a write: `kubectl` is last-wins, so first-wins would send a mutation to
-/// whichever of the two the reader's own habit says is the other one. It is also the
-/// contradiction this driver already rules out twice — the sentence above, and
+/// ruling, 2026-09-04).
+///
+/// **The read path resolves a repeat and this one refuses it, and that is not the two
+/// disagreeing.** [`value_of`] takes the last, which is `kubectl`'s rule — it took the *first*
+/// until the flags box, and the old argument here was that first-wins would send a mutation to
+/// whichever of the two the reader's habit says is the other one. That half has gone; what it
+/// rested on has not. A read taken against the wrong namespace costs a re-run, and a mutation
+/// does not, so the write path buys its certainty with a refusal rather than with a tie-break.
+/// It is also the contradiction this driver already rules out twice — the sentence above, and
 /// [`ops_namespace`]'s refusal to guess a namespace nobody typed. Refusing to guess when none was
 /// typed and guessing when two were is not one rule.
 fn ops_words(rest: &[String]) -> Result<Vec<&str>, String> {
@@ -5866,11 +6116,11 @@ fn attached(arg: &str, flags: &[&str]) -> bool {
 /// **A thing an `ops` line may name once, named twice** — one sentence for both, because the
 /// reason is one (PM ruling, 2026-09-04, extended to [`SUBRESOURCE`] by NOTES § D230 ruling 1).
 ///
-/// [`value_of`]'s documented first-wins is right for the read path and cannot be carried onto a
-/// write or onto a question: `kubectl` is last-wins, so guessing sends the mutation — or the
-/// question — to whichever of the two the reader's own habit says is the other one. It is also
-/// the contradiction this driver rules out twice, here and in [`ops_namespace`]'s refusal to
-/// guess one nobody typed.
+/// **A read resolves a repeat and a write refuses one** ([`ops_words`], which carries the whole
+/// of why). [`value_of`] takes the last, as `kubectl` does, since the flags box; a re-read costs
+/// a re-run and a mutation does not, so this path buys its certainty with a refusal instead. It
+/// is also the contradiction this driver rules out twice, here and in [`ops_namespace`]'s
+/// refusal to guess one nobody typed.
 ///
 /// **It names *the namespace* and not `--namespace`**, which is the sentence this replaced and is
 /// the one to keep: the namespace has two spellings and a reader who typed `-n` twice would be
@@ -6794,10 +7044,12 @@ async fn ops_connected(
         Ok(kubeconfig) => kubeconfig,
         Err(problem) => return Ended::refused(no_cluster(&problem)),
     };
-    let server = current_server(&kubeconfig);
-    // `None`, because an `ops` line takes no `--context`: [`ops_words`] refuses every flag but
-    // the namespace, so the context is the kubeconfig's own — which is the same argument
-    // `current_server` was just asked with, and the two therefore name one entry.
+    // `None` in both places, because an `ops` line takes no `--context`: [`ops_words`] refuses
+    // every flag but the namespace, so the context is the kubeconfig's own. **The list is built
+    // here and handed on rather than asked for twice** — [`current_server`] used to ask for
+    // itself, and the console is what proved that one caller's precondition is not the other's.
+    let contexts = k8s::contexts(&kubeconfig, None);
+    let server = current_server(&contexts);
     let session = match k8s::connect_with(kubeconfig, None, ready.namespace).await {
         Ok(session) => session,
         Err(problem) => return Ended::refused(no_cluster(&problem)),
@@ -6834,23 +7086,33 @@ struct Reached<'a> {
     server: &'a str,
 }
 
-/// **The `server:` the audit line names**, off the same kubeconfig the connection is built from
-/// (NOTES § D220 ruling 5).
+/// **The `server:` the audit line names** — read off the `current` row of the *same*
+/// `k8s::contexts` list the connection was chosen from (NOTES § D220 ruling 5).
 ///
 /// **A context name does not identify a cluster and the record has to** (`ops::Mutation::server`).
 /// `kubeadm` writes `kubernetes-admin@kubernetes` for every cluster it builds, and a context is
 /// renamed freely while the record outlives the file it was written from.
 ///
+/// **It takes the list and not the kubeconfig, because taking the kubeconfig let it ask a second
+/// question** (`k8s-admin`, 2026-09-24). It called `k8s::contexts(kubeconfig, None)` itself, which
+/// was right for [`ops_connected`] — an `ops` line takes no `--context`, and that precondition is
+/// written where the call is — and wrong the moment the console connected with `opening.context`:
+/// `k8rs --context staging`, one restart, and the audit line read `context staging · server
+/// <the kubeconfig's current cluster>`. Invariant 4 says **neither record may lie**, and the
+/// field that lied is the one `ops::Mutation::server` exists to be the backstop for. Handed the
+/// list, the caller cannot ask two different questions: `current` is already on the row it
+/// connected to.
+///
 /// **`Undefined` and `Unreadable` both become the gap**, which is `ops::Record::attempt_line`'s
 /// own *not known*: one is an entry that names no cluster and the other is an address k8rs will
 /// not state without guessing, and neither is a server URL to write down. Telling them apart is
 /// `screens/context.md`'s job on a screen somebody is looking at, not a log line's.
-fn current_server(kubeconfig: &kube::config::Kubeconfig) -> String {
-    k8s::contexts(kubeconfig, None)
-        .into_iter()
+fn current_server(contexts: &[k8s::Choice]) -> String {
+    contexts
+        .iter()
         .find(|choice| choice.current)
-        .and_then(|choice| match choice.server {
-            k8s::Address::Server(server) => Some(server),
+        .and_then(|choice| match &choice.server {
+            k8s::Address::Server(server) => Some(server.clone()),
             k8s::Address::Undefined | k8s::Address::Unreadable => None,
         })
         .unwrap_or_default()
@@ -7350,6 +7612,27 @@ enum Did {
     Suspend,
 }
 
+/// **The audit log this run opens, or `None` because [`READ_ONLY`] means it never opens one** —
+/// the opener is a parameter so the decision is reachable from a test, the way [`ops_line`] takes
+/// `ops::audit_log`.
+///
+/// **`--read-only` beats `Unaudited`, and under it the file is not touched at all** (PM ruling,
+/// todo.md § Phase 12's flags box). `ui::Writes::Unaudited`'s sentence is *k8rs could not open its
+/// audit log — fix that, then start k8rs again*, and under the flag that is **false advice**:
+/// fixing the log restores nothing while the flag stands. Nothing reachable under `--read-only`
+/// needs the file either — `ops::may_i` and `ops::may_i_in` take no writer, and NOTES § D230
+/// ruling 3 keeps nothing else alive — so there is no refusal to report and no `$XDG_STATE_HOME`
+/// note to print about a log this run will not write to.
+///
+/// **NOTES § D21 is about a log that *failed*, not one nobody will ever write to**, which is why
+/// this is not that rule being weakened: *says so and continues read-only* has no *so* here.
+fn audit_log_for<T, F: FnOnce() -> Result<T, String>>(
+    read_only: bool,
+    open: F,
+) -> Option<Result<T, String>> {
+    (!read_only).then(open)
+}
+
 /// **The console's whole run** — `None` is the reader quitting, `Some` the sentence that goes to
 /// stderr with exit `2` (`main`'s own contract).
 ///
@@ -7364,20 +7647,25 @@ enum Did {
 /// `screens/` has a slot for them (`ops::audit_log`, which leaves the placement to its caller). A
 /// *refusal* is different and does have a screen — `ui::Writes::Unaudited`, a banner with every
 /// write key dead (`screens/states.md` § The audit log could not be opened).
-async fn console() -> Option<String> {
+///
+/// **Everything the command line asked for arrives as [`Opening`] and is read nowhere else here**
+/// — `main`'s own rule that a decision lives in a function over values, which this one could not
+/// obey for the run-level facts while it took no parameters at all.
+async fn console(opening: &Opening<'_>) -> Option<String> {
     use std::io::Write;
     // **The log first**, because a refusal here is a fact about the whole run that the header says
-    // from the first frame (NOTES § D21 — k8rs says so and continues, read-only).
-    let opened = ops::audit_log();
+    // from the first frame (NOTES § D21 — k8rs says so and continues, read-only) — and under
+    // [`READ_ONLY`] there is no log to refuse, which is [`audit_log_for`]'s whole subject.
     let mut audit = None;
     let unaudited;
-    let writes = match opened {
-        Ok((file, notes)) => {
+    let writes = match audit_log_for(opening.read_only, ops::audit_log) {
+        None => ui::Writes::ReadOnly,
+        Some(Ok((file, notes))) => {
             audit = Some(file);
             log_to(&mut std::io::stderr(), notes);
             ui::Writes::Live
         }
-        Err(said) => {
+        Some(Err(said)) => {
             unaudited = said;
             ui::Writes::Unaudited(&unaudited)
         }
@@ -7394,11 +7682,18 @@ async fn console() -> Option<String> {
     let mut server = String::new();
     let reached = match k8s::kubeconfig() {
         Err(problem) => Err(problem),
+        // **One list, read three ways, so none of them can name a different cluster from the
+        // connection** (NOTES § D174, § D265 ruling 8): `k8s::contexts` marks the row that was
+        // *asked for* as `current`, so [`tls_unverified`] reads `insecure-skip-tls-verify` and
+        // [`current_server`] reads the audit line's `server:` off the row k8rs actually connected
+        // to — not off the kubeconfig's own current one. The `server` half was the defect
+        // (`k8s-admin`, 2026-09-24): it asked `k8s::contexts(…, None)` for itself, so a
+        // `--context` run logged the right context name beside the wrong URL.
         Ok(kubeconfig) => {
-            contexts = k8s::contexts(&kubeconfig, None);
+            contexts = k8s::contexts(&kubeconfig, opening.context);
             insecure = tls_unverified(&contexts);
-            server = current_server(&kubeconfig);
-            k8s::connect_with(kubeconfig, None, None).await
+            server = current_server(&contexts);
+            k8s::connect_with(kubeconfig, opening.context, opening.namespace).await
         }
     };
     let mut err = std::io::stderr();
@@ -7412,7 +7707,11 @@ async fn console() -> Option<String> {
         if let Ok(session) = &reached {
             log_to(
                 &mut err,
-                connect_log(&session.coverage, session.namespace.as_deref()),
+                connect_log(
+                    &kubectl(session.context.as_deref()),
+                    &session.coverage,
+                    session.namespace.as_deref(),
+                ),
             );
         }
         return Some(why);
@@ -7452,16 +7751,10 @@ async fn console() -> Option<String> {
         depth: theme::depth(std::env::var("COLORTERM").ok().as_deref()),
         writes,
         insecure,
-        // **`(unnamed)` is the only thing a `None` can be here, and that is worth one line**
-        // (NOTES § D202, `k8s::Session::context`, whose doc names three states that reach it).
-        // Two of them — no kubeconfig at all, and no context resolved — cannot reach a session that
-        // connected: `k8s::connect_with` refuses both before there is anything to draw. What is
-        // left is a context whose name stripped to nothing, which is the one state that word is
-        // for; collapsing the other two into it is what D202 closed, through the other door.
-        context: views::Stripped::of(&format!(
-            "ctx: {}",
-            session.context.as_deref().unwrap_or(views::UNNAMED)
-        )),
+        // **Built once, because neither half of it can change without a reconnect**
+        // ([`zone`], `ui::Screen::context`): the context is the one `k8s::connect_with` resolved,
+        // and [`Watching::coverage`] is cloned from the session beside it.
+        context: views::Stripped::of(&zone(session.context.as_deref(), at.coverage.namespace())),
         clock: clock(session.skew),
         kinds: session
             .served
@@ -7476,7 +7769,12 @@ async fn console() -> Option<String> {
     };
     // **The same lines the headless driver prints on stderr, in the strip the reader reads them
     // in** ([`command_log`]): the probe, the version, discovery and the five watches, spelled once.
-    for line in command_log(true, &at.coverage, session.namespace.as_deref()) {
+    for line in command_log(
+        true,
+        &kubectl(session.context.as_deref()),
+        &at.coverage,
+        session.namespace.as_deref(),
+    ) {
         console.log.ran(line);
     }
 
@@ -7915,6 +8213,45 @@ fn tls_unverified(contexts: &[k8s::Choice]) -> bool {
     contexts.iter().any(|row| row.current && row.insecure)
 }
 
+/// **The header's right zone up to the connection word** — `ctx: prod-eu`, and
+/// `ctx: prod-eu · ns: payments` when this run covers one namespace
+/// (`screens/widgets.md` § 1a's zone table, `ui::Screen::context`, whose doc says the caller's
+/// zone ends at the scope and that the connection word is joined on one layer down).
+///
+/// **The scope was missing from it until the flags box, and the flag is what made that visible**
+/// (todo.md § Phase 12). Nothing on the console could narrow a run before `--namespace` reached it
+/// — except `k8s::Coverage`'s own 403 fallback, which lands here through the same field — so a
+/// scoped run drew a header that reads exactly like a cluster-wide one, and `○ nothing is broken`
+/// over one namespace is the answer this whole tool exists not to give
+/// (`screens/states.md` § You can only see some namespaces).
+///
+/// **`(unnamed)` is the only thing a `None` context can be here, and that is worth one line**
+/// (NOTES § D202, `k8s::Session::context`, whose doc names three states that reach it). Two of them
+/// — no kubeconfig at all, and no context resolved — cannot reach a session that connected:
+/// `k8s::connect_with` refuses both before there is anything to draw. What is left is a context
+/// whose name stripped to nothing, which is the one state that word is for; collapsing the other
+/// two into it is what D202 closed, through the other door.
+///
+/// **Nothing here strips and nothing here bounds**, because both belong to the type this becomes:
+/// `views::Stripped::of` runs invariant 9's filter, and `ui::shortened` eats the *front* of the
+/// zone so `read-only` and the TLS warning never give way (NOTES § D249).
+fn zone(context: Option<&str>, namespace: Option<&str>) -> String {
+    let mut zone = format!("ctx: {}", context.unwrap_or(views::UNNAMED));
+    if let Some(namespace) = namespace {
+        zone.push_str(" · ");
+        zone.push_str(&scoped(namespace));
+    }
+    zone
+}
+
+/// **`ns: payments` — what a scoped run is labelled**, spelled once for the two surfaces that
+/// carry it: the header's zone ([`zone`]) and the browser pane's title (`ui::Screen::namespace`,
+/// whose doc is why one fact reaches the frame twice — once already joined into a string, once as
+/// the value, and never one parsed back out of the other).
+fn scoped(namespace: &str) -> String {
+    format!("ns: {namespace}")
+}
+
 /// **What a console says instead of drawing its first frame, or `None` to go on** — the two endings
 /// the prelude can reach, as one decision over typed answers rather than three `return`s among the
 /// calls that produce them.
@@ -8258,7 +8595,7 @@ fn drawn<B: ratatui::backend::Backend>(
         namespace: at
             .coverage
             .namespace()
-            .map(|namespace| views::Stripped::of(&format!("ns: {namespace}"))),
+            .map(|namespace| views::Stripped::of(&scoped(namespace))),
         now: &now,
         note: &note,
         kinds: &console.kinds,

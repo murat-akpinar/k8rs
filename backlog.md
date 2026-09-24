@@ -2653,6 +2653,81 @@ recorded reversal and a later box rather than a dev round
   `k8s-admin` ([reports/2026-09-20-the-dry-run-deadline.md](reports/2026-09-20-the-dry-run-deadline.md)),
   2026-09-20.
 
+- **Flags accepted on a line that silently drops them.** `k8rs --read-only --analysis`
+  opens the console and ignores `--analysis`; `k8rs --yaml --object default/web --read-only`
+  takes the verb path and drops `--read-only`. Both are harmless in this build — the console
+  always draws the ANALYSIS rows, and `--yaml` writes nothing — so neither is a wrong answer
+  today, only a word that taught the reader nothing. `mistyped`'s own doc (`src/main.rs:2148`)
+  already points here: *"Phase 12's real flag parsing is where a tighter answer belongs"*. The
+  flags box tightened the two cases that could mislead (a stray path beside a console flag, and
+  last-wins) and left these, because refusing a redundant-but-true flag costs a reader more than
+  it saves. Revisit when the temporary driver's ten scaffolding flags come out and the surface
+  is small enough to say *every word on the line does something*. Found by `k8s-admin`
+  (`reports/2026-09-24-the-console-flags.md` finding 9), 2026-09-24.
+
+- **The usage synopsis is one 609-column line.** `src/main.rs`'s `USAGE` is deliberately one
+  unwrapped printed line with `   |   ` between alternatives, and it was already ~537 columns
+  before the flags box added the console form. Every terminal wraps it at an arbitrary column,
+  so the alternative a reader needs is split across lines at no meaningful boundary — for a tool
+  whose thesis is that a beginner can read the screen (invariant 14). Not this box's to redesign:
+  `screens/states.md` § The command line's own synopsis is now the authority for the text, and it
+  ruled on *what the line says*, not on whether it should be one line. A real fix is one
+  alternative per output line, which is a screen ruling plus a `tests/binary.rs` change. Noticed
+  by the PM while checking the designer's 609-column measurement against the existing convention,
+  2026-09-24.
+
+- **`docs/architecture.md`'s status header describes a build from before Phase 7.** It says
+  *"the bottom of the pyramid — `rules.rs`, `analysis.rs`, `k8s.rs` — exists and runs behind a
+  temporary driver; the three views and the write path are still design."* All three claims are
+  now false: `ops.rs` landed in Phase 7 (and Phase 12 reopened it once, D278 ruling 5),
+  `theme.rs`/`views.rs`/`ui.rs` landed across Phases 9–11, and the console has been the bare
+  `k8rs` since D274. Left alone deliberately while fixing the CLI-surface rows in the same file:
+  it is not this box's surface, and a turn that absorbs every contradiction it walks past never
+  converges (D196). The honest fix is one rewrite of that block at Phase 12's close, when the
+  freeze list settles. Noticed by the PM during the flags box's docs sync, 2026-09-24.
+
+- **The command-log strip's own worked examples need the same re-derivation the dialogs just got.**
+  `screens/dialogs.md` § *While the call is running* and § *The command log's own line* still show
+  pre-`--context` example commands and a 76-column budget analysis computed against them. The
+  dialog boxes were redrawn when the taught line grew 53 → 73 columns (D278 ruling 10), and the
+  strip was deliberately left out of that turn's scope — but the `--context` floor lands inside
+  `command_cut` itself precisely so the strip inherits it, which means the strip's examples are now
+  describing a cut that behaves differently from the one they draw. Not urgent and not wrong on the
+  screen, only stale on the page. Found by `tui-designer` while ruling on the confirm box's width,
+  2026-09-24.
+
+- **Two `is_empty()`-before-strip sites survive in the temporary driver's scaffolding.**
+  `src/main.rs:5328` and `:5524` take a `false` arm on a raw `kind.group` and sanitize inside it, so
+  a wholly-strippable group would render *the one  adds* / *singular.* — the same shape as the
+  `kubectl()` defect D278 ruling 5 records. **Deliberately not fixed**, and the line is the surface:
+  `--analysis` is released, while `--describe`/`--yaml`/`--kind` are scaffolding that dies with the
+  temporary `main.rs` at Phase 12. The rule that made `action` (`:1591`) worth fixing — *a guard
+  correct only for the inputs it happens to get goes wrong when a later box widens them* — has no
+  later box here. Neither site is reachable today either: `Browsable::group` comes from API
+  discovery, where a non-core group is a server-validated DNS subdomain and a core-group kind is
+  `""` and takes the other arm. **If the scaffolding outlives Phase 12, these two come with it.**
+  Swept and reasoned by `dev-ui`, ruled by the PM, 2026-09-24.
+
+- **§ Scale's mockup breaks the consequence where the wrapper does not.** `screens/dialogs.md`
+  draws the break at the sentence (`This starts 1 more copy of your app.` / `Right now: 2 copies.
+  After: 3 copies.`); `ui::wrapped` packs greedily and breaks after `2 copies.`. Both render the
+  same sentence on the same two rows at the same width — only the break moves — but the page's own
+  prose calls that block *"one string wrapped to the box width — a rendering choice, not two
+  fields"*, so the drawing contradicts its own sentence. It matters more than cosmetics because
+  `ui_tests.rs` parses its expectations **out of that markdown**, so the coupling is weakened: the
+  test compares every other row exactly and those two joined. Left out of the flags box on purpose —
+  changing the mockup changes what the test parses and may need a code change with it, which is a
+  round for a line break in a tree that is green and internally consistent. Found by `dev-ui` while
+  landing D278 ruling 10, 2026-09-24.
+
+- **`ops::pasteable("")` returns `''`, and that is correct rather than a bug.** `''` is the only way
+  to pass an empty argument through a shell at all, so a general-purpose quoter owes it. What would
+  be wrong is a *caller* that wants the flag omitted and asks the quoter instead — and both callers
+  today decide the gap before they quote (`context_segment`, `kubectl()`, D278 ruling 5). Recorded
+  because `dev-ui` correctly flagged it as a trap for a third caller: the omit-or-quote decision
+  belongs to the caller and there is nothing in the type to enforce that. A doc line on `pasteable`
+  saying so is `dev-core`'s whenever `ops.rs` is next open. 2026-09-24.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

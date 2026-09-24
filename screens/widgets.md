@@ -1118,14 +1118,35 @@ reopens the picker it came from
 
   | Interior width | Used when | Margin, centred |
   |---|---|---|
-  | 58 | the default for a `Confirm` box with a `$ kubectl …` line — used whenever the content fits: the consequence wraps to `CONSEQUENCE_LINES` or fewer at this room **and** the `$` line itself needs no cut at all — kind/name, every flag, `-n`'s value, whole — at this room ([dialogs.md § Scale](dialogs.md#scale--confirm-with-dry-run), [§ The namespace flag never disappears without a trace](dialogs.md#the-namespace-flag-never-disappears-without-a-trace)) | 4 / 4 |
-  | 61 | 58 does not fit — a longer consequence sentence, the typed-name field, or a `$ kubectl …` line that would need any cut at all at 58's own room ([§ Restart](dialogs.md#restart--confirm-with-dry-run), [§ Delete](dialogs.md#delete--the-name-has-to-be-typed-and-nothing-is-checked-first), [§ The namespace flag never disappears without a trace](dialogs.md#the-namespace-flag-never-disappears-without-a-trace)) | 3 / 2 — 5 columns split as evenly as an odd number allows |
+  | ~~58~~ | **retired** — was the default for a `Confirm` box with a `$ kubectl …` line whenever the consequence wrapped to `CONSEQUENCE_LINES` or fewer **and** the `$` line needed no cut at all. `--context` makes that second condition unreachable: every taught command now carries it, and even the shortest realistic `--context <name>` already pushes the shortest realistic `$` line past this width's own room ([dialogs.md § Scale](dialogs.md#scale--confirm-with-dry-run)) — not narrower today, structurally never reachable again while invariant 4 holds | — |
+  | 61 | every `Confirm` with a `$` line, now unconditionally — a longer consequence sentence, the typed-name field, or (always, since `--context`) a `$` line needing any cut at all ([§ Scale](dialogs.md#scale--confirm-with-dry-run), [§ Restart](dialogs.md#restart--confirm-with-dry-run), [§ Delete](dialogs.md#delete--the-name-has-to-be-typed-and-nothing-is-checked-first)) | 3 / 2 — 5 columns split as evenly as an odd number allows |
   | 54 | `Refused`, `Gone` or `Unconnected` — no `$ kubectl …` line and no typed-name field inside the box, so there is consistently less to fit ([§ The cluster said no](dialogs.md#the-cluster-said-no), [§ The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open), [§ Drain](dialogs.md#drain-which-takes-minutes), [context.md § When the new cluster does not work](context.md#when-the-new-cluster-does-not-work)) | 6 / 6 |
 
-  **58 fits with room to spare either side. 61 is as wide as any dialog on
-  this page needs, and it is close to the real ceiling** — the smaller
-  margin cannot drop below 2 without the box touching the outer frame, and
-  61 leaves 2 already, one column short of it. **This file drew the three
+  **`CONFIRM_BOX` is provably dead, not merely unused today** — the constant
+  a reviewer or a mutation sweep should expect gone, not kept "for later":
+  `box_width`'s own condition for choosing it can no longer be true, for any
+  command a `Confirm` dialog can ever draw, because `--context` is
+  unconditional on every taught line
+  ([dialogs.md § The context flag never disappears without a trace
+  either](dialogs.md#the-context-flag-never-disappears-without-a-trace-either)).
+  A branch nobody can reach is exactly the shape a mutation sweep cannot kill
+  — `dev-ui`'s to remove, along with `box_width`'s own `fits`/`whole` check,
+  which collapses to always returning `CROWDED_BOX`. **61 is as wide as any
+  dialog on this page needs now, and it is close to the real ceiling** — the
+  smaller margin cannot drop below 2 without the box touching the outer
+  frame, and 61 leaves 2 already, one column short of it — the reason a
+  fourth, wider tier was considered and rejected rather than adopted to spare
+  the `$` line its cut: even the theoretical maximum this rule allows, 72
+  columns of interior (2/2 margin against the real 78-column floor `boxed`'s
+  own doc comment measures, not the 68 this file's own mockups draw at), only
+  rescues the shortest realistic command, and a context name past roughly
+  nine characters — ordinary in a real kubeconfig — busts it again regardless
+  ([dialogs.md § Restart](dialogs.md#restart--confirm-with-dry-run) is the
+  worked case: even `payments/web` in `prod-eu` does not fit whole at 61).
+  Buying that little, at the cost of re-deriving every consequence's own wrap
+  points and every box's row count on this file, was not worth it — the cut,
+  with a floor that never sacrifices the object's own identity, is the
+  general answer; a wider box is not. **This file drew the three
   dismiss-only boxes off-centre (4 / 8) until a review measured every box
   against this same rule and found those three did not obey it** — fixed by
   centring them, not by writing a second margin rule to excuse the
@@ -1139,15 +1160,28 @@ reopens the picker it came from
   borders. **24 is the ceiling**, because the whole frame is drawn inside the
   80×24 floor this product supports at all ([README § How to read
   them](README.md#how-to-read-them)), so content between the nested borders
-  never runs past 13 rows. **One blank row is kept between the consequence and
-  the dry-run verdict whenever there is room for it inside that ceiling, and
-  dropped — first, before any sentence is cut — whenever there is not.** §
-  Scale keeps it (9 content rows). § Restart and § Delete both need that row
-  for something else instead — an extra sentence, the typed-name field — so the
-  blank goes rather than a clause
-  [D223](../NOTES.md#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)/[D224](../NOTES.md#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)/[D225](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
-  put there on purpose; § Restart's paused variant and § Drain both land on
-  exactly 13, the ceiling itself, with no blank left to spend.
+  never runs past 13 rows. **One blank row sits between the consequence and
+  the dry-run verdict, and whether it is even a candidate to draw is a
+  content-shaped question, not a ceiling-shaped one — the ceiling only ever
+  gets a vote on a candidate that already exists.** The row is a candidate
+  only for a `Confirm` whose own consequence already fits
+  [`CONSEQUENCE_LINES`] **and** carries no typed-name
+  field — today, that is § Scale alone (9 content rows, kept, comfortably
+  under the ceiling). § Restart's and § Delete's own shapes — a consequence
+  past `CONSEQUENCE_LINES`, a typed-name field — mean the row was never a
+  candidate for either of them in the first place, whatever slack they have
+  left: § Restart's plain box has three rows still free against the ceiling
+  (10 content rows) and still does not draw it, because the gate that decides
+  is what the box *is*, not what the ceiling has room for
+  [D223](../NOTES.md#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)/[D224](../NOTES.md#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)/[D225](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04).
+  **Only once a box clears that gate does the ceiling become the second,
+  latent rule**: were a future Scale-shaped box ever to run past 13 rows, the
+  blank is what gives first, before any sentence is cut — a fallback no box
+  on this page has yet been wide enough to need, since the only box the
+  content gate ever admits, Scale's, has never come close to 13. § Restart's
+  paused variant and § Drain both land on exactly 13 too, but for the
+  ordinary reason their own content is long, not because the ceiling took
+  this row from them — neither was ever a candidate to draw it.
 - `esc` closes exactly one level, always — with one named exception, and it
   is not a trap: a `Confirm` whose check has not answered yet
   (`Dialog::waiting`) puts the same dialog straight back rather than

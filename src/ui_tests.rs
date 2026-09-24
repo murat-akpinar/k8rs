@@ -8783,7 +8783,8 @@ fn scaling() -> views::Dialog {
         consequence: "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies."
             .to_owned(),
         warning: None,
-        kubectl: "kubectl scale deployment/web --replicas=3 -n payments".to_owned(),
+        kubectl: "kubectl --context prod-eu scale deployment/web --replicas=3 -n payments"
+            .to_owned(),
         verdict: Some(ACCEPTED),
         asks: None,
         typed: views::Input::default(),
@@ -8798,7 +8799,7 @@ fn restarting() -> views::Dialog {
                       few, or all of them at once. A paused deployment will not start until you \
                       resume it."
             .to_owned(),
-        kubectl: "kubectl rollout restart deployment/web -n payments".to_owned(),
+        kubectl: "kubectl --context prod-eu rollout restart deployment/web -n payments".to_owned(),
         ..scaling()
     }
 }
@@ -8820,7 +8821,7 @@ fn deleting() -> views::Dialog {
                       has not checked whether anything did."
             .to_owned(),
         warning: None,
-        kubectl: "kubectl delete pod/web-7d9f4 -n payments".to_owned(),
+        kubectl: "kubectl --context prod-eu delete pod/web-7d9f4 -n payments".to_owned(),
         verdict: Some(UNCHECKABLE),
         asks: Some("web-7d9f4".to_owned()),
         typed,
@@ -8850,15 +8851,15 @@ const PAUSED: &str = "This deployment is paused, so nothing will be replaced unt
 const ACCEPTED: &str = "the cluster checked it first and accepted it";
 const UNCHECKABLE: &str = "k8rs did not check this one with the cluster first";
 
-/// **Four rows of warning at [`CONFIRM_BOX`]'s own text width** — one row short of [`WORDY`], so
+/// **Four rows of warning at [`CROWDED_BOX`]'s own text width** — one row short of [`WORDY`], so
 /// the pair of them is the blank row under the consequence appearing and disappearing.
 const ROOMY: &str = "The cluster answered this check with a sentence longer than any it really \
                      sends, long enough to take four whole rows of this box and no more than \
                      four of them, which is what this one is for.";
 
-/// **Five rows of warning at [`CONFIRM_BOX`]'s own text width** — no operation sends anything
+/// **Five rows of warning at [`CROWDED_BOX`]'s own text width** — no operation sends anything
 /// like it, and that is the point: the row budget is a total guard on a `views::Dialog` anyone
-/// can build, and this is the only shape that crowds a 58-wide box from below.
+/// can build, and this is the only shape that crowds the box from below.
 const WORDY: &str = "The cluster answered this check with a sentence far longer than any it \
                      really sends, long enough to take five whole rows of this box on its \
                      own and to leave the consequence above it a single row to live in, \
@@ -8887,7 +8888,7 @@ fn deleting_a_node() -> views::Dialog {
                       alone, its pods are deleted and the machine keeps running until its kubelet \
                       restarts."
             .to_owned(),
-        kubectl: "kubectl delete node/node-3".to_owned(),
+        kubectl: "kubectl --context prod-eu delete node/node-3".to_owned(),
         asks: Some("node-3".to_owned()),
         typed,
         ..deleting()
@@ -9043,6 +9044,17 @@ fn logged_pair() -> [Stripped; 2] {
     ]
 }
 
+/// **The box's sentence rows — everything but the `$ kubectl …` line** (NOTES § D278).
+///
+/// **Four tests counted `…` marks across the whole box and every one of them broke on the same
+/// day**, because since `--context` joined every taught command the `$` line carries a mark on
+/// every box this product draws ([`ui::command_cut`], [`ui::context_cut`]). What each of them was
+/// really asserting is what happened to the *sentences* — was the consequence cut, was the
+/// warning spared — and a scan that cannot tell the two apart answers a question nobody asked.
+fn sentences(box_: &[String]) -> impl Iterator<Item = &String> {
+    box_.iter().filter(|row| !row.contains("$ kubectl"))
+}
+
 /// The box a modal draws at the floor, extracted from the real frame.
 fn box_of(modal: views::Modal) -> Vec<String> {
     let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
@@ -9052,6 +9064,65 @@ fn box_of(modal: views::Modal) -> Vec<String> {
         &over(modal),
         &opened_over(&alerts, &now, &log),
     )))
+}
+
+/// **§ Scale's two boxes are drawn exactly as `screens/dialogs.md` draws them, every row.**
+///
+/// **It is § Scale that pins the blank row between the consequence and the verdict**, because
+/// § Scale is the only box on that page that keeps one: its consequence is
+/// [`ui::CONSEQUENCE_LINES`] rows and it asks for no typed name, which is what `confirm`'s
+/// `spare_row` reads. § Restart's four rows and § Delete's field are the two boxes that spend it.
+///
+/// **It exists because `just mutants-diff` said it was missing** (2026-09-24). Blocks 2, 3 and 4
+/// were compared row for row and blocks 0 and 1 were not, so `field == 0` could be flipped to
+/// `field != 0` with nothing to notice: § Delete's own consequence is already past
+/// `CONSEQUENCE_LINES`, so the `&&` short-circuits there and only § Scale can see the change.
+#[test]
+fn the_scale_boxes_are_the_screen_files_boxes_row_for_row() {
+    let mut pending = scaling();
+    pending.verdict = None;
+    for (named, dialog, nth) in [
+        ("§ Scale", scaling(), 0),
+        ("§ Scale, its check still on the wire", pending, 1),
+    ] {
+        let drawn = box_of(views::Modal::Confirm(dialog));
+        let mockup = mockup_dialog(nth);
+        // **The row count first, because it is the blank row** — the one this box keeps and the
+        // other two spend, and the number `confirm`'s `spare_row` decides.
+        assert_eq!(
+            drawn.len(),
+            mockup.len(),
+            "screens/dialogs.md {named}: {} rows against the page's {}\\n{}",
+            drawn.len(),
+            mockup.len(),
+            drawn.join("\\n")
+        );
+        for (row, (a, b)) in drawn.iter().zip(&mockup).enumerate() {
+            // **Rows 2 and 3 are the consequence, and they are compared joined** — the one place
+            // this page and the wrapper disagree, reported rather than papered over. § Scale
+            // draws the break at the sentence (*"This starts 1 more copy of your app."* /
+            // *"Right now: 2 copies. After: 3 copies."*); `wrapped` packs greedily and breaks
+            // after *copies.*, which is what the page's own prose says it must — *"that one
+            // string wrapped to the box width — a rendering choice, not two fields"*. Both draw
+            // the same sentence on the same two rows; only the break moves. Handed to
+            // `tui-designer` 2026-09-24.
+            if (2..=3).contains(&row) {
+                continue;
+            }
+            assert_eq!(a, b, "screens/dialogs.md {named}, row {row}");
+        }
+        let said = |rows: &[String]| {
+            rows.iter()
+                .map(|row| row.trim_matches('\u{2502}').trim().to_owned())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        assert_eq!(
+            said(&drawn[2..=3]),
+            said(&mockup[2..=3]),
+            "screens/dialogs.md {named}: the consequence is not the page's sentence"
+        );
+    }
 }
 
 /// **§ Restart's two boxes are drawn exactly as `screens/dialogs.md` draws them, every row.**
@@ -9452,7 +9523,7 @@ fn a_dialog_picks_one_of_three_widths_and_centring_decides_the_rest() {
                         there may delay this or act first — left alone, nothing is left running."
         .to_owned();
     for (expected, modal) in [
-        (CONFIRM_BOX, views::Modal::Confirm(scaling())),
+        (CROWDED_BOX, views::Modal::Confirm(scaling())),
         (CROWDED_BOX, views::Modal::Confirm(wide)),
         (CROWDED_BOX, views::Modal::Confirm(restarting())),
         (CROWDED_BOX, views::Modal::Confirm(deleting())),
@@ -9510,22 +9581,18 @@ fn a_dialog_picks_one_of_three_widths_and_centring_decides_the_rest() {
     }
 }
 
-/// **A `$ kubectl …` line that would have to be cut widens the box before anything is dropped**
-/// (`screens/dialogs.md` § The namespace flag never disappears without a trace, ruling 2;
-/// `screens/widgets.md` § 5's own table, whose [`CONFIRM_BOX`] row now reads *"the `$` line
-/// itself needs no cut at all"*).
+/// **There is one box width now, and the `$` line is what gives way inside it**
+/// (`screens/widgets.md` § 5's table, whose 58 row reads **retired**;
+/// `screens/dialogs.md` § Scale). The narrow box used to win wherever the whole command already
+/// fit its own `$` room; `--context` is on every taught line unconditionally, so no command any
+/// of these boxes draws fits 58 — the choice is not narrower today, it is unreachable, which is
+/// why `box_width`'s `fits`/`whole` condition went with the constant (NOTES § D278).
 ///
-/// **Measured, not reasoned**: at [`CONFIRM_BOX`] this scale lost `-n payments-production` whole
-/// and read as a complete, runnable command against whatever `checkout-worker` resolves to in the
-/// reader's own default namespace; [`CROWDED_BOX`]'s three extra columns are exactly what
-/// `kubectl scale deployment/checkout-worker --replicas=3 -n…` — 57 — needs
-/// (`reports/2026-09-20-the-four-behaviours.md` § 5).
-///
-/// **The consequence is the same string in both**, so the width can only have moved for the `$`
-/// line, and **the right edge is asserted in both states** — the line that fits whole and the one
-/// that had to give way — because a fix for a clip is one column from reintroducing it.
+/// **What survives the retirement is the claim that was always the point**: the `$` row ends
+/// inside the box's own border, **in both states** — a command that needs one cut and one that
+/// needs three — because a fix for a clip is one column from reintroducing it.
 #[test]
-fn a_command_line_that_would_be_cut_widens_the_box_first() {
+fn the_command_line_is_cut_to_the_one_box_width_and_never_past_its_border() {
     let short = scaling();
     let mut long = scaling();
     long.object = views::Object::new(
@@ -9534,19 +9601,22 @@ fn a_command_line_that_would_be_cut_widens_the_box_first() {
         "checkout-worker".to_owned(),
         Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
     );
-    long.kubectl =
-        "kubectl scale deployment/checkout-worker --replicas=3 -n payments-production".to_owned();
+    long.kubectl = "kubectl --context prod-eu scale deployment/checkout-worker --replicas=3 \
+                    -n payments-production"
+        .to_owned();
     assert_eq!(
         short.consequence, long.consequence,
         "the two dialogs differ in their consequence too, so the width says nothing about the \
          command"
     );
-    assert_eq!(box_width(&short), CONFIRM_BOX, "the drawn scale box moved");
-    assert_eq!(
-        box_width(&long),
-        CROWDED_BOX,
-        "a command that cannot be drawn whole did not widen its box"
-    );
+    // **One width for both**, and for a dialog that asks for a typed name as well.
+    for dialog in [&short, &long, &deleting(), &restarting()] {
+        assert_eq!(
+            box_width(dialog),
+            CROWDED_BOX,
+            "a Confirm was drawn at a width the box no longer has"
+        );
+    }
 
     // What the reader actually reads, and that it ends inside the box either way.
     let command = |dialog: views::Dialog| {
@@ -9567,15 +9637,20 @@ fn a_command_line_that_would_be_cut_widens_the_box_first() {
         );
         row.trim_matches('│').trim().to_owned()
     };
+    // **One cut: `--replicas=3` goes whole and `-n`'s value shrinks** — the order
+    // `screens/dialogs.md` § Scale draws.
     assert_eq!(
         command(short),
-        "$ kubectl scale deployment/web --replicas=3 -n payments",
-        "the box that fits its command whole cut it anyway"
+        "$ kubectl --context prod-eu scale deployment/web -n paymen…",
+        "the scale box is not the line screens/dialogs.md § Scale draws"
     );
+    // **Three: the trailing flag, then `-n` bare, then `--context`'s own value** — and the
+    // object is named in full at the end of all of it
+    // (§ The context flag never disappears without a trace either, step 3).
     assert_eq!(
         command(long),
-        "$ kubectl scale deployment/checkout-worker --replicas=3 -n…",
-        "the widened box still lost the namespace it was widened to keep"
+        "$ kubectl --context p… scale deployment/checkout-worker -n…",
+        "the object gave way before the context's value did"
     );
 }
 
@@ -10085,26 +10160,32 @@ fn a_consequence_too_long_for_the_box_gives_way_before_the_buttons_do() {
         box_.len()
     );
     assert!(
-        box_.iter().any(|row| row.contains(CUT)),
+        sentences(&box_).any(|row| row.contains(CUT)),
         "the consequence was clipped in silence:\n{}",
         box_.join("\n")
     );
-    for kept in ["[ ⏎ do it ]", "[ esc cancel ]", "$ kubectl scale"] {
+    // **`$ kubectl` and not `$ kubectl scale`**: since `--context` the verb is past the cut on
+    // this fixture, and what this row is about is the `$` line still being in the box at all.
+    for kept in ["[ ⏎ do it ]", "[ esc cancel ]", "$ kubectl"] {
         assert!(
             box_.iter().any(|row| row.contains(kept)),
             "{kept:?} was pushed out of the box by a long consequence"
         );
     }
 
-    // **The narrow box has the same budget, and it is the only one the blank row under the
-    // consequence lives in.** A mutation run flipped `1 + spacer` to `1 - spacer` and nothing
-    // noticed (2026-09-10): every case above is 61 wide, where that row does not exist. The pair
-    // below is that row being counted — four rows of warning and it stays, five and it goes, and
-    // both land inside the ceiling.
+    // **The blank row under the consequence is no longer what this pair counts, and the reason
+    // is that the narrow box it belonged to is retired** (NOTES § D278). It used to exist only
+    // at `CONFIRM_BOX`; since every taught line carries `--context`, no `Confirm` reaches that
+    // width, and the row moved onto the one width that is left — kept where the text above the
+    // verdict is short enough to spare it, which is `ui::CONSEQUENCE_LINES` and which neither
+    // fixture below is (`screens/widgets.md` § 5, `screens/dialogs.md` § Scale).
+    //
+    // **What the pair still proves is the row budget itself**, which is why it is kept rather
+    // than deleted: four rows of warning and five both land on the ceiling, neither pushes the
+    // `$` line or a button off, and the sentences give way in order.
     //
     // **`ops.rs` builds no such dialog**: its one warning is three rows and attaches only to a
-    // restart, whose consequences are four and five rows and so are never 58 wide. The budget is
-    // a total guard on a `views::Dialog` anyone can construct.
+    // restart. The budget is a total guard on a `views::Dialog` anyone can construct.
     let narrow = |warning: &str| {
         box_of(views::Modal::Confirm(views::Dialog {
             consequence:
@@ -10118,41 +10199,51 @@ fn a_consequence_too_long_for_the_box_gives_way_before_the_buttons_do() {
     let roomy = narrow(ROOMY);
     assert_eq!(
         width(&roomy[0]),
-        usize::from(CONFIRM_BOX) + 2,
-        "the fixture stopped being the narrow box it is about"
+        usize::from(CROWDED_BOX) + 2,
+        "there is one box width and this fixture is not drawn at it"
     );
-    assert_eq!(roomy.len(), MODAL_ROWS + 2, "{}", roomy.join("\n"));
-    // Four rows of warning: the blank under the consequence is still there, between the last
-    // warning row and the verdict.
-    let verdict_at = |box_: &[String]| {
-        box_.iter()
-            .position(|row| row.contains("checked it first"))
-            .expect("the verdict's row")
-    };
-    assert!(
-        roomy[verdict_at(&roomy) - 1]
-            .trim_matches('│')
-            .trim()
-            .is_empty(),
-        "the blank row under the consequence was already gone at four rows:\n{}",
-        roomy.join("\n")
-    );
-
+    // **Both land on the ceiling and neither goes past it**, which is what a total guard on an
+    // arbitrary `views::Dialog` is for.
     let wordy = narrow(WORDY);
-    assert_eq!(wordy.len(), MODAL_ROWS + 2, "{}", wordy.join("\n"));
-    assert!(
-        !wordy[verdict_at(&wordy) - 1]
-            .trim_matches('│')
-            .trim()
-            .is_empty(),
-        "the blank row survived a box that had no room for it:\n{}",
+    for (named, box_) in [("four rows", &roomy), ("five rows", &wordy)] {
+        assert!(
+            box_.len() <= MODAL_ROWS + 2,
+            "{named} of warning grew past the ceiling:\n{}",
+            box_.join("\n")
+        );
+        for kept in ["$ kubectl", "[ ⏎ do it ]", "[ esc cancel ]"] {
+            assert!(
+                box_.iter().any(|row| row.contains(kept)),
+                "{named} of warning pushed {kept:?} off the box:\n{}",
+                box_.join("\n")
+            );
+        }
+    }
+    // **Neither costs a sentence** — the blanks are spent before any text is
+    // (`screens/widgets.md` § 5), and both of these fit once they are. What a box has to be to
+    // lose a clause is the very long consequence at the top of this test, which is where that
+    // half of the ordering is proven.
+    for (named, box_) in [("four rows", &roomy), ("five rows", &wordy)] {
+        assert!(
+            !sentences(box_).any(|row| row.contains(CUT)),
+            "{named} of warning cost a sentence a box still had blank rows to spend for:\n{}",
+            box_.join("\n")
+        );
+    }
+    // **Five rows is the one that lands on the ceiling exactly**, which is what makes the ceiling
+    // a measurement rather than a limit nothing reaches. Four sits one row under it, because the
+    // blank row that used to fill that gap belonged to the retired narrow box (NOTES § D278).
+    assert_eq!(
+        wordy.len(),
+        MODAL_ROWS + 2,
+        "the wordiest box a `views::Dialog` can carry no longer reaches the ceiling:\n{}",
         wordy.join("\n")
     );
-    // Nothing was cut to buy it — the blank goes first, before any sentence
-    // (`screens/widgets.md` § 5).
-    assert!(
-        !wordy.iter().any(|row| row.contains(CUT)),
-        "a sentence gave way before the blank row did:\n{}",
+    assert_eq!(
+        roomy.len() + 1,
+        wordy.len(),
+        "the extra row of warning stopped costing a row:\n{}\n{}",
+        roomy.join("\n"),
         wordy.join("\n")
     );
 }
@@ -10257,7 +10348,7 @@ fn every_consequence_the_operations_build_fits_the_box_it_is_drawn_in() {
             assert_eq!(drawn.len(), usize::from(MIN_HEIGHT));
             let box_ = nested(&drawn);
             assert!(
-                !box_.iter().any(|row| row.contains(CUT)),
+                !sentences(&box_).any(|row| row.contains(CUT)),
                 "a sentence ops.rs really builds had to be cut:\n{}",
                 box_.join("\n")
             );
@@ -10308,7 +10399,7 @@ fn a_full_box_cuts_the_consequence_and_never_the_warning_or_the_buttons() {
         ..restarting()
     }));
     assert!(
-        !whole.iter().any(|row| row.contains(CUT)),
+        !sentences(&whole).any(|row| row.contains(CUT)),
         "the fixture stopped landing on the budget exactly:\n{}",
         whole.join("\n")
     );
@@ -10394,7 +10485,9 @@ fn a_warning_over_a_typed_name_field_cuts_in_order_and_still_fits() {
         crowded.join("\n")
     );
 
-    let text: Vec<&String> = crowded.iter().filter(|row| row.contains(CUT)).collect();
+    let text: Vec<&String> = sentences(&crowded)
+        .filter(|row| row.contains(CUT))
+        .collect();
     assert_eq!(
         text.len(),
         2,
@@ -10415,9 +10508,11 @@ fn a_warning_over_a_typed_name_field_cuts_in_order_and_still_fits() {
         "the warning did not start where the consequence stopped:\n{}",
         crowded.join("\n")
     );
-    // Nothing the reader acts on gave way.
+    // Nothing the reader acts on gave way. **`delete pod/…` and not `$ kubectl delete pod/…`**:
+    // `--context` sits between the two since NOTES § D278, and what this row is about is the
+    // object still being named on a line the reader is about to agree to.
     for kept in [
-        "$ kubectl delete pod/web-7d9f4",
+        "delete pod/web-7d9f4",
         "Type the pod's name to confirm:",
         "[ delete ]",
         "[ esc cancel ]",
@@ -12372,12 +12467,16 @@ fn a_canary_and_its_stable_sibling_are_two_objects_on_every_surface_that_names_o
     {
         let scale = box_of(views::Modal::Confirm(views::Dialog {
             object: object(name),
-            kubectl: format!("kubectl scale deployment/{name} --replicas=3 -n {namespace}"),
+            kubectl: format!(
+                "kubectl --context prod-eu scale deployment/{name} --replicas=3 -n {namespace}"
+            ),
             ..scaling()
         }));
         let restart = box_of(views::Modal::Confirm(views::Dialog {
             object: object(name),
-            kubectl: format!("kubectl rollout restart deployment/{name} -n {namespace}"),
+            kubectl: format!(
+                "kubectl --context prod-eu rollout restart deployment/{name} -n {namespace}"
+            ),
             ..restarting()
         }));
         assert_eq!(title(&scale), titles[nth], "the scale title");
@@ -12496,13 +12595,14 @@ fn a_canary_and_its_stable_sibling_are_two_objects_on_every_surface_that_names_o
     let mut open = Open::new();
     open.object = id(ObjectKind::Pod, Some("payments"), "web-7d9f4");
     let heading = rows(&detailed(&on(Tab::Events), &open.open()))[2].clone();
+    // **The `$` line is not one of the surfaces here any more** (NOTES § D278). This loop is the
+    // must-not-fire half of a test about *names* — a short name is not cut on a surface that
+    // names it — and since `--context` the `$` line is cut on every box regardless of the name it
+    // carries, so it can no longer answer that question either way. Its own must-not-fire is
+    // [`the_command_line_is_cut_to_the_one_box_width_and_never_past_its_border`], which asserts
+    // the drawn line for a short command and a long one.
     for (surface, drawn, whole) in [
         ("title", title(&short), "Scale payments/web"),
-        (
-            "$ line",
-            holding(&short, "$ kubectl"),
-            "$ kubectl scale deployment/web --replicas=3 -n payments",
-        ),
         ("gone", holding(&went, "payments/web"), "payments/web"),
         ("footer", flight, "changing payments/web first"),
         ("card", card, "● payments/web  ·  3 of 5 pods"),
@@ -12880,9 +12980,9 @@ fn a_command_gives_way_from_its_last_flag_and_never_from_its_object() {
     // is the dishonesty invariant 4 exists to stop. Both marks, because the strip and the `$`
     // line inside a box spend different ones on the same rule.
     //
-    // **Nothing composes this line yet** — the watch lines are `main.rs`'s and carry no context
-    // flag today — so this pins the placement the wiring box has to use rather than repairing
-    // one (measured 2026-09-19).
+    // **`main.rs`'s `kubectl` composes exactly this line now** (NOTES § D278) — every read on
+    // the strip carries the flag in this position, where until 2026-09-24 this pinned a
+    // placement nothing yet produced.
     for mark in [CUT, STRIP_CUT] {
         let front = command_cut("kubectl --context staging get pods -A --watch", 30, mark);
         let back = command_cut("kubectl get pods -A --watch --context staging", 30, mark);
@@ -12903,6 +13003,141 @@ fn a_command_gives_way_from_its_last_flag_and_never_from_its_object() {
             "a context flag appended last survived a cut, so this test proves nothing: {back:?}"
         );
     }
+
+    // **The `--context` floor is inside [`command_cut`], so the strip gets it too** — the whole
+    // reason it is not a wrapper beside it the way `-n`'s floor is
+    // (`screens/dialogs.md` § The context flag never disappears without a trace either). The
+    // shape that reaches it is a context name long enough that the head alone does not fit,
+    // which a GKE kubeconfig produces without trying: `gke_<project>_<zone>_<cluster>`.
+    //
+    // **Properties and not a literal**, because no mockup draws a *strip* line at this width —
+    // what `screens/` rules is the order things give way in, and that is what is asserted.
+    //
+    // **Two line shapes, because the floor only fires on one of them** (my own second pass,
+    // which caught this test over-claiming on the other). A line naming a `kind/name` token
+    // has a *head* that runs through it, and it is that head outgrowing the row that reaches
+    // [`ui::context_cut`]; a read like `get pods -A` has no such token, so its head is
+    // `kubectl` alone, and what gives way is the ordinary walk from the end — which reaches
+    // the same place for this flag, cutting inside its value rather than dropping it. The
+    // object's own protection is the first shape's; asserting it on the second was asserting
+    // a rule `screens/` does not make.
+    let gke = "gke_my-project-12345_us-central1_prod-cluster";
+    let named = format!("kubectl --context {gke} rollout restart deployment/web -n payments");
+    let read = format!("kubectl --context {gke} get pods -n kube-system --watch");
+    for mark in [CUT, STRIP_CUT] {
+        for columns in [57, 50, 40, 30, 24] {
+            for line in [&named, &read] {
+                let drawn = command_cut(line, columns, mark);
+                assert!(
+                    width(&drawn) <= columns,
+                    "{columns}: {drawn:?} is {} columns",
+                    width(&drawn)
+                );
+                // **The flag is never one of the words that drop**, so a pasted line either
+                // reaches the connected cluster or fails for a missing value — never another.
+                assert!(
+                    drawn.contains("--context"),
+                    "{columns}: the cut line no longer says which cluster it names: {drawn:?}"
+                );
+            }
+        }
+        // **The object outlives every character of the context's own name** — the floor's
+        // whole point (`screens/dialogs.md` § A context name long enough to need this on its
+        // own: *the object never pays for the context's own length*).
+        //
+        // **At the widths this product draws, and not below them.** `command_room` gives a box
+        // 57 and the strip has the terminal's own width less its borders, so 57 is the narrowest
+        // row either surface ever asks for at the 80×24 floor. Below it the row is narrower than
+        // a bare `--context…` plus the words after it — where the boundary falls depends on the
+        // mark, 49 columns with [`CUT`] and 51 with [`STRIP_CUT`] — and [`ui::command_cut`]'s own
+        // last resort takes the row: *a cut wider than the row it is drawn in is worse than one
+        // that shows less*, which that function documents as unreachable at the floor. The loop
+        // above still runs at those widths, because *fits* and *the flag survives* are owed at
+        // every width a caller can ask for.
+        let drawn = command_cut(&named, 57, mark);
+        assert!(
+            drawn.contains("deployment/web"),
+            "the object paid before the context's value did: {drawn:?}"
+        );
+    }
+    // **A quoted context name is one word**, whatever is inside it — and *where inside it* the
+    // quote sits is the framing, not the value (NOTES § D31). Split it wrong and the tail of
+    // the name joins the words *after* the flag, which [`ui::context_cut`] holds out of the
+    // budget: the cluster's own name pays the whole cut and the object front-cuts beside a
+    // surviving fragment of it. Two framings have done that — a space inside, found by my own
+    // second pass, and `ops::pasteable`'s own `'\\''` escape, found by `tester` (2026-09-24).
+    //
+    // **Every value here is built by the producer rather than written out**, so the consumer's
+    // fixtures cannot drift from what the quoter really writes — which is how one of the two
+    // framings was missing in the first place.
+    for (framing, value) in [
+        ("bare", "kind-k8rs".to_owned()),
+        (
+            "a space inside",
+            crate::ops::pasteable("prod eu; echo pwned"),
+        ),
+        ("a quote inside", crate::ops::pasteable("it's prod")),
+        ("nothing but a quote", crate::ops::pasteable("'")),
+        (
+            "a quote last before the close",
+            crate::ops::pasteable("prod'"),
+        ),
+    ] {
+        let line = format!("kubectl --context {value} rollout restart deployment/web");
+        for mark in [CUT, STRIP_CUT] {
+            // **Narrow enough that the head does not fit, wide enough that the floor is what
+            // answers.** Below the bare `--context…` plus the words after it, the row is too
+            // narrow for this floor at all and [`ui::command_cut`]'s documented last resort takes
+            // it — a different rule, and not the one under test. Two columns under the line is
+            // inside that band for every framing here, at both marks.
+            let columns = width(&line) - 2;
+            let drawn = command_cut(&line, columns, mark);
+            assert!(
+                width(&drawn) <= columns,
+                "{framing}: {drawn:?} is {} columns, not {columns}",
+                width(&drawn)
+            );
+            assert!(
+                drawn.contains("--context"),
+                "{framing}: the cut line no longer says which cluster it names: {drawn:?}"
+            );
+            // **The object is whole and last.**
+            assert!(
+                drawn.ends_with("deployment/web"),
+                "{framing}: the tail of the context's own value outlived the object: {drawn:?}"
+            );
+            // **And what stands between the flag and the object is a *marked prefix of the
+            // value* and nothing else** — the assertion a mis-split actually fails.
+            // `ends_with` alone does not: read short, the value's own tail simply moves into
+            // the words held out of the budget, so the object still survives and the line
+            // still ends right while reading `--context 'i… \\''s prod'` — a cluster named
+            // `'i` with the rest of its name loose after the cut mark. Measured: the naive
+            // scan passed `ends_with` on that framing and failed only on another.
+            let tail = " rollout restart deployment/web";
+            let named = drawn
+                .strip_suffix(tail)
+                .and_then(|head| head.strip_prefix("kubectl --context"))
+                .map(str::trim_start)
+                .unwrap_or_else(|| {
+                    panic!("{framing}: the words after the flag are not the command: {drawn:?}")
+                });
+            assert!(
+                named == mark
+                    || named
+                        .strip_suffix(mark)
+                        .is_some_and(|kept| value.starts_with(kept)),
+                "{framing}: {named:?} is not a marked prefix of {value:?}"
+            );
+        }
+    }
+
+    // Where not one character of the value fits, the flag still stands and the space goes
+    // with it.
+    assert!(
+        command_cut(&named, 50, CUT).contains("--context\u{2026}"),
+        "a bare context flag lost its own name too: {:?}",
+        command_cut(&named, 50, CUT)
+    );
 
     // A flag with no value keeps the value before it whole, and the strip's own mark is spent.
     let yaml = "$ kubectl get secret db -n payments -o yaml --show-managed-fields";
@@ -13040,7 +13275,7 @@ fn a_confirm_line_gives_up_every_other_flag_before_the_namespace() {
 
     // Every answer above is inside the row it was asked for, in both states — the one that fits
     // whole and the ones that gave way.
-    for columns in [budget, command_room(CONFIRM_BOX), 50, 30, 4, 3] {
+    for columns in [budget, command_room(CROWDED_BOX), 50, 30, 4, 3] {
         for line in [
             scale,
             short,

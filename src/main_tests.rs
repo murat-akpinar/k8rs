@@ -1170,8 +1170,15 @@ fn the_wall_clock_reads_the_wall_clock() {
 // --- WHAT `main` IS A WRAPPER AROUND ---
 
 /// No arguments is not a crash and not an empty report: it is the usage text and exit 2
-/// (NOTES § D17). The text has to say this build cannot reach a cluster, because the name
-/// promises one.
+/// (NOTES § D17). The text has to name every door to a cluster this build has, because the name
+/// promises one and a reader decides here whether it is safe to try against production.
+///
+/// **The claim outlived two spellings of the sentence that carries it.** It was *this build
+/// cannot reach a cluster* until `ops` landed, then *without --once, --live, --logs, --describe,
+/// --yaml or ops this build reads files only* until the console did — a bare `k8rs` reaches a
+/// cluster with none of those six words on it (`screens/states.md` § The command line's own
+/// synopsis). What has not changed is what the test is for: the **list** is complete, so nothing
+/// that reaches a cluster is missing from the one page a reader checks.
 #[test]
 fn no_arguments_is_the_usage_text_and_not_a_report() {
     let Err(problem) = run(&[]) else {
@@ -1179,12 +1186,16 @@ fn no_arguments_is_the_usage_text_and_not_a_report() {
     };
 
     assert!(problem.starts_with("usage: k8rs "), "{problem}");
-    // **The qualification is part of the claim** (todo.md 3749). *cannot reach a cluster* alone
-    // stayed true of this string while the sentence around it went false — `ops` reaches one now
-    // — so the substring asserted here is the whole list of what does, and
-    // `the_usage_says_ops_reaches_a_cluster_too` reads the other half of the same line.
     assert!(
-        problem.contains("--yaml or ops this build reads files only — it cannot reach a cluster"),
+        problem.contains(
+            "--once, --live, --logs, --describe, --yaml and ops are its other doors to a cluster"
+        ),
+        "{problem}"
+    );
+    // **And the console, which is the door with no word on it** — the half that sentence had to
+    // be rewritten to admit.
+    assert!(
+        problem.contains("without one, this build opens a console instead of reading nothing"),
         "{problem}"
     );
 }
@@ -1810,11 +1821,12 @@ fn live_is_the_flag_that_names_a_cluster_and_context_names_which_one() {
         live_context(&args(&["--live", "--context=--analysis"])),
         Some(Some("--analysis"))
     );
-    // First-wins, which is the opposite of `kubectl`'s last-wins — stated because it was stated
-    // nowhere, and the real flag box (Phase 12) should follow `kubectl` rather than this.
+    // **Last-wins, which is `kubectl`'s rule** — it was first-wins, and the flags box that
+    // released this flag is the box both parsers' docs had deferred the fix to
+    // (`k8s-admin`, 2026-09-24; [`context_arg`], which carries the wrapper it turns on).
     assert_eq!(
         live_context(&args(&["--live", "--context", "a", "--context", "b"])),
-        Some(Some("a"))
+        Some(Some("b"))
     );
     // A longer flag that merely starts the same way is not this one.
     assert_eq!(
@@ -1867,11 +1879,11 @@ fn namespace_names_the_one_namespace_this_run_watches_in_either_spelling() {
         );
     }
 
-    // First-wins on repeats, [`live_context`]'s rule and not `kubectl`'s last-wins — written
-    // down because an unwritten tie-break is the one that changes by accident.
+    // **Last-wins on repeats, across the two spellings**, which is `kubectl`'s rule and the one
+    // `alias kp='k8rs -n a'` needs to be overridable ([`value_of`]).
     assert_eq!(
         live_namespace(&args(&["--live", "-n", "a", "--namespace", "b"])),
-        Some("a")
+        Some("b")
     );
     // A longer flag that merely starts the same way is not this one.
     assert_eq!(
@@ -1887,6 +1899,427 @@ fn namespace_names_the_one_namespace_this_run_watches_in_either_spelling() {
     assert_eq!(live_namespace(&args(&["--live", "-nginx"])), None);
     // Nothing after the flag is `None` here, and refused by [`mistyped`] before it is used.
     assert_eq!(live_namespace(&args(&["--live", "--namespace"])), None);
+}
+
+/// **One parser for `--context`, and the console reads it on a line [`live_context`] is silent
+/// about** (todo.md § Phase 12's flags box).
+///
+/// **The two functions had to be split and may not drift**: `live_context` answers `None` for
+/// every line without `--once`, `--live` or a verb on it, which is exactly the line that opens a
+/// console — so the console needed an answer that function cannot give, and a second parser for
+/// it is how this repo has already shipped a silent wrong cluster three times (that function's
+/// own doc). Every spelling below goes through both.
+#[test]
+fn the_context_flag_has_one_parser_and_a_console_line_reads_the_same_answer() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    // The line `live_context` says nothing about is the line the console is opened by.
+    assert_eq!(live_context(&line(&["--context", "prod-eu"])), None);
+    assert_eq!(
+        context_arg(&line(&["--context", "prod-eu"])),
+        Some(Some("prod-eu"))
+    );
+
+    for (words, answer) in [
+        (vec!["--context", "kind-k8rs"], Some(Some("kind-k8rs"))),
+        (vec!["--context=kind-k8rs"], Some(Some("kind-k8rs"))),
+        // `--context=` keeps the empty value rather than quietly becoming the current context.
+        (vec!["--context="], Some(Some(""))),
+        (vec!["--context"], Some(None)),
+        // A flag is never a context name — the second line, behind [`mistyped`]'s sentence.
+        (vec!["--context", "--live"], Some(None)),
+        // An `=` says the value was meant, so a flag-shaped one after it is kept.
+        (vec!["--context=--live"], Some(Some("--live"))),
+        // Last-wins, which is `kubectl`'s rule — it was first-wins until the flags box.
+        (vec!["--context", "a", "--context", "b"], Some(Some("b"))),
+        // A longer flag that merely starts the same way is not this one.
+        (vec!["--contextual", "x"], None),
+        (vec![], None),
+    ] {
+        assert_eq!(context_arg(&line(&words)), answer, "{words:?}");
+        // **The same line under `--live` answers the same context**, which is what one parser
+        // buys: a console and the temporary driver cannot come to connect to two clusters off
+        // one spelling.
+        let driven: Vec<&str> = std::iter::once("--live")
+            .chain(words.iter().copied())
+            .collect();
+        assert_eq!(
+            live_context(&line(&driven)),
+            Some(answer.flatten()),
+            "{driven:?}"
+        );
+    }
+}
+
+/// **Which lines open the console, and what the four flags on them asked for**
+/// (todo.md § Phase 12's flags box).
+///
+/// **The premise is the defect, measured at the commit before this one**: `main`'s console arm
+/// asked `args.is_empty()`, so `k8rs --read-only` fell past it into the file-driven report, read
+/// `--read-only` as a path, and dropped the one flag on the line that may not be dropped in
+/// silence. Every row here is a line that reached the wrong driver.
+#[test]
+fn every_console_flag_opens_a_console_and_arrives_as_what_it_asked_for() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    // A bare `k8rs` is still a console, with nothing asked for.
+    let nothing = line(&[]);
+    let bare = opening(&nothing).expect("a bare k8rs opens the console");
+    assert!(!bare.read_only, "a bare k8rs is not read-only");
+    assert_eq!(bare.context, None, "a bare k8rs names no context");
+    assert_eq!(bare.namespace, None, "a bare k8rs names no namespace");
+
+    for (words, read_only, context, namespace) in [
+        (vec!["--read-only"], true, None, None),
+        (vec!["--context", "prod-eu"], false, Some("prod-eu"), None),
+        (vec!["--context=prod-eu"], false, Some("prod-eu"), None),
+        (
+            vec!["--namespace", "payments"],
+            false,
+            None,
+            Some("payments"),
+        ),
+        (vec!["--namespace=payments"], false, None, Some("payments")),
+        (vec!["-n", "payments"], false, None, Some("payments")),
+        (vec!["-n=payments"], false, None, Some("payments")),
+        // All three at once, in either order — the scan is over the whole line.
+        (
+            vec!["--read-only", "--context=prod-eu", "-n", "payments"],
+            true,
+            Some("prod-eu"),
+            Some("payments"),
+        ),
+        (
+            vec!["-n=payments", "--context", "prod-eu", "--read-only"],
+            true,
+            Some("prod-eu"),
+            Some("payments"),
+        ),
+    ] {
+        let typed = line(&words);
+        let opened = opening(&typed)
+            .unwrap_or_else(|| panic!("{words:?} opened no console, so its flags were dropped"));
+        assert_eq!(
+            opened.read_only, read_only,
+            "{words:?} answered the wrong thing about --read-only"
+        );
+        assert_eq!(
+            opened.context, context,
+            "{words:?} would connect to the wrong context"
+        );
+        assert_eq!(
+            opened.namespace, namespace,
+            "{words:?} would watch the wrong namespace"
+        );
+    }
+}
+
+/// **`--once` keeps the temporary driver, and so does every other line that is not a console
+/// line** (todo.md § Phase 12, NOTES § D17).
+///
+/// **`--once` is the row that matters**, because it is released: a console opened under it would
+/// replace a report on stdout with a screen nothing in a pipeline can read, and the exit code
+/// `screens/once.md` sells would go with it.
+#[test]
+fn a_cluster_flag_a_verb_or_a_file_never_opens_a_console() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    // **Each row names the driver it keeps, and not merely *not the console***: a build where
+    // [`opening`] answered `None` to everything would pass a test that asserted only the
+    // absence — and that build is exactly the one this box replaced.
+    for (words, cluster) in [
+        (vec!["--once"], true),
+        (vec!["--once", "--read-only"], true),
+        (
+            vec!["--once", "--context", "prod-eu", "-n", "payments"],
+            true,
+        ),
+        (vec!["--live"], true),
+        (vec!["--live", "--namespace=payments"], true),
+        (vec!["--logs", "--object", "default/web"], true),
+        (vec!["--describe", "--object", "default/web"], true),
+        (vec!["--yaml", "--object", "default/web"], true),
+        // A file, with and without the one flag that is neither the console's nor a cluster's.
+        (vec!["pod.json"], false),
+        (vec!["--analysis", "pod.json"], false),
+        (vec!["--analysis"], false),
+        (vec!["-x", "file.json"], false),
+    ] {
+        let typed = line(&words);
+        assert!(
+            opening(&typed).is_none(),
+            "{words:?} opened a console instead of keeping the driver it named"
+        );
+        assert_eq!(
+            live_context(&typed).is_some(),
+            cluster,
+            "{words:?} did not keep the driver it named — `live_context` answered the other one"
+        );
+        // And nothing on these lines is refused on the way, so the driver is really reached.
+        assert_eq!(mistyped(&typed), None, "{words:?}");
+    }
+}
+
+/// **The header's right zone says what the run is scoped to, and not only which cluster**
+/// (`screens/widgets.md` § 1a's zone table: *context · namespace scope · connection state · …*).
+///
+/// **Measured before the fix, against the kind cluster**: `k8rs -n kube-system` drew
+/// `ctx: kind-k8rs · live · admin` — the same header a cluster-wide run draws — while the Alerts
+/// pane held `1 ● 1 ▲` instead of `25 ● 2 ▲`. A reader who cannot see the scope reads
+/// `○ nothing is broken` over one namespace as a statement about the cluster, which is
+/// `screens/states.md` § You can only see some namespaces' whole subject.
+///
+/// **One zone for both causes** (`k8s::Coverage`, NOTES § D46): `--namespace` and the 403 fallback
+/// produce the same scope, so they produce the same header and nothing here asks which it was.
+#[test]
+fn the_header_zone_names_the_namespace_a_scoped_run_covers() {
+    assert_eq!(zone(Some("prod-eu"), None), "ctx: prod-eu");
+    assert_eq!(
+        zone(Some("prod-eu"), Some("payments")),
+        "ctx: prod-eu · ns: payments"
+    );
+    // **The cluster's name comes first and the scope second**, which is not cosmetic: `shortened`
+    // eats the *front* of this zone, so what erodes under a narrow terminal is the context and
+    // never the scope or the permission word behind it (NOTES § D249).
+    assert!(
+        zone(Some("prod-eu"), Some("payments")).starts_with("ctx: "),
+        "the scope displaced the cluster's name, so the wrong end erodes"
+    );
+    // **`(unnamed)` is the one thing a `None` context can be** (NOTES § D202) — and it still
+    // carries the scope, because the two facts are independent.
+    assert_eq!(
+        zone(None, None),
+        format!("ctx: {}", views::UNNAMED),
+        "a context that stripped to nothing lost its slot"
+    );
+    assert_eq!(
+        zone(None, Some("payments")),
+        format!("ctx: {} · ns: payments", views::UNNAMED)
+    );
+    // The label the pane title carries is this same spelling and not a second one
+    // (`ui::Screen::namespace`).
+    assert!(zone(Some("prod-eu"), Some("payments")).ends_with(&scoped("payments")));
+}
+
+/// **`--read-only` does not open the audit log at all**, and that is not NOTES § D21 weakened
+/// (PM ruling, todo.md § Phase 12's flags box).
+///
+/// **The count is the assertion and the answer is not.** `ui::Writes::ReadOnly` reads the same
+/// whether the file was opened and then ignored or never opened — but a run that opened it would
+/// have created it, set its mode, and printed `ops::audit_log`'s notes about a log it will never
+/// write a line to. And a run that opened it and *failed* would carry `Writes::Unaudited`, whose
+/// sentence — *fix that, then start k8rs again* — is false advice while the flag stands.
+#[test]
+fn read_only_never_opens_the_audit_log_and_every_other_run_does() {
+    let opens = std::cell::Cell::new(0);
+
+    assert!(
+        audit_log_for(true, || {
+            opens.set(opens.get() + 1);
+            Ok::<(), String>(())
+        })
+        .is_none(),
+        "--read-only was handed an audit log it can never write a line to"
+    );
+    assert_eq!(opens.get(), 0, "--read-only opened the audit log anyway");
+
+    assert!(
+        audit_log_for(true, || {
+            opens.set(opens.get() + 1);
+            Err::<(), String>("no state directory".to_string())
+        })
+        .is_none(),
+        "--read-only carries the refusal of a log it will never use"
+    );
+    assert_eq!(
+        opens.get(),
+        0,
+        "--read-only opened the audit log to find out why it would not open"
+    );
+
+    assert!(
+        matches!(
+            audit_log_for(false, || {
+                opens.set(opens.get() + 1);
+                Ok::<(), String>(())
+            }),
+            Some(Ok(()))
+        ),
+        "a run that may write did not get its log"
+    );
+    assert_eq!(opens.get(), 1, "a run that may write did not open its log");
+
+    // **A log that will not open is still a refusal to carry** — a banner and every write key
+    // dead — for the run that could have written.
+    assert!(matches!(
+        audit_log_for(false, || Err::<(), String>("no state directory".to_string())),
+        Some(Err(said)) if said == "no state directory"
+    ));
+}
+
+/// **A path beside a console flag is refused, never read with the flag silently dropped** —
+/// [`mistyped`]'s *a cluster and a file are two inputs* rule, one door over (todo.md § Phase 12's
+/// flags box, NOTES § D189).
+///
+/// **Measured at the commit before this one**: `k8rs --read-only pod.json` passed `mistyped`,
+/// missed the console arm for not being a bare `k8rs`, and printed the file's report with
+/// `--read-only` gone and nothing on any stream to say so.
+///
+/// **The sentence names the flag that is on the line and not a mode that is not** (NOTES § D190's
+/// class): a run with no `--live` on it may not be told that `--live` reads a cluster.
+///
+/// **The subject claims membership and nothing else, and two rounds of it were wrong**
+/// (`k8s-admin` and `tester`, 2026-09-24, invariant 14). *"--read-only opens the console"* was
+/// true of the run and false of the flag — `k8rs --read-only ops delete …` opens none.
+/// *"--read-only on its own opens the console"* was true of the flag and false of a line carrying
+/// two more flags, which is the row set below that let it ship: every row fed **one** console
+/// flag, so nothing here could see the word `on its own` become false.
+///
+/// **Both halves are rows now**: a line with `ops` on it, and lines with two and three console
+/// flags beside the path.
+#[test]
+fn a_path_beside_a_console_flag_is_refused_rather_than_read_with_the_flag_dropped() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    for (words, flag) in [
+        (vec!["--read-only", "pod.json"], "--read-only"),
+        (vec!["--context", "prod-eu", "pod.json"], "--context"),
+        (vec!["--context=prod-eu", "pod.json"], "--context"),
+        (vec!["--namespace", "payments", "pod.json"], "--namespace"),
+        (vec!["--namespace=payments", "pod.json"], "--namespace"),
+        (vec!["-n", "payments", "pod.json"], "-n"),
+        (vec!["-n=payments", "pod.json"], "-n"),
+        // **Two and three console flags beside the path** — the rows the last round did not
+        // have, and the gap a clause claiming *on its own* sailed through
+        // (`tester`, 2026-09-24). The flag named is the first on the line, whichever it is.
+        (
+            vec!["--read-only", "--context", "prod-eu", "pod.json"],
+            "--read-only",
+        ),
+        (
+            vec![
+                "--namespace=payments",
+                "--context=prod-eu",
+                "--read-only",
+                "pod.json",
+            ],
+            "--namespace",
+        ),
+        (
+            vec![
+                "-n",
+                "payments",
+                "--read-only",
+                "--context=prod-eu",
+                "pod.json",
+            ],
+            "-n",
+        ),
+        (
+            vec![
+                "--context",
+                "prod-eu",
+                "-n=payments",
+                "--read-only",
+                "pod.json",
+            ],
+            "--context",
+        ),
+    ] {
+        let problem = mistyped(&line(&words))
+            .unwrap_or_else(|| panic!("{words:?} was accepted, so {flag} is dropped in silence"));
+        assert_eq!(
+            problem,
+            format!(
+                "k8rs: {flag} belongs to the console, which reads a cluster, so k8rs cannot \
+                 also read pod.json — run it with the flag, or with the file, not both\n{USAGE}"
+            ),
+            "{words:?}"
+        );
+    }
+
+    // **What is echoed is the flag and never the word that carried it** (the security gate's
+    // *sizes are bounded* row). `--context`'s value is the one word on a console line nothing has
+    // bounded — `--namespace`'s is checked against `k8s::namespace_name` further up — so a
+    // 64 KiB context name must not come back out in the refusal.
+    let enormous = format!("--context={}", "c".repeat(65536));
+    let problem = mistyped(&line(&[enormous.as_str(), "pod.json"]))
+        .expect("a path beside --context is refused");
+    assert!(
+        problem.starts_with("k8rs: --context belongs to the console, which reads a cluster"),
+        "{problem}"
+    );
+    assert!(
+        !problem.contains("cccc"),
+        "the refusal printed the context name back at {} bytes",
+        problem.len()
+    );
+
+    // **The subject may not claim the flag opens a console, because `ops` is a line where it
+    // does not** (invariant 14). A reader who forgot `ops` in front of `may-i` is told about a
+    // console, so the rule they carry away has to be one that holds everywhere.
+    let forgot = mistyped(&line(&["--read-only", "may-i", "get", "pods"]))
+        .expect("a bare `may-i` is a path beside a console flag");
+    assert!(
+        forgot.starts_with("k8rs: --read-only belongs to the console, which reads a cluster"),
+        "{forgot}"
+    );
+    for claim in ["opens the console", "on its own"] {
+        assert!(
+            !forgot.contains(claim),
+            "the subject claims {claim:?}, which `k8rs --read-only ops …` falsifies: {forgot}"
+        );
+    }
+    // And the line that proves the claim: the same flag in front of `ops` opens no console,
+    // because [`ops_line`] takes the line before [`mistyped`] or [`opening`] is ever asked.
+    let claimed = ops_line(
+        &line(&["--read-only", "ops", "delete", "deployment/web"]),
+        nowhere,
+        unwired,
+        unanswered,
+    );
+    assert!(
+        claimed.is_some(),
+        "`--read-only ops …` fell through to the console arm, so the clause would be false"
+    );
+
+    // **A one-dash word this build does not have is a usage error on a console line too**, which
+    // is the sentence `k8rs --once -o json` already gets.
+    let problem =
+        mistyped(&line(&["--read-only", "-o", "json"])).expect("-o is not a flag k8rs has");
+    assert!(
+        problem.starts_with("k8rs: -o is not a flag k8rs has"),
+        "{problem}"
+    );
+
+    // **`k8rs -x file.json` with no console flag on it is still a path** — [`NAMESPACE_SHORT`]'s
+    // doc promises it, and the flags box does not take it away.
+    assert_eq!(mistyped(&line(&["-x", "file.json"])), None);
+    assert_eq!(mistyped(&line(&["pod.json"])), None);
+    assert_eq!(mistyped(&line(&["--analysis", "pod.json"])), None);
+    // A console line with no path on it is not refused either.
+    assert_eq!(mistyped(&line(&["--read-only"])), None);
+    assert_eq!(
+        mistyped(&line(&["--context", "prod-eu", "-n", "pay"])),
+        None
+    );
+
+    // **The cluster flags keep their own subject**, which is the whole of why the gate and the
+    // sentence are one function ([`cluster_reader`]).
+    for (words, subject) in [
+        (vec!["--once", "pod.json"], "--once"),
+        (vec!["--live", "pod.json"], "--live"),
+        (
+            vec!["--logs", "--object", "default/web", "pod.json"],
+            "--logs",
+        ),
+    ] {
+        let problem = mistyped(&line(&words)).unwrap_or_else(|| panic!("{words:?} was accepted"));
+        assert!(
+            problem.starts_with(&format!("k8rs: {subject} reads a cluster,")),
+            "{words:?} → {problem}"
+        );
+    }
 }
 
 /// **A `--namespace` with nothing usable after it is refused, and `--context`'s is not**
@@ -4017,11 +4450,150 @@ $ kubectl get deployments -A --watch
 $ kubectl get statefulsets -A --watch
 $ kubectl get daemonsets -A --watch";
 
+/// **Every line k8rs shows carries `--context <name>`, immediately after `kubectl`**
+/// (`screens/context.md` § What the command log shows, invariant 4, NOTES § D8).
+///
+/// **Measured before the fix**: `grep -c -- --context` over every `$ kubectl` literal in
+/// `src/main.rs` was **0** (`k8s-admin`, 2026-09-24). A reader who pastes
+/// `kubectl get pods -A --watch` gets their own `current-context`, which is a different cluster
+/// the moment k8rs was started with `--context` — the line teaches a command that reads somewhere
+/// else and says nothing about it.
+///
+/// **Not only the lines after a switch.** `screens/context.md` writes the rule for the switcher,
+/// and its reason — *honest, and it teaches the flag that makes `kubectl` safe to use across
+/// clusters* — is about the paste reproducing the read, which is every line's problem.
+#[test]
+fn every_kubectl_line_names_the_context_it_was_read_from() {
+    // **The connected context and not the flag**, so a run that typed none still teaches it.
+    assert_eq!(kubectl(Some("staging")), "$ kubectl --context staging");
+    // **The gap drops the segment whole** — NOTES § D202's third state, a name that stripped to
+    // nothing. `--context ` with an empty value is a line that does not run.
+    assert_eq!(kubectl(None), "$ kubectl");
+    assert_eq!(kubectl(Some("")), "$ kubectl");
+    // Invariant 9, on a name argv never touched but a kubeconfig can hold.
+    assert_eq!(
+        kubectl(Some("prod\u{202e}eu")),
+        "$ kubectl --context prodeu",
+        "a bidi override in a context name reached the strip that every drawn string meets"
+    );
+
+    // **A name made *only* of characters the strip removes is the gap, not an empty flag**
+    // (`k8s-admin`'s step-7 pass, 2026-09-24). The emptiness test used to run on the raw
+    // name: it passed, `sanitize` then emptied it, and `ops::pasteable` quoted the nothing —
+    // `$ kubectl --context ''`, which is the empty-valued flag this function's own doc
+    // refuses two lines up and a line that does not run. `ops::context_segment` had the same
+    // hole and was fixed by cleaning first; this is that order, so the two taught surfaces
+    // cannot disagree on the one input their shared quoting rule exists for.
+    //
+    // **Every class `k8s::unprintable` covers**, because one of them is not proof of the
+    // others (NOTES § D29): a control character, the soft hyphen, the zero-width and bidi
+    // ranges, the invisible-operator range, and the byte-order mark.
+    for stripped in [
+        "\u{202e}",
+        "\u{7}",
+        "\u{ad}",
+        "\u{200b}",
+        "\u{200f}",
+        "\u{202a}",
+        "\u{2060}",
+        "\u{206f}",
+        "\u{feff}",
+        "\u{202e}\u{200b}\u{feff}",
+    ] {
+        assert_eq!(
+            kubectl(Some(stripped)),
+            "$ kubectl",
+            "{stripped:?} stripped to nothing and was drawn as a flag with no value"
+        );
+    }
+    // And the two spellings of nothing that never reach the strip at all.
+    assert_eq!(kubectl(None), "$ kubectl");
+    assert_eq!(kubectl(Some("")), "$ kubectl");
+
+    // **A name the shell would not read whole is quoted, and the line stays the command k8rs
+    // ran** (invariant 4, `ops::pasteable`, NOTES § D278 ruling 5 — one rule for this surface
+    // and for the three taught mutation lines). **Measured against the real binary before it**:
+    // `kubectl config rename-context kind-k8rs 'prod eu; echo pwned'` and then `k8rs --once`
+    // printed `$ kubectl --context prod eu; echo pwned get --raw /version` — a line the command
+    // log exists to have pasted, doing something else when it is. k8rs executes nothing either
+    // way; what it may not do is teach a line that is not the one it ran.
+    //
+    // **The ordinary names stay bare**, so the line is still the one `screens/context.md` draws.
+    for plain in [
+        "kind-k8rs",
+        "staging",
+        "gke_my-project_europe-west1_prod",
+        "arn:aws:eks:eu-west-1:123456789012:cluster/production-eu",
+    ] {
+        assert_eq!(
+            kubectl(Some(plain)),
+            format!("$ kubectl --context {plain}"),
+            "an ordinary context name was quoted, so the taught line stopped being the drawn one"
+        );
+    }
+    assert_eq!(
+        kubectl(Some("prod eu; echo pwned")),
+        "$ kubectl --context 'prod eu; echo pwned'",
+        "a context name with shell syntax in it is pasted as syntax"
+    );
+    // A `'` is the one character single quotes cannot hold, and this is the standard closing,
+    // escaping and reopening.
+    assert_eq!(
+        kubectl(Some("it's prod")),
+        r"$ kubectl --context 'it'\''s prod'",
+        "a quote inside the name ended the quoting early"
+    );
+    // **Every shape the allowlist refuses is quoted and not guessed at** — the rule is what is
+    // safe bare, not a list of what is dangerous, so a character nobody thought of is quoted.
+    for hostile in [
+        "a b", "a;b", "a|b", "a&b", "a$b", "a`b", "a>b", "a(b", "a*b", "a\\b", "a\"b", "a#b",
+        "a!b", "a~b",
+    ] {
+        let line = kubectl(Some(hostile));
+        assert!(
+            line.starts_with("$ kubectl --context '") && line.ends_with('\''),
+            "{hostile:?} was left bare on a line meant to be pasted: {line:?}"
+        );
+    }
+
+    // **Every line, not the first one** — the probe, the version, discovery, the seven reports
+    // and the five watches all come out of one head.
+    let lines = command_log(
+        true,
+        &kubectl(Some("staging")),
+        &k8s::Coverage::Cluster,
+        None,
+    );
+    assert!(lines.len() >= 12, "the log shrank: {lines:?}");
+    for line in &lines {
+        assert!(
+            line.starts_with("$ kubectl --context staging "),
+            "a line k8rs shows would paste into a different cluster: {line:?}"
+        );
+    }
+    // **The position is the spelling `kubectl` accepts**: a global flag goes before the verb, so
+    // `kubectl --context staging get …` and never `kubectl get --context staging …`.
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == "$ kubectl --context staging get pods -A --watch"),
+        "the watch line is not the one `screens/context.md` draws: {lines:?}"
+    );
+    assert!(
+        lines.iter().all(|line| !line.contains("get --context")),
+        "the flag landed after the verb, where kubectl does not take it: {lines:?}"
+    );
+
+    // And the same log with no context named is byte-identical to what it printed before.
+    let bare = command_log(true, &kubectl(None), &k8s::Coverage::Cluster, None);
+    assert_eq!(bare.join("\n"), ANALYSIS_LOG);
+}
+
 /// **A bare run prints one line per read, in the order the code starts them** — and the
 /// `--analysis` run prints the seven a report fetches between discovery and the watches.
 #[test]
 fn the_command_log_is_every_read_this_run_performs_in_the_order_it_starts_them() {
-    let log = |analysis, coverage| command_log(analysis, &coverage, None).join("\n");
+    let log = |analysis, coverage| command_log(analysis, "$ kubectl", &coverage, None).join("\n");
 
     let bare = log(false, k8s::Coverage::Cluster);
     println!("{bare}");
@@ -4068,7 +4640,13 @@ fn the_command_log_is_every_read_this_run_performs_in_the_order_it_starts_them()
 /// `certificatesigningrequests` are cluster-scoped and `kubectl top nodes` is about machines.
 #[test]
 fn a_scoped_run_narrows_exactly_the_reads_that_are_narrowed() {
-    let scoped = command_log(false, &k8s::Coverage::Asked("payments".to_string()), None).join("\n");
+    let scoped = command_log(
+        false,
+        "$ kubectl",
+        &k8s::Coverage::Asked("payments".to_string()),
+        None,
+    )
+    .join("\n");
     println!("{scoped}");
     assert_eq!(
         scoped, SCOPED_LOG,
@@ -4080,7 +4658,12 @@ fn a_scoped_run_narrows_exactly_the_reads_that_are_narrowed() {
          ask for: {scoped}"
     );
 
-    let reports = command_log(true, &k8s::Coverage::Asked("payments".to_string()), None);
+    let reports = command_log(
+        true,
+        "$ kubectl",
+        &k8s::Coverage::Asked("payments".to_string()),
+        None,
+    );
     for line in &reports {
         println!("{line}");
     }
@@ -4113,7 +4696,7 @@ fn a_scoped_run_narrows_exactly_the_reads_that_are_narrowed() {
         k8s::Coverage::Blind("payments".to_string()),
     ] {
         assert_eq!(
-            command_log(false, &coverage, Some("payments")).join("\n"),
+            command_log(false, "$ kubectl", &coverage, Some("payments")).join("\n"),
             format!("$ kubectl get --raw '/api/v1/pods?limit=1'\n{SCOPED_LOG}"),
             "a scope k8rs fell back to printed a cluster-wide command log while the watches were \
              narrowed, or lost the refused probe that put it in this arm"
@@ -4136,7 +4719,7 @@ fn a_scoped_run_narrows_exactly_the_reads_that_are_narrowed() {
 #[test]
 fn the_scope_probe_prints_once_twice_or_not_at_all_and_the_context_decides_which() {
     let probes = |coverage: k8s::Coverage, context: Option<&str>| -> Vec<String> {
-        command_log(false, &coverage, context)
+        command_log(false, "$ kubectl", &coverage, context)
             .into_iter()
             .take_while(|line| line.contains("/pods?limit=1"))
             .collect()
@@ -4208,7 +4791,7 @@ fn the_scope_probe_prints_once_twice_or_not_at_all_and_the_context_decides_which
 #[test]
 fn the_command_log_is_stripped_display_text_and_nothing_executes_it() {
     let crafted = k8s::Coverage::Refused("pay\u{1b}[2Jments".to_string());
-    let log = command_log(true, &crafted, Some("payments"));
+    let log = command_log(true, "$ kubectl", &crafted, Some("payments"));
     for line in &log {
         println!("{line}");
         assert!(
@@ -4250,7 +4833,7 @@ fn no_line_in_the_command_log_pages_a_whole_cluster_one_object_at_a_time() {
         k8s::Coverage::Blind("default".to_string()),
     ] {
         for analysis in [false, true] {
-            for line in command_log(analysis, &coverage, None) {
+            for line in command_log(analysis, "$ kubectl", &coverage, None) {
                 assert!(
                     !line.contains("--chunk-size"),
                     "a page-size flag is back in the command log, and on the probe it turns one \
@@ -4261,7 +4844,7 @@ fn no_line_in_the_command_log_pages_a_whole_cluster_one_object_at_a_time() {
     }
     // The probe's own spelling, positively: exact, single-quoted so the `?` survives a shell, and
     // the same `get --raw` shape `/version` two lines under it already uses.
-    let probe = &command_log(false, &k8s::Coverage::Cluster, None)[0];
+    let probe = &command_log(false, "$ kubectl", &k8s::Coverage::Cluster, None)[0];
     println!("{probe}");
     assert_eq!(
         probe, "$ kubectl get --raw '/api/v1/pods?limit=1'",
@@ -4287,7 +4870,7 @@ fn the_command_log_reaches_the_stream_one_line_at_a_time() {
     let mut written = Vec::new();
     log_to(
         &mut written,
-        command_log(true, &k8s::Coverage::Cluster, None),
+        command_log(true, "$ kubectl", &k8s::Coverage::Cluster, None),
     );
     let written = String::from_utf8(written).expect("the command log is text");
     print!("{written}");
@@ -4299,7 +4882,7 @@ fn the_command_log_reaches_the_stream_one_line_at_a_time() {
     );
     assert_eq!(
         written.lines().count(),
-        command_log(true, &k8s::Coverage::Cluster, None).len(),
+        command_log(true, "$ kubectl", &k8s::Coverage::Cluster, None).len(),
         "a line was dropped or doubled on the way out"
     );
 
@@ -4315,7 +4898,7 @@ fn the_command_log_reaches_the_stream_one_line_at_a_time() {
     }
     log_to(
         &mut Closed,
-        command_log(false, &k8s::Coverage::Cluster, None),
+        command_log(false, "$ kubectl", &k8s::Coverage::Cluster, None),
     );
 }
 
@@ -4333,11 +4916,11 @@ fn the_wall_prints_the_reads_that_happened_and_the_run_prints_them_the_same_way(
         (k8s::Coverage::Refused("default".to_string()), None),
         (k8s::Coverage::Blind("default".to_string()), Some("shop")),
     ] {
-        let attempted = connect_log(&coverage, context);
+        let attempted = connect_log("$ kubectl", &coverage, context);
         println!("{attempted:?}");
         for analysis in [false, true] {
             assert!(
-                command_log(analysis, &coverage, context).starts_with(&attempted),
+                command_log(analysis, "$ kubectl", &coverage, context).starts_with(&attempted),
                 "the wall and the run spell the connect reads differently, which is two \
                  sentences that can disagree about one request"
             );
@@ -7227,15 +7810,16 @@ fn argv(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| (*word).to_string()).collect()
 }
 
-/// **One selector for four consumers, in both spellings, first wins** (NOTES § D194,
+/// **One selector for four consumers, in both spellings, last wins** (NOTES § D194,
 /// [`value_of`]).
 ///
 /// **Both spellings, for `--context`'s reason**: matching only `--object NAME` lets
 /// `--object=NAME` fall through, and a selector that silently selects nothing is worse than one
-/// that refuses. **First wins is written down** because an unwritten tie-break is the one that
-/// changes by accident.
+/// that refuses. **Last wins is written down** because an unwritten tie-break is the one that
+/// changes by accident — and because this one moved: it was first-wins until the flags box
+/// (`k8s-admin`, 2026-09-24, [`value_of`]).
 #[test]
-fn the_object_selector_reads_both_spellings_and_takes_the_first() {
+fn the_object_selector_reads_both_spellings_and_takes_the_last() {
     assert_eq!(
         object_arg(&argv(&["--logs", "--object", "payments/web"])),
         Some(Some("payments/web"))
@@ -7248,8 +7832,9 @@ fn the_object_selector_reads_both_spellings_and_takes_the_first() {
         object_arg(&argv(&[
             "--logs", "--object", "first", "--object", "second"
         ])),
-        Some(Some("first")),
-        "a repeated selector is not first-wins, so the tie-break is whatever the loop happens to do"
+        Some(Some("second")),
+        "a repeated selector did not take the last one, so a correction typed at the end of a \
+         recalled command is silently ignored"
     );
     assert_eq!(
         object_arg(&argv(&["--logs", "--object"])),
@@ -11100,12 +11685,15 @@ fn no_refusal_ever_names_a_word_the_same_sentence_offers_back() {
 /// **The namespace may be named once and no more, and `k8rs ops` refuses rather than picking
 /// one** (`k8s-admin` and `tester`, 2026-09-04; PM ruling).
 ///
-/// **[`value_of`]'s first-wins is right for the read path and cannot be carried onto a write.**
-/// `kubectl` is last-wins — measured here on `kubectl` v1.36.3, client-side and against no
-/// cluster: `kubectl create deployment web --image=nginx --dry-run=client -o yaml -n payments -n
-/// prod` prints `namespace: prod`, and so does the same line with `--namespace payments -n prod`.
-/// So first-wins here would send a mutation to a namespace the reader's own habit says is the
-/// other one. It is also the
+/// **The read path resolves a repeat and this one refuses it, and that is not the two
+/// disagreeing.** `kubectl` is last-wins — measured here on `kubectl` v1.36.3, client-side and
+/// against no cluster: `kubectl create deployment web --image=nginx --dry-run=client -o yaml -n
+/// payments -n prod` prints `namespace: prod`, and so does the same line with `--namespace
+/// payments -n prod`. [`value_of`] followed that measurement as of the flags box and takes the
+/// last too; the argument this doc used to make — *first-wins would send a mutation to whichever
+/// of the two the reader's habit says is the other one* — went with it. What it rested on did
+/// not: a read taken against the wrong namespace costs a re-run and a mutation does not, so this
+/// path buys its certainty with a refusal rather than with a tie-break. It is also the
 /// contradiction two doc comments in this region already rule out: [`ops_words`]' *a word
 /// silently skipped is a run doing something other than what was typed*, and [`ops_namespace`]'s
 /// refusal to guess a namespace nobody typed. Refusing to guess when none was typed and then
@@ -11923,8 +12511,46 @@ fn one_context(server: Option<&str>) -> kube::config::Kubeconfig {
     .expect("a kubeconfig this test wrote itself")
 }
 
-/// **Which cluster the audit line names comes off the kubeconfig, not off a field on a frozen
-/// `k8s::Session`** (NOTES § D220 ruling 5).
+/// **A second context in the file, so `--context` has a row to name that is not the file's own
+/// current one** — the one shape [`one_context`] cannot make.
+fn two_contexts(first: &str, second: &str) -> kube::config::Kubeconfig {
+    serde_yaml_ng::from_str(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: alpha\n\
+         contexts:\n\
+         - name: alpha\n  \
+           context:\n    \
+             cluster: a\n    \
+             user: k8rs\n\
+         - name: beta\n  \
+           context:\n    \
+             cluster: b\n    \
+             user: k8rs\n\
+         clusters:\n\
+         - name: a\n  \
+           cluster:\n    \
+             server: {first}\n\
+         - name: b\n  \
+           cluster:\n    \
+             server: {second}\n\
+         users:\n\
+         - name: k8rs\n  \
+           user: {{}}\n"
+    ))
+    .expect("a kubeconfig this test wrote itself")
+}
+
+/// **Which cluster the audit line names comes off the row k8rs connected to** (NOTES § D220
+/// ruling 5) — the `current` row of the same `k8s::contexts` list the connection was chosen from.
+///
+/// **The blocking half, measured** (`k8s-admin`, 2026-09-24): the function used to take the
+/// kubeconfig and ask `k8s::contexts(…, None)` for itself. That is right for an `ops` line, which
+/// takes no `--context`, and wrong for the console, which now connects with one — so
+/// `k8rs --context beta`, one restart, and `ops::Record::attempt_line` wrote
+/// `context beta · server <alpha's URL>`. Invariant 4: **neither record may lie**, and the field
+/// that lied is the one `ops::Mutation::server` exists to be the backstop for, because a context
+/// name does not identify a cluster.
 ///
 /// **The three `k8s::Address` states become two answers here**, because a log line has one job:
 /// an address it can state, or the gap `ops::Record::attempt_line` already spells. Telling
@@ -11934,13 +12560,32 @@ fn one_context(server: Option<&str>) -> kube::config::Kubeconfig {
 /// server comes from here rather than being remembered a second time on the way into a file that
 /// is kept.
 #[test]
-fn the_server_the_record_names_is_the_one_the_current_context_points_at() {
+fn the_server_the_record_names_is_the_one_the_run_connected_to() {
+    // **The finding itself**: two clusters in one file, and the answer follows `--context`.
+    let two = two_contexts("https://alpha.invalid:6443", "https://beta.invalid:6443");
+    assert_eq!(
+        current_server(&k8s::contexts(&two, None)),
+        "https://alpha.invalid:6443",
+        "a run that named no context did not get the file's own current-context"
+    );
+    assert_eq!(
+        current_server(&k8s::contexts(&two, Some("beta"))),
+        "https://beta.invalid:6443",
+        "the audit line would have named `context beta` beside alpha's server URL, which is \
+         invariant 4's neither record may lie"
+    );
+    // A context the file does not have leaves no row marked current, so there is nothing to name
+    // — and the connection under it fails anyway.
+    assert_eq!(current_server(&k8s::contexts(&two, Some("gamma"))), "");
+
+    let current =
+        |kubeconfig: &kube::config::Kubeconfig| current_server(&k8s::contexts(kubeconfig, None));
     // **A reserved host and not the `127.0.0.1` a real kind writes**, because
     // `scripts/security-guard.py` reads a loopback URL in this tree as a second outbound path and
     // is right to; the port is what carries the point, and `ops_tests.rs`'s own fixture already
     // pays this price for the same reason.
     assert_eq!(
-        current_server(&one_context(Some("https://k8rs-tests.invalid:41751"))),
+        current(&one_context(Some("https://k8rs-tests.invalid:41751"))),
         "https://k8rs-tests.invalid:41751"
     );
     // **A password in the URL never reaches the log** — `k8s::Address` dropped it before this
@@ -11951,17 +12596,17 @@ fn the_server_the_record_names_is_the_one_the_current_context_points_at() {
     // reads the whole authority — so the credential half is a separate literal.
     let with_password = format!("https://{}@{}", "root:hunter2", "prod.invalid:6443");
     assert_eq!(
-        current_server(&one_context(Some(&with_password))),
+        current(&one_context(Some(&with_password))),
         "https://prod.invalid:6443",
         "a kubeconfig password reached the audit log"
     );
     // An entry that names no cluster, and one whose address k8rs will not state: both are the gap.
-    assert_eq!(current_server(&one_context(None)), "");
-    assert_eq!(current_server(&one_context(Some("https://[oops"))), "");
+    assert_eq!(current(&one_context(None)), "");
+    assert_eq!(current(&one_context(Some("https://[oops"))), "");
     // No current context at all — nothing to name, and nothing to invent.
     let empty: kube::config::Kubeconfig =
         serde_yaml_ng::from_str("apiVersion: v1\nkind: Config\n").expect("an empty kubeconfig");
-    assert_eq!(current_server(&empty), "");
+    assert_eq!(current(&empty), "");
 }
 
 /// **A run that never reached a cluster says nothing was changed, and then says why**
@@ -12298,9 +12943,12 @@ fn every_refusal_of_an_ops_line_exits_two() {
     }
 }
 
-/// **The usage stops saying this build cannot reach a cluster without qualifying it**
-/// (todo.md 3749). It was true until the first operation landed, and it is the sentence a reader
-/// checks before deciding whether it is safe to experiment against production.
+/// **`ops` is on the list of what reaches a cluster, and the list is the whole list**
+/// (todo.md 3749). The sentence around it has now been rewritten twice — *this build cannot
+/// reach a cluster*, then *without --once, --live … this build reads files only*, now
+/// *--once, --live … and ops are its other doors to a cluster* — and what this test is for has
+/// survived all three: it is the sentence a reader checks before deciding whether it is safe to
+/// experiment against production, so a door missing from it is the dangerous kind of omission.
 #[test]
 fn the_usage_says_ops_reaches_a_cluster_too() {
     let Err(problem) = run(&[]) else {
@@ -12324,8 +12972,8 @@ fn the_usage_says_ops_reaches_a_cluster_too() {
     // binary, so the pin costs one `contains` on an invocation that is paid for either way.
     let last = problem.lines().last().expect("the usage has a last line");
     assert!(
-        last.contains("--yaml or ops this build reads files only"),
-        "the line that says what cannot reach a cluster still leaves `ops` out of it: {last:?}"
+        last.contains("--yaml and ops are its other doors to a cluster"),
+        "the line listing what reaches a cluster still leaves `ops` out of it: {last:?}"
     );
     // **Offered *and* explained.** A bracketed flag on a mutating form reads as *and then it
     // scales*; what it does is refuse, and the prose is where that fits without a fourth line
@@ -12512,7 +13160,7 @@ async fn a_headless_scale_prints_the_dialog_as_three_lines_and_exits_zero() {
             "deployment/web in payments",
             "This stops all 3 copies of your app — nothing will be left running. Right now: 3 \
              copies. After: 0 copies.",
-            "$ kubectl scale deployment/web --replicas=0 -n payments",
+            "$ kubectl --context kind-k8rs scale deployment/web --replicas=0 -n payments",
         ],
         "the headless dialog is not the three lines screens/dialogs.md prints"
     );
@@ -12736,7 +13384,7 @@ async fn a_headless_restart_prints_the_dialog_as_three_lines_and_exits_zero() {
             "This asks Kubernetes to replace every copy of your app with a new one. How many \
              stop at the same time is a setting on this deployment — it can be a few, or all of \
              them at once. A paused deployment will not start until you resume it.",
-            "$ kubectl rollout restart deployment/web -n payments",
+            "$ kubectl --context kind-k8rs rollout restart deployment/web -n payments",
         ],
         "the headless dialog is not the three lines screens/dialogs.md prints"
     );
@@ -12780,7 +13428,8 @@ async fn a_headless_restart_prints_the_dialog_as_three_lines_and_exits_zero() {
     );
     assert!(
         written.contains(
-            "kubectl: kubectl rollout restart deployment/web -n payments · call: PATCH \
+            "kubectl: kubectl --context kind-k8rs rollout restart deployment/web -n payments \
+             · call: PATCH \
              /apis/apps/v1/namespaces/payments/deployments/web · resourceVersion not sent"
         ) && written.contains("· no uid was read ·")
             && written.contains("· the change was made"),
@@ -12854,7 +13503,7 @@ async fn a_headless_restart_of_a_paused_deployment_says_so_above_the_prompt_and_
         "the paused line is not the one under the taught command: {lines:?}"
     );
     assert_eq!(
-        lines[2], "$ kubectl rollout restart deployment/web -n payments",
+        lines[2], "$ kubectl --context kind-k8rs rollout restart deployment/web -n payments",
         "the paused line moved above the command it is about: {lines:?}"
     );
     assert!(
@@ -13373,8 +14022,9 @@ fn only_a_question_takes_the_subresource_flag() {
             ended.said
         );
     }
-    // **Named twice is refused for the namespace's own reason** — `value_of` is first-wins and
-    // `kubectl` is last-wins, so guessing asks a different question from the one that was typed.
+    // **Named twice is refused for the namespace's own reason** — a read may resolve a repeat
+    // ([`value_of`], last-wins like `kubectl` since the flags box) because it can be re-run, and
+    // a question about permission that asks about the wrong subresource cannot be taken back.
     //
     // **Both spellings, because they are counted on two different lines** (my own second pass,
     // found by `just mutants-diff`): a row with only the attached form left `replace += with *=`
@@ -13407,6 +14057,77 @@ fn only_a_question_takes_the_subresource_flag() {
 /// **The usage says the question exists, in both places a reader can find it** — the top-level
 /// synopsis, which is the only place a reader learns a mode exists, and `k8rs ops`'s own rows.
 ///
+/// **The synopsis leads with the console, and its last line no longer denies one**
+/// (`screens/states.md` § The command line's own synopsis, which is this text's authority and was
+/// written for the flags box).
+///
+/// **Two runs printed the contradiction** (`k8s-admin`, 2026-09-24). `k8rs --read-only | cat`
+/// printed a usage with no line for the flag just typed; `k8rs --read-only pod.json` printed the
+/// new refusal — *`--read-only` on its own opens the console, which reads a cluster* — directly
+/// above *without --once, --live, --logs, --describe, --yaml or ops this build reads files only —
+/// it cannot reach a cluster*. One write to stderr, two sentences that cannot both be true.
+///
+/// **The synopsis is the only place a reader learns a form exists**, which is [`READ_ONLY`]'s own
+/// argument for itself, measured at zero mentions before it landed — and it reaches the console
+/// as a whole: nothing the binary printed said that typing `k8rs` alone opens anything.
+#[test]
+fn the_usage_leads_with_the_console_and_stops_denying_it() {
+    println!("{USAGE}");
+    let synopsis = USAGE.lines().next().expect("the usage has a first line");
+    assert!(
+        synopsis.starts_with(
+            "usage: k8rs [--read-only] [--context <name>] [--namespace <name>]   |   k8rs \
+             [--analysis] <file.json>..."
+        ),
+        "the console form does not lead the synopsis: {synopsis:?}"
+    );
+    // **Seven alternatives**, counted off the separator the line is built from.
+    assert_eq!(
+        synopsis.matches("   |   ").count() + 1,
+        7,
+        "an alternative was added or lost: {synopsis:?}"
+    );
+    // **The claim the console form makes false, gone** — and the six doors it replaced with a
+    // true sentence still named, because a reader needs each of them too.
+    assert!(
+        !USAGE.contains("this build reads files only"),
+        "the synopsis still says a line without the six mode words cannot reach a cluster"
+    );
+    assert!(
+        USAGE.contains(
+            "A path on the line is always the file-driven form, and nothing else; without one, \
+             this build opens a console instead of reading nothing"
+        ),
+        "the rewritten trailing sentence is not the one screens/states.md writes: {USAGE}"
+    );
+    for door in ["--once", "--live", "--logs", "--describe", "--yaml", "ops"] {
+        assert!(
+            USAGE.contains(door),
+            "the synopsis stopped naming {door}, which still reaches a cluster"
+        );
+    }
+    // **`--analysis` is not on the console form**, and this asserts the *text* and not a
+    // behaviour (PM ruling, 2026-09-24; backlog.md carries the reasoning). `--analysis` is not a
+    // console flag and never opens a console — `k8rs --analysis` alone is the file form with no
+    // file — but `k8rs --read-only --analysis` does open one and drops the word, because the
+    // console draws the seven panes anyway and refusing a flag it already satisfies costs the
+    // reader more than it saves. The assertion this replaced claimed the behaviour and was
+    // shaped to pass: `!starts_with("usage: k8rs [--analysis] [--read-only]")` ruled out one
+    // spelling of a thing it said it forbade, so `[--read-only] [--analysis] …` sailed through.
+    let console_form = synopsis
+        .strip_prefix("usage: ")
+        .and_then(|line| line.split("   |   ").next())
+        .expect("the synopsis has a first alternative");
+    assert_eq!(
+        console_form, "k8rs [--read-only] [--context <name>] [--namespace <name>]",
+        "the console form is not the one screens/states.md writes"
+    );
+    assert!(
+        !console_form.contains("--analysis"),
+        "the console form offers a flag the console has nothing to mean: {console_form:?}"
+    );
+}
+
 /// **`may-i`'s shape is not the operations' shape**, and the synopsis showed only theirs
 /// (`k8s-admin`, 2026-09-05): a reader who followed `ops <operation> <kind>/<name>` for a question
 /// would write `may-i delete/nodes`.
@@ -16095,8 +16816,13 @@ async fn each_verb_shows_its_own_command_and_nothing_is_sent_without_an_answer()
     let scratch = Scratch::named("console-mutating");
     let client = refusing().await;
     for (verb, expected) in [
-        (RESTART, "kubectl rollout restart deployment/web"),
-        (DELETE, "kubectl delete deployment/web"),
+        // **The fixture's own context is `prod-eu`**, which `mutating` is handed three lines
+        // down — every taught command carries it now (NOTES § D278 ruling 5).
+        (
+            RESTART,
+            "kubectl --context prod-eu rollout restart deployment/web",
+        ),
+        (DELETE, "kubectl --context prod-eu delete deployment/web"),
     ] {
         let mut audit = scratch.file(&format!("audit-{verb}"));
         let wanted = Wanted {

@@ -34,6 +34,13 @@ const NO_KUBECONFIG: &str = "/nonexistent/k8rs-tests/there-is-no-kubeconfig-here
 /// a piped stdout — the code under test standing in for the harness's own guard
 /// ([`no_test_here_can_reach_a_cluster`], which is why the two helpers are now one).
 ///
+/// **The door is wider than *no arguments* since the flags box** (todo.md § Phase 12): `k8rs
+/// --read-only`, `k8rs --context <name>` and `k8rs -n <name>`, in either spelling and in any
+/// combination, open the console too (`src/main.rs`'s `opening`). Every one of them is a line a
+/// test in this file can type, so the sentence above now describes a class rather than one shape —
+/// and the override is what keeps all of it away from a cluster
+/// ([`a_console_flag_line_with_no_terminal_is_the_usage_and_nothing_else`]).
+///
 /// Nothing here reaches a network: the path does not exist, so no client is ever built.
 fn k8rs(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_k8rs"))
@@ -129,13 +136,43 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
     let stderr = text(out.stderr);
     assert_eq!(stderr.lines().count(), 3, "{stderr:?}");
     assert!(stderr.starts_with("usage: k8rs "), "{stderr:?}");
-    assert!(stderr.contains("cannot reach a cluster"), "{stderr:?}");
+    // **This line used to read `contains("cannot reach a cluster")`, and it was retired because
+    // the claim stopped being true — not because it became inconvenient** (todo.md § Phase 12's
+    // flags box). *"Without --once, --live … this build reads files only — it cannot reach a
+    // cluster"* was the usage's own third sentence and was correct while a bare `k8rs` had
+    // nowhere to go; since the console arm it is the binary denying, on its own first screen, the
+    // mode it is about to open. A test may not go on pinning a sentence the build must no longer
+    // print, so what is pinned is the replacement requirement: the usage does not deny the
+    // cluster, and the first form it offers is the console's.
+    //
+    // **It stays a content anchor and not just a line count**, which is what the paragraph below
+    // says this assertion is for: a `main` that printed a *different*, well-formed usage — a
+    // stale copy from anywhere else in the tree — passes three lines and fails here.
+    assert!(
+        !stderr.contains("cannot reach a cluster"),
+        "the usage still denies the cluster a bare `k8rs` now opens a console on: {stderr:?}"
+    );
     // **Counting the lines does not read them.** The synopsis is the only place a reader
     // learns which modes this build has, and the whole `--live` form was removable from it
     // with all seven of these green until this loop existed. It is asserted against the
     // first line and not the whole text because the prose below still says `--live` while
     // the synopsis offers no way to reach it.
     let synopsis = stderr.lines().next().expect("the usage has a first line");
+    // **The console is the first form offered**, because it is the one a reader reaches by typing
+    // the program's name and nothing else — and because a reader who has just been shown this
+    // text got here without arguments (`src/main_tests.rs`'s
+    // `the_usage_leads_with_the_console_and_stops_denying_it`, which pins the wording of the
+    // `USAGE` const; this pins that the process really prints that const and not another).
+    let console_form = synopsis
+        .find("--read-only")
+        .expect("the synopsis offers --read-only");
+    let file_form = synopsis
+        .find("<file.json>")
+        .expect("the synopsis offers the file-driven form");
+    assert!(
+        console_form < file_form,
+        "the usage does not lead with the console form a bare `k8rs` opens: {synopsis:?}"
+    );
     // `--namespace` joined the list when the scoping box landed. It is here for the reason the
     // three beside it are: the synopsis is the only place a reader learns the flag exists, and
     // a flag that scopes what the tool reads is the one a reader most needs offered.
@@ -414,6 +451,371 @@ fn a_crafted_namespace_never_reaches_the_terminal_at_all() {
              terminal: {stderr:?}"
         );
     }
+}
+
+/// **A line whose only flags are the console's is [`USAGE`] with no terminal attached** — exit 2,
+/// an empty stdout, and not one word of what was typed (todo.md § Phase 12's flags box).
+///
+/// **The premise is the defect, and only a process can see it.** Until the flags box `main`'s
+/// console arm asked `args.is_empty()`, so `k8rs --read-only` fell past it into the file-driven
+/// report, read the flag as a **path**, and came back *`--read-only`: No such file or directory*.
+/// `src/main_tests.rs` can call `opening` and read its answer; it cannot say which driver the
+/// process then ran, and *the flag was read as a filename* is a fact about the process.
+///
+/// **Two canaries, both proved producible first** — `No such file or directory`, which is what a
+/// line that fell into the file-driven report says, and *is not a flag k8rs has*, which is what a
+/// `--` word this build does not have gets. Reworded or gone, the first makes every `!contains`
+/// below silently true at once and this test passes over a binary that still reads `--read-only`
+/// as a path; the second is the sentence the rows here must **not** get, and it is asserted
+/// producible so that *not getting it* stays a fact about the flags and not about the message
+/// having moved (CLAUDE.md § A derived list asserts it found something).
+///
+/// **And a console line still never dials.** [`CONNECT_CANARY`]'s absence is asserted on every
+/// row: `at_a_keyboard` is the whole of what stands between a console line in this harness and a
+/// live cluster, and it is the code under test ([`no_test_here_can_reach_a_cluster`]).
+///
+/// **Both spellings of each flag and the combinations, because a line is a console line however it
+/// was written** (NOTES § D29). `--context=NAME` falling through where `--context NAME` was caught
+/// is how this repo shipped a silent wrong cluster once already (`src/main.rs`'s `context_arg`).
+#[test]
+fn a_console_flag_line_with_no_terminal_is_the_usage_and_nothing_else() {
+    // **Canary one**: a `--` word this build does not have is refused as a flag and never read
+    // as a path, which is the answer the console rows below must not get either.
+    let fell_through = text(k8rs(&["--no-such-path.json"]).stderr);
+    assert!(
+        fell_through.contains("is not a flag k8rs has"),
+        "a `--` word k8rs does not have stopped being refused: {fell_through:?}"
+    );
+    // **Canary two**: a path that is not there is what a run that fell into the file-driven
+    // report says, and it is what every row below asserts it does not say.
+    let read_as_a_path = text(k8rs(&[&fixture("no-such-fixture.json")]).stderr);
+    assert!(
+        read_as_a_path.contains("No such file or directory"),
+        "the file-driven report no longer says {:?}, so every `!contains` below proves \
+         nothing: {read_as_a_path:?}",
+        "No such file or directory"
+    );
+
+    let usage = {
+        let bare = k8rs(&[]);
+        assert_eq!(bare.status.code(), Some(2), "{bare:?}");
+        text(bare.stderr)
+    };
+    assert!(usage.starts_with("usage: k8rs "), "{usage:?}");
+
+    for args in [
+        vec!["--read-only"],
+        vec!["--context", "prod-eu"],
+        vec!["--context=prod-eu"],
+        vec!["--namespace", "payments"],
+        vec!["--namespace=payments"],
+        vec!["-n", "payments"],
+        vec!["-n=payments"],
+        // Every flag at once, and in the other order — the scan is over the whole line, so an
+        // answer that depended on which came first would show in exactly one of these two.
+        vec!["--read-only", "--context=prod-eu", "-n", "payments"],
+        vec!["-n=payments", "--context", "prod-eu", "--read-only"],
+        vec!["--context", "prod-eu", "--namespace", "payments"],
+        // Repeated, in both spellings. Which one wins is `src/main_tests.rs`'s to pin — what
+        // this file owes is that a repeat does not stop the line being a console line.
+        vec!["--context", "a", "--context", "b"],
+        vec!["--namespace", "a", "-n", "b"],
+    ] {
+        let out = k8rs(&args);
+
+        assert_eq!(out.status.code(), Some(2), "{args:?} {out:?}");
+        assert!(
+            out.stdout.is_empty(),
+            "{args:?} wrote to stdout, which a console line has nothing to put there: {:?}",
+            text(out.stdout.clone())
+        );
+        let stderr = text(out.stderr);
+        // **The whole of stderr and not a prefix of it.** A binary that printed the usage *after*
+        // a sentence about a file it tried to open would pass a `contains`, and that sentence is
+        // the defect this test is named for.
+        assert_eq!(
+            stderr, usage,
+            "{args:?} did not print the usage a console line in a pipeline prints"
+        );
+        assert!(
+            !stderr.contains("No such file or directory"),
+            "{args:?} was read as a path, so the flags on it were dropped: {stderr:?}"
+        );
+        assert!(
+            !stderr.contains(CONNECT_CANARY),
+            "{args:?} dialled a cluster with no terminal to draw one on: {stderr:?}"
+        );
+    }
+
+    // **A line with no console flag on it is still a path, which is the half that could have been
+    // taken away by mistake** (`src/main.rs`'s `NAMESPACE_SHORT`, whose doc promises it). `-x` is
+    // a one-dash word this build does not have and `file.json` is a positional beside it; with no
+    // cluster and no console flag there is nothing for either to be ambiguous with.
+    let missing = fixture("no-such-fixture.json");
+    for args in [
+        vec!["-x", "file.json"],
+        vec![missing.as_str()],
+        vec!["--analysis", missing.as_str()],
+    ] {
+        let stderr = text(k8rs(&args).stderr);
+        assert_ne!(
+            stderr, usage,
+            "{args:?} stopped being a path and became a console line"
+        );
+        assert!(
+            stderr.contains("No such file or directory"),
+            "{args:?} is not a path any more: {stderr:?}"
+        );
+    }
+
+    // **A committed capture beside no flag at all still prints its report**, which is the one row
+    // here that reaches exit 0 — and the proof that widening the console arm did not swallow the
+    // file-driven driver whole.
+    let report = k8rs(&[&fixture("healthy.json")]);
+    assert_eq!(report.status.code(), Some(0), "{report:?}");
+    assert_eq!(
+        text(report.stdout),
+        "1 pod · 0 nodes\n\n○ nothing is broken\n"
+    );
+}
+
+/// **The cluster modes keep their driver when a console flag is beside them** — `--once`
+/// especially, which is released and is a command in a pipeline rather than a screen
+/// (NOTES § D17, `screens/once.md`).
+///
+/// **Not *not a console*, but *the driver it named***. A build where every line fell through to
+/// the file-driven report would pass an assertion that only said *no console* — and that build is
+/// the one the flags box replaced. [`CONNECT_CANARY`] is the positive: `KUBECONFIG` here cannot be
+/// read, so a line that really reached the cluster driver says *no cluster to watch*, and a line
+/// that opened a console or read a file cannot.
+#[test]
+fn a_cluster_flag_keeps_its_driver_when_a_console_flag_is_beside_it() {
+    for args in [
+        vec!["--once", "--read-only"],
+        vec!["--once", "--context", "prod-eu"],
+        vec!["--once", "-n", "payments"],
+        vec![
+            "--once",
+            "--read-only",
+            "--context=prod-eu",
+            "--namespace=payments",
+        ],
+        vec!["--live", "--read-only"],
+        vec!["--live", "--namespace=payments"],
+    ] {
+        let out = k8rs(&args);
+
+        assert_eq!(out.status.code(), Some(2), "{args:?} {out:?}");
+        assert!(
+            out.stdout.is_empty(),
+            "{args:?} wrote a diagnostic where a report goes: {:?}",
+            text(out.stdout.clone())
+        );
+        let stderr = text(out.stderr);
+        assert!(
+            stderr.contains(CONNECT_CANARY),
+            "{args:?} did not reach the cluster driver it named: {stderr:?}"
+        );
+    }
+}
+
+/// **A path beside a console flag is refused, and the sentence names the flag that is on the
+/// line** — never a mode the reader did not type (NOTES § D190's class, todo.md § Phase 12's
+/// flags box).
+///
+/// **Measured at the commit before this one**: `k8rs --read-only <capture>.json` read the file
+/// with `--read-only` gone and nothing on any stream to say so — the single worst flag in this
+/// build to drop in silence.
+///
+/// **The four shapes of a value nobody can use, on a *console* line.** They were proven only
+/// beside `--live` and `--once`; `mistyped` judges them before it knows which mode it is in, and
+/// a check is proven for the shapes it was fed (NOTES § D29).
+#[test]
+fn a_path_or_a_bad_value_beside_a_console_flag_is_refused_before_anything_opens() {
+    let capture = fixture("healthy.json");
+
+    for (mut args, flag) in [
+        (vec!["--read-only"], "--read-only"),
+        (vec!["--context", "prod-eu"], "--context"),
+        (vec!["--context=prod-eu"], "--context"),
+        (vec!["--namespace", "payments"], "--namespace"),
+        (vec!["--namespace=payments"], "--namespace"),
+        (vec!["-n", "payments"], "-n"),
+        (vec!["-n=payments"], "-n"),
+        // **Two console flags on one line name the *first* one** — whichever order they are in.
+        // The sentence has to name a flag that is really on the line (NOTES § D190's class), and
+        // *the first* is the rule `console_flag` states; an answer that drifted to the last would
+        // still be true of the line and would still be a rule nobody wrote down.
+        (vec!["--read-only", "--context", "prod-eu"], "--read-only"),
+        (vec!["--context=prod-eu", "--read-only"], "--context"),
+        (vec!["-n", "payments", "--read-only"], "-n"),
+        (
+            vec!["--namespace=payments", "--context=prod-eu", "--read-only"],
+            "--namespace",
+        ),
+    ] {
+        args.push(capture.as_str());
+        let out = k8rs(&args);
+
+        assert_eq!(out.status.code(), Some(2), "{args:?} {out:?}");
+        // **The capture is a real one and its report is a known string**, so *the file was not
+        // read* is asserted and not assumed: a run that read it would put that report here.
+        assert!(
+            out.stdout.is_empty(),
+            "{args:?} printed the file's report with {flag} dropped: {:?}",
+            text(out.stdout.clone())
+        );
+        let stderr = text(out.stderr);
+        // **The three things the requirement asks of this sentence, and not its wording.**
+        // `src/main_tests.rs` pins the sentence whole, where a rewording belongs; what a process
+        // owes is that the subject is *this line's* flag (NOTES § D190's class), that the reader
+        // is told the file was not read, and that the file is named. Pinning the prose in both
+        // places would make a rewording two red tests and one of them the wrong one.
+        assert!(
+            stderr.starts_with(&format!("k8rs: {flag} ")),
+            "{args:?} was not refused by the flag that is on it: {stderr:?}"
+        );
+        assert!(
+            stderr.contains("so k8rs cannot also read "),
+            "{args:?} was refused for something other than the two inputs: {stderr:?}"
+        );
+        assert!(
+            stderr.contains(&capture),
+            "{args:?} did not say which file it would not read: {stderr:?}"
+        );
+        assert!(
+            stderr.contains("usage: k8rs "),
+            "{args:?} was refused with no way to see the right spelling: {stderr:?}"
+        );
+        assert!(
+            !stderr.contains(CONNECT_CANARY),
+            "{args:?} dialled before the line was judged: {stderr:?}"
+        );
+    }
+
+    // **The three spellings of nothing after `--context`, on a console line.** The flag as the
+    // last word is `--context "$CTX"` with `CTX` unset, which is the commonest way here and the
+    // one that used to connect to the current cluster in silence.
+    for args in [
+        vec!["--context"],
+        vec!["--context", ""],
+        vec!["--context="],
+        vec!["--read-only", "--context"],
+    ] {
+        let stderr = text(k8rs(&args).stderr);
+        assert!(
+            stderr.starts_with("k8rs: --context needs the name of a context\n"),
+            "{args:?} took the current context instead of saying so: {stderr:?}"
+        );
+        assert!(!stderr.contains(CONNECT_CANARY), "{args:?}: {stderr:?}");
+    }
+
+    // **A flag is never a context name**, and the sentence says which word it refused.
+    let stderr = text(k8rs(&["--context", "--read-only"]).stderr);
+    assert!(
+        stderr.starts_with(
+            "k8rs: --context needs the name of a context, and --read-only is a flag\n"
+        ),
+        "--read-only became the name of a context: {stderr:?}"
+    );
+
+    // **`-nfoo` is refused on a console line too**, which is the shape `-nginx` is: attached, and
+    // meaning the namespace `ginx` to nobody who typed it.
+    for args in [vec!["-nfoo"], vec!["--read-only", "-nginx"]] {
+        let stderr = text(k8rs(&args).stderr);
+        assert!(
+            stderr.starts_with("k8rs: the namespace has to be separate from -n"),
+            "{args:?} was read as a namespace: {stderr:?}"
+        );
+    }
+
+    // **A one-dash word this build does not have is a usage error on a console line too**, and
+    // not a silently dropped word beside a flag that does exist.
+    let stderr = text(k8rs(&["--read-only", "-o", "json"]).stderr);
+    assert!(
+        stderr.starts_with("k8rs: -o is not a flag k8rs has"),
+        "-o was dropped beside --read-only: {stderr:?}"
+    );
+}
+
+/// **Invariant 9 over the two console flags that carry a value, at the process boundary.**
+///
+/// **`--context`'s value is the one word on a console line nothing bounds and nothing checks** —
+/// `--namespace`'s is judged by `k8s::namespace_name` — so what this asserts of it is the stronger
+/// property that fits: on a line with no terminal, **no part of it reaches stderr at all**. The
+/// usage is a `const`, so a value that leaked would make stderr something other than that const.
+///
+/// **Three framings and a length** (NOTES § D31): an `ESC` sequence, a `CR`, a right-to-left
+/// override, and a value long enough that echoing it whole would be the *sizes are bounded* row's
+/// own failure.
+#[test]
+fn a_crafted_console_flag_value_never_reaches_the_terminal() {
+    let usage = text(k8rs(&[]).stderr);
+    assert!(usage.starts_with("usage: k8rs "), "{usage:?}");
+
+    let crafted = "pay\u{1b}[2J\rments\u{202e}x";
+    let enormous = "c".repeat(8192);
+
+    // `--context` takes any word at all, so these lines are ordinary console lines and print the
+    // usage — with nothing of the value in it.
+    for value in [crafted, enormous.as_str()] {
+        for args in [
+            vec!["--context".to_string(), value.to_string()],
+            vec![format!("--context={value}")],
+        ] {
+            let spelled: Vec<&str> = args.iter().map(String::as_str).collect();
+            let out = k8rs(&spelled);
+
+            assert_eq!(out.status.code(), Some(2), "{out:?}");
+            let stderr = text(out.stderr);
+            assert_eq!(
+                stderr,
+                usage,
+                "a --context value reached the terminal ({} bytes of stderr)",
+                stderr.len()
+            );
+        }
+    }
+
+    // `--namespace` judges its value, so these lines are *refused* — and the refusal is the sink
+    // invariant 9 is about. Both framings of the leak: what the strip leaves of the word, and the
+    // readable tail of the escape sequence.
+    for args in [
+        vec!["--namespace".to_string(), crafted.to_string()],
+        vec![format!("--namespace={crafted}")],
+        vec!["-n".to_string(), crafted.to_string()],
+    ] {
+        let spelled: Vec<&str> = args.iter().map(String::as_str).collect();
+        let stderr = text(k8rs(&spelled).stderr);
+        assert!(
+            stderr.contains("the namespace you typed"),
+            "{spelled:?} was not refused as a namespace: {stderr:?}"
+        );
+        let survivors: Vec<char> = stderr
+            .chars()
+            .filter(|c| c.is_control() && *c != '\n')
+            .collect();
+        assert!(
+            survivors.is_empty(),
+            "{spelled:?} let control characters out: {survivors:?}"
+        );
+        for fragment in ["ments", "[2J", "\u{202e}"] {
+            assert!(
+                !stderr.contains(fragment),
+                "{fragment:?} out of a namespace k8rs said it would not repeat reached the \
+                 terminal: {stderr:?}"
+            );
+        }
+    }
+
+    // A value too long to be a namespace is refused, and the echo is cut to what a namespace name
+    // could have been rather than printed back whole.
+    let stderr = text(k8rs(&["-n", &enormous]).stderr);
+    assert!(
+        stderr.len() < enormous.len(),
+        "the refusal printed the value back at {} bytes",
+        stderr.len()
+    );
 }
 
 /// **Invariant 9 at the process boundary, over a refusal that still quotes what was typed.**
@@ -2049,7 +2451,21 @@ fn a_confirmed_scale_changes_the_cluster_exits_0_and_leaves_stdout_empty() {
             "deployment/web in payments",
             "This stops all 3 copies of your app — nothing will be left running. Right now: 3 \
              copies. After: 0 copies.",
-            "$ kubectl scale deployment/web --replicas=0 -n payments",
+            // **The context is in the taught line because the line is only equivalent with it**
+            // (invariant 4). This run connected to `stub` — [`stub_kubeconfig`] writes
+            // `current-context: stub` and names no other — and a `kubectl scale` with no
+            // `--context` targets whatever the *reader's* current context is, which is a
+            // different cluster on every machine but this one. A teaching device that tells the
+            // reader to run a mutation against a cluster nobody chose is the silent-wrong-cluster
+            // class `src/main.rs` has now shut three doors on.
+            //
+            // **Before the verb, because `kubectl` reads `--context` as a global flag** — after
+            // it the word belongs to `scale` and the command does not run.
+            //
+            // **`stub` is read off this file's own fixture and not off the binary's output**: the
+            // literal below is what the kubeconfig above makes the only correct answer, which is
+            // the difference between an assertion and a transcript.
+            "$ kubectl --context stub scale deployment/web --replicas=0 -n payments",
         ],
         "the headless dialog is not the three lines screens/dialogs.md prints: {stderr:?}"
     );
