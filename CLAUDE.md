@@ -425,7 +425,10 @@ ssh ubuntu 'cd ~/k8rs-src && export PATH=$HOME/.cargo/bin:$PATH && just check'
 runs in it at a time. **`rsync -a` preserves mtimes, so `touch src/*.rs` after a
 mirror that restores a file** — otherwise `cargo` reuses the object built from
 the version you just replaced. A run longer than ten minutes goes to the
-background with its log on the host.
+background with its log on the host — and **what waits on it polls that log for
+its `EXIT=` line, under a `timeout`, never `pgrep` for the command's name: the
+name matches the waiting shell too, and that wait never ends**
+([D275](NOTES.md#d275--the-wait-loop-watched-for-the-commands-own-name-so-it-matched-itself-and-never-ended-2026-09-24)).
 
 **The one exception is the mutation sweep, and it runs here** — 82 s per mutant
 on the host, measured, against 136 mutants for one box. `just mutants-diff` and

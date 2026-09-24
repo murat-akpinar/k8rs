@@ -296,6 +296,7 @@ its line moving with it.
 - [D272](#d272--the-four-behaviours-a-clamp-the-renderer-computed-and-threw-away-an-esc-that-is-inert-with-nothing-bounding-the-wait-and-a-box-that-named-two-keys-the-footer-did-not-2026-09-20) — the four behaviours: a clamp the renderer computed and threw away, an `esc` that is inert with nothing bounding the wait, and a box that named two keys the footer did not
 - [D273](#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20) — the wiring box has no `call` closure, so the bound D272 ordered goes inside the contract and `ops.rs` reopens for one change
 - [D274](#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24) — the console event loop: the six rulings the brief needed, the strip line that moved to the confirmation, `s` withheld, the `over_modal` survivors invariant 2 had no test for, and the PM repeating D136
+- [D275](#d275--the-wait-loop-watched-for-the-commands-own-name-so-it-matched-itself-and-never-ended-2026-09-24) — the wait loop watched for the command's own name, so it matched itself and never ended
 
 ## Why it exists — where the gap is
 
@@ -24260,3 +24261,36 @@ correct, and it cost the phase a serial restart. [CLAUDE.md](CLAUDE.md)'s concur
 ignoring it reproduced
 [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
 exactly — a re-dispatch to fix a finding is a write, not a review.
+
+### D275 — the wait loop watched for the command's own name, so it matched itself and never ended (2026-09-24)
+
+Six background shells were still alive seven hours after the runs they were
+waiting on had finished, each one a
+`ssh ubuntu 'until ! pgrep -f "just check"; do sleep 15; done; tail -40 /tmp/check.log'`.
+`pgrep -f` matches a whole command line, and the remote shell running the loop
+carries `just check` inside its own — so the predicate was true *of the watcher*,
+and going false was not something the gate finishing could cause. Nothing hung on
+the test host: every gate had completed and its result had already been read
+straight out of the log. What hung was the watching, and after a `/clear` there
+was no context left that knew the shells existed. The only symptom the user could
+see was `/exit` declining to leave with shells still open.
+
+**The leak is on two machines.** Killing the local `ssh` does not kill the loop
+it started: after the six shells here were gone, four `bash -c until ! pgrep …`
+loops were still spinning on the test host — and each one's `pgrep` matched the
+others, so they held each other alive and would have deadlocked the next
+correctly-written wait too. They had to be killed there by name.
+
+The fix is not a better pattern. **Any pattern that names the command also names
+whatever is watching for it** — a property of `pgrep -f`, not of this spelling,
+and the next wait would earn it back. The unambiguous thing is what the run
+*writes*: the `EXIT=$?` line the exit-code rule already puts in the log, which
+exists only once the command is over. So a wait polls the log for that line and
+never the process table.
+
+Second half, because a wrong predicate will be written again: **the wait is
+bounded** — `timeout` on the `ssh`, sized to the run it is waiting for.
+[D185](#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)
+said cleanup on the last line is not cleanup and the resource is not always a
+file; a watcher is a resource too, and an unbounded one outlives the session that
+could have reaped it.
