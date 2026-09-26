@@ -304,6 +304,8 @@ its line moving with it.
 - [D280](#d280--the-which-cluster-review-round-a-header-slot-with-no-vocabulary-a-mockup-that-cannot-be-drawn-and-four-tests-weaker-than-they-read-2026-09-26) — the which-cluster review round: a header slot with no vocabulary, a mockup that cannot be drawn, and four tests weaker than they read
 - [D281](#d281--round-two-the-fix-that-broke-the-quoting-rule-a-probe-that-was-not-one-and-a-frame-that-is-honest-as-built-and-misreading-as-drawn-2026-09-26) — round two: the fix that broke the quoting rule, a probe that was not one, and a frame that is honest as built and misreading as drawn
 - [D282](#d282--the-two-sentences-opsrs-keeps-to-itself-stay-copied-and-the-guard-that-already-exists-is-what-pins-them-2026-09-26) — the two sentences `ops.rs` keeps to itself stay copied, and the guard that already exists is what pins them
+- [D283](#d283--the-dialog-strip-box-its-premise-was-closed-four-boxes-ago-the-type-goes-on-dialog-and-the-door-goes-on-object-2026-09-26) — the dialog-strip box: its premise was closed four boxes ago, the type goes on `Dialog` and the door goes on `Object`
+- [D284](#d284--the-dialog-strip-review-round-a-door-that-was-not-one-a-renderer-that-panics-on-the-strips-own-fixed-point-and-two-comments-that-were-lies-2026-09-26) — the dialog-strip review round: a door that was not one, a renderer that panics on the strip's own fixed point, and two comments that were lies
 
 ## Why it exists — where the gap is
 
@@ -24962,3 +24964,211 @@ exists to assert against. Naming it here so it is not read as covered.
 the way an `ops.rs` sentence reaches `ui.rs` is retyped and guarded, because
 `ops.rs` froze at Phase 7 and the page needs pinning either way. That is not a
 workaround for the freeze — it is the only shape that covers all three copies.
+
+### D283 — the dialog-strip box: its premise was closed four boxes ago, the type goes on `Dialog` and the door goes on `Object` (2026-09-26)
+
+**The box's premise is stale at HEAD, and the box is smaller than it reads.** It
+says *"Phase 11 drew the boxes and nothing outside a test constructs one"* — that
+stopped being true on 2026-09-24, when the event-loop box
+([D274](#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24))
+landed `main.rs`'s `mutating` / `installed` pair: `show` builds a whole
+`views::Dialog` and `installed` puts it in `App::modal`. So this box does not
+write the wiring. What is left is the half `ui::Screen`'s own doc assigned to it —
+*"Wrapping them belongs to the box that wires the dialogs"* — plus the proof the
+box names.
+
+**And every one of the five strings is already stripped in fact.** `ops::Record::of`
+is the single door: `consequence` and `kubectl` at `FREE_TEXT`, `namespace` and
+`confirm` (which becomes `Dialog::asks`) at `IDENTIFIER`, and `Shown` borrows that
+stripped copy. `Object::name` is `Wanted::name` off `rules::ObjectId`, which came
+through ingest. Nothing here is a defect to fix; what is missing is that none of
+it is *provable* without following a caller three files up, which is the thing
+`Stripped` exists to end.
+
+**Ruling 1 — `Dialog`'s four caller-built strings become the type.**
+`consequence: Stripped`, `warning: Option<Stripped>`, `kubectl: Stripped`,
+`asks: Option<Stripped>`. There is no constructor to put the strip inside: every
+field is `pub`, `main.rs` builds one with a struct literal, and `installed`
+*assigns* `asks` after the box is already open — so a `Dialog::new` would not
+cover the one field that is compared against what a person typed.
+
+**Ruling 2 — the bound the type carries is `FREE_TEXT`, and `asks`'s `IDENTIFIER`
+stays `ops::Record::of`'s.** `Stripped::of` spends `k8s::text` at `FREE_TEXT`
+(4096) and there is to be no second constructor at `IDENTIFIER`. Over a value
+`Record::of` already cut to 512 the strip is a no-op, so nothing moves; what the
+type then proves is *no control characters*, and the 512 that lets
+`views::Input` ever match it is still `ops.rs`'s. A `Stripped::identifier` would
+be a second answer to *was this bounded* in the file whose whole point is that
+there is one.
+
+**Ruling 3 — `Object::name` and `Object::namespace` are stripped inside
+`Object::new`, at `IDENTIFIER`, and do not become `Stripped`.** `Object::new` is
+already the only door from outside `views.rs`: `uid` is private, so no other file
+can write the struct literal, and `grep -rn 'Object {' src/*.rs` outside
+`views.rs` finds nothing. The guarantee is therefore already structural, and it
+is code rather than a doc comment — which is the bar `ui.rs`'s module doc failed
+and `Stripped` was introduced to meet. Typing the fields would churn every read
+site (the title bar, `ui::name`, the *"Type the pod's name"* and *"already gone"*
+sentences) for no guarantee the door does not give. `IDENTIFIER` and not
+`FREE_TEXT`, because a name is a name — D146's split, the same one
+`ops::Record::of` reads.
+
+**Ruling 4 — `Object::uid` is not stripped.** Invariant 9 is about what reaches
+the screen, and the `uid` is compared and never drawn. `ops::Deleting::uid` gets
+its own cut through `Record::of` on the way to `preconditions.uid`. What
+`Object::new` owes it is the empty-string refusal it already has.
+
+**Ruling 5 — the proof runs over a harness that exists.**
+`main_tests.rs`'s `each_verb_shows_its_own_command_and_nothing_is_sent_without_an_answer`
+already drives `mutating()` for real over `refusing()` with a closed answer
+channel, and `framed()` already renders a `Console` at 80×24. The box's *feed a
+crafted name through the real path* is those two joined: a `Wanted` whose name
+carries an ANSI escape, a right-to-left override and 10k on one line, through
+`ops::restart` and `ops::delete`, installed, drawn, and the frame asserted still
+80×24 with none of the three characters in any cell. A test that builds a
+`Dialog` by hand proves the renderer and not the wiring, and the wiring is what
+the box is about.
+
+### D284 — the dialog-strip review round: a door that was not one, a renderer that panics on the strip's own fixed point, and two comments that were lies (2026-09-26)
+
+Two reviewers over one diff, in parallel, and between them nine findings. Four
+are this box's own defects and are fixed inside it; the rest are recorded here or
+in [`backlog.md`](backlog.md). The round is worth writing down because **three of
+the four came from the same PM error**: [D283](#d283--the-dialog-strip-box-its-premise-was-closed-four-boxes-ago-the-type-goes-on-dialog-and-the-door-goes-on-object-2026-09-26)'s
+rulings were reasoned from what a field's *privacy* is rather than measured
+against what a `pub` field *does*, and its out-of-scope line was reasoned from a
+comment in the file rather than from the object the comment describes.
+
+**Ruling 1 — `just check` is red and that is the whole of the round's first
+half.** `scripts/width-guard.py` fails on `src/main_tests.rs:17050` and
+`src/ui_tests.rs:9527`, both 101 columns, both this diff's. The dev's own gate
+cannot see it: the width guard lives in `scripts/guards.sh`, which only
+`just check` runs, and the dev is told not to run `just check`
+(CLAUDE.md § step 5). That is the division working as designed — `tester` found it
+on the first full run — and the note is that a doc-comment reflow is the one edit
+a dev makes that its own four commands cannot judge.
+
+**Ruling 2 — D283 ruling 3 is reversed in its mechanism and kept in its
+guarantee: `Object::name` and `Object::namespace` become private, with
+accessors.** Ruling 3 said the strip inside `Object::new` was already structural
+because `uid` is private and no other file can write the struct literal. That
+is true of the *literal* and false of the *field*: `object.name = value` needs no
+constructor, and two live sites already do it — `src/ui_tests.rs:9857` and
+`:9952`. The proof the ruling cited, `grep -rn 'Object {' src/*.rs`, cannot match
+either line, which is why it came back empty. So the doc the box landed asserted
+a structural guarantee with two in-tree violations, which is precisely the failure
+the paragraph that same diff *struck* was written to prevent.
+
+**Private with accessors, and not a fifth `Stripped`**, because the struct then
+has one convention instead of two: `uid` is already private with a `uid()`
+accessor one field down, `Object::new` already strips, and an accessor returning
+`&str` / `Option<&str>` is what every read site already wants — where an
+`Option<Stripped>` would put `.as_ref().map(Stripped::as_str)` at each of them.
+**And the two bypasses stop compiling, which is the point**: `ui_tests.rs:9857`
+sets a 10 000-byte name directly and its own doc calls that *"past
+`k8s::IDENTIFIER`'s own 512-byte bound"* — a shape the product can no longer
+produce. Through the door it becomes the 512-plus-marker shape, which until now
+was tested by nothing.
+
+**Ruling 3 — `ui::confirm` panics on an empty consequence, and it is fixed here
+rather than boxed.** `src/ui.rs:2308`, `attempt to subtract with overflow`:
+`wrapped("")` and `wrapped("   ")` both return no lines, so
+`keep = 0.saturating_sub(short).max(1)` is 1 and `consequence.len() - keep`
+underflows. Measured by `tester` under `catch_unwind` — empty, whitespace-only
+and all-unprintable consequences panic; every other field of the box survives
+emptying, because `warning`'s own arithmetic carries no `.max(1)`.
+
+**It predates the diff and belongs to it anyway**, for two reasons. The class is
+the box's: `Stripped::of`'s fixed point is the empty string — its own doc says so
+— and neither new test feeds it, so *the strip can produce the one value the
+renderer cannot draw* is a sentence this box had to be able to answer. And a
+release build does not panic; it wraps, `marked` returns early, and the box draws
+**stating no consequence at all**, which is invariant 2 broken in silence. A
+crash is a blocker by the phase-close triage's own definition, and the fix is one
+word.
+
+**Ruling 4 — three assertions in the new tests cannot fail, and the framing rule
+is what catches all three.** D31 and D29, again:
+
+- the refusal test plants the crafted name in **both** `name` and `namespace`, and
+  both predicates refuse it — so with `object_name` bypassed entirely the test
+  stays green on `namespace_name` alone. Two carriers poisoned in one call prove
+  neither;
+- its `assert!(console.app.modal.is_none())` cannot fail, because `settled` sets
+  `modal = None` as its second statement on every path;
+- the `object.name` and `object.namespace` rows of the field loop pass on an
+  empty value, and the frame's paired `assert!(frame.contains("zzz"))` is
+  satisfied by the *consequence* — so an `Object::new` that dropped the name
+  passes this test whole. `asks` has the presence assertion the other two lack.
+
+**What did hold, measured rather than accepted**: with `Object::new`'s strip
+deleted, the field loop's shape assertion is the **only** one of 1 569 tests that
+goes red, and the frame check still passes — ratatui writes no cell for a
+zero-width grapheme, exactly as the author's own second pass reported. The bound
+row is load-bearing too: changing the cap to `FREE_TEXT` reds it at 4 119 bytes.
+
+**Ruling 5 — D283 ruling 2 stands, and the sentence that contradicts it is what
+changes.** `Dialog::asks` stays `Stripped` at `FREE_TEXT` and no
+`Stripped::identifier` is added. But `src/ui.rs:2171` says *"`views::Input` bounds
+it at `k8s::IDENTIFIER`, which is exactly the longest name a dialog can ask
+for"*, and that was already false by 23 bytes before this diff —
+`ops::Record::of`'s cut **at** `IDENTIFIER` emits 512 plus the 23-byte marker,
+which `Input` can never hold — and is false by 3 607 after it. Any `asks` over
+512 leaves a confirm button that can never light with no sentence saying why,
+which is PRIOR-ART § G1. Unreachable today, because `k8s::object_name` caps a
+name at 253 before `Record::of` runs. **The sentence is corrected to name the
+253 that actually keeps it safe**, because a bound the code does not relate is
+one a reader has to re-derive.
+
+**Ruling 6 — two comments in `main.rs` are lies and are corrected now; the
+behaviour behind them is boxed.** `src/main.rs:9944`'s *"no operation hands one
+over"* is false — `ops::Checked::returned()` is `pub` and the headless driver
+already reads it through `while_paused` — and `settled`'s comment says both *"there
+is no waiting command-log line … `show` never ran"* and *"if one ever does arrive
+it lands on the line"*, which cannot both be true. A comment that tells the next
+reader there is nothing to do is worse than no comment. **The features are
+[`backlog.md`](backlog.md)'s and are marked Phase 12 close blockers**: the console
+never draws D224's paused-Deployment sentence, and a refused mutation is
+completely silent on screen.
+
+**Ruling 7 — the leftover list is restored, because five was not the whole
+list.** The diff removed the four `Dialog` strings from `ui::Screen`'s enumeration
+of what is still a caller's word and left a three-item list that reads closed.
+Read whole, the modal layer has four more — `Modal::Refused::said`,
+`Unconnected`'s `to` / `said` / `renewal`, `Before`'s name, and `ContextPick`'s
+rows and `Coverage`. **Every one is safe in fact**, each traced to a `k8s.rs`
+door, so this is not an invariant 9 hole; it is a hole in the record, in the one
+place the record is kept, created by a box whose title is *every string a dialog
+draws*. That is the struck paragraph's own failure relocated one struct over.
+
+**And this ruling's own word for that door was wrong on one row, which is why the
+list is written in the code and not here.** *Door* was read as *strip*, and
+`Coverage` is held by a **predicate**: every string any `k8s::Coverage` arm
+carries has passed `k8s::namespace_name`, the filter living in `k8s::coverage`
+itself so that it holds whatever a caller does — `main.rs`'s exit 2 is the better
+sentence for a reader and not the guard. `dev-ui` traced it and said so;
+`k8s-admin` confirmed it against the source and found the first draft of the
+replacement wrong three further ways. The enumeration in `ui::Screen`'s doc is
+what is authoritative, and this paragraph exists so the next reader of D284 does
+not carry the summary instead.
+
+**Ruling 8 — `asks` is compared and never drawn, and D283 should have said
+so.** `ui::typed_name` draws the label, the field rule and `Dialog::typed`, never
+`asks`. So the box's five strings are four drawn ones and one compared one, and
+what the strip on `asks` buys is not invariant 9 but that the button can match at
+all — `Input::push` refuses a control character, so an unstripped `asks` holding
+one would be permanently unmatchable. Recorded here so the next reader does not
+hunt for where `asks` is rendered.
+
+**What was checked and found sound**, so it is not re-checked: the write path is
+byte-identical to HEAD (dry-run ordering, `preconditions.uid`,
+`Checked::typed` still the only route to an `Agreed`, no new precondition);
+invariant 1's allowlist is untouched; `--read-only` still gates at
+`may_mutate` before a `Wanted` exists; invariant 4 holds, the taught line and the
+audit line being the same string with ~3 200 bytes of headroom; `ops.rs`'s
+refusal ordering is exactly as claimed, and its sentence is stripped —
+`unaddressable` interpolates `cleaned(object, FREE_TEXT)`, so the raw `ESC` in the
+paste was the test's *source* and never the value; `k8s::text` is idempotent at a
+fixed cap, so a re-strip produces no doubled marker; and both pty gates,
+`just suspend` (30 checks) and `just picker` (101 checks), are green over the
+diff.

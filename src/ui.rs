@@ -23,17 +23,18 @@
 //! - what the cluster sent came through `k8s::text` at ingest, behind `k8s::ingest`'s single door;
 //! - what the user typed is bounded and refused control characters by [`crate::views::Input`];
 //! - what the caller *assembled* — [`Screen`]'s `vitals`, `context`, `note`, `clock`, `namespace`
-//!   and `log` — is a [`Stripped`], whose only constructor reachable from here spends `k8s::text`.
+//!   and `log`, and [`crate::views::Dialog`]'s `consequence`, `warning`, `kubectl` and `asks` — is
+//!   a [`Stripped`], whose only constructor reachable from here spends `k8s::text`.
 //!
 //! **The third bullet is Phase 12's, and this paragraph asserted it for a phase while five
-//! `Screen` fields took a bare `&str`** (todo.md § Phase 12). A doc comment claiming a security
-//! guarantee nothing enforced is worth less than none: it is what a reviewer reads instead of the
-//! field list.
+//! `Screen` fields took a bare `&str`** (todo.md § Phase 12); the four dialog strings joined it
+//! when NOTES § D283 typed them. A doc comment claiming a security guarantee nothing enforced is
+//! worth less than none: it is what a reviewer reads instead of the field list.
 //!
 //! **Some strings this file draws are still a caller's word, and [`Screen`]'s own doc is where
-//! they are listed** — with what each rests on, and which box owes it a type. **The list is kept
-//! in one place on purpose**: this paragraph carried a count of its own, it said *two*, and there
-//! were more (`k8s-admin`, 2026-09-19).
+//! they are listed** — with what each rests on. **The list is kept in one place on purpose**: this
+//! paragraph carried a count of its own, it said *two*, and there were more (`k8s-admin`,
+//! 2026-09-19).
 //! What this file owes on top of all of it is not *building* a string that escapes the guarantee,
 //! which is why every span below is either a literal or a value that arrived stripped.
 //!
@@ -639,16 +640,36 @@ enum Held {
 /// names, spent at a different door. What the three lack is the *type*; not one of them is a
 /// sentence the cluster wrote that nothing has stripped.
 ///
-/// **And the enumeration above reads closed while it is not: [`draw`] also draws four caller-built
-/// `String`s that never touch this struct** (`k8s-admin`, 2026-09-19) — `crate::views::Dialog`'s
-/// `consequence`, `warning`, `kubectl` and `asks`, which arrive through `crate::views::App::modal`
-/// and not through [`Screen`]. They are safe **today** because `ops::Shown` is built from an
-/// `ObjectId` that met ingest — which is precisely the caller-held promise a type was introduced
-/// here to stop relying on — and `Dialog::kubectl` is the same command text invariant 4 and NOTES
-/// § D233 ruling 1 put behind [`Stripped`] one field down, carried loose. **Wrapping them belongs
-/// to the box that wires the dialogs, not to this one**: they are `crate::views`' fields, the
-/// turn that builds them has not run, and naming them here is what keeps the gap from being
-/// rediscovered as a defect.
+/// **The enumeration above is this struct's, and [`draw`] also draws the modal layer, which reaches
+/// [`draw`] through `crate::views::App::modal` and not through here** (`k8s-admin`, 2026-09-19).
+/// `crate::views::Dialog`'s `consequence`, `warning`, `kubectl` and `asks` are each a [`Stripped`]
+/// since NOTES § D283, and `crate::views::Object`'s name and namespace carry the same guarantee as
+/// *private fields* rather than as a type — `Object::new` being the only thing that can set either,
+/// and stripping as it does (NOTES § D284 ruling 2; the version of this sentence that rested on the
+/// constructor was wrong, and two tests were assigning the field).
+///
+/// **The rest of that layer is a caller's word too, and each is safe one layer down rather than by
+/// a type here** (NOTES § D284 ruling 7 — the list read closed at three and was not).
+/// `views::Modal::Refused::said` and `views::Modal::Unconnected`'s `said` are `k8s::said` — or, on
+/// a watch's own `WatchError`, `k8s::message` directly (`k8s::watch_said`), the arm a `403` on the
+/// watch verb takes once the LIST has succeeded — at [`crate::k8s::FREE_TEXT`] either way.
+/// `Unconnected`'s `to` is `k8s::Choice::name`, its `renewal` is `k8s::NotConnected`'s or
+/// `k8s::Session`'s, the name inside `views::Before` is `k8s::Session::context` — `crate::main`'s
+/// `views::Connection::Live` is the only origin of either `Connection` variant, so that one is
+/// never a `Choice` — and [`Screen::contexts`]' rows are `k8s::contexts`': all stripped at
+/// [`crate::k8s::IDENTIFIER`] where the kubeconfig is read.
+///
+/// **`Unconnected`'s `coverage` is a predicate, and on one of its two sources a strip as well.**
+/// The defence is `k8s::coverage`'s own filter, which holds whatever a caller does: every string
+/// every arm carries has passed `k8s::namespace_name` — lower-case ASCII, digits and `-`, up to 63
+/// bytes — because a `--namespace` that fails it is *replaced* rather than kept, and
+/// `k8s::FALLBACK_NAMESPACE` is a literal that satisfies it. The context's own namespace met
+/// `k8s::text` at `IDENTIFIER` before that, through `k8s::namespace_of`'s `drawable`; argv met no
+/// strip at all. `crate::main`'s exit 2 on a `--namespace` that is not one is why the replacing arm
+/// is unreachable rather than merely correct.
+///
+/// **None of them is a hole in invariant 9**; the hole was in this list, which is the one place the
+/// record is kept.
 ///
 /// **[`Screen::detail`] is the one field that is deliberately the other way round, and this
 /// sentence used to be false because of it** (NOTES § D254). A detail tab carries *typed* values —
@@ -1462,7 +1483,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
                 open,
                 offer,
                 screen.refused,
-                &name_cut(object.namespace.as_deref(), &object.name, room),
+                &name_cut(object.namespace(), object.name(), room),
                 screen.contexts,
             )
             .0,
@@ -2166,11 +2187,24 @@ fn dismiss(screen: &Screen) -> Line<'static> {
 ///
 /// **The tail is what is kept when the typed line is longer than the field** ([`shortened`], the
 /// opposite end from [`clipped`]) — a name is typed left to right and the end is where the
-/// reader's cursor is. The line cannot be long: `views::Input` bounds it at `k8s::IDENTIFIER`,
-/// which is exactly the longest name a dialog can *ask* for.
+/// reader's cursor is. The line cannot be long: `views::Input` bounds it at `k8s::IDENTIFIER`.
+///
+/// **What keeps that bound enough is `k8s::object_name`'s 253, not `IDENTIFIER`'s 512**
+/// (NOTES § D284 ruling 5). `ops::Record::of`'s cut **at** `IDENTIFIER` emits 512 plus the 23-byte
+/// *shortened by k8rs* marker, which `Input` can never hold — so an `asks` over 512 would leave a
+/// confirm button that can never light with nothing on screen saying why, which is
+/// PRIOR-ART § G1. It cannot happen because `ops::restart` and `ops::delete` refuse a name past
+/// 253 before the record is built. This sentence used to say `IDENTIFIER` *was* the longest an
+/// `asks` could be, and it was never true.
 ///
 /// **The kind is the label's own word** — *the pod's name*, *the node's name* — which is why
 /// `views::Object` carries one.
+///
+/// **`views::Dialog::asks` is not drawn here and is drawn nowhere** (NOTES § D284 ruling 8): this
+/// field draws the label, the rule and `views::Dialog::typed`, and `asks` is only ever compared
+/// (`views::Dialog::armed`). What its strip buys is that the button can match at all — `Input`
+/// refuses a control character, so an unstripped `asks` holding one is unmatchable for ever — and
+/// not invariant 9, which is about what reaches a cell.
 fn typed_name(dialog: &views::Dialog, columns: usize, screen: &Screen) -> Vec<Line<'static>> {
     let text = screen.fg(theme::TEXT);
     let border = screen.fg(theme::BORDER);
@@ -2245,11 +2279,11 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
     let columns = room(width);
     let text = screen.fg(theme::TEXT);
 
-    let consequence = wrapped(&dialog.consequence, columns);
+    let consequence = wrapped(dialog.consequence.as_str(), columns);
     let warning = dialog
         .warning
         .as_ref()
-        .map_or_else(Vec::new, |warning| wrapped(warning, columns));
+        .map_or_else(Vec::new, |warning| wrapped(warning.as_str(), columns));
     let verdict = dialog.verdict.map_or_else(
         || wrapped(&checking(), columns),
         |verdict| wrapped(&spoken(verdict), columns),
@@ -2306,9 +2340,21 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
     // **The consequence gives way first and the warning only when it is down to its last row.**
     // The warning is NOTES § D224's correction — without it the dialog claims copies were
     // replaced when they were not. Every cut is marked.
+    //
+    // **The second `saturating_sub` is the whole of the empty-consequence fix** (NOTES § D284
+    // ruling 3): `.max(1)` keeps one row of a consequence that has none, so `len() - keep`
+    // underflowed on `wrapped("")` — which is `Stripped::of`'s own fixed point, an all-unprintable
+    // sentence. The intent is unchanged for every non-empty case.
+    //
+    // **And release was not merely not-panicking, it was wrong.** `Cargo.toml` sets no
+    // `overflow-checks`, so release took `false`: the inner `0 - 1` wrapped to `usize::MAX`, the
+    // outer `saturating_sub` then gave `short = 0`, and **the warning was never cut** — the box ran
+    // past [`MODAL_ROWS`] and ratatui clipped it from the buttons up, which is the one thing
+    // `a_consequence_too_long_for_the_box_gives_way_before_the_buttons_do` exists to prevent. So
+    // the empty case went from wrong in release and a crash in debug to right in both.
     let short = over;
     let keep = consequence.len().saturating_sub(short).max(1);
-    let short = short.saturating_sub(consequence.len() - keep);
+    let short = short.saturating_sub(consequence.len().saturating_sub(keep));
     let said = marked(consequence, columns, keep);
     let kept = warning.len().saturating_sub(short);
     let warning = marked(warning, columns, kept);
@@ -2331,7 +2377,7 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
     lines.push(Line::styled(
         format!(
             "{MODAL_MARGIN}$ {}",
-            namespaced_cut(&dialog.kubectl, command_room(width))
+            namespaced_cut(dialog.kubectl.as_str(), command_room(width))
         ),
         screen.fg(theme::INFO),
     ));
@@ -2354,8 +2400,8 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
     let title = format!(
         "{verb}{}",
         name_cut(
-            dialog.object.namespace.as_deref(),
-            &dialog.object.name,
+            dialog.object.namespace(),
+            dialog.object.name(),
             usize::from(width).saturating_sub(2 + self::width(&verb)),
         )
     );
@@ -2560,11 +2606,7 @@ fn gone(frame: &mut Frame, body: Rect, object: &views::Object, recreated: bool, 
         Line::styled(
             format!(
                 "    {}",
-                name_cut(
-                    object.namespace.as_deref(),
-                    &object.name,
-                    columns.saturating_sub(2),
-                )
+                name_cut(object.namespace(), object.name(), columns.saturating_sub(2))
             ),
             text,
         ),

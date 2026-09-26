@@ -9,10 +9,12 @@
 //! `ScrollbarState`. `screens/widgets.md` § 2 is the mapping from each of these onto the widget
 //! that draws it, and it stays on that side of the line.
 //!
-//! **Nothing here strips a string that came off the API, and that is not an omission**
-//! (invariant 9). Every one of those reached this file through `k8s::text` at ingest — the strip is
-//! paid once on the way in so no renderer has to remember it, which is what [`crate::rules`]'s and
-//! [`crate::analysis`]'s own module docs already promise.
+//! **Nothing here strips a string that came off the API for want of trusting the first strip, and
+//! that is not an omission** (invariant 9). Every one of those reached this file through
+//! `k8s::text` at ingest — the strip is paid once on the way in so no renderer has to remember it,
+//! which is what [`crate::rules`]'s and [`crate::analysis`]'s own module docs already promise.
+//! **[`Stripped::of`] and [`Object::new`] spend it again and over such a value it is a no-op**
+//! (NOTES § D283 rulings 2 and 3): what each adds is a type and a door, not a second opinion.
 //!
 //! **Strings that did *not* arrive that way are what [`Stripped`] and [`Input`] are for, and each
 //! is a type rather than a rule.** What the user types is [`Input`] — bounded in length, **and**
@@ -156,12 +158,11 @@ pub enum Pane<T> {
 ///
 /// **What this type covers is the strings a caller *assembles*, and a reader here must not read it
 /// as *everything `ui.rs` draws*** (`k8s-admin`, 2026-09-19). `ui::Screen`'s own doc is the list of
-/// what is left over — `ui::Writes::Unaudited`'s sentence, `ui::Screen::reports`' labels, the
-/// server's own words inside [`Pane::Denied`], and the four `String`s [`Dialog`] hands the
-/// renderer through [`Modal`] — and **why each is safe without one, and which box owes it a type,
-/// is written there and not here**, because a reason kept twice is a reason that goes stale in one
-/// of the two (CLAUDE.md § A decision is written once). What a reader of this type needs is that
-/// the list exists and is not this type's.
+/// what is left over — `ui::Writes::Unaudited`'s sentence, `ui::Screen::reports`' labels and the
+/// server's own words inside [`Pane::Denied`] — and **why each is safe without one is written there
+/// and not here**, because a reason kept twice is a reason that goes stale in one of the two
+/// (CLAUDE.md § A decision is written once). What a reader of this type needs is that the list
+/// exists and is not this type's.
 ///
 /// **[`crate::k8s::text`] and not [`sanitize`], which are two transformations and not one.** Every
 /// value this wraps is **one line** — a header segment, a note paragraph, a command-log line — so a
@@ -1336,13 +1337,18 @@ pub struct Object {
     /// word the API sent from being interpolated into one. The six kinds an operation can be
     /// pointed at are literals in the driver.
     pub kind: &'static str,
+    // **Private, with the name below, and that is what makes `Object::new`'s strip a guarantee
+    // rather than a convention** (NOTES § D284 ruling 2). Both were `pub` for one box, on the
+    // argument that `uid` being private already stopped every outside struct literal — true of the
+    // literal and false of the field: `object.name = value` needs no constructor, and two tests
+    // were doing it. Read them through `Object::name` and `Object::namespace`.
     /// Its namespace, or `None` for something cluster-scoped. No namespace is drawn where there
     /// is none — the title bar reads the bare `node-3`, never `/node-3`
     /// (`screens/README.md` § the five rules).
-    pub namespace: Option<String>,
+    namespace: Option<String>,
     /// Its own name — `web`, `web-7d9f4`, `node-3`. The second half of every title bar, and what
-    /// a delete asks to have typed back.
-    pub name: String,
+    /// a delete asks to have typed back. Private, for the namespace's reason above.
+    name: String,
     // **Private, and the only field here that is** — [`Object::new`] is the one way to set it and
     // it is what refuses `Some("")`.
     /// **The cluster's own name for *this* instance of that name** — what answers *is this still
@@ -1395,18 +1401,39 @@ impl Object {
     /// [`Modal::Gone`] check against it flips a healthy object to *Already gone* the instant the
     /// dialog opens. `k8s::owner_uid` already refuses an empty uid one layer down; this is the
     /// same refusal at the other end.
+    ///
+    /// **The name and the namespace are stripped here, at [`crate::k8s::IDENTIFIER`]** — the
+    /// guarantee invariant 9 wants on the two values a title bar and a *"Type the pod's name"*
+    /// label draw (NOTES § D283 ruling 3). **What makes it a guarantee is that both fields are
+    /// private**, so this is the only way to set either and not merely the only way to build one
+    /// (NOTES § D284 ruling 2). [`Self::uid`] is not stripped, because it is compared and never
+    /// drawn (D283 ruling 4).
     pub fn new(
         kind: &'static str,
         namespace: Option<String>,
         name: String,
         uid: Option<String>,
     ) -> Self {
+        let identifier = |mut value: String| {
+            text(&mut value, IDENTIFIER);
+            value
+        };
         Self {
             kind,
-            namespace,
-            name,
+            namespace: namespace.map(identifier),
+            name: identifier(name),
             uid: uid.filter(|uid| !uid.is_empty()),
         }
+    }
+
+    /// Its own name, stripped — the field's own doc is the rest.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Its namespace, stripped, or `None` for something cluster-scoped.
+    pub fn namespace(&self) -> Option<&str> {
+        self.namespace.as_deref()
     }
 
     /// The cluster's own name for this instance, or `None` where there is none to trust.
@@ -1452,7 +1479,7 @@ pub struct Dialog {
     /// lines**, never two fields: `ops::Mutation::consequence` is one string and a `\n` put here
     /// would not survive `k8s::text` on the way into the record (`screens/dialogs.md`
     /// § *Printed instead of drawn*).
-    pub consequence: String,
+    pub consequence: Stripped,
     /// **The one extra sentence a check can add to the consequence** — today only
     /// *"This deployment is paused, so nothing will be replaced…"*, built by the driver's
     /// `while_paused` off the `bool` `ops::Checked::returned` carries (NOTES § D224).
@@ -1465,11 +1492,11 @@ pub struct Dialog {
     /// **Its own paragraph and not appended to [`Self::consequence`]**, because it is a second
     /// sentence that starts on its own line in the box; joined with a space it would wrap into
     /// the middle of the line above.
-    pub warning: Option<String>,
+    pub warning: Option<Stripped>,
     /// The equivalent kubectl command, for the `$ …` line. **Display text**: k8rs never executes
     /// it and nothing is fed back from it into a process (invariant 4, the security gate's
     /// *the command log is display text*).
-    pub kubectl: String,
+    pub kubectl: Stripped,
     /// **What the cluster's check said, or `None` while it is still running.**
     ///
     /// `None` is the whole of *the button is not live yet* (`screens/dialogs.md` rule 3). It is
@@ -1493,7 +1520,12 @@ pub struct Dialog {
     /// and the title bar draws the other. `k8s::text` can shorten a 600-byte name to
     /// `k8s::IDENTIFIER` on the way in, and a dialog that armed on the unstripped one would light
     /// a button `ops.rs` then refuses.
-    pub asks: Option<String>,
+    ///
+    /// **The [`Stripped`] it wears is the [`crate::k8s::FREE_TEXT`] bound and the 512 stays
+    /// `ops::Record::of`'s** (NOTES § D283 ruling 2): over a value already cut to
+    /// `k8s::IDENTIFIER` the strip is a no-op, so what the type adds here is *no control
+    /// characters* and the bound [`Input`] can ever match is still one file down.
+    pub asks: Option<Stripped>,
     /// What has been typed into it so far. Empty and unused on a press-only dialog.
     pub typed: Input,
 }
@@ -1550,7 +1582,7 @@ impl Dialog {
     /// even light the button up.
     pub fn armed(&self) -> bool {
         self.verdict.is_some()
-            && match self.asks.as_deref() {
+            && match self.asks.as_ref().map(Stripped::as_str) {
                 None => true,
                 Some(name) => !name.is_empty() && self.typed.text() == name,
             }

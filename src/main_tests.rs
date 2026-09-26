@@ -15546,9 +15546,9 @@ fn an_open_dialog() -> views::Dialog {
             "web".to_owned(),
             Some("u-1".to_owned()),
         ),
-        consequence: "This replaces every copy of your app, one at a time.".to_owned(),
+        consequence: views::Stripped::of("This replaces every copy of your app, one at a time."),
         warning: None,
-        kubectl: "kubectl rollout restart deployment/web -n payments".to_owned(),
+        kubectl: views::Stripped::of("kubectl rollout restart deployment/web -n payments"),
         verdict: None,
         asks: None,
         typed: views::Input::default(),
@@ -15867,8 +15867,8 @@ fn a_refusal_opens_the_box_that_says_which_side_of_the_call_it_was() {
     let Some(views::Modal::Gone { object, .. }) = gone else {
         panic!("an object that went away opened no box: {gone:?}")
     };
-    assert_eq!(object.name, "web");
-    assert_eq!(object.namespace.as_deref(), Some("payments"));
+    assert_eq!(object.name(), "web");
+    assert_eq!(object.namespace(), Some("payments"));
 }
 
 /// **A key that is not a press is not a key** — crossterm reports a release and a repeat on the
@@ -16723,11 +16723,11 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
     dialog.verb = DELETE;
     dialog.object =
         views::Object::new("pod", Some("payments".to_owned()), "web-1".to_owned(), None);
-    dialog.kubectl = "kubectl delete pod/web-1 -n payments".to_owned();
+    dialog.kubectl = views::Stripped::of("kubectl delete pod/web-1 -n payments");
     // `delete` sends no check, so its verdict is `Some` from the moment the box opens (NOTES § D225
     // ruling 1) — what is left to wait for is the name.
     dialog.verdict = Some("k8rs cannot check this one first.");
-    dialog.asks = Some("web-1".to_owned());
+    dialog.asks = Some(views::Stripped::of("web-1"));
     installed(&mut console, Published::Opening(dialog));
 
     for character in "web-".chars() {
@@ -16776,7 +16776,7 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
     let mut console = bare_console();
     let mut dialog = an_open_dialog();
     dialog.verdict = Some("k8rs cannot check this one first.");
-    dialog.asks = Some("web-1".to_owned());
+    dialog.asks = Some(views::Stripped::of("web-1"));
     installed(&mut console, Published::Opening(dialog));
     let _ = pressed(
         &mut console,
@@ -16952,18 +16952,18 @@ async fn each_verb_shows_its_own_command_and_nothing_is_sent_without_an_answer()
         let Some(Published::Opening(dialog)) = published.first() else {
             panic!("{verb} published no dialog: {} entries", published.len())
         };
-        println!("{verb}: {}", dialog.kubectl);
+        println!("{verb}: {}", dialog.kubectl.as_str());
         assert_eq!(dialog.verb, verb);
         assert!(
-            dialog.kubectl.starts_with(expected),
+            dialog.kubectl.as_str().starts_with(expected),
             "{verb} taught the wrong command: {:?}",
-            dialog.kubectl
+            dialog.kubectl.as_str()
         );
         // **The title bar's own spelling** — `views::Object::name` is the bare name, because
         // `ui::name` joins it with the namespace; `ops::Shown::object` is the `kind/name` form the
         // `$` line uses, and putting that here drew `payments/deployment/web`.
-        assert_eq!(dialog.object.name, "web");
-        assert_eq!(dialog.object.namespace.as_deref(), Some("payments"));
+        assert_eq!(dialog.object.name(), "web");
+        assert_eq!(dialog.object.namespace(), Some("payments"));
         assert_eq!(dialog.object.kind, "deployment");
         // Nothing was confirmed, so nothing was sent — whatever the cluster would have said.
         match performed {
@@ -16973,6 +16973,263 @@ async fn each_verb_shows_its_own_command_and_nothing_is_sent_without_an_answer()
             ),
             Err(refusal) => panic!("{verb} was refused before it could ask: {refusal}"),
         }
+    }
+}
+
+/// **What `k8s::text` appends where it cut** — retyped, because `k8s::SHORTENED` is private to that
+/// file, and only ever read here for its length.
+const SHORTENED_BY_K8RS: &str = "\u{2026} (shortened by k8rs)";
+
+/// **The crafted name this box feeds the dialog path** — every one of [`CRAFTED_SHAPES`], so no row
+/// of the loop below is a check nothing can reach, plus ten thousand characters on one line
+/// (todo.md § Phase 12, NOTES § D283 ruling 5).
+fn crafted_name() -> String {
+    format!("web\u{1b}[31m\u{202e}\u{200b}{}", "z".repeat(10_000))
+}
+
+/// **Driven through `mutating` for real, `ops` refuses to address such a name and no box opens at
+/// all** — which is not what the box predicted and is the stronger answer.
+///
+/// **So this is the first of two halves rather than the whole proof.** `ops::restart` and
+/// `ops::delete` both check `k8s::object_name` *before* `perform` calls `show`, and that predicate
+/// allows only ASCII alphanumerics, `-` and `.` up to `k8s::NAME_MAX` — so not one of the three
+/// shapes can reach a `views::Dialog` by this route, and `main.rs`'s `settled` throws the sentence
+/// away rather than drawing it. What proves the strip at the door the wiring actually uses is
+/// [`a_crafted_name_the_wiring_hands_a_dialog_reaches_no_cell`].
+#[tokio::test]
+async fn a_crafted_name_is_refused_before_any_box_can_open_on_it() {
+    let scratch = Scratch::named("console-crafted-refused");
+    let client = refusing().await;
+    let store = a_cluster_with_cards();
+    // **One crafted carrier per row, and the other left clean** (NOTES § D31, § D284 ruling 4).
+    // Both fields poisoned in one call proved neither: `object_name` and `namespace_name` each
+    // refuse this value, so bypassing one left the test green on the other. The `which` string is
+    // the half of `ops::unaddressable`'s sentence that says *which* word was refused.
+    for (verb, name, namespace, which) in [
+        (
+            RESTART,
+            crafted_name(),
+            "payments".to_owned(),
+            "an object's own name",
+        ),
+        (
+            RESTART,
+            "web".to_owned(),
+            crafted_name(),
+            "the name of a namespace",
+        ),
+        (
+            DELETE,
+            crafted_name(),
+            "payments".to_owned(),
+            "an object's own name",
+        ),
+        (
+            DELETE,
+            "web".to_owned(),
+            crafted_name(),
+            "the name of a namespace",
+        ),
+    ] {
+        let what = format!("{verb} on {which}");
+        let mut audit = scratch.file(&format!("audit-{verb}-{}", which.len()));
+        let wanted = Wanted {
+            verb,
+            kind: "deployment",
+            name,
+            namespace: Some(namespace),
+            uid: None,
+        };
+        let shown = std::cell::RefCell::new(Vec::new());
+        let (answering, answered) = tokio::sync::mpsc::unbounded_channel();
+        drop(answering);
+        let performed = mutating(
+            &client,
+            "https://prod-eu.invalid:6443",
+            "prod-eu",
+            &wanted,
+            &now(),
+            &mut audit,
+            &shown,
+            answered,
+        )
+        .await;
+        let refusal =
+            performed.expect_err("a name Kubernetes would not accept was addressed anyway");
+        println!("{what} refused: {refusal}");
+        assert!(
+            refusal.contains(which),
+            "{what}: the refusal is about the other word: {refusal}"
+        );
+        assert!(
+            shown.into_inner().is_empty(),
+            "{what} published a dialog for a name it refused"
+        );
+        // **A box is opened first, so `modal.is_none()` has something to disprove** (ruling 4):
+        // `settled` sets it to `None` as its second statement on every path, so the assertion was
+        // unfalsifiable over a console that never had one.
+        let mut console = bare_console();
+        installed(&mut console, Published::Opening(an_armed_dialog()));
+        // **And the precondition is asserted, which is ruling 4's own class one line earlier**:
+        // with the `installed` above deleted, `modal.is_none()` below passes for ever.
+        assert!(
+            console.app.modal.is_some(),
+            "{what}: the box this asserts `settled` closes never opened"
+        );
+        // **The waiting line is planted, and the product cannot reach this state** — `Log::sent`'s
+        // one product caller is `over_modal`'s confirm arm, which never runs when `show` never
+        // ran, so on this path `Log::outcome` writes nothing at all and the refusal is silent on
+        // screen (backlog.md § From the dialog-strip box, a Phase 12 close blocker). What is
+        // planted is the line `outcome` would annotate if there were one.
+        console
+            .log
+            .sent("$ kubectl rollout restart deployment/web -n payments".to_owned());
+        settled(&mut console, Err(refusal));
+        assert!(console.app.modal.is_none(), "{what} left a box open");
+        // The crafted name never entered the console at all — `settled` discards the sentence —
+        // so this frame is that discard rather than a strip.
+        unhostile(&what, &framed(&mut console, &store), "broken-");
+    }
+}
+
+/// **The crafted name handed to a dialog through the calls `mutating`'s own `show` makes, and no
+/// cell of the frame holds one of its shapes** — invariant 9, NOTES § D283 rulings 1 and 3.
+///
+/// **Not a hand-built `views::Dialog`**: every hostile value goes through the wiring's own call
+/// over it — `views::Object::new` for the name and the namespace (ruling 3), `Stripped::of` for
+/// the consequence and the command (ruling 1), and [`installed`]'s `Stripped::of` for `asks`, the
+/// one field no constructor could have covered because it is assigned after the box is open. What
+/// this route skips, and why it has to, is
+/// [`a_crafted_name_is_refused_before_any_box_can_open_on_it`].
+///
+/// **Both shapes of box, because `asks` is only a typed-name one's** — a press-only box leaves the
+/// field `None` and never spends the one strip `installed` owns.
+#[test]
+fn a_crafted_name_the_wiring_hands_a_dialog_reaches_no_cell() {
+    let store = a_cluster_with_cards();
+    let crafted = crafted_name();
+    for asks in [None, Some(crafted.clone())] {
+        let typed_name = asks.is_some();
+        let what = if typed_name {
+            "a typed-name box"
+        } else {
+            "a press-only box"
+        };
+        let mut dialog = an_open_dialog();
+        dialog.object = views::Object::new(
+            "deployment",
+            Some(crafted.clone()),
+            crafted.clone(),
+            Some("u-1".to_owned()),
+        );
+        dialog.consequence = views::Stripped::of(&crafted);
+        dialog.kubectl = views::Stripped::of(&crafted);
+        // **`warning` is fed one even though the console cannot build one** — `mutating`'s `show`
+        // sets it `None` and nothing downstream can (backlog.md § From the dialog-strip box, a
+        // Phase 12 close blocker).
+        //
+        // **What earns it its place is not a third copy of the type's proof, it is the row budget's
+        // warning arm** (`tester`, 2026-09-26): an oversized hostile warning is the only fixture in
+        // the tree that reaches `ui::confirm`'s `marked(warning, columns, kept)` at all, and the
+        // printed frame below shows the documented give-way order at the extreme — the consequence
+        // down to its one row while the warning keeps nine. With `None` that arm is skipped
+        // entirely, in the function NOTES § D284 ruling 3 just edited.
+        dialog.warning = Some(views::Stripped::of(&crafted));
+        let mut console = bare_console();
+        installed(&mut console, Published::Opening(dialog));
+        installed(
+            &mut console,
+            Published::Checked {
+                verdict: "k8rs cannot check this one first.",
+                asks: asks.clone(),
+            },
+        );
+        let Some(views::Modal::Confirm(dialog)) = &console.app.modal else {
+            panic!("{what} did not stay open")
+        };
+        assert_eq!(
+            dialog.asks.is_some(),
+            typed_name,
+            "{what}: installed dropped the name the box asks for"
+        );
+
+        // **Every carrier the box has, named, with what each is bounded to and whether it is
+        // *expected* to hold the name at all** — the claim is *no unprintable character survived*
+        // and *it is bounded*, and a failure has to say which field let one past.
+        //
+        // **The `carries` column is NOTES § D284 ruling 4**: an absence assertion passes on an
+        // empty value, so a door that silently dropped the name passed this loop whole. Each row
+        // that is handed the name asserts it is still there, in its printable half.
+        //
+        // **`warning` is the sixth carrier** — a field the console cannot fill today, fed above for
+        // the row budget's sake, so this row is about the field and not about an empty `Option`.
+        for (which, value, cap, carries) in [
+            (
+                "consequence",
+                dialog.consequence.as_str(),
+                k8s::FREE_TEXT,
+                true,
+            ),
+            (
+                "warning",
+                dialog.warning.as_ref().map_or("", views::Stripped::as_str),
+                k8s::FREE_TEXT,
+                true,
+            ),
+            ("kubectl", dialog.kubectl.as_str(), k8s::FREE_TEXT, true),
+            // **`k8s::FREE_TEXT` and not the 512 a name really carries** — the bound the *type*
+            // spends, the 512 being `ops::Record::of`'s and one file down (NOTES § D283 ruling 2).
+            // This route hands `installed` the raw name, which is exactly the caller `ops.rs` is
+            // not in the room for.
+            (
+                "asks",
+                dialog.asks.as_ref().map_or("", views::Stripped::as_str),
+                k8s::FREE_TEXT,
+                typed_name,
+            ),
+            ("object.name", dialog.object.name(), k8s::IDENTIFIER, true),
+            (
+                "object.namespace",
+                dialog.object.namespace().unwrap_or(""),
+                k8s::IDENTIFIER,
+                true,
+            ),
+        ] {
+            for shape in CRAFTED_SHAPES {
+                assert!(
+                    !value.contains(shape),
+                    "{what}: views::Dialog::{which} kept {shape:?}"
+                );
+            }
+            // **The security gate's *sizes are bounded* row** — the marked cut `k8s::text` appends
+            // is what puts a shortened value a little over its own cap.
+            assert!(
+                value.len() <= cap + SHORTENED_BY_K8RS.len(),
+                "{what}: views::Dialog::{which} is {} bytes, past the {cap} it is bounded to",
+                value.len()
+            );
+            assert_eq!(
+                value.contains("zzz"),
+                carries,
+                "{what}: views::Dialog::{which} does not hold the name this route gave it, so \
+                 every absence above passes on nothing"
+            );
+        }
+
+        // **The canary is the box's own last row**: the buttons are what a box that outgrew the
+        // body loses first, so a frame without them is not one this may call clean.
+        let frame = framed(&mut console, &store);
+        unhostile(what, &frame, "[ esc cancel ]");
+        // **And the printable half of the same name is on it** — without this the frame says
+        // nothing about *this* string: ratatui writes no cell for a zero-width grapheme either way
+        // ([`unhostile`]), so the absence above has to sit beside a presence.
+        assert!(
+            frame.contains("zzz"),
+            "{what}: nothing of the crafted name was drawn, so its absence proves nothing:\n{frame}"
+        );
+        // Printed under `--nocapture`, because *the frame stayed 80×24* is a claim a reader of the
+        // report should be able to see rather than take on the assertions above.
+        println!("{what}:\n{frame}");
     }
 }
 
@@ -17238,8 +17495,9 @@ fn the_strip_keeps_the_object_the_line_is_about_for_every_ending() {
         let mut console = bare_console();
         let mut dialog = an_armed_dialog();
         // The command `screens/dialogs.md` § The command log's own line measures its cut against.
-        dialog.kubectl =
-            "kubectl rollout restart deployment/payments-api -n payments-production-eu".to_owned();
+        dialog.kubectl = views::Stripped::of(
+            "kubectl rollout restart deployment/payments-api -n payments-production-eu",
+        );
         installed(&mut console, Published::Opening(dialog.clone()));
         // **Through the yes, because that is what puts the line on the strip** (rule 7).
         let answered = keyed(
@@ -17456,29 +17714,48 @@ fn a_crafted_object_name_cannot_rewrite_the_terminal_or_break_the_frame() {
         console.log.ran(format!("$ kubectl get pod {name}"));
         let drawn = framed(&mut console, &store);
 
-        let rows: Vec<&str> = drawn.lines().collect();
-        assert_eq!(rows.len(), 24, "{what}: the frame is not 24 rows");
-        for (at, row) in rows.iter().enumerate() {
-            assert_eq!(
-                row.chars().count(),
-                80,
-                "{what}: row {at} is not 80 cells: {row:?}"
-            );
-        }
-        assert!(
-            !drawn.contains('\u{1b}'),
-            "{what}: an escape reached the cells"
-        );
-        assert!(
-            !drawn.contains('\u{202e}') && !drawn.contains('\u{200b}'),
-            "{what}: a bidi override or a zero-width character reached the cells"
-        );
-        // The canary: a real console frame, not an empty buffer every absence above would pass.
-        assert!(
-            drawn.contains("ALERTS"),
-            "{what}: not a console frame:\n{drawn}"
+        unhostile(what, &drawn, "ALERTS");
+    }
+}
+
+/// **The characters invariant 9 is about, as a test may plant them** — a real ANSI escape, a
+/// right-to-left override and a zero-width space (`k8s::unprintable`, NOTES § D154).
+const CRAFTED_SHAPES: [char; 3] = ['\u{1b}', '\u{202e}', '\u{200b}'];
+
+/// **A frame that drew, at the size the product is drawn to, with none of [`CRAFTED_SHAPES`] in a
+/// cell** — the security gate's *a 50MB annotation or an endless log line must not blow up the
+/// renderer*, asserted as a property rather than as a particular cut.
+///
+/// **The canary is the caller's and is not optional**: every assertion here but the last passes on
+/// an empty buffer, so what proves the frame is the one under test is a string only it draws.
+///
+/// **The row and cell counts are the half that can fail; the shapes are ratatui's** — measured
+/// 2026-09-26 by removing `views::Object::new`'s strip and running the dialog caller below: the
+/// escape and the override still reached no cell, because ratatui skips a zero-width grapheme
+/// instead of writing one. So a caller proves its *own* strip at the field and reads this for *the
+/// renderer did not blow up* — the canary going missing is a box that outgrew the body and lost its
+/// last row.
+fn unhostile(what: &str, drawn: &str, canary: &str) {
+    let rows: Vec<&str> = drawn.lines().collect();
+    assert_eq!(rows.len(), 24, "{what}: the frame is not 24 rows");
+    for (at, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row.chars().count(),
+            80,
+            "{what}: row {at} is not 80 cells: {row:?}"
         );
     }
+    for shape in CRAFTED_SHAPES {
+        assert!(
+            !drawn.contains(shape),
+            "{what}: {shape:?} reached the cells:\n{drawn}"
+        );
+    }
+    assert!(
+        drawn.contains(canary),
+        "{what}: {canary:?} is not on it, so this is not the frame the assertions above were \
+         about:\n{drawn}"
+    );
 }
 
 /// **What the console says instead of drawing, and in which order** ([`before_the_first_frame`]) —

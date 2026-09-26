@@ -4757,15 +4757,26 @@ at HEAD). Every other box in this phase stays one at a time.
       or *renew your login, then press X* closes the picker instead of
       reconnecting
       ([D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13) rulings 4 and 8).
-- [ ] **Every string a dialog draws is proven stripped, and this is the wiring
-      that makes it provable** — invariant 9. Phase 11 drew the boxes and
-      nothing outside a test constructs one, so `tester` could prove the strip
-      only for `Modal::Refused::said` (it can only arrive through `k8s::said`)
-      and `Dialog::typed` (bounded and filtered by `views::Input`).
-      `consequence`, `kubectl`, `asks`, `Object::name` and `Object::namespace`
-      are whatever this wiring hands them ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)). Feed a
-      crafted name — ANSI escape, right-to-left override, 10k on one line —
-      through the real path and watch the frame stay 80×24
+- [x] **Every string a dialog draws is proven stripped, and this is the wiring
+      that makes it provable** — invariant 9
+      ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)).
+      **Its premise was closed four boxes ago** — the wiring landed with the
+      event loop on 2026-09-24, so what was left was the proof
+      ([D283](NOTES.md#d283--the-dialog-strip-box-its-premise-was-closed-four-boxes-ago-the-type-goes-on-dialog-and-the-door-goes-on-object-2026-09-26)).
+      Landed 2026-09-26 over two review rounds
+      ([D284](NOTES.md#d284--the-dialog-strip-review-round-a-door-that-was-not-one-a-renderer-that-panics-on-the-strips-own-fixed-point-and-two-comments-that-were-lies-2026-09-26) ·
+      [reports/2026-09-26-the-dialog-strip-family.md](reports/2026-09-26-the-dialog-strip-family.md)).
+      `Dialog`'s `consequence`, `warning`, `kubectl` and `asks` are a
+      `views::Stripped`; `Object`'s `name` and `namespace` are **private**, set
+      only by `Object::new`, which strips at `k8s::IDENTIFIER` — the first
+      mechanism rested on `uid` being private and two tests were assigning the
+      field straight past it. `ui::Screen`'s leftover list names the rest of the
+      modal layer with the door each rests on, because five was not the whole
+      list. **`ui::confirm` no longer overflows on a consequence the strip
+      emptied**, which in release drew a box past `MODAL_ROWS` and lost its own
+      buttons. A crafted name cannot reach a dialog through `mutating` at all —
+      `k8s::object_name` refuses it before `show` — so the proof is the wiring's
+      three doors, driven for real, plus the frame at 80×24
 - [x] **Rule, before wiring a dialog, what happens to the two sentences `ops.rs`
       keeps to itself** — `ops::ACCEPTED` / `ops::UNCHECKABLE` and `ops::removal`'s
       pod hedge are copied into `src/ui.rs` and `src/ui_tests.rs`, and the original

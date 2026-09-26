@@ -3570,3 +3570,53 @@ a silent hole**, which is why neither blocked the box
 - **Two shapes the guard states it cannot see**, in its own docstrings rather than left implied:
   a copy rewritten end to end leaves both fragment counts intact, and the node clause's two
   fragments overlap on the word `k8rs,` so a reword of that one word is invisible.
+
+### From the dialog-strip box (2026-09-26) — two of these are Phase 12 **close blockers**
+
+Found by `k8s-admin` and `tester` over one diff, ruled in
+[D284](NOTES.md#d284--the-dialog-strip-review-round-a-door-that-was-not-one-a-renderer-that-panics-on-the-strips-own-fixed-point-and-two-comments-that-were-lies-2026-09-26)
+rulings 6 and 8. The first two are **wrong output an operator acts on**, so the
+Phase 12 close triage fixes them; the rest are notes.
+
+- **CLOSE BLOCKER — the console never draws D224's paused-Deployment sentence.**
+  `ops::Checked::returned()` is `pub` and the headless driver reads it through
+  `while_paused` (`src/main.rs:7212`, used at `:7271`), but `Published::Checked`
+  (`src/main.rs:8818`) has no warning field, so `mutating`'s `show` sets
+  `warning: None` and nothing downstream can set it. An operator who presses `r`
+  on a **paused** Deployment gets the generic *"a paused deployment will not
+  start…"* line, an armed button, and a command log resolving to `→ done` with
+  nothing replaced — D224's defect verbatim, arriving through the one surface an
+  operator acts on. `screens/dialogs.md:801-843` draws the box the code cannot
+  produce, so the screen is right and the code is wrong. The fix is `main.rs`
+  only: a third field on `Published::Checked` and one assignment in `installed`.
+  Found by `k8s-admin`, finding 1.
+- **CLOSE BLOCKER — a refused mutation is completely silent on the console.**
+  `settled`'s `Err` arm calls `console.log.outcome("refused")`, and
+  `views::Log::outcome` does nothing when nothing is `waiting` — which only
+  `Log::sent` sets, and `Log::sent`'s one product caller is `over_modal`'s confirm
+  arm, which never runs on this path because `show` never ran. So: no box, no
+  command-log line, no audit line (ruled out by the preflight decision), no
+  stderr, because a TUI has none. A keypress that does nothing. Unreachable from a
+  conforming API server today — it needs `object_name` or `namespace_name` to
+  refuse a value that came through ingest — which is why it is a close blocker and
+  not a stop. Found by `k8s-admin`, finding 4.
+- **Invariant 4's headroom is a length argument that lives in no comment and no
+  test.** The taught line and the audit line are the same string only while it
+  stays under `FREE_TEXT`: `Record::of` cuts at 4096 and `main.rs:9948` re-spends
+  `Stripped::of` at the same cap, so a first cut makes the second call cut again
+  and the two records become two different commands. The longest line the product
+  can build today is ~900 bytes. Nothing catches a future operation that passes
+  4096. `k8s-admin`, finding 8.
+- **`unhostile`'s row assertion counts `chars()` where its message says cells.**
+  `screened` emits one symbol per cell and a symbol can be a grapheme cluster, so
+  a combining mark — which `k8s::text` deliberately keeps — reads as 107 chars in
+  an 80-cell row. Measured by `tester`, §5. The direction is a false **red**, never
+  a false green, and every caller today feeds a crafted name; but `ui.rs` draws API
+  free text where a combining mark is ordinary.
+- **`k8s::SHORTENED` now has four copies, pinned only incidentally.**
+  `tests/binary.rs:1687` and `scripts/picker-test.py:132` pin it end to end against
+  the real binary, and `main_tests.rs`'s new `SHORTENED_BY_K8RS` is read only for
+  its length inside a `<=` ceiling — so a *longer* marker goes red there and a
+  shorter one or a same-length reword goes quiet. No `copy-guard.py` row relates
+  the four. The same shape as `ACCEPTED`/`UNCHECKABLE` above, and a visibility
+  ruling on `k8s::SHORTENED` would remove all of them. `tester`, §9.

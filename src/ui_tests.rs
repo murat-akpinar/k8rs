@@ -8780,11 +8780,13 @@ fn scaling() -> views::Dialog {
             "web".to_owned(),
             Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
         ),
-        consequence: "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies."
-            .to_owned(),
+        consequence: Stripped::of(
+            "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies.",
+        ),
         warning: None,
-        kubectl: "kubectl --context prod-eu scale deployment/web --replicas=3 -n payments"
-            .to_owned(),
+        kubectl: Stripped::of(
+            "kubectl --context prod-eu scale deployment/web --replicas=3 -n payments",
+        ),
         verdict: Some(ACCEPTED),
         asks: None,
         typed: views::Input::default(),
@@ -8794,12 +8796,14 @@ fn scaling() -> views::Dialog {
 fn restarting() -> views::Dialog {
     views::Dialog {
         verb: "restart",
-        consequence: "This asks Kubernetes to replace every copy of your app with a new one. How \
-                      many stop at the same time is a setting on this deployment — it can be a \
-                      few, or all of them at once. A paused deployment will not start until you \
-                      resume it."
-            .to_owned(),
-        kubectl: "kubectl --context prod-eu rollout restart deployment/web -n payments".to_owned(),
+        consequence: Stripped::of(
+            "This asks Kubernetes to replace every copy of your app with a new one. How many stop \
+             at the same time is a setting on this deployment — it can be a few, or all of them at \
+             once. A paused deployment will not start until you resume it.",
+        ),
+        kubectl: Stripped::of(
+            "kubectl --context prod-eu rollout restart deployment/web -n payments",
+        ),
         ..scaling()
     }
 }
@@ -8817,13 +8821,14 @@ fn deleting() -> views::Dialog {
             "web-7d9f4".to_owned(),
             Some("f0a1b2c3-d4e5-4678-9abc-def012345678".to_owned()),
         ),
-        consequence: "This removes the pod. Whatever created it will normally replace it — k8rs \
-                      has not checked whether anything did."
-            .to_owned(),
+        consequence: Stripped::of(
+            "This removes the pod. Whatever created it will normally replace it — k8rs has not \
+             checked whether anything did.",
+        ),
         warning: None,
-        kubectl: "kubectl --context prod-eu delete pod/web-7d9f4 -n payments".to_owned(),
+        kubectl: Stripped::of("kubectl --context prod-eu delete pod/web-7d9f4 -n payments"),
         verdict: Some(UNCHECKABLE),
-        asks: Some("web-7d9f4".to_owned()),
+        asks: Some(Stripped::of("web-7d9f4")),
         typed,
     }
 }
@@ -8883,13 +8888,13 @@ fn deleting_a_node() -> views::Dialog {
             "node-3".to_owned(),
             Some("c0ffee00-0000-4000-8000-000000000000".to_owned()),
         ),
-        consequence: "This asks the cluster to remove its record of node-3, not the machine. \
-                      Something attached to it, unread by k8rs, may delay this or act first. Left \
-                      alone, its pods are deleted and the machine keeps running until its kubelet \
-                      restarts."
-            .to_owned(),
-        kubectl: "kubectl --context prod-eu delete node/node-3".to_owned(),
-        asks: Some("node-3".to_owned()),
+        consequence: Stripped::of(
+            "This asks the cluster to remove its record of node-3, not the machine. Something \
+             attached to it, unread by k8rs, may delay this or act first. Left alone, its pods are \
+             deleted and the machine keeps running until its kubelet restarts.",
+        ),
+        kubectl: Stripped::of("kubectl --context prod-eu delete node/node-3"),
+        asks: Some(Stripped::of("node-3")),
         typed,
         ..deleting()
     }
@@ -8915,7 +8920,7 @@ fn every_dialog_on_the_screen_it_belongs_to() {
     plain.log = &log;
 
     let mut paused = restarting();
-    paused.warning = Some(PAUSED.to_owned());
+    paused.warning = Some(Stripped::of(PAUSED));
 
     for (title, modal) in [
         ("Scale", views::Modal::Confirm(scaling())),
@@ -9141,7 +9146,7 @@ fn the_restart_boxes_are_the_screen_files_boxes_row_for_row() {
     );
 
     let mut paused = restarting();
-    paused.warning = Some(PAUSED.to_owned());
+    paused.warning = Some(Stripped::of(PAUSED));
     assert_eq!(
         box_of(views::Modal::Confirm(paused)),
         mockup_dialog(3),
@@ -9248,7 +9253,7 @@ fn the_delete_boxes_are_the_screen_files_boxes_but_for_the_gap_between_two_butto
 #[test]
 fn every_dialog_says_the_words_the_screen_file_says() {
     let mut paused = restarting();
-    paused.warning = Some(PAUSED.to_owned());
+    paused.warning = Some(Stripped::of(PAUSED));
     let mut pending = scaling();
     pending.verdict = None;
     for (nth, modal) in [
@@ -9518,10 +9523,11 @@ fn a_refusal_sentence_the_size_the_api_allows_gives_way_before_the_button_does()
 #[test]
 fn a_dialog_picks_one_of_three_widths_and_centring_decides_the_rest() {
     let mut wide = scaling();
-    wide.consequence = "This asks the cluster to remove the deployment and every copy of the app \
-                        it runs. k8rs has not read what may be attached to it, and something \
-                        there may delay this or act first — left alone, nothing is left running."
-        .to_owned();
+    wide.consequence = Stripped::of(
+        "This asks the cluster to remove the deployment and every copy of the app it runs. k8rs \
+         has not read what may be attached to it, and something there may delay this or act \
+         first — left alone, nothing is left running.",
+    );
     for (expected, modal) in [
         (CROWDED_BOX, views::Modal::Confirm(scaling())),
         (CROWDED_BOX, views::Modal::Confirm(wide)),
@@ -9601,9 +9607,10 @@ fn the_command_line_is_cut_to_the_one_box_width_and_never_past_its_border() {
         "checkout-worker".to_owned(),
         Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
     );
-    long.kubectl = "kubectl --context prod-eu scale deployment/checkout-worker --replicas=3 \
-                    -n payments-production"
-        .to_owned();
+    long.kubectl = Stripped::of(
+        "kubectl --context prod-eu scale deployment/checkout-worker --replicas=3 \
+         -n payments-production",
+    );
     assert_eq!(
         short.consequence, long.consequence,
         "the two dialogs differ in their consequence too, so the width says nothing about the \
@@ -9840,14 +9847,31 @@ fn a_dialog_floats_over_the_screen_and_clears_only_its_own_box() {
 /// and invariant 9's own class read at the one place a name is drawn inside a border
 /// (`screens/widgets.md` § 7).
 ///
-/// **10 000 characters is past anything an API server accepts** and past `k8s::IDENTIFIER`'s own
-/// 512-byte bound; what is asserted is that the frame is still 80×24, that the box is still the
-/// width it chose, and that the cut is *marked* — a `Block` left to clip its own title would draw
-/// a name flush against the border with nothing to say it was cut.
+/// **10 000 characters is past anything an API server accepts, and what the box is fed is what
+/// comes back through `views::Object::new`** — the door, since NOTES § D284 ruling 2; it used to
+/// assign the field, which no caller can do now, and so fed a shape nothing could produce.
+///
+/// **Two ceilings, and this is the door's and not the product's.** `k8s::IDENTIFIER`'s 512 bytes
+/// plus the 23-byte *shortened by k8rs* marker is the most `Object::new` can emit — 535, and 533
+/// for a multi-byte name, because `k8s::text` steps the cut back to a char boundary, so it is a
+/// ceiling and not a value. What the *product* can put in a dialog is `k8s::NAME_MAX`'s 253:
+/// `Object::new`'s one product caller is `main.rs`'s `show`, which runs only after
+/// `k8s::object_name` has passed, and `object_name` returns false for what this door hands back.
+/// `ui::typed_name` names that 253 (NOTES § D284 ruling 5) and the two must not disagree. 10 000
+/// is deliberately past both, because what is under test here is the renderer's floor.
+///
+/// What is asserted is that the frame is still 80×24, that the box is still the width it chose, and
+/// that the cut is *marked* — a `Block` left to clip its own title would draw a name flush against
+/// the border with nothing to say it was cut.
 #[test]
 fn a_ten_thousand_character_name_does_not_grow_the_box_it_is_drawn_in() {
     let mut dialog = deleting();
-    dialog.object.name = "w".repeat(10_000);
+    dialog.object = views::Object::new(
+        "pod",
+        Some("payments".to_owned()),
+        "w".repeat(10_000),
+        Some("f0a1b2c3-d4e5-4678-9abc-def012345678".to_owned()),
+    );
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let log = logged_pair();
@@ -9942,8 +9966,15 @@ fn a_dialog_is_the_same_height_before_and_after_the_check_answers() {
 #[test]
 fn the_typed_field_keeps_the_end_of_a_name_too_long_for_it() {
     let mut dialog = deleting();
-    dialog.object.name = "w".repeat(400);
-    dialog.asks = Some("w".repeat(400));
+    // 400 bytes is under `k8s::IDENTIFIER`, so the door leaves it alone and the field below is
+    // fed exactly what is written here (`views::Object::new`, NOTES § D284 ruling 2).
+    dialog.object = views::Object::new(
+        "pod",
+        Some("payments".to_owned()),
+        "w".repeat(400),
+        Some("f0a1b2c3-d4e5-4678-9abc-def012345678".to_owned()),
+    );
+    dialog.asks = Some(Stripped::of(&"w".repeat(400)));
     dialog.typed = views::Input::default();
     for character in "abcdefghij".chars().cycle().take(400) {
         dialog.typed.push(character);
@@ -10125,11 +10156,95 @@ fn already_gone_hedges_only_where_something_puts_one_back() {
     }
 }
 
+/// **The strip's own fixed point is a consequence with no rows at all, and drawing one must not
+/// panic** (NOTES § D284 ruling 3). `views::Stripped::of` of an all-unprintable sentence is `""`,
+/// its own doc names that fixed point, and [`confirm`]'s `consequence.len() - keep` underflowed on
+/// it — a debug crash, and in release a box that states nothing.
+///
+/// **Three shapes, because one is not the class** (NOTES § D31): nothing at all, whitespace the
+/// strip keeps, and characters the strip removes. All three reach `wrapped` with no lines, by
+/// different routes.
+///
+/// **One of the three carries a warning past the row budget, and it is the only shape where the
+/// clamp is observable** (NOTES § D284 ruling 8). With no warning — or with one the box has room
+/// for — `short` is zero and the wrapped `0 - 1` changes nothing a frame can show. Over the budget
+/// it is `short` the warning gives way by, and release's wrap turned it into `0`: the warning was
+/// never cut, the box ran past [`MODAL_ROWS`] and ratatui clipped it from the buttons up.
+///
+/// **`ops.rs` can build none of them** — `ops::Record::of` carries a `debug_assert!` that a
+/// mutation states something — so what is asserted is the renderer's own floor: it draws, and the
+/// rows that are not the consequence are all still there.
+#[test]
+fn a_consequence_the_strip_emptied_still_draws_its_box_and_its_buttons() {
+    // **About a dozen rows at [`CROWDED_BOX`]'s own text width, and the size is derived rather than
+    // picked.** `over` on its own is not enough: this box's four blank rows can absorb two of them
+    // ([`confirm`]'s `give`), so a warning one or two rows past the budget leaves `short` at zero
+    // and nothing is cut. It takes more than that before `short` is a number the warning gives way
+    // by — which is the only state where NOTES § D284 ruling 3's clamp is observable at all.
+    let oversized =
+        "the cluster answered this check with a sentence far longer than any it sends ".repeat(9);
+    for (what, written, warned) in [
+        ("nothing at all", "", false),
+        ("whitespace only", "   ", false),
+        ("all unprintable", "\u{1b}\u{202e}\u{200b}", true),
+    ] {
+        let mut dialog = scaling();
+        dialog.consequence = Stripped::of(written);
+        assert!(
+            dialog.consequence.as_str().trim().is_empty(),
+            "{what}: the fixture is not the fixed point"
+        );
+        if warned {
+            dialog.warning = Some(Stripped::of(&oversized));
+        }
+        let alerts = Pane::Ready(vec![oom()]);
+        let now = now();
+        let log = logged_pair();
+        let drawn = rows(&render(
+            &over(views::Modal::Confirm(dialog)),
+            &opened_over(&alerts, &now, &log),
+        ));
+
+        assert_eq!(drawn.len(), usize::from(MIN_HEIGHT), "{what}: not 24 rows");
+        let box_ = nested(&drawn);
+        assert_eq!(
+            width(&box_[0]),
+            usize::from(CROWDED_BOX) + 2,
+            "{what}: the box lost its width"
+        );
+        // **The ceiling is what release used to break on the warned shape**, and the buttons are
+        // what it lost when it did.
+        assert!(
+            box_.len() <= MODAL_ROWS + 2,
+            "{what}: the box grew to {} rows:\n{}",
+            box_.len(),
+            box_.join("\n")
+        );
+        for kept in ["[ ⏎ do it ]", "[ esc cancel ]", "$ kubectl"] {
+            assert!(
+                box_.iter().any(|row| row.contains(kept)),
+                "{what}: {kept:?} is not in the box:\n{}",
+                box_.join("\n")
+            );
+        }
+        if warned {
+            // The warning is what gave way, and visibly — `screens/widgets.md` § 7's ban on a
+            // silent cut, over the one arm of the budget only this shape reaches.
+            assert!(
+                sentences(&box_).any(|row| row.contains(CUT)),
+                "{what}: the warning was cut in silence:\n{}",
+                box_.join("\n")
+            );
+        }
+    }
+}
+
 /// **A consequence longer than the box gives way with a mark, and the buttons never do**
 /// — the security gate's *sizes are bounded* read at the one place a dialog's own text could
 /// outgrow the 24 rows this product is drawn to.
 ///
-/// **`views::Dialog::consequence` is a `String`**, so this is reachable by construction even
+/// **`views::Dialog::consequence` is bounded at `k8s::FREE_TEXT` and not to the box**, so this is
+/// reachable by construction even
 /// though nothing `ops.rs` builds comes near it: the widest real one, a paused Deployment's
 /// restart, lands on the budget exactly, which is asserted below rather than assumed. Without the
 /// cut the box would simply be taller than the body and ratatui would clip it — with the confirm
@@ -10137,11 +10252,11 @@ fn already_gone_hedges_only_where_something_puts_one_back() {
 #[test]
 fn a_consequence_too_long_for_the_box_gives_way_before_the_buttons_do() {
     let mut dialog = scaling();
-    dialog.consequence = "this starts one more copy of your app and here is a sentence that goes \
-                          on "
-    .repeat(60);
+    dialog.consequence = Stripped::of(
+        &"this starts one more copy of your app and here is a sentence that goes on ".repeat(60),
+    );
     assert!(
-        dialog.consequence.len() > 4000,
+        dialog.consequence.as_str().len() > 4000,
         "the fixture stopped being oversized"
     );
     let alerts = Pane::Ready(vec![oom()]);
@@ -10188,10 +10303,10 @@ fn a_consequence_too_long_for_the_box_gives_way_before_the_buttons_do() {
     // restart. The budget is a total guard on a `views::Dialog` anyone can construct.
     let narrow = |warning: &str| {
         box_of(views::Modal::Confirm(views::Dialog {
-            consequence:
-                "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies."
-                    .to_owned(),
-            warning: Some(warning.to_owned()),
+            consequence: Stripped::of(
+                "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies.",
+            ),
+            warning: Some(Stripped::of(warning)),
             ..scaling()
         }))
     };
@@ -10332,16 +10447,16 @@ fn every_consequence_the_operations_build_fits_the_box_it_is_drawn_in() {
         (node, true, false),
     ] {
         let warnings = if pausable {
-            vec![None, Some(PAUSED.to_owned())]
+            vec![None, Some(Stripped::of(PAUSED))]
         } else {
             vec![None]
         };
         for warning in warnings {
             let paused = warning.is_some();
             let dialog = views::Dialog {
-                consequence: consequence.to_owned(),
+                consequence: Stripped::of(consequence),
                 warning,
-                asks: asks.then(|| "web".to_owned()),
+                asks: asks.then(|| Stripped::of("web")),
                 ..scaling()
             };
             let drawn = rows(&render(&over(views::Modal::Confirm(dialog)), &screen));
@@ -10394,7 +10509,7 @@ fn a_full_box_cuts_the_consequence_and_never_the_warning_or_the_buttons() {
         .to_owned();
 
     let whole = box_of(views::Modal::Confirm(views::Dialog {
-        consequence: long.clone(),
+        consequence: Stripped::of(&long),
         warning: None,
         ..restarting()
     }));
@@ -10405,8 +10520,8 @@ fn a_full_box_cuts_the_consequence_and_never_the_warning_or_the_buttons() {
     );
 
     let warned = box_of(views::Modal::Confirm(views::Dialog {
-        consequence: long,
-        warning: Some(PAUSED.to_owned()),
+        consequence: Stripped::of(&long),
+        warning: Some(Stripped::of(PAUSED)),
         ..restarting()
     }));
     assert_eq!(
@@ -10475,7 +10590,7 @@ fn a_full_box_cuts_the_consequence_and_never_the_warning_or_the_buttons() {
 #[test]
 fn a_warning_over_a_typed_name_field_cuts_in_order_and_still_fits() {
     let crowded = box_of(views::Modal::Confirm(views::Dialog {
-        warning: Some(WORDY.to_owned()),
+        warning: Some(Stripped::of(WORDY)),
         ..deleting()
     }));
     assert_eq!(
@@ -12642,16 +12757,16 @@ fn a_canary_and_its_stable_sibling_are_two_objects_on_every_surface_that_names_o
     {
         let scale = box_of(views::Modal::Confirm(views::Dialog {
             object: object(name),
-            kubectl: format!(
+            kubectl: Stripped::of(&format!(
                 "kubectl --context prod-eu scale deployment/{name} --replicas=3 -n {namespace}"
-            ),
+            )),
             ..scaling()
         }));
         let restart = box_of(views::Modal::Confirm(views::Dialog {
             object: object(name),
-            kubectl: format!(
+            kubectl: Stripped::of(&format!(
                 "kubectl --context prod-eu rollout restart deployment/{name} -n {namespace}"
-            ),
+            )),
             ..restarting()
         }));
         assert_eq!(title(&scale), titles[nth], "the scale title");

@@ -9550,7 +9550,7 @@ fn over_modal(
                 // decided inside `ops` *after* this point, so something was sent by then and the
                 // line carries its outcome — for `delete`, whose 409 arrives through its own real
                 // call, that is the same send any other mutation makes.
-                console.log.sent(format!("$ {}", dialog.kubectl));
+                console.log.sent(format!("$ {}", dialog.kubectl.as_str()));
                 console.app.modal = None;
                 console.app.changing = Some(object);
                 Did::Answered(Some(typed))
@@ -9940,12 +9940,18 @@ async fn mutating(
                 asked.name.clone(),
                 asked.uid.clone(),
             ),
-            consequence: opened.consequence.to_owned(),
-            // **No warning line, because no operation hands one over** — `ops::Shown` carries the
-            // consequence and the command and nothing else, so a warning here would be a second
-            // copy of a sentence `ops.rs` owns (`views::Dialog::warning`).
+            consequence: views::Stripped::of(opened.consequence),
+            // **`None` because this console cannot carry one, and not because no operation has
+            // one to give** — the comment here said the second and it was false
+            // (NOTES § D284 ruling 6). `ops::Checked::returned()` is `pub`, the headless driver
+            // already turns it into D224's paused-Deployment sentence through `while_paused`, and
+            // `ops::Shown` — which is all this closure is handed — carries the consequence and the
+            // command and nothing else. What is missing is a field on [`Published`] for the
+            // *check's* answer to travel on, so nothing downstream of here can set this either.
+            // **An operator who restarts a paused Deployment is therefore told the generic
+            // sentence: backlog.md § From the dialog-strip box, a Phase 12 close blocker.**
             warning: None,
-            kubectl: opened.kubectl.to_owned(),
+            kubectl: views::Stripped::of(opened.kubectl),
             verdict: None,
             asks: None,
             typed: views::Input::default(),
@@ -10017,7 +10023,10 @@ fn installed(console: &mut Console<'_>, asked: Published) {
         Published::Checked { verdict, asks } => {
             if let Some(views::Modal::Confirm(dialog)) = &mut console.app.modal {
                 dialog.verdict = Some(verdict);
-                dialog.asks = asks;
+                // **The strip is spent here and not inside a `Dialog` constructor**: this field is
+                // assigned after the box is already open, so no constructor could have covered it
+                // (NOTES § D283 ruling 1).
+                dialog.asks = asks.as_deref().map(views::Stripped::of);
             }
         }
     }
@@ -10073,13 +10082,27 @@ fn settled(console: &mut Console<'_>, performed: Result<ops::Performed, String>)
         // `Err`s are an unserved kind, a name that is not one, and a namespace that does or does
         // not belong to the kind — and [`wanting`] only builds a mutation for a [`KINDS`] entry
         // that `views::Offer::act` says the operation serves, over an `ObjectId` that came through
-        // ingest. So there is no waiting command-log line to annotate either: `show` never ran. If
-        // one ever does arrive it lands on the line, and that is better than a box claiming the
-        // cluster answered.
+        // ingest.
+        //
+        // **And if one ever does arrive, nothing at all appears on screen.** The clause that
+        // stood here said the word would land on the command-log line; it cannot
+        // (NOTES § D284 ruling 6). `views::Log::outcome` writes nothing unless something is
+        // `waiting`; `views::Log::sent` is the only thing that sets it, and `sent` has exactly one
+        // product caller — [`over_modal`]'s confirm arm. **That, and not *`show` never ran*, is the
+        // reason**: it
+        // holds however this arm is reached, and it names what would rot it. `Log::sent`'s own doc
+        // says a read the reader opened can be refused, so a second caller is expected one day —
+        // and on that day `outcome("refused")` below would mark **that** command `→ refused`,
+        // which is invariant 4 with a record lying about a different call. No box, no line, no
+        // stderr: backlog.md § From the dialog-strip box, a Phase 12 close blocker.
         Err(refusal) => {
             // **`refused` and not the sentence** — [`outcome_word`]'s reason: this slot is a short
             // form and the sentence would eat the command it is annotating. Unreachable from this
             // router (above), and the word is one of the four `views::SAID` names itself.
+            //
+            // **The call provably writes nothing today** — nothing is `waiting` here (above) — and
+            // it is kept rather than deleted because it is the correct call for the day
+            // [`Published`] grows a field and this path has a line to annotate.
             let _ = refusal;
             console.log.outcome("refused");
             return;

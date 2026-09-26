@@ -1299,12 +1299,13 @@ fn dialog(asks: Option<&str>) -> Dialog {
             "web".to_owned(),
             Some("8656c3ec-0f0e-4d0e-9f0b-2a1d3c4b5a69".to_owned()),
         ),
-        consequence: "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies."
-            .to_owned(),
+        consequence: Stripped::of(
+            "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies.",
+        ),
         warning: None,
-        kubectl: "kubectl scale deployment/web --replicas=3 -n payments".to_owned(),
+        kubectl: Stripped::of("kubectl scale deployment/web --replicas=3 -n payments"),
         verdict: None,
-        asks: asks.map(str::to_owned),
+        asks: asks.map(Stripped::of),
         typed: Input::default(),
     }
 }
