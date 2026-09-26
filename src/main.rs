@@ -92,7 +92,7 @@ use std::collections::BTreeMap;
 // **`--namespace` is the real flag and not scaffolding**, unlike [`CONTEXT`]: the scope it sets
 // is read by rules and reports written for it (N2 and N5 switch off under one, three panes draw a
 // different title), so what it does outlives this driver even though the parsing here does not.
-use views::{NAMESPACE, because, sanitize};
+use views::{CONTEXT, NAMESPACE, because, sanitize};
 
 /// **stdout is the findings, stderr is everything else** (`screens/once.md` § stdout and
 /// stderr are split on purpose), and the two exit codes are `0` and `2` — never `1`, which is
@@ -163,17 +163,20 @@ fn main() {
                     None => match opening(&args) {
                         Some(opening) => {
                             let (reading, drawing) = ends_are_terminals();
-                            if !at_a_keyboard(reading, drawing) {
+                            let keyboard = at_a_keyboard(reading, drawing);
+                            if !keyboard {
                                 USAGE.to_string()
                             } else {
                                 match tokio::runtime::Builder::new_multi_thread()
                                     .enable_all()
                                     .build()
                                 {
-                                    Ok(runtime) => match runtime.block_on(console(&opening)) {
-                                        Some(sentence) => sentence,
-                                        None => return,
-                                    },
+                                    Ok(runtime) => {
+                                        match runtime.block_on(console(&opening, keyboard)) {
+                                            Some(sentence) => sentence,
+                                            None => return,
+                                        }
+                                    }
                                     Err(failed) => runtime_failure(&failed),
                                 }
                             }
@@ -1727,20 +1730,6 @@ fn once_wanted(args: &[String]) -> bool {
 /// said the change that makes it load-bearing is the change that puts it in the line; the first
 /// half happened three boxes ago and the second half did not.
 const READ_ONLY: &str = "--read-only";
-
-/// **Which context k8rs connects to** — the console's ([`opening`]) and, on the temporary driver,
-/// `--live`'s and `--once`'s. One spelling for both, read by one parser ([`context_arg`]).
-///
-/// **Released and not scaffolding, since the flags box** (todo.md § Phase 12). It arrived here
-/// early, for `--live`, because the machine that runs the reconnect proof does not have to be the
-/// machine whose current context is the test cluster; what that bought was the muscle memory
-/// already being right when the console came to read it.
-///
-/// **What it picks is not only the connection**: `k8s::contexts` is handed the same value, so the
-/// `current` row the header's TLS warning is read off is the row k8rs is actually on
-/// (`ui::Screen::insecure`, NOTES § D265 ruling 8). Reading one and not the other is the
-/// disagreement NOTES § D174 closed one door over.
-const CONTEXT: &str = "--context";
 
 /// **`kubectl`'s own short spelling of [`NAMESPACE`]**, because the muscle memory is the point:
 /// somebody who types `kubectl get pods -n payments` all day types `-n` here too.
@@ -7461,16 +7450,49 @@ struct Console<'a> {
     writes: ui::Writes<'a>,
     /// The connected context's kubeconfig sets `insecure-skip-tls-verify`.
     insecure: bool,
-    /// **The header's right zone up to the connection word** — `ctx: prod-eu`, built once because
-    /// it cannot change without a reconnect (`ui::Screen::context`, whose doc is why the connection
-    /// word is *not* in it).
+    /// **The header's right zone up to the connection word** — `ctx: prod-eu`, built once per
+    /// connection because neither half of it can change without one ([`zone`],
+    /// `ui::Screen::context`, whose doc is why the connection word is *not* in it).
+    ///
+    /// **One state does put a connection word in it, and [`switched`] writes that one**: a connect
+    /// that failed ends the zone in [`not_connected`], because `ui::Link::Unconnected` has no word
+    /// of its own to join (NOTES § D280 item 1).
     context: views::Stripped,
     /// The skew sentence, or `None` — read once at connect, like the value behind it ([`clock`]).
     clock: Option<String>,
     /// Every browsable kind the cluster said it serves, for the sidebar (invariant 12).
     kinds: Vec<k8s::Browsable>,
     /// The kubeconfig's contexts, for `X` and the startup picker (`k8s::contexts`).
+    ///
+    /// **Re-read for the context every connect was made with** (NOTES § D265 ruling 8): the list
+    /// marks the row that was *asked for* as `current`, so after a switch the picker's `(current)`
+    /// is the context k8rs is on — or the one it just tried — and never the kubeconfig's own
+    /// (NOTES § D264 ruling 4).
     contexts: Vec<k8s::Choice>,
+    /// **What has connected in this run, in the terms a picker opens on** (`views::Connection`,
+    /// NOTES § D264 rulings 4 and 15) — `Never` until the first `⏎` answers, `Live` carrying the
+    /// connected context's drawn name after one, and `Dropped` carrying the context that was last
+    /// live from the moment a switch fails.
+    ///
+    /// **`Dropped` is stored by a failed switch and by nothing else.** A live link that *expires*
+    /// is the other way into that variant and is read at the keypress instead ([`opening_on`]),
+    /// because it lifts on its own the moment the login is renewed and a stored copy would then be
+    /// describing a connection that is fine.
+    connection: views::Connection,
+    /// **Nothing is connected at all** — a switch that was refused or never answered, from the
+    /// moment its box first draws through however long the reader leaves it dismissed
+    /// (`ui::Link::Unconnected`, `screens/widgets.md` § 1a: *this is a session fact, not a modal
+    /// one*).
+    ///
+    /// **It is a field because [`linked`] cannot see it**: that function reads the *store*, and
+    /// after `views::App::switched` the store holds nothing at all — which is the shape of a first
+    /// launch, and therefore `ui::Link::Connecting`. *connecting…* in the header of a cluster that
+    /// has already said no is the stale header `screens/states.md` exists to forbid.
+    unconnected: bool,
+    /// **What the last frame drew as the connection state** — [`Console::offer`]'s own reason, one
+    /// field down: `X` opens the picker on the link the reader was looking at, so which picker
+    /// they get and what the header told them cannot come apart.
+    link: ui::Link,
     /// **What the detail slot is showing, which `views::App` deliberately does not hold** — *what
     /// is open over the view* is `ui::Screen::detail`'s half (`views::App::escape`'s own reason for
     /// taking it as an argument), so the router keeps it here.
@@ -7490,6 +7512,13 @@ struct Console<'a> {
     /// **`Nothing` until the first frame**, which is right rather than merely safe: no footer has
     /// been drawn, so no key it would have carried is live.
     offer: views::Offer,
+    /// **What a key asked for in a frame that could not act on it** ([`parked`], NOTES § D281
+    /// item 5) — drained by the next [`pump`] before it reads a key or draws a frame.
+    ///
+    /// **A field and not a parameter, for [`Console::offer`]'s reason one field up**: it is
+    /// run-level state the console holds between calls, and `pump` already takes seven arguments,
+    /// which is clippy's ceiling.
+    carried: Option<Halt>,
     /// **Whether a stop can be come back from — `SIGCONT` armed** ([`watching_for_stops`]).
     ///
     /// **`false` makes `ctrl-z` do nothing at all, and that is the ruling** (PM, 2026-09-24): the
@@ -7574,6 +7603,78 @@ enum Halt {
     /// build the mutation and the future that borrows it in a frame of its own, then re-enter
     /// (NOTES § D232, the region comment above).
     Mutate(Wanted),
+    /// **`⏎` on a picker row** — the loop returns so its caller can drop this session and open
+    /// another, which is the startup path run again (NOTES § D16 ruling 4, § D264 ruling 13).
+    Switch(Switching),
+    /// **The reader asked for something the frame that was running could not do, and it is parked**
+    /// ([`parked`]) — the caller ends that frame and calls [`pump`] again, which answers with what
+    /// was parked. Nothing to act on here, which is why it carries nothing.
+    Carried,
+}
+
+/// **What a mutation's own frame does with a halt it cannot act on** (NOTES § D281 item 5).
+///
+/// **A mutation frame is one for its whole life, and that is the defect in one line.** `pump` sets
+/// its own `running` slot to `None` the instant the call settles and goes on reading keys — so
+/// `views::App::may_mutate` and `may_switch_cluster`, which both read `App::changing`, go live
+/// again *inside* a call whose caller is still holding the future, the `&mut File` and the strings
+/// they borrow (NOTES § D232). A `Halt::Mutate` returned there cannot be acted on in that frame,
+/// and the caller dropped it: one dead key, and the reader pressed it twice.
+///
+/// **`mutating` is read at [`pump`]'s entry and never from the live slot**, which is the half that
+/// looks like a detail and is the whole of it: by the time the key arrives the slot is already
+/// `None`, so a check made there would park nothing and the drop would survive the fix.
+///
+/// **It stays `true` across the *in-flight* window too, and what keeps that safe is not this
+/// function** (`k8s-admin`, 2026-09-26). A halt parked while the call is still on the wire would
+/// have the caller `continue`, dropping the future, the audit `File` and the `&mut` strings it
+/// borrows — **an attempt in the audit log with no result**, which is invariant 4's own failure.
+/// It cannot be reached because `views::App::changing` is `Some` for the whole of that window and
+/// both `may_mutate` and `may_switch_cluster` read it, so no key produces a halt there at all.
+/// **That is the same field `views::App::may_quit` leans on for the identical reason**, and that
+/// method's doc says it out loud: *quitting mid-`PATCH` would leave the audit log holding an
+/// attempt with no result*. Written down because `screens/context.md` already contemplates an `X`
+/// that *refuses in the footer* rather than being unbound — the change that would turn this from
+/// unreachable into a dropped write.
+///
+/// **It lives here rather than in [`console`] because nothing can prove anything in `console`** —
+/// `cargo mutants --list` offers **0** mutants in its body against 3482 in the crate, and
+/// `just picker` cannot reach this window either, since it needs a mutation that settles and
+/// therefore a cluster (`tester`, 2026-09-26). This is NOTES § D274's rule — every decision inside
+/// `console` is a function over values — applied to the one thing that was left inside it.
+fn parked(carried: &mut Option<Halt>, mutating: bool, halt: Halt) -> Halt {
+    // **One [`pump`] call parks at most once**, because both sites `return` the moment they do and
+    // the next call drains the slot before it reads a key — so a slot that is already full here is
+    // a keypress about to be overwritten by another. That invariant lived in the caller until
+    // `tester` asked for it to live where the function is (2026-09-26); it is a `debug_assert`
+    // because the release build has nothing useful to do about it and the shape is a programming
+    // error, not an input.
+    debug_assert!(
+        carried.is_none(),
+        "a parked keypress was overwritten by another"
+    );
+    if mutating {
+        *carried = Some(halt);
+        Halt::Carried
+    } else {
+        halt
+    }
+}
+
+/// **Which context `⏎` chose, owned** — for [`Wanted`]'s reason: the rows it came off are borrowed
+/// from the caller for the length of one keypress, and the connection it starts outlives the frame
+/// the key was pressed in.
+struct Switching {
+    /// **The kubeconfig's own spelling — what `k8s::connect_with` is handed** (`k8s::Choice::key`,
+    /// NOTES § D264 ruling 8). Never the drawn name: a context whose name carries a zero-width or
+    /// bidi character is drawn without it and looked up *with* it.
+    key: String,
+    /// **The row's name as drawn** — the failure box's title. Already stripped and bounded where
+    /// `k8s::contexts` read it, which is invariant 9's filter run once at ingest
+    /// (`k8s::drawable`).
+    to: Option<String>,
+    /// What the failure box, if it comes to one, goes back to (`views::Before`).
+    before: views::Before,
 }
 
 /// **Which mutation a key asked for, and the object it named** — owned, because what it becomes has
@@ -7610,6 +7711,9 @@ enum Did {
     /// **`ctrl-z`** — the one key whose consequence is not on the screen but under it, so it is
     /// answered where the `Terminal` is ([`stopped`], NOTES § D24).
     Suspend,
+    /// **`⏎` on a picker row that is not the live one** — answered where the session is, which is
+    /// [`console`]'s own frame ([`Halt::Switch`]).
+    Switch(Switching),
 }
 
 /// **The audit log this run opens, or `None` because [`READ_ONLY`] means it never opens one** —
@@ -7633,6 +7737,115 @@ fn audit_log_for<T, F: FnOnce() -> Result<T, String>>(
     (!read_only).then(open)
 }
 
+/// **Which cluster a console opens with, or that it has to ask first** ([`which_cluster`]).
+enum Opens<'a> {
+    /// Connect straight through with this — [`CONTEXT`] when one was named, and the kubeconfig's
+    /// own current context otherwise.
+    With(Option<&'a str>),
+    /// **The startup picker, before anything else draws** (`screens/context.md` § Opening at
+    /// startup).
+    Asking,
+}
+
+/// **One place decides which context is used, and it is not three** (todo.md § Phase 12,
+/// NOTES § D116): `--context` beats the picker, the picker beats `current-context`.
+///
+/// **A decision over values and not a function that reads its own environment** (NOTES § D279
+/// ruling 2), for [`at_a_keyboard`]'s measured reason: read inside, every row but one is
+/// unreachable from a test — `cargo test`'s own ends are pipes — and `just mutants-diff` proved
+/// that exact hole on that function, by replacing its body with `false` and with `||` and finding
+/// no test that could tell.
+///
+/// | `--context` | contexts in the file | at a keyboard | opens with |
+/// |---|---|---|---|
+/// | given | any | any | **that context** |
+/// | none | two or more | yes | **the picker** |
+/// | none | two or more | no | `current-context`, silently |
+/// | none | one, or none | any | `current-context` — there is nothing to ask |
+///
+/// **The third input is what keeps the picker out of a pipeline** — `k8rs --once` and any non-tty
+/// stdin answer `With` whatever is in the file, because a picker there is a script that hangs for
+/// ever (NOTES § D116). It is the value `main` measured rather than one read here, and `main`
+/// answers [`USAGE`] for it long before this is asked; the row exists so the rule is complete in
+/// one place instead of resting on a caller's promise.
+///
+/// **Rows, and not `views::landable` rows** (NOTES § D279 ruling 3): a file holding one usable
+/// context and one broken entry is a file with something to say, and that predicate is the
+/// cursor's rule rather than the opening one.
+fn which_cluster(context: Option<&str>, rows: usize, keyboard: bool) -> Opens<'_> {
+    match context {
+        Some(_) => Opens::With(context),
+        None if rows >= 2 && keyboard => Opens::Asking,
+        None => Opens::With(None),
+    }
+}
+
+/// **The login program never gets the terminal, because k8rs is holding it** (NOTES § D279
+/// ruling 6, § D264 ruling 32).
+///
+/// **`interactive_mode: Never` on the kubeconfig k8rs connects with, and not a handover around the
+/// connect**: kube re-runs an `exec` plugin on its own near expiry, from inside the client at an
+/// arbitrary `await` point — 27 runs over a 12 s session, measured — so a handover wrapping only
+/// the connect leaves every one of those runs reading keystrokes out of a raw-mode terminal and
+/// printing over the alternate screen. There is nothing in this codebase to hook that moment with.
+///
+/// **kube reads the field off this in-memory value before it runs the plugin, read rather than
+/// recalled** (kube-client 4.2.0, the version `Cargo.lock` pins):
+/// `ConfigLoader::load_from_kubeconfig` clones this `AuthInfo` out of the `Kubeconfig` it is handed
+/// and nothing re-reads the file (`config/file_loader.rs:89-104`); `auth_exec` inherits stdin and
+/// stderr only while `auth.interactive_mode != Some(Never)` (`client/auth/mod.rs:587-592`); and the
+/// near-expiry refresh calls `Auth::try_from` again over that same stored clone
+/// (`client/auth/mod.rs:210-222`). One field set here therefore covers the connect and every
+/// refresh after it.
+///
+/// **Every entry in the file and not the one being connected with**, because a switch connects
+/// with another one out of the same value and this is the only reading of it.
+///
+/// **What it costs is an interactive login**, which is the trade that ruling made: a plugin that
+/// wants a password fails instead of prompting, and what the reader is told is that the login
+/// program is why (`views::because`'s `NoCredential` arm).
+fn login_stays_off_the_terminal(
+    mut kubeconfig: kube::config::Kubeconfig,
+) -> kube::config::Kubeconfig {
+    for named in &mut kubeconfig.auth_infos {
+        if let Some(exec) = named.auth_info.as_mut().and_then(|auth| auth.exec.as_mut()) {
+            exec.interactive_mode = Some(kube::config::ExecInteractiveMode::Never);
+        }
+    }
+    kubeconfig
+}
+
+/// **What this run asked the watches to cover, before any connection has answered** — the scope
+/// [`NAMESPACE`] named, and every namespace otherwise (`k8s::Coverage`, NOTES § D5).
+///
+/// **Two frames read it and neither has a session to read the real one off**: the one drawn
+/// between `⏎` and its answer, and the failure box of a connection that never opened. For that
+/// second one `ui::failed` reads no coverage at all — a request that never went out has no scope —
+/// so this is the honest value rather than a placeholder standing in for one.
+fn asked_for(namespace: Option<&str>) -> k8s::Coverage {
+    match namespace {
+        Some(namespace) => k8s::Coverage::Asked(namespace.to_owned()),
+        None => k8s::Coverage::Cluster,
+    }
+}
+
+/// **Which picker a key opens** (`views::Connection`) — what has connected in this run, promoted to
+/// *dropped* while the login has run out.
+///
+/// **`Live` has to become `Dropped` under [`ui::Link::Expired`], or the picker closes instead of
+/// reconnecting** (NOTES § D265 ruling 4): `views::Picker::chosen` answers `Close` on a `(current)`
+/// row that is live, so *renew your login, then press `X`* would put the reader back on the cluster
+/// they cannot reach. A switch that failed stores `Dropped` itself, carrying the context that was
+/// last live (NOTES § D264 ruling 15), and nothing here has to tell the two apart.
+fn opening_on(connection: &views::Connection, link: ui::Link) -> views::Connection {
+    match (connection, link) {
+        (views::Connection::Live(name), ui::Link::Expired) => {
+            views::Connection::Dropped(name.clone())
+        }
+        (connection, _) => connection.clone(),
+    }
+}
+
 /// **The console's whole run** — `None` is the reader quitting, `Some` the sentence that goes to
 /// stderr with exit `2` (`main`'s own contract).
 ///
@@ -7651,7 +7864,7 @@ fn audit_log_for<T, F: FnOnce() -> Result<T, String>>(
 /// **Everything the command line asked for arrives as [`Opening`] and is read nowhere else here**
 /// — `main`'s own rule that a decision lives in a function over values, which this one could not
 /// obey for the run-level facts while it took no parameters at all.
-async fn console(opening: &Opening<'_>) -> Option<String> {
+async fn console(opening: &Opening<'_>, keyboard: bool) -> Option<String> {
     use std::io::Write;
     // **The log first**, because a refusal here is a fact about the whole run that the header says
     // from the first frame (NOTES § D21 — k8rs says so and continues, read-only) — and under
@@ -7670,135 +7883,104 @@ async fn console(opening: &Opening<'_>) -> Option<String> {
             ui::Writes::Unaudited(&unaudited)
         }
     };
-    // **Read once and handed to both**, so the picker's list and the session come out of one
-    // reading of the file (`k8s::kubeconfig`'s own reason for being reachable at all).
+    // **Read once and handed to every connect this run makes**, so the picker's list and every
+    // session come out of one reading of the file (`k8s::kubeconfig`'s own reason for being
+    // reachable at all). A switch clones it; nothing re-reads the disk.
     //
-    // **The two failures are one `Result`, so the decision below is asked once** — a kubeconfig
-    // that will not load and a client that will not build are the same sentence to the reader
-    // ([`no_cluster_to_watch`]), and joining them here is what leaves [`before_the_first_frame`]
-    // one decision over values instead of three `return`s in a row.
-    let mut contexts = Vec::new();
-    let mut insecure = false;
-    let mut server = String::new();
-    let reached = match k8s::kubeconfig() {
-        Err(problem) => Err(problem),
-        // **One list, read three ways, so none of them can name a different cluster from the
-        // connection** (NOTES § D174, § D265 ruling 8): `k8s::contexts` marks the row that was
-        // *asked for* as `current`, so [`tls_unverified`] reads `insecure-skip-tls-verify` and
-        // [`current_server`] reads the audit line's `server:` off the row k8rs actually connected
-        // to — not off the kubeconfig's own current one. The `server` half was the defect
-        // (`k8s-admin`, 2026-09-24): it asked `k8s::contexts(…, None)` for itself, so a
-        // `--context` run logged the right context name beside the wrong URL.
-        Ok(kubeconfig) => {
-            contexts = k8s::contexts(&kubeconfig, opening.context);
-            insecure = tls_unverified(&contexts);
-            server = current_server(&contexts);
-            k8s::connect_with(kubeconfig, opening.context, opening.namespace).await
-        }
+    // **No kubeconfig at all is always stderr and a non-zero exit, whatever else is on the line**
+    // (`screens/states.md` § Before the TUI ever starts, NOTES § D279 ruling 4): there is nothing
+    // yet to list a context from, so there is no picker for the failure to be drawn in.
+    let kubeconfig = match k8s::kubeconfig() {
+        Err(problem) => return Some(no_cluster_to_watch(&problem)),
+        Ok(kubeconfig) => login_stays_off_the_terminal(kubeconfig),
     };
     let mut err = std::io::stderr();
-    if let Ok(session) = &reached {
-        let _ = writeln!(err, "k8rs: watching — {}", greeting(session).join(" · "));
-    }
-    let now = wall_clock().ok();
-    if let Some(why) = before_the_first_frame(reached.as_ref(), now.as_ref()) {
-        // **The wall gets a command log too, and it is the reads that really happened**
-        // ([`connect_log`]) — only where there was a session to read them from.
-        if let Ok(session) = &reached {
-            log_to(
-                &mut err,
-                connect_log(
-                    &kubectl(session.context.as_deref()),
-                    &session.coverage,
-                    session.namespace.as_deref(),
-                ),
-            );
-        }
-        return Some(why);
-    }
-    let session = match reached {
-        Ok(session) => session,
-        // **Unreachable, and spelled as the same sentence rather than as a panic**:
-        // [`before_the_first_frame`] answers `Some` for every `Err` and has just been asked, so
-        // this arm cannot be taken — and a driver is not the place to discover otherwise
-        // ([`plain_kind`]'s own rule). `Result::expect` is not available here either:
-        // `k8s::NotConnected` derives no `Debug` on purpose (the security gate's token hygiene),
-        // which is the shape of guard that stops a credential reaching a panic message.
-        Err(problem) => return Some(no_cluster_to_watch(&problem)),
-    };
 
-    let mut store = k8s::Store::default();
-    store.identify(k8s::Identity::of(&session));
-    // **The lists every report needs, fetched once at connect and bounded together** — the shape
-    // [`live`] uses under `--analysis`, unconditional here because the console always draws the
-    // seven ANALYSIS rows, so their lists are always owed (`k8s::report_lists`, NOTES § D178). What
-    // that costs is [`lists_were_read`]'s staleness with no line to say so yet, and the re-read a
-    // pane should trigger is `backlog.md`'s.
-    let (certificates, lists) = tokio::join!(
-        k8s::certificate_requests(&session.client, k8s::REPORT_FETCH),
-        k8s::report_lists(&session.client, &session.coverage, k8s::REPORT_FETCH),
-    );
-    store.certificates_fetched(certificates);
-    store.reports_fetched(lists);
-
-    let at = Watching {
-        renewal: session.renewal.clone(),
-        coverage: session.coverage.clone(),
-    };
     let mut console = Console {
         app: views::App::default(),
         log: views::Log::default(),
         depth: theme::depth(std::env::var("COLORTERM").ok().as_deref()),
         writes,
-        insecure,
-        // **Built once, because neither half of it can change without a reconnect**
-        // ([`zone`], `ui::Screen::context`): the context is the one `k8s::connect_with` resolved,
-        // and [`Watching::coverage`] is cloned from the session beside it.
-        context: views::Stripped::of(&zone(session.context.as_deref(), at.coverage.namespace())),
-        clock: clock(session.skew),
-        kinds: session
-            .served
-            .as_ref()
-            .map(|served| served.kinds.clone())
-            .unwrap_or_default(),
-        contexts,
+        insecure: false,
+        // **Empty until something connects, which is the startup picker's own header** — `choose a
+        // cluster · admin`, with no context in the zone at all (`screens/widgets.md` § 1a,
+        // NOTES § D265 ruling 7: an empty zone joins nothing).
+        context: views::Stripped::of(""),
+        clock: None,
+        kinds: Vec::new(),
+        contexts: Vec::new(),
+        connection: views::Connection::Never,
+        // **Nothing is connected yet, which is the literal truth of this frame** — the startup
+        // picker's, and the only state `Opens::With` passes through on its way to [`connected`].
+        unconnected: true,
+        link: ui::Link::Connecting,
         opened: None,
         offer: views::Offer::Nothing { switch: false },
+        carried: None,
         // **Nothing is armed yet**, and nothing can press a key before the channel below exists.
         resumable: false,
     };
-    // **The same lines the headless driver prints on stderr, in the strip the reader reads them
-    // in** ([`command_log`]): the probe, the version, discovery and the five watches, spelled once.
-    for line in command_log(
-        true,
-        &kubectl(session.context.as_deref()),
-        &at.coverage,
-        session.namespace.as_deref(),
-    ) {
-        console.log.ran(line);
-    }
+    let mut cluster = nothing_connected(opening.namespace);
 
-    // **Every stream in one merge, in the frame that also holds the store** — the shape
-    // `k8s::drive_watching` has one layer down, written here rather than reused for one reason:
-    // that function owns its own loop and hands its observer a `&Store` with nothing to `await` on,
-    // so a console driven from inside it would draw on a watch event and never on a key.
+    // **Which cluster, decided once and nowhere else** ([`which_cluster`], NOTES § D116).
     //
-    // **Its end-marker is not reproduced, because nothing here reads it.** That marker exists so
-    // `--live` can print *every watch has stopped* while a poll that never ends is merged beside
-    // the watches; a console has no such ending to print — every watch having stopped is a state on
-    // screen, five `k8s::Trouble`s carrying `ended`, and the run goes on (`k8s.rs` § THE DRIVER,
-    // PRIOR-ART § B3). What replaces it is [`Updates::drained`], which stops *polling* a merge that
-    // has run dry so the loop blocks instead of spinning on it.
-    let mut streams = session.watches;
-    streams.push(k8s::node_usage_poll(session.client.clone()));
-    let (asking, wanted) = tokio::sync::mpsc::unbounded_channel();
-    streams.push(k8s::owner_fetches(session.client.clone(), wanted));
-    let mut updates = Updates {
-        merged: futures_util::stream::select_all(streams),
-        drained: false,
-        asked: std::collections::BTreeSet::new(),
-        asking,
-    };
+    // **The count is the file's own rows and not `k8s::contexts`'**, which maps one row per entry
+    // and would be a list built to be thrown away: *how many contexts are there* is a question
+    // about the file, and it is exactly the number of rows the picker would draw
+    // (NOTES § D279 ruling 3 — rows, not landable rows).
+    match which_cluster(opening.context, kubeconfig.contexts.len(), keyboard) {
+        // **Today's wall, unchanged** (NOTES § D279 ruling 4): nothing has put a modal on screen,
+        // raw mode is not on, and everything that can fail here prints one line the reader can
+        // read (`screens/states.md` § Before the TUI ever starts).
+        Opens::With(context) => {
+            let reached = k8s::connect_with(kubeconfig.clone(), context, opening.namespace).await;
+            if let Ok(session) = &reached {
+                let _ = writeln!(err, "k8rs: watching — {}", greeting(session).join(" · "));
+            }
+            let now = wall_clock().ok();
+            if let Some(why) = before_the_first_frame(reached.as_ref(), now.as_ref()) {
+                // **The wall gets a command log too, and it is the reads that really happened**
+                // ([`connect_log`]) — only where there was a session to read them from.
+                if let Ok(session) = &reached {
+                    log_to(
+                        &mut err,
+                        connect_log(
+                            &kubectl(session.context.as_deref()),
+                            &session.coverage,
+                            session.namespace.as_deref(),
+                        ),
+                    );
+                }
+                return Some(why);
+            }
+            let session = match reached {
+                Ok(session) => session,
+                // **Unreachable, and spelled as the same sentence rather than as a panic**:
+                // [`before_the_first_frame`] answers `Some` for every `Err` and has just been
+                // asked, so this arm cannot be taken — and a driver is not the place to discover
+                // otherwise ([`plain_kind`]'s own rule). `Result::expect` is not available here
+                // either: `k8s::NotConnected` derives no `Debug` on purpose (the security gate's
+                // token hygiene), which is the shape of guard that stops a credential reaching a
+                // panic message.
+                Err(problem) => return Some(no_cluster_to_watch(&problem)),
+            };
+            cluster = connected(&mut console, &kubeconfig, context, session).await;
+        }
+        // **The picker is the first thing drawn, over genuinely nothing** (`screens/context.md`
+        // § Opening at startup). Its `⏎` is [`switched`] below — the startup path is that
+        // function's first call, not a second copy of it (NOTES § D116).
+        Opens::Asking => {
+            console.contexts = k8s::contexts(&kubeconfig, None);
+            console.app.modal = Some(views::Modal::ContextPick(views::Picker::new(
+                &console.contexts,
+                views::Connection::Never,
+            )));
+            // **The one read behind the picker, said out loud** (NOTES § D264 ruling 29,
+            // `screens/context.md` § What the command log shows): the same line `X` appends, since
+            // it is the same local file read either way.
+            console.log.ran(views::GET_CONTEXTS.to_owned());
+        }
+    }
 
     // **`try_init` and not `init`**, which *panics* on a terminal it cannot take over — the one
     // path [`at_a_keyboard`] cannot rule out, since a tty that exists and then refuses raw mode is
@@ -7857,16 +8039,38 @@ async fn console(opening: &Opening<'_>) -> Option<String> {
         let halt = pump(
             &mut console,
             &mut terminal,
-            &mut store,
-            &mut updates,
+            &mut cluster.store,
+            &mut cluster.updates,
             &mut keys,
-            &at,
+            &cluster.at,
             None,
         )
         .await;
         match halt {
             Halt::Quit => break None,
             Halt::Failed(said) => break Some(said),
+            // **Nothing to do but come round again**, which drains the slot on the way in
+            // ([`pump`]). This call holds no [`Running`], so [`parked`] never parks for it and the
+            // arm cannot be taken — and the `continue` is the right answer either way, which is
+            // why it is the same one line in both matches.
+            Halt::Carried => continue,
+            // **The connection lives in this frame the way the mutation below does**: `⏎` on a
+            // picker row replaces the session, the store and every stream the loop was just handed,
+            // and none of that can be done from inside the borrow `pump` holds.
+            Halt::Switch(asked) => {
+                if let Err(said) = switched(
+                    &mut console,
+                    &mut terminal,
+                    &mut cluster,
+                    &kubeconfig,
+                    opening.namespace,
+                    asked,
+                )
+                .await
+                {
+                    break Some(said);
+                }
+            }
             // **The frame a mutation lives in** (NOTES § D232): the [`Wanted`]'s strings, the
             // `ops::Mutation` built out of them and the `&mut File` all belong to this block, and
             // the future that borrows all three is a parameter of the loop rather than a field of
@@ -7875,13 +8079,19 @@ async fn console(opening: &Opening<'_>) -> Option<String> {
             Halt::Mutate(asked) => {
                 let Some(file) = audit.as_mut() else { continue };
                 let Ok(now) = now.as_ref() else { continue };
+                // **No session, no mutation** — unreachable rather than ignored: a mutating key
+                // needs a selected card, and a run with nothing connected has an empty store and
+                // therefore no cards (`views::App::may_mutate`, `ui::offered`).
+                let Some(session) = cluster.session.as_ref() else {
+                    continue;
+                };
                 let (answering, answered) = tokio::sync::mpsc::unbounded_channel();
                 let shown = std::cell::RefCell::new(Vec::new());
                 let performing: std::pin::Pin<
                     Box<dyn Future<Output = Result<ops::Performed, String>>>,
                 > = Box::pin(mutating(
                     &session.client,
-                    &server,
+                    &cluster.server,
                     session.context.as_deref().unwrap_or_default(),
                     &asked,
                     now,
@@ -7893,10 +8103,10 @@ async fn console(opening: &Opening<'_>) -> Option<String> {
                 let halt = pump(
                     &mut console,
                     &mut terminal,
-                    &mut store,
-                    &mut updates,
+                    &mut cluster.store,
+                    &mut cluster.updates,
                     &mut keys,
-                    &at,
+                    &cluster.at,
                     Some(Running {
                         performing: &mut performing,
                         shown: &shown,
@@ -7907,15 +8117,248 @@ async fn console(opening: &Opening<'_>) -> Option<String> {
                 match halt {
                     Halt::Quit => break None,
                     Halt::Failed(said) => break Some(said),
-                    // **A second mutation cannot be asked for while one is running**
-                    // (`views::App::may_mutate` reads `App::changing`), so this is unreachable
-                    // rather than ignored — and unreachable and ignored draw the same screen, so
-                    // it is a `continue` and not a `panic!`.
-                    Halt::Mutate(_) => continue,
+                    // **The reader's key is in the slot, so this frame's only job is to end** —
+                    // the future, the `&mut File` and the strings they borrow are dropped with it,
+                    // and the next [`pump`] answers with what was parked ([`parked`]). `Mutate` and
+                    // `Switch` cannot arrive here, because this call *is* the mutating frame and
+                    // that is exactly what [`parked`] reads.
+                    Halt::Carried | Halt::Mutate(_) | Halt::Switch(_) => continue,
                 }
             }
         }
     }
+}
+
+/// **What one connection gives the loop** — dropped whole and rebuilt when another is opened
+/// (`screens/context.md` § What happens on `⏎` step 1: *nothing from the old cluster survives the
+/// switch*).
+///
+/// **A struct and not five locals**, because the whole point is that they are replaced together: a
+/// store kept across a switch is prod's findings under staging's header, which is the fabrication
+/// NOTES § D16 ruling 1 forbids.
+struct Cluster {
+    /// **The session, or `None` while nothing is connected** — before the startup picker's first
+    /// `⏎`, and after a switch that failed.
+    session: Option<k8s::Session>,
+    store: k8s::Store,
+    updates: Updates,
+    at: Watching,
+    /// **The audit line's `server:`** — `ops::Mutation::server`, off the `current` row of the list
+    /// this connection was chosen from (NOTES § D220 ruling 5).
+    server: String,
+}
+
+/// **The loop's state with nothing connected** — before the startup picker's first `⏎`, and from
+/// the moment a switch is asked for until it answers.
+///
+/// **`drained` from the start and not `false`**: a `SelectAll` with no streams in it answers `None`
+/// at once and for ever, which inside a `select!` is a busy loop and not a blocked one
+/// ([`Updates::drained`], invariant 7).
+fn nothing_connected(namespace: Option<&str>) -> Cluster {
+    Cluster {
+        session: None,
+        store: k8s::Store::default(),
+        updates: Updates {
+            merged: futures_util::stream::select_all(Vec::new()),
+            drained: true,
+            asked: std::collections::BTreeSet::new(),
+            asking: tokio::sync::mpsc::unbounded_channel().0,
+        },
+        at: Watching {
+            renewal: None,
+            coverage: asked_for(namespace),
+        },
+        server: String::new(),
+    }
+}
+
+/// **A session made this run's own** — every run-level fact a frame reads, rebuilt from the
+/// connection that has just opened, and the streams it is fed from.
+///
+/// **One function because the switch *is* the startup path run again** (NOTES § D16 ruling 4): two
+/// copies is how a switch comes to draw a header, a command log or a TLS warning the first connect
+/// does not.
+///
+/// **One list, read three ways, so none of them can name a different cluster from the connection**
+/// (NOTES § D174, § D265 ruling 8): `k8s::contexts` marks the row that was *asked for* as
+/// `current`, so [`tls_unverified`] reads `insecure-skip-tls-verify` and [`current_server`] reads
+/// the audit line's `server:` off the row k8rs actually connected to — not off the kubeconfig's own
+/// current one. The `server` half was the defect (`k8s-admin`, 2026-09-24): it asked
+/// `k8s::contexts(…, None)` for itself, so a `--context` run logged the right context name beside
+/// the wrong URL.
+///
+/// **[`Console::writes`] is untouched, which is the whole of `--read-only` outliving `X`**: it is a
+/// property of the process and not of the context (`screens/context.md` § What happens on `⏎`,
+/// NOTES § D265 ruling 8).
+async fn connected(
+    console: &mut Console<'_>,
+    kubeconfig: &kube::config::Kubeconfig,
+    context: Option<&str>,
+    mut session: k8s::Session,
+) -> Cluster {
+    console.contexts = k8s::contexts(kubeconfig, context);
+    console.insecure = tls_unverified(&console.contexts);
+    let server = current_server(&console.contexts);
+    // **The two facts a frame needs that are read once at connect** — `k8s::Session`'s own fields
+    // are moved into the merge below, so what a later frame still wants is read out first.
+    let at = Watching {
+        renewal: session.renewal.clone(),
+        coverage: session.coverage.clone(),
+    };
+    // **Built once per connection, because neither half of it can change without another one**
+    // ([`zone`], `ui::Screen::context`).
+    console.context =
+        views::Stripped::of(&zone(session.context.as_deref(), at.coverage.namespace()));
+    console.clock = clock(session.skew);
+    console.kinds = session
+        .served
+        .as_ref()
+        .map(|served| served.kinds.clone())
+        .unwrap_or_default();
+    // **The name as drawn, which is what a picker's `(current)` row shows** — `k8s::Session`'s
+    // `None` and `k8s::Choice::name`'s `None` are one answer for one entry, and this is that entry
+    // (`k8s::Session::context`'s own doc).
+    console.connection = views::Connection::Live(session.context.clone());
+    console.unconnected = false;
+    // **The old cluster's lines go here and not on `⏎`** (NOTES § D280 item 2,
+    // `screens/context.md` § When the new cluster does not work): emptied when the switch was
+    // *asked for*, the strip drew blank for as long as `connect_with` was out — seconds, on an SSO
+    // login — and a switch that then failed had nothing true to put there, because `sent` is
+    // `false` for every fault that box can draw. So the strip keeps `prod-eu`'s last line, or the
+    // picker's own `$ kubectl config get-contexts`, until there is a new context's line to replace
+    // it with.
+    console.log = views::Log::default();
+    // **The same lines the headless driver prints on stderr, in the strip the reader reads them
+    // in** ([`command_log`]): the probe, the version, discovery and the five watches, spelled once.
+    // **Every one of them carries `--context <name>`**, which is [`kubectl`]'s own rule, so a
+    // switch needs no second one for its lines (`screens/context.md` § What the command log shows).
+    for line in command_log(
+        true,
+        &kubectl(session.context.as_deref()),
+        &at.coverage,
+        session.namespace.as_deref(),
+    ) {
+        console.log.ran(line);
+    }
+
+    let mut store = k8s::Store::default();
+    store.identify(k8s::Identity::of(&session));
+    // **The lists every report needs, fetched once at connect and bounded together** — the shape
+    // [`live`] uses under `--analysis`, unconditional here because the console always draws the
+    // seven ANALYSIS rows, so their lists are always owed (`k8s::report_lists`, NOTES § D178). What
+    // that costs is [`lists_were_read`]'s staleness with no line to say so yet, and the re-read a
+    // pane should trigger is `backlog.md`'s.
+    let (certificates, lists) = tokio::join!(
+        k8s::certificate_requests(&session.client, k8s::REPORT_FETCH),
+        k8s::report_lists(&session.client, &session.coverage, k8s::REPORT_FETCH),
+    );
+    store.certificates_fetched(certificates);
+    store.reports_fetched(lists);
+
+    // **Every stream in one merge, in the frame that also holds the store** — the shape
+    // `k8s::drive_watching` has one layer down, written here rather than reused for one reason:
+    // that function owns its own loop and hands its observer a `&Store` with nothing to `await` on,
+    // so a console driven from inside it would draw on a watch event and never on a key.
+    //
+    // **Its end-marker is not reproduced, because nothing here reads it.** That marker exists so
+    // `--live` can print *every watch has stopped* while a poll that never ends is merged beside
+    // the watches; a console has no such ending to print — every watch having stopped is a state on
+    // screen, five `k8s::Trouble`s carrying `ended`, and the run goes on (`k8s.rs` § THE DRIVER,
+    // PRIOR-ART § B3). What replaces it is [`Updates::drained`], which stops *polling* a merge that
+    // has run dry so the loop blocks instead of spinning on it.
+    let mut streams = std::mem::take(&mut session.watches);
+    streams.push(k8s::node_usage_poll(session.client.clone()));
+    let (asking, wanted) = tokio::sync::mpsc::unbounded_channel();
+    streams.push(k8s::owner_fetches(session.client.clone(), wanted));
+    Cluster {
+        session: Some(session),
+        store,
+        updates: Updates {
+            merged: futures_util::stream::select_all(streams),
+            drained: false,
+            asked: std::collections::BTreeSet::new(),
+            asking,
+        },
+        at,
+        server,
+    }
+}
+
+/// **One switch: everything the old cluster had, dropped, and the picked context connected** —
+/// `screens/context.md` § What happens on `⏎`, and the startup picker's first `⏎` through the same
+/// function (NOTES § D16 ruling 4, § D264 ruling 13).
+///
+/// **The dropping happens on `⏎` and not when the answer comes back**, which is that section's
+/// steps 1 and 2 and `views::App::switched`'s own contract. So a switch that then fails reveals a
+/// body with nothing in it, because nothing survived to be stale — never the old cluster's findings
+/// under the new cluster's header (NOTES § D16 ruling 1). [`Console::opened`] goes with them: what
+/// a detail slot was showing belongs to the cluster it was read from.
+///
+/// **A failure is the modal and never the wall** (NOTES § D279 ruling 4): raw mode is already on by
+/// the time any picker can be pressed, at startup exactly as much as mid-session, so a stderr line
+/// here would be written behind an alternate screen.
+///
+/// **Its way out is `views::Before`'s and this function does not choose one** — `Picker::chosen`
+/// read it off what had connected when the key was pressed (NOTES § D264 rulings 4 and 15), which
+/// is the one moment it is knowable.
+async fn switched<B: ratatui::backend::Backend>(
+    console: &mut Console<'_>,
+    terminal: &mut ratatui::Terminal<B>,
+    cluster: &mut Cluster,
+    kubeconfig: &kube::config::Kubeconfig,
+    namespace: Option<&str>,
+    asked: Switching,
+) -> Result<(), String> {
+    *cluster = nothing_connected(namespace);
+    console.app.switched();
+    console.opened = None;
+    console.contexts = k8s::contexts(kubeconfig, Some(&asked.key));
+    console.insecure = tls_unverified(&console.contexts);
+    console.clock = None;
+    console.kinds = Vec::new();
+    console.unconnected = false;
+    console.context = views::Stripped::of(&zone(asked.to.as_deref(), namespace));
+    // **Step 3's frame, drawn before the connect is awaited** — `ctx: staging · connecting…` over
+    // the loading body `screens/states.md` already has. Nothing else draws while `connect_with` is
+    // out, so without this the reader watches the old cluster's frame during a switch that has
+    // already thrown it away.
+    drawn(terminal, console, &cluster.store, &cluster.at)?;
+    match k8s::connect_with(kubeconfig.clone(), Some(&asked.key), namespace).await {
+        Ok(session) => {
+            *cluster = connected(console, kubeconfig, Some(&asked.key), session).await;
+        }
+        Err(problem) => {
+            console.unconnected = true;
+            // **What a later `X` opens on** (NOTES § D264 ruling 15): the context that was last
+            // live, so a second and third failed switch in a row still name it — and `Never` for a
+            // run that has never connected, whose picker is the startup one.
+            console.connection = match &asked.before {
+                views::Before::Connected(last) => views::Connection::Dropped(last.clone()),
+                views::Before::Picking(_) => views::Connection::Never,
+            };
+            // **The header's connection slot, for as long as nothing is connected**
+            // ([`not_connected`], `screens/widgets.md` § 1a). Re-joined onto the zone the frame
+            // above drew without it, because the answer only exists now.
+            console.context = views::Stripped::of(&format!(
+                "{} · {}",
+                zone(asked.to.as_deref(), namespace),
+                not_connected()
+            ));
+            console.app.modal = Some(views::Modal::Unconnected {
+                to: asked.to,
+                before: asked.before,
+                // **Nothing was sent**: a `k8s::NotConnected` is a client that could not be built,
+                // so the box is asked as *reach this cluster* and reads no coverage at all
+                // (`ui::failed`, NOTES § D264 ruling 17).
+                sent: false,
+                fault: problem.fault(),
+                said: None,
+                coverage: asked_for(namespace),
+                renewal: problem.renewal().map(str::to_owned),
+            });
+        }
+    }
+    Ok(())
 }
 
 // --- THE TERMINAL HANDOVER START ---
@@ -8252,6 +8695,30 @@ fn scoped(namespace: &str) -> String {
     format!("ns: {namespace}")
 }
 
+/// **`⚠ not connected` — what the header's connection slot carries while nothing is connected**
+/// (`screens/widgets.md` § 1a, `screens/context.md` § After `esc dismiss`), joined onto the end of
+/// [`zone`] by the one caller that can fail a connect ([`switched`]).
+///
+/// **The caller's and not `ui::Link`'s, which answers `None` for exactly this state**
+/// (`ui::Link::Unconnected`): none of that type's four words describes a connection that never
+/// opened — `connecting…` claims an attempt is in flight and the last one has already answered no
+/// — and a fifth on the type would have to be kept in step with a per-fault table.
+///
+/// **One word for every fault, and that is measured rather than chosen for tidiness**
+/// (NOTES § D280 item 1, `screens/context.md` § Which faults can actually reach this box):
+/// `k8s::connect_with` fails in exactly two places, neither of which sends a byte, so the three
+/// faults that can reach a failed connect — `BadEntry`, `NoCredential`, and an `Unanswered` whose
+/// client was never built — all end in the one outcome the box draws, *could not be opened*. `⚠
+/// not allowed` belonged to `Fault::Refused`, which cannot get here at all: a 403 on the capability
+/// probe comes back `Ok(Session)` with a narrowed `k8s::Coverage`.
+///
+/// **A session fact and not a modal one**: it outlives the box that announced it, for as long as
+/// nothing is connected, which is what `esc dismiss` proved wrong once already
+/// (`reports/2026-09-19-the-strip-and-the-connection-word.md` § M1).
+fn not_connected() -> String {
+    format!("{} not connected", ui::mark(theme::ALARM))
+}
+
 /// **What a console says instead of drawing its first frame, or `None` to go on** — the two endings
 /// the prelude can reach, as one decision over typed answers rather than three `return`s among the
 /// calls that produce them.
@@ -8378,6 +8845,16 @@ async fn pump<B: ratatui::backend::Backend>(
     at: &Watching,
     mut running: Option<Running<'_, '_>>,
 ) -> Halt {
+    // **A halt parked by the last call is this one's first answer, before a key is read or a frame
+    // is drawn** ([`parked`], NOTES § D281 item 5): the reader already pressed that key, and making
+    // them press it again is the defect this slot exists to close.
+    if let Some(halt) = console.carried.take() {
+        return halt;
+    }
+    // **Read here and not at the point it is used**: [`Running`] is taken out of its own slot the
+    // instant the mutation settles, so a check made later would answer *not mutating* about a
+    // frame that is still holding the future and the audit `File` ([`parked`]).
+    let mutating = running.is_some();
     // **The first frame is owed before anything has happened at all** — `screens/states.md`
     // § Still loading is a screen and not a wait, so it is drawn before the first LIST returns.
     let mut owing = Owing::default();
@@ -8411,7 +8888,15 @@ async fn pump<B: ratatui::backend::Backend>(
                                 return Halt::Failed(said);
                             }
                         }
-                        Did::Mutate(asked) => return Halt::Mutate(asked),
+                        Did::Mutate(asked) => {
+                            return parked(&mut console.carried, mutating, Halt::Mutate(asked));
+                        }
+                        // **Out for the same reason a mutation goes out** (NOTES § D232): the
+                        // session, the store and every stream this loop was handed belong to
+                        // [`console`]'s frame, and a switch replaces all three.
+                        Did::Switch(switching) => {
+                            return parked(&mut console.carried, mutating, Halt::Switch(switching));
+                        }
                         Did::Answered(reply) => {
                             if let Some(running) = running.as_ref() {
                                 let _ = running.answering.send(reply);
@@ -8474,8 +8959,17 @@ async fn pump<B: ratatui::backend::Backend>(
             }
         }
         // **Read after the `select!` and not inside one arm**: `show` and `ask` are called from
-        // inside the mutation's own future, so whatever they published is here once that future has
-        // been polled — and a dialog that opened or armed is a frame owed.
+        // inside the mutation's own future, so whatever they published is picked up on the turn
+        // after the poll that wrote it — and a dialog that opened or armed is a frame owed.
+        //
+        // **What the `running` guard drops is the *final* poll's publications, and dropping them is
+        // the correct answer** (`k8s-admin`, 2026-09-26): [`settled`] has already taken the slot to
+        // `None` and installed the outcome box by the time this runs, so the only thing strandable
+        // is a `Published::Opening` from an operation that published and returned in one poll —
+        // and installing that confirmation box *over* the outcome the reader is now looking at
+        // would be the box reopening after its own answer. The comment above said the opposite for
+        // a round: *whatever they published is here once that future has been polled*, which
+        // describes a mechanism this loop does not have.
         if let Some(running) = running.as_ref() {
             let published: Vec<Published> = running.shown.borrow_mut().drain(..).collect();
             for asked in published {
@@ -8536,7 +9030,11 @@ fn drawn<B: ratatui::backend::Backend>(
     // whose read has not answered.
     let alerts_pane = console.app.view == views::View::Alerts && console.opened.is_none();
     let note = if alerts_pane {
-        notes(snapshot.as_ref(), &store.still_listing())
+        notes(
+            !console.unconnected,
+            snapshot.as_ref(),
+            &store.still_listing(),
+        )
     } else {
         Vec::new()
     };
@@ -8587,7 +9085,7 @@ fn drawn<B: ratatui::backend::Backend>(
     }
     let screen = ui::Screen {
         depth: console.depth,
-        vitals: vitals(snapshot.as_ref(), &troubles),
+        vitals: vitals(!console.unconnected, snapshot.as_ref(), &troubles),
         context: console.context.clone(),
         insecure: console.insecure,
         alerts: &alerts,
@@ -8606,11 +9104,13 @@ fn drawn<B: ratatui::backend::Backend>(
         refused: views::Refused::default(),
         writes: console.writes,
         clock: console.clock.as_deref().map(views::Stripped::of),
-        link: linked(snapshot.as_ref(), &troubles),
+        link: linked(!console.unconnected, snapshot.as_ref(), &troubles),
         detail,
         // **Handed over only while the picker is open**, which is that field's own contract —
-        // *"empty when nothing is picking"* (`ui::Screen::contexts`). The list itself is held for
-        // the run, because `X` must not re-read the kubeconfig to open a picker.
+        // *"empty when nothing is picking"* (`ui::Screen::contexts`). The list itself is held
+        // between connects, because `X` must not re-read the kubeconfig to open a picker; it is
+        // re-derived once per connect so its `(current)` row is the context that connect was made
+        // with ([`connected`], NOTES § D264 ruling 4).
         contexts: match console.app.modal {
             Some(views::Modal::ContextPick(_)) => &console.contexts,
             _ => &[],
@@ -8620,6 +9120,9 @@ fn drawn<B: ratatui::backend::Backend>(
     // the footer was drawn from *is* the value a mutating key is checked against, which is
     // `ui::offered`'s own reason for being `pub`.
     console.offer = ui::offered(&console.app, &screen);
+    // **What this frame said the connection was doing, kept for the key that answers it**
+    // ([`Console::link`]): `X` opens the picker the header just described.
+    console.link = screen.link;
     terminal
         .draw(|frame| ui::draw(frame, &mut console.app, &screen))
         .map(|_| ())
@@ -8658,7 +9161,18 @@ static UNOPENED: views::Pane<k8s::Table> = views::Pane::Loading;
 /// **Blank and not zero whenever the node watch has not answered**: `nodes` is cluster-scoped and
 /// no namespaced `Role` grants it, so `0/0` is what every scoped run would otherwise draw over a
 /// cluster it simply cannot see — the defect [`header`] already carries this rule for.
-fn vitals(snapshot: Option<&ClusterSnapshot>, troubles: &[k8s::Trouble<'_>]) -> views::Stripped {
+fn vitals(
+    connected: bool,
+    snapshot: Option<&ClusterSnapshot>,
+    troubles: &[k8s::Trouble<'_>],
+) -> views::Stripped {
+    // **Blank while nothing is connected, which is not the same as `nodes …`** — that reading is
+    // *while connecting*, and a switch that failed is not connecting to anything
+    // (`screens/widgets.md` § 1a, `screens/context.md` § After `esc dismiss`, whose left zone is
+    // empty). The nodes it would count are the ones the switch already threw away.
+    if !connected {
+        return views::Stripped::of("");
+    }
     let unread = troubles
         .iter()
         .any(|trouble| trouble.kind == ObjectKind::Node && !trouble.listed);
@@ -8696,7 +9210,18 @@ fn vitals(snapshot: Option<&ClusterSnapshot>, troubles: &[k8s::Trouble<'_>]) -> 
 /// whatever it was. What moves the link is a cluster that is not answering
 /// (`k8s::Fault::Unanswered`, `Unfinished`) and a login that has run out (`Expired`), which is the
 /// one that promotes `X switch cluster` onto the footer because renewing is *the* next step.
-fn linked(snapshot: Option<&ClusterSnapshot>, troubles: &[k8s::Trouble<'_>]) -> ui::Link {
+fn linked(
+    connected: bool,
+    snapshot: Option<&ClusterSnapshot>,
+    troubles: &[k8s::Trouble<'_>],
+) -> ui::Link {
+    // **A switch that failed is not a connection in any state** (`ui::Link::Unconnected`,
+    // `screens/widgets.md` § 1a: *this is a session fact, not a modal one*). The store the arms
+    // below read is empty after `views::App::switched`, which is the shape of a first launch — so
+    // without this the header draws `connecting…` over a cluster that has already said no.
+    if !connected {
+        return ui::Link::Unconnected;
+    }
     let fault = |wanted: k8s::Fault| {
         troubles
             .iter()
@@ -8729,7 +9254,28 @@ fn linked(snapshot: Option<&ClusterSnapshot>, troubles: &[k8s::Trouble<'_>]) -> 
 /// mockup's parenthesis is a sentence out of a report's own rows — *"1 node is promising more than
 /// it has"* — and nothing in `analysis.rs` hands one back. The two paragraphs that are derivable
 /// are drawn; a third that would have to be invented is not.
-fn notes(snapshot: Option<&ClusterSnapshot>, listing: &[k8s::Listing]) -> Vec<views::Stripped> {
+fn notes(
+    connected: bool,
+    snapshot: Option<&ClusterSnapshot>,
+    listing: &[k8s::Listing],
+) -> Vec<views::Stripped> {
+    // **Nothing is being read, so *reading the cluster…* is a false sentence** — the two
+    // paragraphs `screens/context.md` § After `esc dismiss` draws instead, which say what the
+    // state is and what the one key out of it does. The reason is not repeated here: the reader
+    // has just read it in the box they dismissed, and a second, shorter copy is the second
+    // vocabulary NOTES § D264 ruling 1 refuses.
+    //
+    // **The mark is `theme::ALARM` and the sentence carries it** — `ui::banner` hangs its wrap on
+    // the mark the caller sent and spells none of its own.
+    if !connected {
+        return vec![
+            views::Stripped::of(&format!(
+                "{} Not connected to the cluster right now.",
+                ui::mark(theme::ALARM)
+            )),
+            views::Stripped::of("Press X to try again, or pick a different cluster."),
+        ];
+    }
     match snapshot {
         None => {
             // **The count is the pods LIST's own progress** (`k8s::Store::still_listing`), the
@@ -8905,16 +9451,11 @@ fn pressed(
             Did::Changed
         }
         KeyCode::Char('X') if console.app.may_switch_cluster() => {
-            console.log.ran(views::GET_CONTEXTS.to_owned());
-            let named = console
-                .contexts
-                .iter()
-                .find(|row| row.current)
-                .map(|row| views::drawn_name(row).to_owned());
             console.app.modal = Some(views::Modal::ContextPick(views::Picker::new(
                 &console.contexts,
-                views::Connection::Live(named),
+                opening_on(&console.connection, console.link),
             )));
+            console.log.ran(views::GET_CONTEXTS.to_owned());
             Did::Changed
         }
         // **`esc` closes the detail slot and the *caller* is what closes it** —
@@ -9046,16 +9587,21 @@ fn over_modal(
                 picker.filter.pop();
                 Did::Changed
             }
-            // **`⏎` on the row the picker is on** — and connecting again is the *cluster picker*
-            // box's, not this one's (todo.md § Phase 12): `Chosen::Close` is the whole of what is
-            // wired here, and a row that would connect leaves the picker open rather than
-            // pretending.
+            // **`⏎` on the row the picker is on** — `Close` when that row is the live cluster,
+            // and otherwise the connection [`console`]'s own frame makes (NOTES § D264 ruling 13).
+            // **`Stay` is a row `views::Picker::chosen` refuses**, whose button already drew dim
+            // and whose key the footer never offered (NOTES § D264 ruling 2).
             KeyCode::Enter => match picker.chosen(&contexts) {
                 views::Chosen::Close => {
                     console.app.modal = None;
                     Did::Changed
                 }
-                views::Chosen::Stay | views::Chosen::Connect { .. } => Did::Nothing,
+                views::Chosen::Stay => Did::Nothing,
+                views::Chosen::Connect { row, before } => Did::Switch(Switching {
+                    key: row.key.clone(),
+                    to: row.name.clone(),
+                    before,
+                }),
             },
             KeyCode::Esc => {
                 if console.app.escape(open) {

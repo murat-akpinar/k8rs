@@ -11735,6 +11735,21 @@ fn unconnected_box(
     fault: Fault,
     coverage: Coverage,
 ) -> (Vec<String>, Vec<String>) {
+    unconnected_box_of(to, before, sent, fault, coverage, None)
+}
+
+/// [`unconnected_box`] over a kubeconfig that names a login program — the shape every box
+/// `screens/context.md` draws is in, since `Fault::NoCredential` is the fault it illustrates and
+/// the program's name is inside the sentence (`views::because`) and its next step
+/// (`views::run_the_login`).
+fn unconnected_box_of(
+    to: Option<&str>,
+    before: views::Before,
+    sent: bool,
+    fault: Fault,
+    coverage: Coverage,
+    renewal: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
     failure_box(views::Modal::Unconnected {
         to: to.map(str::to_owned),
         before,
@@ -11742,12 +11757,12 @@ fn unconnected_box(
         fault,
         said: None,
         coverage,
-        renewal: None,
+        renewal: renewal.map(str::to_owned),
     })
 }
 
-/// **[`failed_under`] the page's own header, with nothing in the vitals zone** — `ctx: staging · ⚠
-/// not allowed · admin`, read off § When the new cluster does not work's `[0]`, and never the
+/// **[`failed_under`] the page's own header, with nothing in the vitals zone** — `ctx: aws-staging
+/// · ⚠ not connected · admin`, read off § When the new cluster does not work's `[0]`, and never the
 /// helper [`screen`]'s `prod-eu · live`: the header names the context that was tried and not the
 /// one live before it (§ Opening at startup), and nothing from the old cluster survives the switch
 /// (§ What happens on `⏎`), so the page draws no vitals.
@@ -11763,10 +11778,10 @@ fn failure_box(modal: views::Modal) -> (Vec<String>, Vec<String>) {
 /// handed over whole would draw it twice.
 ///
 /// **The link is [`Link::Unconnected`] in every one of these, which is the whole of what a caller
-/// owes this frame** (todo.md § Phase 12): the zone handed over already ends in the *fault's* word,
+/// owes this frame** (todo.md § Phase 12): the zone handed over already ends in `⚠ not connected`,
 /// and any other value of [`Link`] joins a second connection word behind it — measured, with
-/// `Link::Live`, as `ctx: staging · ⚠ not allowed · live · admin` against this page's own row
-/// (`tester`, 2026-09-19).
+/// `Link::Live`, as `ctx: aws-staging · ⚠ not connected · live · admin` against this page's own
+/// row (`tester`, 2026-09-19).
 fn failed_under(modal: views::Modal, header: &str, vitals: &str) -> (Vec<String>, Vec<String>) {
     let alerts = Pane::Ready(vec![oom(), cordon(Some(at(0)))]);
     let now = now();
@@ -11813,34 +11828,57 @@ fn never(rows: &[Choice]) -> views::Before {
     views::Before::Picking(views::Picker::new(rows, views::Connection::Never))
 }
 
-/// **Both *staging said no* boxes are the screen file's, byte for byte** — `Refused` on a watch
-/// cluster-wide, over a live switch and over the startup picker: every row of the box, its title
+/// **Both *aws-staging could not be opened* boxes are the screen file's, byte for byte** — a
+/// `NoCredential` over a live switch and over the startup picker: every row of the box, its title
 /// and both borders included, and the footer each draws (`screens/context.md` § When the new
 /// cluster does not work, NOTES § D264 ruling 1) — **the button row too**, whose odd spare column
 /// the page puts on the left, where `screens/dialogs.md`'s two boxes of the same width put it
-/// (ruling 19). **The paragraph's next step is the running one** (ruling 23), six rows in the box,
+/// (ruling 19). **The paragraph's next step is [`views::run_the_login`]'s** (NOTES § D280 item 3),
 /// and **the header is each mockup's own** ([`against_page_header`]).
+///
+/// **The fault is the one that can actually reach this box, which is what changed here**
+/// (NOTES § D280 items 1 and 2): `Fault::Refused` cannot — a 403 on the capability probe comes
+/// back `Ok(Session)` with a narrowed `Coverage` — so the page it was compared against stopped
+/// existing, and a byte-for-byte test against a mockup nobody can produce is a test that pins the
+/// wrong thing. `sent` is `false` for the same structural reason
+/// (§ Which faults can actually reach this box, and where the rest live instead).
+///
+/// **Each box is the *first* fence under its own heading, and that is not cosmetic.** The startup
+/// one was `[2]` of the `##` section for one afternoon and `[1]` the next, because a `###` between
+/// them grew a fence — and an ordinal that has moved does not fail, it silently compares a
+/// different drawing, the trap the dismissed-frame test below already names. [`fenced`] runs a
+/// heading to the next `## `, so a `###` addresses its own fences and everything under it; taking
+/// `[0]` of each is *the drawing this heading opens with*, which is what both mockups are.
 #[test]
 fn both_refusals_are_the_screen_files_boxes() {
     let four = contexts_of(FOUR);
-    let blocks = fenced("context.md", "## When the new cluster does not work");
+    let mid_session = fenced("context.md", "## When the new cluster does not work");
+    let startup = fenced(
+        "context.md",
+        "### The same failure, from the startup picker",
+    );
     for (block, before) in [
         (
-            &blocks[0],
+            &mid_session[0],
             views::Before::Connected(Some("prod-eu".to_owned())),
         ),
-        (&blocks[2], never(&four)),
+        (&startup[0], never(&four)),
     ] {
-        let (drawn, frame) = unconnected_box(
-            Some("staging"),
+        let (drawn, frame) = unconnected_box_of(
+            Some("aws-staging"),
             before,
-            true,
-            Fault::Refused,
+            false,
+            Fault::NoCredential,
             Coverage::Cluster,
+            Some("aws"),
         );
         let mockup = nested(block);
         assert_eq!(drawn.len(), mockup.len(), "the box's height");
         for (n, (drawn, row)) in drawn.iter().zip(&mockup).enumerate() {
+            // **The wrap is `room(DISMISS_BOX)`, which is 52**, and every other row of every box
+            // on this page obeys it. A row that differs by one trailing word is the mockup
+            // hand-wrapped at 50 — D264 ruling 21's class, *the page draws the bytes the code
+            // draws* — and it is the page's to fix, never this assertion's to loosen.
             assert_eq!(drawn, row, "row {n}");
         }
         assert_eq!(
@@ -11859,8 +11897,8 @@ fn both_refusals_are_the_screen_files_boxes() {
 /// **The claim is that dismissing the box changes nothing about the header**, so the two frames
 /// are compared with each other as well as with the page: [`header`] read
 /// `crate::views::Modal::Unconnected` until 2026-09-19, which made the fault's word end when the
-/// box did — `ctx: staging · ⚠ not allowed · live · admin` the frame after `esc`, two connection
-/// words over a cluster k8rs never reached
+/// box did — `ctx: aws-staging · ⚠ not connected · live · admin` the frame after `esc`, two
+/// connection words over a cluster k8rs never reached
 /// (`reports/2026-09-19-the-strip-and-the-connection-word.md` § M1). Asserted as *the same row*
 /// and not as *a row 36 columns wide*: a geometry assertion passes whichever word is in it.
 ///
@@ -11892,8 +11930,10 @@ fn the_frame_behind_a_dismissed_failure_keeps_the_faults_word_and_the_way_back()
     // dropped the moment `⏎` was pressed, so the pane is `Loading` and the note is all the body
     // has.
     let note = [Stripped::of("⚠ Not connected to the cluster right now.")];
+    // **The strip keeps `prod-eu`'s own last line** (NOTES § D280 item 2): nothing was sent for
+    // aws-staging, so nothing about it was ever appended — the page's own row.
     let log = [Stripped::of(
-        "$ kubectl --context staging get pods -A --watch   → not allowed",
+        "$ kubectl --context prod-eu get pods -A --watch",
     )];
     let mut screen = screen(&alerts, &now);
     screen.context = Stripped::of(zone.strip_suffix(" · admin").expect("the page's own word"));
@@ -11905,13 +11945,16 @@ fn the_frame_behind_a_dismissed_failure_keeps_the_faults_word_and_the_way_back()
     let dismissed = rows(&render(&app(), &screen));
     let open = App {
         modal: Some(views::Modal::Unconnected {
-            to: Some("staging".to_owned()),
+            to: Some("aws-staging".to_owned()),
             before: views::Before::Connected(Some("prod-eu".to_owned())),
-            sent: true,
-            fault: Fault::Refused,
+            // **The fault this box can actually be reached with** (NOTES § D280 items 1 and 2):
+            // `Refused` folds into a narrowed `Coverage` inside a live session and never fails a
+            // connect, so a frame built from it is a frame no run produces.
+            sent: false,
+            fault: Fault::NoCredential,
             said: None,
             coverage: Coverage::Cluster,
-            renewal: None,
+            renewal: Some("aws".to_owned()),
         }),
         ..App::default()
     };
@@ -11928,8 +11971,8 @@ fn the_frame_behind_a_dismissed_failure_keeps_the_faults_word_and_the_way_back()
         unframed(&page[page.len() - 2]),
         "the footer"
     );
-    // **One connection word in the slot, and it is the fault's** — a header that joined `live`
-    // behind it reads as a connected cluster that is also not allowed.
+    // **One connection word in the slot** — a header that joined `live` behind `⚠ not connected`
+    // reads as a cluster that is both.
     for never in ["live", "connecting", "disconnected", "login expired"] {
         assert!(
             !dismissed[0].contains(never),
@@ -11939,30 +11982,49 @@ fn the_frame_behind_a_dismissed_failure_keeps_the_faults_word_and_the_way_back()
     }
 }
 
-/// **A namespace the reader named and one k8rs had to guess take the page's two next steps**, and
-/// the same opening reason (`screens/context.md` § The scope changes the next step, not just a
-/// number) — the contrast `Coverage::namespace()` alone collapsed. **Each is the page's quote with
-/// nothing added**: the reason before it ends in the full stop `failed` writes, and what follows it
-/// in the box is the way out, so a stop the driver's sentence does not have would be caught.
+/// **The three scopes take the page's three next steps, byte for byte** (`screens/context.md`
+/// § What `Refused` draws, if something ever hands it here) — the contrast
+/// `Coverage::namespace()` alone collapsed, which sent a namespace-scoped developer to ask for
+/// access to `default` (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1,
+/// NOTES § D264 ruling 1). **Each is the page's quote with nothing added**: the reason before it
+/// ends in the full stop `failed` writes, and what follows it in the box is the way out, so a stop
+/// the driver's sentence does not have would be caught.
+///
+/// **Three and not two, because `Coverage::Cluster`'s was orphaned too** — it was the old headline
+/// box's body text, and that box went when `Fault::Refused` was measured unable to reach a failed
+/// connect (NOTES § D280 items 1 and 2). All three now live in one subsection that says plainly no
+/// caller reaches them today.
+///
+/// **`sent: true` is kept deliberately** (NOTES § D280 item 2): that branch is unreachable from
+/// the console and the page names a future avenue for it, so it stays drawn and stays tested
+/// rather than being deleted for being quiet.
 #[test]
 fn a_named_namespace_and_a_guessed_one_take_the_page_s_two_next_steps() {
-    let excerpt = &fenced("context.md", "## When the new cluster does not work")[1];
+    let excerpt = &fenced(
+        "context.md",
+        "### What `Refused` draws, if something ever hands it here",
+    )[0];
     let paragraphs: Vec<String> = excerpt
         .split(|row| row.ends_with(':') && !row.starts_with(' '))
         .skip(1)
         .map(|rows| words(&rows.join(" ")))
         .collect();
-    assert_eq!(paragraphs.len(), 2, "{excerpt:?}");
-    for (coverage, next, namespace) in [
+    assert_eq!(paragraphs.len(), 3, "{excerpt:?}");
+    for (coverage, next, place) in [
+        (
+            Coverage::Cluster,
+            &paragraphs[0],
+            "across the whole cluster",
+        ),
         (
             Coverage::Asked("payments".to_owned()),
-            &paragraphs[0],
-            "payments",
+            &paragraphs[1],
+            "in the namespace payments",
         ),
         (
             Coverage::Blind("default".to_owned()),
-            &paragraphs[1],
-            "default",
+            &paragraphs[2],
+            "in the namespace default",
         ),
     ] {
         let (drawn, _) = unconnected_box(
@@ -11975,13 +12037,126 @@ fn a_named_namespace_and_a_guessed_one_take_the_page_s_two_next_steps() {
         let said = inside(&drawn);
         assert!(
             said.contains(&format!(
-                "needs to `list` and `watch` pods in the namespace {namespace}. {next} Nothing has \
-                 connected yet"
+                "needs to `list` and `watch` pods {place}. {next} Nothing has connected yet"
             )),
             "{coverage:?}:\n{}",
             drawn.join("\n")
         );
-        assert!(!said.contains("across the whole cluster"), "{coverage:?}");
+        // **And the other two places are not in this box** — the collapse R1 measured draws one
+        // scope over three different refusals.
+        for other in [
+            "across the whole cluster",
+            "in the namespace payments",
+            "in the namespace default",
+        ] {
+            assert_eq!(
+                other == place,
+                said.contains(other),
+                "{coverage:?} drew {other:?}:\n{}",
+                drawn.join("\n")
+            );
+        }
+    }
+}
+
+/// **The one fault that sent nothing and still gets a next step, and the three that do not**
+/// (NOTES § D280 item 3, `screens/context.md` § When the new cluster does not work).
+///
+/// **`interactive_mode: Never` is what owes this sentence.** An `exec` plugin can no longer prompt
+/// or print — its stdin is piped and its stderr captured, at connect and at every refresh — so a
+/// reader whose login wants a device code got *gave k8rs nothing to sign in with* and nothing to
+/// do about it, while their own `kubectl` worked on that same context.
+///
+/// **`renewal` is the gate and not the fault**: a `tokenFile` that does not exist and an
+/// `auth-provider: azure` both land in `NoCredential` with no program (NOTES § D264 ruling 32), and
+/// *run it yourself* over one of those names nothing the reader can run.
+///
+/// **The name is quoted, and one frame spells it once** (NOTES § D281 item 1): the box and the
+/// command log are both taught `kubectl` lines, and `ops::pasteable` is the one quoting rule
+/// (NOTES § D278 ruling 5). Measured on the real binary before this: the strip drew
+/// `--context 'needs login'` and the box drew `--context needs login`, in the same frame — and for
+/// `prod eu; echo pwned` the box handed the reader a shell injection as an instruction to paste.
+/// `k8s::drawable` removes characters with no printed form and caps length; it is **not** a charset
+/// allowlist, so a space and a `;` both reach here.
+///
+/// **A name with nothing left after the strip gets no next step at all** (NOTES § D281 item 2):
+/// `(unnamed)` is a shell syntax error, and dropping only the flag would teach a command against
+/// the reader's own current context — a third cluster.
+#[test]
+fn only_a_login_program_earns_a_next_step_from_a_connection_that_sent_nothing() {
+    let step = |to, renewal| {
+        let (drawn, _) = unconnected_box_of(
+            to,
+            views::Before::Connected(Some("prod-eu".to_owned())),
+            false,
+            Fault::NoCredential,
+            Coverage::Cluster,
+            renewal,
+        );
+        inside(&drawn)
+    };
+    let told = step(Some("aws-staging"), Some("aws"));
+    println!("{told}");
+    assert!(
+        told.contains(
+            "Run it yourself first: `kubectl --context aws-staging version`. Then try again."
+        ),
+        "the login that cannot prompt any more left the reader nothing to do: {told:?}"
+    );
+    // **`version` and not `get ns`** — `namespaces` is cluster-scoped, so the reader that sentence
+    // was written to protect would have been refused and concluded a working login was broken
+    // (NOTES § D281 item 3).
+    assert!(!told.contains("get ns"), "{told:?}");
+
+    // **One name, one spelling, and it is `ops::pasteable`'s.**
+    let quoted = step(Some("needs login"), Some("aws"));
+    println!("{quoted}");
+    assert!(
+        quoted.contains(&format!(
+            "`kubectl --context {} version`",
+            crate::ops::pasteable("needs login")
+        )),
+        "the box spelled the name its own way: {quoted:?}"
+    );
+    // The injection D278 measured, handed over as an instruction to paste.
+    let dangerous = step(Some("prod eu; echo pwned"), Some("aws"));
+    println!("{dangerous}");
+    assert!(
+        !dangerous.contains("--context prod eu; echo pwned"),
+        "an unquoted name reached a sentence telling the reader to run it: {dangerous:?}"
+    );
+
+    // **No name, no command** — never `(unnamed)`, and never a bare `kubectl version`.
+    let nameless = step(None, Some("aws"));
+    println!("{nameless}");
+    assert!(
+        !nameless.contains("Run it yourself"),
+        "a context with no runnable name was given a command: {nameless:?}"
+    );
+    assert!(!nameless.contains("kubectl"), "{nameless:?}");
+
+    // **No program named, no login to re-run.**
+    let bare = step(Some("aws-staging"), None);
+    assert!(
+        !bare.contains("Run it yourself"),
+        "a kubeconfig with no login program was told to run one: {bare:?}"
+    );
+    // **Neither of the other two reachable faults has a reader-side action**, and inventing one is
+    // the fallback `views::because` refuses.
+    for fault in [Fault::BadEntry, Fault::Unanswered] {
+        let (drawn, _) = unconnected_box_of(
+            Some("aws-staging"),
+            views::Before::Connected(Some("prod-eu".to_owned())),
+            false,
+            fault,
+            Coverage::Cluster,
+            Some("aws"),
+        );
+        let said = inside(&drawn);
+        assert!(
+            !said.contains("Run it yourself"),
+            "{fault:?} was given a login to re-run: {said:?}"
+        );
     }
 }
 

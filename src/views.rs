@@ -56,17 +56,20 @@
 // `unfulfilled_lint_expectations` warning each under `-D warnings` (measured 2026-09-23). The
 // wrapper keeps the claim where it belongs: *nothing outside a test reaches this*.
 //
-// **Two numbers live here and they count different things** (both measured, 2026-09-24):
+// **Two numbers lived here and they counted different things** (both measured, 2026-09-24):
 // **fourteen** `dead_code` *warnings* were what removing the two module attributes reported — the
 // unit rustc counts, so one warning covered `Modal`'s two unreached variants together — and
-// **fifteen** per-item `expect`s are what replaced them, thirteen in this file and two in `ui.rs`,
-// because an attribute goes on an item and not on a warning.
+// **fifteen** per-item `expect`s were what replaced them, thirteen in this file and two in
+// `ui.rs`, because an attribute goes on an item and not on a warning. **How many are left is not
+// written down, because it is the copy that goes stale every time a box lands** (this one did,
+// the turn *the cluster picker is wired* removed five of them). Counted, not recalled:
+// `grep -c 'expect($' src/views.rs src/ui.rs`.
 //
 // **And a reason may not name a box that does not exist** (PM ruling, 2026-09-24, after `tester`
 // grepped `todo.md` 4565–4732): Phase 12 has no detail-tab fetch box, no permission-probe box and
-// no scale-count box, so those reasons say *no box yet* and name the work instead. The four that do
-// cite a box — three for **the cluster picker is wired** and one for **flags from
-// `std::env::args`** — cite boxes that are in the file.
+// no scale-count box, so those reasons say *no box yet* and name the work instead. The ones that
+// cited **the cluster picker is wired** are gone, with that box; what still cites one cites
+// **flags from `std::env::args`**, which is in the file.
 
 use crate::analysis::Row as ReportRow;
 use crate::k8s::{
@@ -1042,14 +1045,6 @@ pub enum Modal {
     /// **It carries what the driver's own sentences read, and no sentence** (NOTES § D264
     /// ruling 1): the reason is [`because`]'s, the scope [`scope`]'s and the next step
     /// [`next_step`]'s, the same three a `--once` run that could not read pods prints.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "built from a failed second `connect()` — the cluster picker box's (todo.md \
-                      § Phase 12)"
-        )
-    )]
     Unconnected {
         /// The picked context's name as drawn — [`Choice::name`], `None` being [`UNNAMED`].
         to: Option<String>,
@@ -1142,14 +1137,6 @@ pub enum Connection {
     /// **A context connected earlier in this run and none is live now** — a switch failed, or has
     /// not answered yet. **It carries the context that was last live**, its name as drawn, so a
     /// second and third failed switch in a row still name it (NOTES § D264 ruling 15).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "an expired login opens the picker with it — the cluster picker box's, with \
-                      NOTES § D265 ruling 4 (todo.md § Phase 12)"
-        )
-    )]
     Dropped(Option<String>),
     /// **The `(current)` row is the live context** — its name as drawn. The rows must then be
     /// `k8s::contexts` asked for that context, so its row is the one marked current.
@@ -1184,14 +1171,6 @@ pub enum Chosen<'a> {
     Stay,
     /// **Connect to this row** (NOTES § D264 ruling 8): the caller connects with [`Choice::key`],
     /// the file's own spelling, and draws [`Choice::name`].
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by the caller that connects again — the cluster picker box's (todo.md \
-                      § Phase 12)"
-        )
-    )]
     Connect {
         /// The row `⏎` was pressed on.
         row: &'a Choice,
@@ -2763,11 +2742,20 @@ impl App {
         }
     }
 
-    /// **A switch was made, and nothing the reader did on the old cluster survives it in [`App`] or
-    /// in the command log** (`screens/context.md` § What happens on `⏎`, steps 2 and 5; NOTES § D16
-    /// ruling 3). The view is Alerts again — the old sidebar's indices mean nothing on the new
-    /// cluster — every cursor, filter, tab and scroll is gone, and the command log starts empty for
-    /// the new context's first line.
+    /// **A switch was made, and nothing the reader did on the old cluster survives it in [`App`]**
+    /// (`screens/context.md` § What happens on `⏎` step 5; NOTES § D16 ruling 3). The view is
+    /// Alerts again — the old sidebar's indices mean nothing on the new cluster — and every cursor,
+    /// filter, tab and scroll is gone.
+    ///
+    /// **[`Log`] is not emptied here, and that is a correction rather than an omission**
+    /// (NOTES § D280 item 2). It was, on `⏎`, before the outcome was known — so the strip drew
+    /// blank for as long as `connect_with` was out, on every switch, and a switch that then failed
+    /// had nothing to put there at all. `screens/context.md` § When the new cluster does not work
+    /// rules that the strip **keeps what was already there** until the new context has connected:
+    /// `sent` is `false` for every fault that box can draw, so no line about the new context was
+    /// ever true, and inventing one is the outcome-word fiction `screens/dialogs.md` § The object
+    /// went away already refused. The caller empties it on success, beside the new context's first
+    /// line.
     ///
     /// **It is not the whole of a switch.** The session and any open detail stream are the
     /// caller's — `ui::Screen::detail` is not a field here — and Phase 12's wiring drops them
@@ -2775,17 +2763,8 @@ impl App {
     ///
     /// Called on `⏎`, before the connection answers: a switch that then fails stays on the context
     /// that was chosen, and so does this.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "called beside the second `connect()` — the cluster picker box's, with \
-                      NOTES § D264 ruling 13 (todo.md § Phase 12)"
-        )
-    )]
-    pub fn switched(&mut self, log: &mut Log) {
+    pub fn switched(&mut self) {
         *self = App::default();
-        *log = Log::default();
     }
 
     /// **Nothing has connected behind what is open** — the startup picker, or the failure it led to
@@ -3776,6 +3755,26 @@ pub fn no_previous_run(container: &str, restarts: i32, previous: bool) -> Option
 /// spelling, moved with the sentences that name it.
 pub const NAMESPACE: &str = "--namespace";
 
+/// **Which context k8rs connects to** — the console's (`crate::main`'s `opening`) and, on the
+/// temporary driver, `--live`'s and `--once`'s. One spelling for both, read by one parser
+/// (`crate::main`'s `context_arg`).
+///
+/// **It lives here for [`NAMESPACE`]'s reason** (NOTES § D264 ruling 14): [`run_the_login`] names
+/// it in a sentence `ui.rs` draws, and `ui.rs` cannot reach `main.rs` — so a copy there would be
+/// the second spelling of a flag, which is how a next step comes to teach a flag the parser no
+/// longer has. CLAUDE.md's flag count already greps this file.
+///
+/// **Released and not scaffolding, since the flags box** (todo.md § Phase 12). It arrived in the
+/// driver early, for `--live`, because the machine that runs the reconnect proof does not have to
+/// be the machine whose current context is the test cluster; what that bought was the muscle memory
+/// already being right when the console came to read it.
+///
+/// **What it picks is not only the connection**: `k8s::contexts` is handed the same value, so the
+/// `current` row the header's TLS warning is read off is the row k8rs is actually on
+/// (`crate::ui::Screen::insecure`, NOTES § D265 ruling 8). Reading one and not the other is the
+/// disagreement NOTES § D174 closed one door over.
+pub const CONTEXT: &str = "--context";
+
 /// **What a connection that sent nothing was trying to do** — a `k8s::NotConnected`, whose client
 /// was never built, framed for [`because`] (NOTES § D264 ruling 1).
 pub const REACH: &str = "reach this cluster";
@@ -4135,6 +4134,68 @@ pub fn next_step(
         ),
         _ => None,
     }
+}
+
+/// **What a reader whose login program answered nothing can do about it** — run the same login
+/// themselves, in their own terminal, where it can prompt (`screens/context.md` § When the new
+/// cluster does not work).
+///
+/// **It reverses half of NOTES § D264 ruling 32, and the thing that changed is not the wording.**
+/// That ruling gave [`Fault::NoCredential`] no next step because the program's own diagnosis went
+/// to the terminal's stderr and getting it back was Phase 12's terminal handover to do. Phase 12
+/// did that turn and ruled the other way: an `exec` program gets `interactive_mode: Never`, so its
+/// stderr is gone **for good** rather than merely unread (NOTES § D279 ruling 6, § D280 item 3).
+/// That closes the door ruling 32 was leaning on and opens a plainer one — `kubectl` runs the same
+/// program against the same kubeconfig entry, in a terminal that can take a password, a device code
+/// or a hardware key.
+///
+/// **`version`, and not because it needs less permission — nothing the reader can name does**
+/// (NOTES § D281 item 3). The login program runs *before* any request is sent, so every command
+/// exercises it equally; the only real choice is which failure stays confusable. `get ns` was
+/// wrong for exactly the case its own rationale claimed to cover: `namespaces` is cluster-scoped,
+/// so a namespaced `Role` grants `list namespaces` as little as `list pods -A`
+/// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1, the platform-issued kubeconfig
+/// this whole `Coverage` fallback exists for), and that reader would have read *namespaces is
+/// forbidden at the cluster scope* and concluded the opposite of what was true. `version` asks
+/// about `/version`, the `nonResourceURL` `docs/security.md`'s own `k8rs-readonly` Role names and
+/// the one path k8rs's connect log already leans on — narrower, though not guaranteed
+/// ([NOTES § D160](../NOTES.md)).
+///
+/// **What proves the login worked does not need the request to succeed**: a `403` on `version`
+/// still means the plugin handed the cluster a credential it could check, which is the one
+/// question this box asks — never whether that credential can list anything.
+///
+/// **It is not [`next_step`]'s, and that is not a filing decision**: that function is shared with
+/// `--once` through `crate::main`'s `pods_unread`, answers per [`Coverage`], and takes no context
+/// name — and the name is the whole of what makes this command runnable.
+///
+/// **The name is quoted by [`crate::ops::pasteable`] and by nothing else** (NOTES § D278 ruling 5,
+/// § D281 item 1). [`Choice::name`] is `k8s::drawable`, which removes characters with no printed
+/// form and caps length — **it is not a charset allowlist**, so a space and a `;` both survive.
+/// Interpolated raw, this drew `--context needs login` beside the strip's own
+/// `--context 'needs login'` in one frame, and for `prod eu; echo pwned` it handed the reader a
+/// shell injection *as an instruction to paste*. This surface is worse than the command log for
+/// exactly that reason: the strip is text a reader may paste, this is a sentence telling them to.
+///
+/// **A name that strips to nothing gets no next step at all** (NOTES § D281 item 2). `(unnamed)`
+/// is not a wrong command but an unrunnable one — `kubectl --context (unnamed)` is a shell syntax
+/// error — and dropping just the flag is worse, because `kubectl version` then teaches a command
+/// against the reader's *current* context, a third cluster. `crate::main`'s `kubectl` rules the
+/// same input the same way, dropping the segment whole: *a line that does not run has nothing to
+/// teach*. A dead end beats a wrong errand.
+///
+/// **It carries its own full stop**, unlike [`next_step`]'s sentences, because it is two sentences
+/// and the second is the instruction: `crate::ui::failed` joins a next step with one space and adds
+/// no stop of its own, so *Then try again* would otherwise run into the way-out paragraph.
+pub fn run_the_login(context: Option<&str>) -> Option<String> {
+    // **The *stripped* value decides whether there is a name**, which is `crate::main`'s `kubectl`
+    // own order: a name made only of characters [`sanitize`] removes is empty here and quoting the
+    // nothing would produce the empty-valued flag the paragraph above refuses.
+    let name = context.map(sanitize).filter(|name| !name.is_empty())?;
+    Some(format!(
+        "Run it yourself first: `kubectl {CONTEXT} {} version`. Then try again.",
+        crate::ops::pasteable(&name)
+    ))
 }
 
 // --- WHY A CALL DID NOT WORK END ---

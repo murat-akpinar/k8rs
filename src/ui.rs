@@ -50,7 +50,9 @@
 // deleting it by hand (NOTES § D38's accepted blind spot, and NOTES § D272 § 4's measurement of
 // what removing it costs). `views.rs`'s came off in the same turn, as that measurement required.
 // What is left is per item and named: every `#[expect(dead_code, …)]` below carries the box that
-// reaches it.
+// reaches it — **and this file has none left, since *the cluster picker is wired* gave
+// [`Link::Unconnected`] a writer.** The rule stays for the next unwired item; the count does not,
+// because a count in a comment is what goes stale (`views.rs`'s own head note).
 
 use crate::analysis::{Badge, Report, Row as ReportRow};
 use crate::k8s::{Address, Browsable, Choice, Coverage, Fault, Tag};
@@ -673,13 +675,15 @@ pub struct Screen<'a> {
     /// field down; the string was a second carrier of it.
     ///
     /// **One state is the exception and it is stated rather than left to be discovered**: while
-    /// nothing is connected this string still ends with the *fault's* word —
-    /// `ctx: staging · ⚠ not allowed` — because there is no connection for [`Screen::link`] to
-    /// describe, and `screens/context.md` has written that word for one of eleven faults
-    /// ([`header`]'s own doc). **The caller pairs it with [`Link::Unconnected`], whose
-    /// [`Link::state`] is `None`, so the two cannot both put a word in the slot** — and it holds
-    /// for as long as nothing is connected, not for as long as the failure box is drawn
-    /// (that page's § After `esc dismiss`, on a switch that failed with a cluster already live).
+    /// nothing is connected this string still ends with `⚠ not connected` —
+    /// `ctx: aws-staging · ⚠ not connected` — because there is no connection for [`Screen::link`]
+    /// to describe (`crate::main`'s `not_connected`). **One word and not one per fault**
+    /// (NOTES § D280 item 1): every fault that can reach a failed connect ends in the one outcome
+    /// the box draws, so there is one sentence for the header to describe rather than eleven.
+    /// **The caller pairs it with [`Link::Unconnected`], whose [`Link::state`] is `None`, so the
+    /// two cannot both put a word in the slot** — and it holds for as long as nothing is
+    /// connected, not for as long as the failure box is drawn (`screens/context.md`
+    /// § After `esc dismiss`, on a switch that failed with a cluster already live).
     ///
     /// **Laid out first, and the last zone to give way**: `prod-eu` and `prod-eu-2` differ by one
     /// character. Where the whole row is not enough for it, what gives way is the **front** of
@@ -963,10 +967,17 @@ pub enum Link {
     /// with a cluster already live; `screens/widgets.md` § 1a).
     ///
     /// **The one state with no word of its own, and that is the whole of it** (PM ruling,
-    /// 2026-09-19). Those pages refuse a fifth connection *word*, not a fifth state: the slot
-    /// carries the **fault's** own short word — `⚠ not allowed` for a `Refused` — which the caller
-    /// already put in [`Screen::context`], and the more specific answer to the same question.
-    /// So [`Link::state`] answers `None` here and [`header`] has nothing to join.
+    /// 2026-09-19). Those pages refuse a fifth connection *word* on this type, not a fifth state:
+    /// the slot carries `⚠ not connected`, which the caller already put in [`Screen::context`]
+    /// (`crate::main`'s `not_connected`). So [`Link::state`] answers `None` here and [`header`]
+    /// has nothing to join.
+    ///
+    /// **One word for every fault and not one per fault** (NOTES § D280 item 1): `screens/
+    /// context.md` § Which faults can actually reach this box measures that `k8s::connect_with`
+    /// can fail in only two places, neither of which sends a byte, so the three faults that reach
+    /// a failed connect share the one outcome the box draws — *could not be opened*. `⚠ not
+    /// allowed`, which this doc named until 2026-09-26, belongs to `Fault::Refused`, and a 403
+    /// comes back `Ok(Session)` with a narrowed `Coverage` rather than failing the connect.
     ///
     /// **It is a session fact and not a modal one, which is the defect it closes** (todo.md
     /// § Phase 12, `reports/2026-09-19-the-strip-and-the-connection-word.md` § M1): [`header`]
@@ -978,14 +989,6 @@ pub enum Link {
     ///
     /// **It promotes `X switch cluster` onto the footer the way [`Link::Expired`] does**
     /// ([`offered`]), for that page's own reason: pressing `X` again is the only way out.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "a mid-session switch that failed is the cluster picker box's \
-                      (todo.md § Phase 12)"
-        )
-    )]
     Unconnected,
 }
 
@@ -1194,7 +1197,12 @@ fn ink(role: Colour, depth: Depth) -> Color {
 ///
 /// [`Signal::Reverse`] is a style and not a string, so it has no text to give; it is drawn by
 /// reversing a span where a screen asks for it, and every caller below wants a mark.
-fn mark(signal: Signal) -> &'static str {
+///
+/// **`pub` because `crate::main`'s own sentences carry the same mark** — `Screen::note`'s
+/// *not connected* paragraph is the caller's string and [`banner`] hangs its wrap on the mark
+/// inside it, so a second reader of [`theme::ALARM`] one file over would be the copy that goes
+/// stale (CLAUDE.md § Single point of change).
+pub fn mark(signal: Signal) -> &'static str {
     match signal {
         Signal::Mark(text) => text,
         Signal::Reverse => "",
@@ -1809,12 +1817,14 @@ fn indented(area: Rect) -> Rect {
 ///
 /// **Four words, five states, and the fifth joins nothing here** (todo.md § Phase 12). `live`,
 /// `connecting…`, `⚠ disconnected, retrying` and `⚠ login expired` are [`Link::state`]'s;
-/// [`Link::Unconnected`] answers `None`, because the slot already holds the *fault's* own word —
-/// `⚠ not allowed` for a `Fault::Refused` — which the caller put inside [`Screen::context`] and
-/// `screens/context.md` § When the new cluster does not work draws. A type that carried that word
-/// would be inventing ten more for the faults `screens/` has not written one for; a type that
-/// cannot be worded at all costs nothing and makes the two-word frame unspellable
-/// (`screens/widgets.md` § 1a: *not a fifth connection word, and not a blank segment either*).
+/// [`Link::Unconnected`] answers `None`, because the slot already holds `⚠ not connected`, which
+/// the caller put inside [`Screen::context`] (`crate::main`'s `not_connected`) and
+/// `screens/context.md` § When the new cluster does not work draws. **One word and not one per
+/// fault** (NOTES § D280 item 1): every fault that can reach a failed connect ends in the one
+/// outcome that box draws. A type that carried the word would still be a fifth connection word on
+/// [`Link`], which `screens/widgets.md` § 1a refuses; a type that cannot be worded at all costs
+/// nothing and makes the two-word frame unspellable (§ 1a again: *not a fifth connection word, and
+/// not a blank segment either*).
 ///
 /// **What this function does not do any more is ask which modal is open** (`k8s-admin`,
 /// 2026-09-19): it did, and `crate::views::App::escape` clears that modal while the connection
@@ -1987,8 +1997,14 @@ fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, scr
             coverage,
             renewal,
         } => {
-            let (outcome, why) =
-                failed(*sent, *fault, said.as_deref(), coverage, renewal.as_deref());
+            let (outcome, why) = failed(
+                to.as_deref(),
+                *sent,
+                *fault,
+                said.as_deref(),
+                coverage,
+                renewal.as_deref(),
+            );
             unconnected(frame, body, to.as_deref(), before, outcome, &why, screen);
         }
     }
@@ -3022,7 +3038,20 @@ fn served(row: &Choice, columns: usize) -> Vec<String> {
 /// **[`views::next_step`] follows the reason only where a request went out, asked as a running
 /// k8rs** (NOTES § D264 rulings 23 and 32) — so an `Unanswered` whose client was never built draws
 /// none, which is the sentence `--once` prints for it (§ Every other fault's table, ruling 28).
+///
+/// **One fault that sent nothing does get a next step, and it is the only one**
+/// ([`views::run_the_login`], NOTES § D280 item 3): a `NoCredential` on a context whose kubeconfig
+/// names a login *program*. `interactive_mode: Never` means that program can no longer prompt or
+/// print, so the reader is told to run the same login themselves. **`renewal` is the gate and not
+/// the fault alone** — a `tokenFile` that does not exist and an `auth-provider: azure` both land in
+/// `NoCredential` with no program to run (NOTES § D264 ruling 32), and *run it yourself* over one
+/// of those names nothing the reader can run. **And the sentence itself can still decline**, for
+/// a context whose name strips to nothing (NOTES § D281 item 2). `BadEntry` and an `Unanswered`
+/// whose client was never built keep none: neither has a reader-side action, and inventing one is
+/// the fallback [`views::because`] refuses (`screens/context.md` § When the new cluster does not
+/// work).
 fn failed(
+    to: Option<&str>,
     sent: bool,
     fault: Fault,
     said: Option<&str>,
@@ -3035,7 +3064,13 @@ fn failed(
     );
     let (outcome, reason, next) = if !sent || local {
         let reason = views::because(fault, views::REACH, renewal, None);
-        ("could not be opened", reason, None)
+        // **`and_then`, because the sentence can decline** — a context whose name strips to
+        // nothing has no runnable command to name, and a dead end beats a wrong errand
+        // (`views::run_the_login`, NOTES § D281 item 2).
+        let next = (fault == Fault::NoCredential && renewal.is_some())
+            .then(|| views::run_the_login(to))
+            .flatten();
+        ("could not be opened", reason, next)
     } else {
         // **Pods, because the permanent pods watch is the one request a fresh connection makes**
         // (`screens/context.md` § Every other fault has its own sentence).

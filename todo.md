@@ -4573,12 +4573,22 @@ Goal: one binary, live and safe.
 same question, and the test is the only proof of that box's central claim, so a
 loop that lands without it has had its coalescer proven by nothing
 ([D109](NOTES.md#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)).
-Every other box in this phase stays one at a time. **Its preconditions are
+**Its preconditions are
 landed** — the screen ruling on who owns the free-text scroll offset
 (`screens/widgets.md` § 4), the dialog page's ceiling and its second 1b reading
 (`screens/dialogs.md`), and the bound on the check itself
 ([D273](NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20),
 which also corrected the mechanism that box used to order).
+
+**The second family, ruled 2026-09-24: which cluster.** *One place decides
+which context is used* and *the cluster picker is wired* are one turn — the
+first's *the picker beats `current-context`* cannot be proven while nothing can
+pick, and the second's own first clause owns the startup `⏎`. Landing either
+alone ships a decision whose answer is discarded, or a picker whose `⏎` does
+nothing
+([D279](NOTES.md#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24),
+which also carries the five rulings their brief needed and the premise re-check
+at HEAD). Every other box in this phase stays one at a time.
 
 **The surface the console still owes its wiring** — boxed at Phase 11's close
 ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 3), in `ui.rs` / `views.rs`, which stay open until this phase closes:
@@ -4705,13 +4715,30 @@ which also corrected the mechanism that box used to order).
       flag is **last-wins** as `kubectl` resolves it; and `USAGE` leads with the
       console form, whose text `screens/states.md`
       § *The command line's own synopsis* now owns.
-- [ ] **One place decides which context is used, and it is not three**:
+- [x] **One place decides which context is used, and it is not three**:
       `--context` beats the startup picker, the picker beats `current-context`.
       `--once` and a non-tty stdin never open it — a picker in a pipeline is a
       script that hangs forever. Proven by running `k8rs --once` with two
       contexts in the file and no terminal attached
-      ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19))
-- [ ] **The cluster picker is wired** ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13) rulings 8, 13, 29 and 32).
+      ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19)).
+      Landed 2026-09-26 with the box below, as one family — neither can be
+      proven without the other
+      ([D279](NOTES.md#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24) ·
+      [D280](NOTES.md#d280--the-which-cluster-review-round-a-header-slot-with-no-vocabulary-a-mockup-that-cannot-be-drawn-and-four-tests-weaker-than-they-read-2026-09-26) ·
+      [D281](NOTES.md#d281--round-two-the-fix-that-broke-the-quoting-rule-a-probe-that-was-not-one-and-a-frame-that-is-honest-as-built-and-misreading-as-drawn-2026-09-26))
+- [x] **The cluster picker is wired** ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13) rulings 8, 13, 29 and 32).
+      Landed 2026-09-26 over three review rounds
+      ([reports/2026-09-25-the-which-cluster-family.md](reports/2026-09-25-the-which-cluster-family.md) ·
+      [reports/2026-09-26-which-cluster-round-two.md](reports/2026-09-26-which-cluster-round-two.md) ·
+      [reports/2026-09-26-which-cluster-round-three.md](reports/2026-09-26-which-cluster-round-three.md)).
+      The header carries `⚠ not connected` for the three faults that can
+      reach a failed connect; the taught login command is quoted by the one
+      rule (`ops::pasteable`) and declines when there is no name it can spell;
+      the strip keeps what was there until a connect succeeds; and the halt a
+      mutation frame cannot act on is parked in `pump` rather than dropped.
+      Proven by `just picker` (`scripts/picker-test.py`, 101 checks over 22
+      journeys against the real binary on a real pty), which is also the only
+      thing that kills the three `console` mutants.
       `X` and the startup `⏎` call `connect()` again, the old `Session` and any
       open detail stream are dropped beside `App::switched`, and a failure
       builds `Modal::Unconnected` from the fault, its `Coverage` and the
@@ -4756,6 +4783,16 @@ which also corrected the mechanism that box used to order).
 the terminal is restored and the backtrace on stderr contains no credential.
 This is the one path that is never exercised by accident, so it gets exercised
 on purpose.
+
+**Two pty gates this phase owes at its close, and neither is in `just check`:**
+`just suspend` (the three stop doors) and `just picker` (the startup picker, the
+switch, and the only thing that kills the three `console` mutants). Both need a
+pty and a built binary, which CI has not — the `just suspend` precedent
+([D277](NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)
+ruling 7) — so they are named here rather than left in a report, because a gate
+that is only owed is a gate that is forgotten
+([D281](NOTES.md#d281--round-two-the-fix-that-broke-the-quoting-rule-a-probe-that-was-not-one-and-a-frame-that-is-honest-as-built-and-misreading-as-drawn-2026-09-26)
+ruling 6).
 
 **Done when:** k8rs runs against kind end-to-end and every error state
 behaves as specified.

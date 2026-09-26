@@ -1104,3 +1104,19 @@ e2e:
 suspend:
     cargo build --locked
     python3 scripts/suspend-test.py
+
+# **Not in `just check` either, and for the same two reasons**: a pty and a built
+# binary. What runs in the gate is `scripts/picker-test.py --self-test`, out of
+# `scripts/guards.sh`.
+#
+# What it proves cannot be reached from the suite at all. `main` asks
+# `at_a_keyboard` before it builds a runtime, and `cargo test`'s own ends are both
+# pipes, so `console()` — and with it the whole startup-picker journey — is never
+# entered from a test (NOTES § D279 ruling 2). A green `cargo test` therefore says
+# nothing about whether the picker draws, whether `⏎` connects, or what `esc` does.
+#
+# The startup picker against the real binary: the shapes a kubeconfig comes in,
+# a crafted context name, `--context`, and the two runs with no terminal
+picker:
+    cargo build --locked
+    python3 scripts/picker-test.py

@@ -101,6 +101,13 @@ python3 scripts/handover-guard.py
 # can: every check in it fed a healthy transcript and then one broken variant of
 # itself, so a red run there names which door of the three failed.
 python3 scripts/suspend-test.py --self-test
+# The same split, one box along: `just picker` drives the startup picker on a real
+# pty, which `cargo test` cannot reach at all — `main` asks `at_a_keyboard` before
+# it builds a runtime and this suite's own ends are both pipes, so `console()` is
+# never entered from it (NOTES § D279 ruling 2). This is the half that runs with
+# no terminal: every check fed a healthy transcript and then one broken variant of
+# itself.
+python3 scripts/picker-test.py --self-test
 # Every fixture is trusted because a jq predicate in cluster.sh said it reached
 # the state its rule is about. Those predicates only ever ran against a live
 # cluster, where too-loose and too-tight look identical.

@@ -508,17 +508,15 @@ rather than replacing one that does not
 ([NOTES § D264 ruling 19](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)):
 
 ```
-                                 ctx: staging · ⚠ not allowed · admin
+                            ctx: aws-staging · ⚠ not connected · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│      ┌ staging said no ─────────────────────────────────────┐      │
+│      ┌ aws-staging could not be opened ─────────────────────┐      │
 │      │                                                      │      │
-│      │  The role this kubeconfig uses needs to `list` and   │      │
-│      │  `watch` pods across the whole cluster. Ask whoever  │      │
-│      │  runs this cluster for a role that may read pods in  │      │
-│      │  every namespace — `k8rs-readonly` in the k8rs docs  │      │
-│      │  is that role — or quit and start k8rs again in one  │      │
-│      │  namespace you can read: --namespace <name>          │      │
+│      │  The program this kubeconfig logs in with (`aws`)    │      │
+│      │  gave k8rs nothing to sign in with. Run it yourself  │      │
+│      │  first: `kubectl --context aws-staging version`. Then│      │
+│      │  try again.                                          │      │
 │      │                                                      │      │
 │      │  Nothing is wrong with prod-eu — X takes you back.   │      │
 │      │                                                      │      │
@@ -527,32 +525,81 @@ rather than replacing one that does not
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl --context staging get pods -A --watch   → not allowed    │
+│ $ kubectl --context prod-eu get daemonsets -A --watch              │
+│ $ kubectl config get-contexts                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc dismiss                                                        │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-**Every word inside the box is `because`'s and `pods_unread`'s, not a second
-vocabulary invented for this screen** ([NOTES § D264 ruling 1](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
-Read as two sentences run together, not two separate fields with their own
-labels: *"the role this kubeconfig uses needs to `list` and `watch` pods
-across the whole cluster"* is `because(Fault::Refused, …)`'s own sentence
-with `pods_unread`'s scope clause folded onto its end — the same words
-[states.md § Before the TUI ever starts](states.md#before-the-tui-ever-starts)
-draws as two labelled lines (*"What k8rs asked for" / "What happened"*) for a
-wider pane;
-here they are one flowing paragraph because a 54-column dialog has no room
-to spend on labels the sentence does not need to repeat itself to keep. The
-second sentence is `pods_unread`'s own per-`Coverage` next step, verbatim —
-the drawing above is `Coverage::Cluster`'s, the one this cluster's
-capability probe actually produces when nothing has been asked for by name.
-**The next step's `--namespace` arm is worded for a k8rs that is already
-running** — *quit and start k8rs again in one namespace you can read*, never
-merely *run k8rs in one* — because this box is only ever reached from a
-running one; `k8rs --once` reads the same next step differently, and that
-copy lives on `once.md`, not here
-([NOTES § D264 ruling 23](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
+**Every word inside the box is `because`'s, not a second vocabulary invented
+for this screen** ([NOTES § D264 ruling 1](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
+*"The program this kubeconfig logs in with (`aws`) gave k8rs nothing to sign
+in with"* is `because(Fault::NoCredential, …)`'s own sentence, `` `aws` ``
+being [`NotConnected::renewal`](../src/k8s.rs) — the login program's name as
+the kubeconfig itself spells it, never a guess.
+
+**The next step is new, and it reverses half of [D264 ruling
+32](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13):**
+*"NoCredential has no next step of its own"* was true only because getting
+the login program's own diagnosis back from the terminal was Phase 12's to
+do. This family did that turn and ruled the other way — an `exec` program
+gets `interactive_mode: Never` on every context, at connect and at every
+near-expiry refresh, so it never reads or writes the terminal at all
+([NOTES § D279 ruling 6](../NOTES.md#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24)).
+Its stderr is gone for good, not
+merely unread yet, which closes the one door ruling 32 was leaning on and
+opens a plainer one: `kubectl` runs the exact same program against the exact
+same kubeconfig entry, in the reader's own terminal, where it can prompt for
+whatever it needs — a password, a device code, a hardware key. *"Run it
+yourself first… then try again"* is that step, spelled as the one command
+that is both the shortest proof the login still works and the fix if it
+does not.
+
+**`version`, and not because it needs less permission — nothing the reader
+can name does.** The login program runs before any request is sent, so
+every command exercises it; the only real choice is which failure stays
+confusable. `namespaces` is a cluster-scoped resource, so a namespaced
+`Role`/`RoleBinding` grants `list namespaces` exactly as little as it grants
+`list pods -A` — `get ns` was wrong for exactly the case it claimed to
+cover, since that is the realistic shape of the platform-issued kubeconfig
+this whole `Coverage` fallback exists for
+(`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1): a reader
+whose login is fine would have run it, read *namespaces is forbidden … at
+the cluster scope*, and concluded the opposite of what was true. `version`
+asks about `/version`, a `nonResourceURL` a stock cluster grants every
+authenticated user — the same path `docs/security.md`'s own `k8rs-readonly`
+Role names, and the one path k8rs's own connect log already relies on —
+narrower than a cluster-scoped list, though not guaranteed: a
+`nonResourceURL` refusal is real
+([NOTES § D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+**What proves the login worked does not need the request to succeed**: a
+`403 Forbidden` on `version` still means the plugin handed the cluster a
+credential it could check, which is the one question this box is asking —
+never whether that credential can list anything.
+
+**Only `NoCredential` gets this treatment, and that is deliberate rather
+than an oversight left for later.** `BadEntry` and `Unanswered` — the other
+two reachable faults, below — name a broken kubeconfig entry and a client
+this build could not construct; neither has a reader-side action that fixes
+it the way *run the login again* fixes a plugin. Inventing one for them would
+be the fallback [`because`](../src/views.rs) already refuses.
+
+**`NoCredential` itself still draws no next step when the context's own name
+[strips to nothing](#a-context-whose-name-strips-to-nothing), and that is a
+different reason from the other two, not the same one repeated.** There *is*
+a reader-side action here — run the login again, same as ever — but nothing
+k8rs can spell hands them the right command for it. `--context <anything>`
+pasted over a name this screen cannot print sends the reader's login program
+at an entry that does not exist; dropping the flag runs `kubectl version`
+against whatever the kubeconfig's own `current-context:` happens to name —
+a third cluster, not this one. `Choice::key` still connects the right entry
+on `⏎` — [that section](#a-context-whose-name-strips-to-nothing) says so in
+as many words — but that raw, unstripped spelling is exactly what
+invariant 9 keeps off a screen, so it is not available to build a command
+from either. **Not *nothing to do* — *nothing we can spell for the reader to
+do it with*.** The box still names the login program and still names `X`;
+only the one pre-built command is missing, never the reader's own way out.
 
 - **The footer reads `esc dismiss` alone — `X` is not there to press.**
   [D16](../NOTES.md#d16--the-context-switcher) ruling 1 is explicit: `X`
@@ -571,10 +618,36 @@ copy lives on `once.md`, not here
   [NOTES § D264 ruling 19](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)) —
   one box, one rule, not a coin flip decided fresh per screen.
 - **We do not silently fall back to the old context.** A header that says
-  `staging` while the data is from `prod-eu` is the one thing this whole
-  screen exists to prevent. The user asked for staging; they get staging, or
-  they get told why not.
+  `aws-staging` while the data is from `prod-eu` is the one thing this whole
+  screen exists to prevent. The user asked for aws-staging; they get
+  aws-staging, or they get told why not.
 - Never a dead end: the way out is on the screen, and it is the same key.
+- **The log strip is two rows** (`ui::LOG_LINES`), **and both matter here.**
+  The older one carries `prod-eu`'s own last line, not a line about
+  aws-staging — because there is none: `sent` is `false` for every fault
+  this box can draw (below), so nothing was ever sent for the strip to log,
+  the same reasoning that removed a written-off `→ not sent` line from
+  [dialogs.md § The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open)
+  rather than invent an outcome word for a command that never ran: *"the
+  strip only appends a line the instant the thing it is about actually
+  happens… What it shows instead is whatever was already there."* Here that
+  is the read that connected `prod-eu` in the first place, not left as a
+  blank strip for the reader to fill in themselves. **This means the clear
+  [§ What happens on `⏎`](#what-happens-on) step 2 describes has to move**:
+  today it fires on `⏎`, before the outcome is known, which is why this box
+  could only ever have drawn empty or invented a line — it has to fire once
+  the new context is known to have connected, never before. **The newer row
+  is what makes the older one unmisreadable**: `X` appends
+  `$ kubectl config get-contexts` the instant the picker opens, before
+  `⏎` is ever pressed, and nothing clears it on the failed attempt that
+  follows — so the strip's own last line, the one a reader's eye lands on
+  first, always names no cluster at all. **This is the invariant and it is
+  nowhere enforced**: on this frame the strip's newest line is always the
+  picker's own local read, never a cluster's — if `LOG_LINES` ever became 1,
+  or a path reached this box without the picker having logged first, the
+  same misread [dialogs.md § The object went
+  away](dialogs.md#the-object-went-away-while-the-dialog-was-open) closed
+  once would be open again, silently, with no gate to catch it.
 - **No `User:` line.** k8rs never reads a display name for the identity a
   kubeconfig authenticates as — there is no field here to print, honest or
   otherwise, the same reasoning that dropped the equivalent line from the
@@ -582,21 +655,75 @@ copy lives on `once.md`, not here
   ([NOTES § D190](../NOTES.md#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)).
   A line the binary cannot produce is a promise this screen cannot keep.
 
-### The scope changes the next step, not just a number
+### Which faults can actually reach this box, and where the rest live instead
 
+**`sent` is `false` for every box this page draws, always, structurally —
+not a common case with rare exceptions.** `k8s::connect_with` has exactly
+two ways to fail: `Config::from_custom_kubeconfig` (a kubeconfig that will
+not resolve into a working config) and `Client::try_from` (a config that
+resolves but will not build into a client). Neither ever sends a byte to
+the API server — the one on-wire request a fresh connect makes is the
+capability probe inside a *successful* build, and that probe is written
+never to fail the connect: a refusal there becomes `Coverage::Refused` or
+`Coverage::Blind` inside an `Ok(Session)`, not an `Err`
+([`k8s::coverage`](../src/k8s.rs), [`lists_pods`](../src/k8s.rs): *"`false`
+is a refusal and nothing else… every other outcome is `true`"*). So the
+title this box draws is always `<name> could not be opened`, never `<name>
+said no` or `<name> did not answer` — those two outcomes, and the whole of
+`ui::failed`'s `sent: true` branch, are dead from every caller reachable
+today, `X` and the startup picker alike.
+
+That collapses `k8s::Fault` from eleven variants to three this box can ever
+actually carry, and rules out two more that look like they should qualify
+but cannot, for a sharper reason than *no request went out*:
+
+| Fault | Reaches this box? | Why, or where it shows instead |
+|---|---|---|
+| `BadEntry` | **yes** | the row exists and its cluster is defined, but a certificate path, a `server:` line or something else it points at does not load — reachable on retry, since none of that is checked until the connect is actually attempted |
+| `NoCredential` | **yes** | drawn in full above — the exec plugin `Auth::try_from` runs (and fails) synchronously inside `Client::try_from`, before anything is sent |
+| `Unanswered`, client never built | **yes** | the catch-all — a proxy scheme this build cannot speak, a connector `kube` refuses to construct |
+| `Kubeconfig` | no | this box is reached only through `switched`, which hands `connect_with` the *same in-memory* `Kubeconfig` the picker's own row list was read from — the top-level file parse this fault is about already succeeded, once, before the picker ever drew a row |
+| `NoContext` | no | for the same reason: `asked.key` is always a name `k8s::contexts` already found in that value, so `ConfigLoader`'s *no such context* branch cannot fire on a name the picker offered. It is real — a `--context` naming nothing, or no `current-context` at all — for the *first* connect of a run, and that one is pre-terminal, stderr, [states.md § Before the TUI ever starts](states.md#before-the-tui-ever-starts) |
+| `Refused` | no | folds into `Coverage::Refused`/`Blind` inside a live session instead — [states.md § You can only see some namespaces](states.md#you-can-only-see-some-namespaces) for an interactive run, that file's § Before the TUI ever starts for `--once` |
+| `Expired` | no | a token runs out on an *already-live* watch, never on a fresh connect — [states.md § Your login expired](states.md#your-login-expired) |
+| `Rejected`, `Gone`, `Conflict`, `Unfinished` | no | per-request faults on one read or write after a session exists — a `--logs` line, a scale, a delete — shown in [detail.md](detail.md) or [dialogs.md](dialogs.md), never on the connection itself |
+
+**The one avenue by which a `sent: true` fault could ever reach this exact
+box is a mid-session reconnect that rebuilds a client for an *already-live*
+watch** — the shape [NOTES § D264 ruling 17](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+gestures at. No box in
+`todo.md` builds that reconnect yet, so this page does not draw a mockup for
+work nobody has claimed; `ui::failed`'s general `sent: true` rendering is
+not asked to change here, only the claim that anything today drives it.
+
+### What `Refused` draws, if something ever hands it here
+
+Not a mockup — no caller reaches this today, above — but `views::next_step`
+still carries three sentences with nowhere else to be read, and `because`'s
+own `Refused` reason still needs a scope to sit beside each of them.
 `Coverage::namespace()` — the accessor every other screen reads — answers
 the same `Some(payments)` whether the reader typed `--namespace payments`
 and was refused, or the kubeconfig named no namespace at all and k8rs had to
-guess one and was refused there too. Those are not the same next step, and a
-box built only from that collapsed answer sends the second reader to ask for
-access to a namespace they never chose
+guess one and was refused there too, and says nothing at all for a refusal
+with nothing to fall back to guessing. None of the three next steps is the
+same, and a box built only from the collapsed answer sends the second reader
+to ask for access to a namespace they never chose
 ([NOTES § D264 ruling 1](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13),
-`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1). The box
-reads `k8s::Coverage` itself, not its collapsed `namespace()`, so the two
-read differently — each quoted exactly as `next_step` returns it, with no
-full stop added that the function did not write:
+`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1) —
+`ui::failed` reads `k8s::Coverage` itself, never its collapsed
+`namespace()`, so the three read differently — each quoted exactly as
+`next_step` returns it, with no full stop added that the function did not
+write:
 
 ```
+Refused cluster-wide with nothing to fall back to guessing:
+
+  Ask whoever runs this cluster for a role that may
+  read pods in every namespace — `k8rs-readonly` in
+  the k8rs docs is that role — or quit and start k8rs
+  again in one namespace you can read:
+  --namespace <name>
+
 Refused in a namespace the reader named:
 
   Ask whoever runs this cluster for a role that may
@@ -612,79 +739,16 @@ Refused after k8rs had to guess the namespace:
   --namespace <name>
 ```
 
-Both replace the same paragraph in the box above, in place of
-`Coverage::Cluster`'s sentence — the opening reason
-(*"…needs to `list` and `watch` pods in the namespace {ns}"*) is identical
-either way, because the role a login is missing does not depend on how k8rs
-arrived at the namespace it tried.
-
-### Every other fault has its own sentence, and this page does not retype it
-
-Eleven `k8s::Fault` variants can reach this box — twelve rows below, because
-`Unanswered` draws two different sentences depending on whether a request
-went out — and `because` already answers every one of them without a second
-wording living here
-([NOTES § D264 ruling 1](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
-`403` is the only one this page draws in full; for the rest, the title names
-the class the fault falls into and the sentence is `because`'s own — quoted
-on screen exactly as that function returns it, never paraphrased here where
-a second copy would go stale first:
-
-| Fault | A request went out? | Title | The sentence on screen |
-|---|---|---|---|
-| `Refused` (`403`) | yes | `<name> said no` | drawn in full above — the only one this page draws in full, quoted from `because` and `next_step` |
-| `Expired` (`401`) | yes | `<name> said no` | `because`'s `Expired` sentence — names the login program when the kubeconfig has one |
-| `Rejected` (`400`) | yes | `<name> said no` | `because`'s `Rejected` sentence — quotes the cluster if it explained itself, else says the fault is k8rs's own |
-| `Gone` (`404`) | yes | `<name> said no` | `because`'s `Gone` sentence, plus its own next step — *Check the server address this kubeconfig names — as written, it does not lead to a Kubernetes API server* ([ruling 22](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13), [ruling 32](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)) |
-| `Conflict` (`409`) | yes | `<name> said no` | `because`'s `Conflict` sentence |
-| `Unanswered` | yes | `<name> did not answer` | `because`'s `Unanswered` sentence, plus its own next step — check the server address this kubeconfig names |
-| `Unfinished` | yes | `<name> did not answer` | `because`'s `Unfinished` sentence |
-| `Kubeconfig` | **no** | `<name> could not be opened` | `because`'s `Kubeconfig` sentence, asked as *reach this cluster* — nothing was ever sent |
-| `NoContext` | **no** | `<name> could not be opened` | `because`'s `NoContext` sentence, asked as *reach this cluster* |
-| `BadEntry` | **no** | `<name> could not be opened` | `because`'s `BadEntry` sentence, asked as *reach this cluster* |
-| `NoCredential` | **no** | `<name> could not be opened` | `because`'s `NoCredential` sentence, asked as *reach this cluster* — names the login program when there is one; no next step of its own ([ruling 32](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)) |
-| `Unanswered`, its client never built | **no** | `<name> could not be opened` | `because`'s `Unanswered` sentence, asked as *reach this cluster* — no next step; the same sentence `--once` already prints for this case, a known limit rather than a fifth wording ([ruling 28](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13), `backlog.md`) |
-
-**`Gone`'s next step answers a question whose outcome was actually
-measured, not invented to fill the row** ([NOTES § D264 ruling 22](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)):
-a stand-in server answering `/api/v1/pods` with a plain `404` is what a
-wrong address looks like. **`NoCredential` has no next step of its own** —
-an `exec` plugin's own diagnosis goes only to the terminal's stderr, never
-to k8rs, so the diagnosis is the login program's own output, not a sentence
-this screen can write in its place; getting that output back to the reader
-is Phase 12's terminal handover to do, not this box
-([NOTES § D264 ruling 32](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
-`Gone`'s next step is drawn the same way whether the box is reached from a
-fresh connection or from the `## When the new cluster does not work` boxes
-on a watch that fails mid-session.
-
-**"A request went out?" is what decides the title, not the HTTP class.** The
-four faults marked **no** above never reached the network — the client
-itself could not be built — so a title claiming the cluster *said* anything
-would be false about a call that was never made; the box is asked as *reach
-this cluster* for those four, and for one more below, `live`'s own framing
-for a `NotConnected` that sent nothing. **`Unanswered` is the one fault that
-appears both ways**: most of the time a request went out and nothing usable
-came back before the fault fired, drawn `did not answer`; the rarer case
-where its own client was never built either draws `could not be opened`,
-the same sentence with no request to blame it on. Every other fault sent
-the same request
-this page draws in full — `` `list` and `watch` pods `` — because the
-capability probe that opens the permanent pods watch is the one request a
-fresh connection makes. **This holds whatever path the fault arrives by, not
-only a switch from this picker** ([NOTES § D264 ruling 17](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)):
-a `NoCredential` that shows up mid-session, when the permanent pods watch's
-own reconnect cannot rebuild a client, is titled the same `<name> could not
-be opened`, never `did not answer` — that attempt never reached the network
-any more than one started from this picker does.
-**The way-out sentence is unchanged across every row of this table, and
-which of the two it is turns on whether anything has connected this run, not
-on which of the eleven faults this was or which picker the reader opened**
-([NOTES § D264 ruling 15](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)):
-*"Nothing is wrong with {the context that was last live} — X takes you
-back"* once a context has connected, even when the switch that just failed
-is the second or third in a row, *"Nothing has connected yet — esc takes you
-back to the list"* only for a run that has never connected at all.
+**The first and third sentences are each the `running: true` half of a
+pair, and the other half is `--once`'s** — [states.md § Before the TUI ever
+starts](states.md#before-the-tui-ever-starts) draws the same two refusals,
+refused the same way, as *"or run k8rs in one namespace you can read"* and
+*"Say which namespace you work in"* rather than *"quit and start k8rs
+again"* twice over, because that reader has no running k8rs to quit out of
+yet. **The middle sentence has no `running` half at all** — a namespace the
+reader already named by typing `--namespace` is a door spent whichever
+surface refused it, so `--once` prints the identical words. Every sentence
+here is real, compiled and tested; none of the three has any other screen.
 
 ### The same failure, from the startup picker
 
@@ -692,17 +756,15 @@ Only the header, the recovery sentence and the footer change — `X` is not
 bound yet, so it cannot be the way back:
 
 ```
-                                ctx: staging · ⚠ not allowed · admin
+                            ctx: aws-staging · ⚠ not connected · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│      ┌ staging said no ─────────────────────────────────────┐      │
+│      ┌ aws-staging could not be opened ─────────────────────┐      │
 │      │                                                      │      │
-│      │  The role this kubeconfig uses needs to `list` and   │      │
-│      │  `watch` pods across the whole cluster. Ask whoever  │      │
-│      │  runs this cluster for a role that may read pods in  │      │
-│      │  every namespace — `k8rs-readonly` in the k8rs docs  │      │
-│      │  is that role — or quit and start k8rs again in one  │      │
-│      │  namespace you can read: --namespace <name>          │      │
+│      │  The program this kubeconfig logs in with (`aws`)    │      │
+│      │  gave k8rs nothing to sign in with. Run it yourself  │      │
+│      │  first: `kubectl --context aws-staging version`. Then│      │
+│      │  try again.                                          │      │
 │      │                                                      │      │
 │      │  Nothing has connected yet — esc takes you back to   │      │
 │      │  the list to try a different cluster.                │      │
@@ -712,25 +774,39 @@ bound yet, so it cannot be the way back:
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl --context staging get pods -A --watch   → not allowed    │
+│ $ kubectl config get-contexts                                      │
+│                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc back to the list                                               │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-This is the tallest either box draws — thirteen rows between the nested
-borders, the ceiling [widgets.md § 5](widgets.md#5-the-modal-layer) sets for
-any dialog, with none left to spend
-([NOTES § D264 ruling 1](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
+This is the tallest either box draws — eleven rows between the nested
+borders, against a ceiling of thirteen
+([widgets.md § 5](widgets.md#5-the-modal-layer)) — the four-line reason and
+next step above, the widest paragraph a reachable fault draws
+([§ Which faults can actually reach this box, and where the rest live
+instead](#which-faults-can-actually-reach-this-box-and-where-the-rest-live-instead)),
+is what makes it taller than the mid-session box's own ten, not an RBAC
+sentence spending the whole ceiling the way this box once did.
 
 - **`esc` reopens the picker**, not a running app — there is not one yet to
   return to. Pressing `esc` again, now on the picker itself, quits — the same
   rule [§ Opening at startup](#opening-at-startup) already states. Two
   presses, never a dead end, never a third key nobody was told about.
-- The header still names the attempted context (`ctx: staging · ⚠ not
-  allowed · admin`) even though nothing ever connected — the picker committed to
-  trying it, and hiding that after the fact would be the exact
+- The header still names the attempted context (`ctx: aws-staging · ⚠ not
+  connected · admin`) even though nothing ever connected — the picker
+  committed to trying it, and hiding that after the fact would be the exact
   stale-header failure this whole screen exists to prevent.
+- **The log strip keeps its one real line from opening the picker**, the same
+  `$ kubectl config get-contexts` [§ The picker](#the-picker) already shows —
+  nothing else was ever sent, so nothing else is appended. The second row is
+  blank rather than missing, the same *"always two rows"* rule
+  [§ Three contexts told apart only by their tail](#three-contexts-told-apart-only-by-their-tail)
+  already states for this box's own family: there is no second line to fill
+  it with yet, not on a run that has never connected at all
+  ([§ When the new cluster does not work](#when-the-new-cluster-does-not-work)'s
+  own ruling on the strip).
 - **The picker `esc` reopens is the same `startup: true` picker that opened
   this attempt, not a fresh one** — a second and third failed connection in
   a row still read as the startup variant throughout, never sliding into the
@@ -747,7 +823,8 @@ picker, above, and stays there.
 to fall back *to*.** [§ What happens on `⏎`](#what-happens-on)'s step 1 drops
 the snapshot store, the findings, the analysis results, the table caches and
 every open log stream **before** the switch is known to have failed — the
-moment `⏎` was pressed on `staging`, not the moment `staging` said no. So the
+moment `⏎` was pressed on `aws-staging`, not the moment aws-staging could not
+be opened. So the
 frame `esc` reveals is not prod-eu gone stale, the way [The connection
 dropped](states.md#the-connection-dropped) or [Your login
 expired](states.md#your-login-expired) draw it — it is a body with nothing in
@@ -757,7 +834,7 @@ forbids twice over: once for showing prod-eu as if it were still live, and
 once for showing it at all when the code has already thrown it away.
 
 ```
-                                  ctx: staging · ⚠ not allowed · admin
+                            ctx: aws-staging · ⚠ not connected · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS            │                                               │
 │  RESOURCES         │   ⚠ Not connected to the cluster right now.   │
@@ -775,21 +852,23 @@ once for showing it at all when the code has already thrown it away.
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl --context staging get pods -A --watch   → not allowed    │
+│ $ kubectl --context prod-eu get daemonsets -A --watch              │
+│ $ kubectl config get-contexts                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ X switch cluster  ? all keys  q quit                               │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-- **The header keeps naming `staging` and keeps `⚠ not allowed`.** Dismissing
-  the box closes the box; it does not answer the question the box was open to
-  ask. Nothing about the connection changed when `esc` was pressed, so nothing
-  about the sentence describing it should. This is the same word
+- **The header keeps naming `aws-staging` and keeps `⚠ not connected`.**
+  Dismissing the box closes the box; it does not answer the question the box
+  was open to ask. Nothing about the connection changed when `esc` was
+  pressed, so nothing about the sentence describing it should. This is the
+  same word
   [§ When the new cluster does not work](#when-the-new-cluster-does-not-work)
   already draws while the box is open — not a fifth connection word invented
-  for the frame behind it. **The fault's word is what occupies the connection
-  slot for as long as nothing is connected**, which is a longer span than
-  "while this one modal happens to be drawn" — measured wrong 2026-09-19,
+  for the frame behind it. **The word is what occupies the connection slot
+  for as long as nothing is connected**, which is a longer span than "while
+  this one modal happens to be drawn" — measured wrong 2026-09-19,
   `reports/2026-09-19-the-strip-and-the-connection-word.md` § M1: read against
   "while the box is open" the slot went on to draw a second, joined connection
   word the instant `esc` closed it, over a cluster k8rs still was not
@@ -797,22 +876,21 @@ once for showing it at all when the code has already thrown it away.
 - **None of [`Link`](widgets.md#1a-the-header-row)'s four words is written
   here, and a fifth is not added to hold one.** `connecting…` claims an
   attempt is in flight; none is — the last one already answered, and the
-  answer was no. This page could invent a generic fifth word, *"not
-  connected"*, for this slot, but it would say strictly less than
-  `⚠ not allowed` already sitting
-  there, and it would cost a new [`Link`] variant, four more match arms, and
-  a second header word to keep in sync with this page's own eleven-fault
-  table for every fault that is not `Refused` — for no reader benefit, since
-  the fault's own word is the more specific, truer answer to the same
-  question. **The slot is not empty and it is not a sixth vocabulary: it is
-  the one word this page already wrote, still there.**
+  answer was no. **`⚠ not connected` is that fifth word**, and it costs
+  nothing new: every fault this box can actually draw collapses to the same
+  outcome — *could not be opened*
+  ([§ Which faults can actually reach this box, and where the rest live
+  instead](#which-faults-can-actually-reach-this-box-and-where-the-rest-live-instead)) —
+  so one word for all of them is the truer answer, not a guess dressed up as
+  one. **The slot is not empty and it is not a sixth vocabulary: it is the
+  one word this page already wrote, still there.**
 - **The body carries no stale card and no severity glyph of its own kind** —
   `○`, `●` and `▲` are claims about the cluster's own health, and k8rs has
   not read this cluster's health even once. `⚠` here is the connection's own
   mark, the same one the header already carries, not a finding.
-- **The sentence never repeats *why* staging refused.** The reader already
-  read that sentence in the box just dismissed, worded once by `because` and
-  `next_step` — a second, shorter copy here is exactly the second vocabulary
+- **The sentence never repeats *why* aws-staging could not be opened.** The
+  reader already read that sentence in the box just dismissed, worded once by
+  `because` — a second, shorter copy here is exactly the second vocabulary
   [NOTES § D264 ruling 1](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
   refuses, and it is the copy that goes stale first. What this frame owes the
   reader is the next step, not the reason again.
@@ -834,24 +912,24 @@ once for showing it at all when the code has already thrown it away.
 - **The sidebar's labels are the app frame's own, not the cluster's, and stay
   drawn** — `ALERTS`, `RESOURCES`, `ANALYSIS` and their rows are this
   product's own words, unlike [Opening at startup](#opening-at-startup),
-  where no frame has been built yet at all. `certificates  30d` can still show
-  — reading the client certificate `staging`'s kubeconfig entry already holds
-  is a local file read, the same one [Still
-  loading](states.md#still-loading) draws it from, and it costs no connection
-  to the cluster that just refused one. **This is `Fault::Refused`'s own
-  case, where a request reached the cluster at all** — for a fault whose
-  client was never built (`sent: false`, [§ Every other fault has its own
-  sentence](#every-other-fault-has-its-own-sentence-and-this-page-does-not-retype-it)),
-  there may be no certificate read to show either, and that is a narrower
-  question this section does not answer, since every failure-box mockup in
-  this file draws `Fault::Refused`. Every other ANALYSIS row stays blank —
-  `capacity`, `drain safety`, `posture`, `restarts`, `waste`, `versions` all
-  need the cluster staging just refused.
+  where no frame has been built yet at all. **`certificates  30d` cannot show
+  here, and that is resolved rather than left open**: every fault this box
+  draws has `sent: false` ([§ Which faults can actually reach this box, and
+  where the rest live
+  instead](#which-faults-can-actually-reach-this-box-and-where-the-rest-live-instead)),
+  and `k8s::NotConnected` carries no certificate on either of its two arms —
+  `connect_with` reads one off the resolved config before it tries to build a
+  client, but drops it on the `?` that fails the connect, so there is nothing
+  for this frame to have kept. Reading it anyway, from the kubeconfig
+  directly rather than from a failed session, is a real improvement
+  `backlog.md` may pick up; today the row is blank like the six beside it.
+  Every ANALYSIS row stays blank — `capacity`, `drain safety`, `posture`,
+  `restarts`, `waste`, `versions` all need a cluster this run has not reached.
 - **This frame ends the moment `X` is pressed again** — the picker reopens,
-  `(current)` marking `staging` per [§ The picker](#the-picker)'s own rule for
-  a context that connected before but is not live now, and `⏎` on it tries
-  again rather than merely closing. A second failure redraws this same frame,
-  not a new one.
+  `(current)` marking `aws-staging` per [§ The picker](#the-picker)'s own rule
+  for a context that connected before but is not live now, and `⏎` on it
+  tries again rather than merely closing. A second failure redraws this same
+  frame, not a new one.
 
 ## Unhappy states
 

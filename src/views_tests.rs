@@ -2112,10 +2112,18 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
     }
 }
 
-/// **Nothing the reader did on the old cluster survives a switch**, and the command log starts
-/// empty (`screens/context.md` § What happens on `⏎`).
+/// **Nothing the reader did on the old cluster survives a switch** (`screens/context.md`
+/// § What happens on `⏎` step 5).
+///
+/// **The command log is not part of it, and that is the claim this test changed to make**
+/// (NOTES § D280 item 2): a switch is *asked for* here, before the outcome is known, and a strip
+/// emptied at that moment draws blank for as long as `connect_with` is out — then has nothing true
+/// to put there at all if the connect failed, since `sent` is `false` for every fault that box can
+/// draw. The strip keeps what was already there until a new context has connected, and the caller
+/// that learns it did is the one that empties it (`screens/context.md` § When the new cluster does
+/// not work).
 #[test]
-fn a_switch_puts_the_view_back_on_alerts_and_empties_the_command_log() {
+fn a_switch_puts_the_view_back_on_alerts_and_leaves_the_command_log_alone() {
     let rows = listed(SIX);
     let mut app = App {
         view: View::Resources(7),
@@ -2133,22 +2141,27 @@ fn a_switch_puts_the_view_back_on_alerts_and_empties_the_command_log() {
     let mut log = Log::default();
     log.ran(GET_CONTEXTS.to_owned());
     log.sent("$ kubectl get pods -A --watch".to_owned());
+    let before = log.clone();
 
-    app.switched(&mut log);
+    app.switched();
     assert_eq!(
         app,
         App::default(),
         "something of the old cluster's survived the switch"
     );
     assert_eq!(
-        log,
-        Log::default(),
-        "the command log kept the old context's lines"
+        log, before,
+        "the switch emptied a strip the screen says keeps its last line"
     );
+    // **And the line that was waiting is still the one an outcome lands on** — `Log::sent` marked
+    // it, nothing has replaced it, so the record cannot come apart (invariant 4).
     log.outcome("not allowed");
     assert!(
-        log.lines().is_empty(),
-        "an outcome landed on a line from before the switch"
+        log.lines()
+            .last()
+            .is_some_and(|line| line.as_str().contains("not allowed")),
+        "the outcome had nowhere true to go: {:?}",
+        log.lines()
     );
 }
 
@@ -5313,9 +5326,16 @@ fn every_fault_reads_the_sentence_the_driver_prints() {
 ///
 /// **Not running — `--once` — first, and its bytes are the ones this grid held before k8rs could
 /// be running** (NOTES § D264 ruling 23). Running, the two arms that end in the flag say to quit
-/// and start again, in `screens/context.md` § When the new cluster does not work's `[0]` and `[1]`
-/// words, which `ui_tests.rs` holds the drawn box to; nothing else moves. **Three faults answer
-/// either way** (NOTES § D264 ruling 32), `Gone` in that ruling's bytes.
+/// and start again, in the words `screens/context.md` § What `Refused` draws, if something ever
+/// hands it here writes — all three of them, which `ui_tests.rs` holds the drawn box to byte for
+/// byte; nothing else moves. **The middle arm has no `running` half at all**: a namespace the
+/// reader named by typing `--namespace` is a door spent whichever surface refused it, so `--once`
+/// prints the identical words. **Three faults answer either way** (NOTES § D264 ruling 32), `Gone`
+/// in that ruling's bytes.
+///
+/// **That subsection is where these sentences live now** (NOTES § D280): the section that used to
+/// quote them went with the `Fault::Refused` mockups, which cannot reach a failed connect, and for
+/// a round the three were written in no screen at all.
 #[test]
 fn the_next_step_is_per_coverage_and_only_three_faults_have_one() {
     let payments = || "payments".to_owned();

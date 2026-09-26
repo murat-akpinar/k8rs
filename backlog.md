@@ -3442,3 +3442,108 @@ long-form version and stays the authority.*
   the shape `just check` exists to prevent (CLAUDE.md § Running it: a missing step is an
   invisible gap). Fix is `rustup target add` ×4 on the host plus the linkers `cross` wants,
   or a recorded decision that the matrix is CI's alone. Found by `tester`, 2026-09-24.
+
+### From the which-cluster family and its two reviews (2026-09-26)
+
+All six are `k8s-admin`'s or `tester`'s findings on the family
+[D279](NOTES.md#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24)
+landed, triaged in
+[D280](NOTES.md#d280--the-which-cluster-review-round-a-header-slot-with-no-vocabulary-a-mockup-that-cannot-be-drawn-and-four-tests-weaker-than-they-read-2026-09-26)
+item 7. Evidence:
+[reports/2026-09-25-the-which-cluster-family.md](reports/2026-09-25-the-which-cluster-family.md).
+
+- **An expired API-server certificate reached through `X` leaves the reader on a false
+  `⚠ disconnected, retrying`, for ever.** `certificate_is_why` is asked on the startup path
+  only; a switch to the same cluster opens a session whose every watch fails the handshake,
+  and `s`/`r` are paused *while disconnected, retrying* — which cannot help and never will.
+  The ten-line wall does not fit the thirteen-row modal ceiling, so the fix needs a screen
+  and not a call. Contradicts `screens/context.md`'s own *the switch is the startup path,
+  run again*. Found by `k8s-admin`, finding 6.
+
+- **`--namespace` crosses a switch and the new cluster is never asked whether it has that
+  namespace.** Kept as a property of the process (D280 item 4); what it owes is the scoped
+  Alerts paragraph `screens/states.md` § You can only see some namespaces specifies, which
+  does not reach the console today and is independent of this box. The LIST return against a
+  missing namespace is **not measured**. Found by `k8s-admin`, finding 7.
+
+- **The taught `--context` carries the drawn name, not the spelling `kubectl` would resolve.**
+  `Session::context` is stripped and capped at 512 bytes; `connect_with` is handed the raw
+  key. For a bidi or over-long context name the strip prints a pasteable line naming a context
+  that does not exist. The two requirements genuinely conflict — the raw name may not be
+  printed — and the bare-`$ kubectl` fallback the function already has for a name that strips
+  to nothing is the shape the partial case wants. Found by `k8s-admin`, finding 8.
+
+- **`k8s.rs`'s token-hygiene comment says an exec plugin's *stdout* where `Never` now pipes
+  stderr too.** The invariant holds — nothing formats a kube error, *select, never format*,
+  verified — but the documented shape is narrower than the risk, and the next person reaching
+  for a kube error string reads that sentence. `k8s.rs` froze at Phase 6, so this is a
+  reversal and not an edit. Found by `k8s-admin`, finding 9.
+
+- **`Modal::Unconnected::coverage` is computed at its only construction site and read by
+  nobody**, and `X` appends `$ kubectl config get-contexts` on every press with no dedupe, so
+  two presses read as two kubeconfig reads that did not happen. Found by `k8s-admin`,
+  findings 10 and 11.
+
+- **`X` reconnects from the kubeconfig cached at startup**, so a login renewed by *writing a
+  fresh token into the file* is reconnected with the stale one — while `Fault::Expired`'s own
+  sentence tells the reader to renew it there and press `X`. `src/views.rs`'s `Fault::Expired`
+  arm already records this class as *"the PM's to box rather than this arm's to guess at"*;
+  the cache is deliberate (`X` must not re-read the kubeconfig to open a picker) and reversing
+  it is a decision. Found by `tester`, gap G2.
+
+- **`reports-guard.py` refuses any Rust path spelled `Token::`, `Secret::` or `Credential::`.**
+  Its rule is a credential-named field, a separator and a long value, and Rust's `::` satisfies
+  the separator — so a reviewer naming a kube-client symbol reds the build. **The guard is
+  right and narrowing it is worse**: excusing `::` would also excuse `token::` inside a real
+  leak's key path, which is the framing [D31](NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+  exists for. The cost is one red build per reviewer who has not met it yet, and the entry is
+  here so the next one recognises it. Found by `tester` and `k8s-admin`, 2026-09-26.
+
+### From the which-cluster round two (2026-09-26)
+
+Triaged in [D281](NOTES.md#d281--round-two-the-fix-that-broke-the-quoting-rule-a-probe-that-was-not-one-and-a-frame-that-is-honest-as-built-and-misreading-as-drawn-2026-09-26)
+item 8. Evidence:
+[reports/2026-09-26-which-cluster-round-two.md](reports/2026-09-26-which-cluster-round-two.md).
+
+- **Two test sites index a page's fenced blocks by `##`-ordinal and are fragile to a fence added
+  under an earlier `###`.** `## The tag column` (`[1] [2] [3]`) and `## Unhappy states`
+  (`[0] [3]`), neither with a shape canary. **`## Unhappy states`[3] fails silently** — its test
+  reads only `.len()`, so a different mockup with the same row count passes. This family fixed
+  the same class at two sites by addressing blocks by `###` heading instead; these two are
+  pre-existing and not this family's, and a guard for the class would red the gate on them.
+  Found by `tester`, round two finding 2.
+
+- **`main::kubectl(None)`'s bare `$ kubectl` line collides with the failed-switch frame.** A
+  context whose name strips to nothing drops the `--context` segment whole — right, and
+  documented in `src/ops.rs`. In the new frame the only cluster name on screen is the one that
+  was just refused, the strip's line came from a different cluster, and pasting it runs against
+  `current-context`, a third. This box created the frame, not the line. Found by `tester`,
+  round two finding 4.
+
+- **The backlogged drawn-name-versus-key finding got more expensive**, and the entry above it
+  should be read with this one: a next step now *instructs* the reader to run what the command
+  log merely showed, so a name that differs between `Choice::name` and `Choice::key` sends them
+  to a context `kubectl` cannot find as their way out of a dead end. Also: `ui::cut` bounds the
+  box's paragraph with no idea it is cutting a command, truncating a taught line mid-name where
+  `command_cut` exists and is not reachable from there. Found by `k8s-admin`, round two
+  finding 5.
+
+### From the which-cluster round three (2026-09-26)
+
+Evidence:
+[reports/2026-09-26-which-cluster-round-three.md](reports/2026-09-26-which-cluster-round-three.md)
+and the round-two report beside it. Neither is blocking; the round found no defect in the code.
+
+- **The `Halt::Mutate` arm's three `continue` guards can discard a halt that was already
+  drained.** `let Some(file) = audit.as_mut() else { continue }` and its two siblings sit after
+  the slot has been emptied, so a key parked during a mutation is lost if the run has no audit
+  log. Unreachable today — `--read-only` opens no audit log *and* reaches no mutating key — and
+  it predates the carry, but it is the one remaining `continue` that eats a real keypress and it
+  has no test. Found by `tester`, round three.
+
+- **`kubectl version` prints `Client Version:` locally before it contacts the server.** So the
+  reader whose login now works but whose cluster is unreachable sees two success-looking lines
+  above the error, presses `X`, and the switch fails again. It does not loop — the second box
+  draws a different fault — so the cost is one wasted attempt. **This is an estimate, not a
+  measurement**: nobody ran `kubectl version` against an unreachable server. The one-line run
+  would settle it. Found by `k8s-admin`, round three.

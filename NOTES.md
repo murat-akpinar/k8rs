@@ -300,6 +300,9 @@ its line moving with it.
 - [D276](#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24) — the thirteenth crate was already compiled, and the terminal handover is one family
 - [D277](#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24) — the handover round: a measurement that read the shell instead of the job, one door for three ways of stopping, and a test that passed with its subject deleted
 - [D278](#d278--the-flags-box-what-had-to-be-ruled-before-it-could-be-briefed-a-record-that-named-the-wrong-cluster-and-opsrs-reopens-for-a-taught-command-2026-09-24) — the flags box: what had to be ruled before it could be briefed, a record that named the wrong cluster, and `ops.rs` reopens for a taught command
+- [D279](#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24) — the context family: two boxes that cannot be landed apart, and the five rulings their brief needed
+- [D280](#d280--the-which-cluster-review-round-a-header-slot-with-no-vocabulary-a-mockup-that-cannot-be-drawn-and-four-tests-weaker-than-they-read-2026-09-26) — the which-cluster review round: a header slot with no vocabulary, a mockup that cannot be drawn, and four tests weaker than they read
+- [D281](#d281--round-two-the-fix-that-broke-the-quoting-rule-a-probe-that-was-not-one-and-a-frame-that-is-honest-as-built-and-misreading-as-drawn-2026-09-26) — round two: the fix that broke the quoting rule, a probe that was not one, and a frame that is honest as built and misreading as drawn
 
 ## Why it exists — where the gap is
 
@@ -24636,3 +24639,287 @@ lesson arriving through the reviewer instead of the sweep. And **the dev's gate
 has no guards in it** by design (`fmt`/`clippy`/`test`/`mutants-diff`), which is
 why one 102-column line survived three consecutive edit rounds: nothing the dev
 runs can see `scripts/width-guard.py`.
+
+### D279 — the context family: two boxes that cannot be landed apart, and the five rulings their brief needed (2026-09-24)
+
+Phase 12's next two boxes are **one place decides which context is used** and
+**the cluster picker is wired**. The phase's head note says every box but the
+event loop stays one at a time, and that is the sentence this entry reverses —
+for these two and for no others.
+
+**The premise, re-checked at HEAD** ([D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)),
+because the first box was written a phase before the code it is about:
+
+- Phase 11 landed the picker's whole state and drawing — `views::Picker`,
+  `Modal::ContextPick`, `Connection`, `Chosen`, `views::landable`, and
+  `ui::Screen::contexts`. None of it is a stub.
+- `main.rs` already **opens** the picker on `X`, moves its cursor, filters it,
+  and answers `Chosen::Close`. `Chosen::Connect` is `Did::Nothing`, with a
+  comment naming the wiring box as its owner (`src/main.rs`, § THE CONSOLE,
+  `over_modal`).
+- `Modal::ContextPick` is constructed in exactly one place — the `X` arm. There
+  is no startup picker.
+- `console()` reads `opening.context` twice, for `k8s::contexts` and for
+  `k8s::connect_with`, and there is no third reader **because the picker cannot
+  yet supply a context at all**.
+- `--once` and a non-tty never reach `console()`: `opening` answers `None` for
+  every line `live_context` claims, and `main` asks `at_a_keyboard` before it
+  builds a runtime. The first box's *"never open it"* half is already
+  structurally true; what it lacks is the run that says so.
+
+**1. The two boxes are one family and one turn.** A family is the boxes that
+touch the same code and answer the same question
+([D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)),
+and these answer *which cluster*. Landing the first alone has two spellings and
+both are dishonest. Either the resolver answers *ask first* and `console()`
+connects to `current-context` anyway — a decision whose answer is discarded,
+which is the shipped behaviour with more code in front of it — or the startup
+picker opens and its `⏎` does nothing, which is a program a reader cannot get
+out of except by `esc`. The second box's own first clause is *"`X` and the
+startup `⏎` call `connect()` again"*, so the startup `⏎` was never the first
+box's to wire; and the first box's *"the picker beats `current-context`"* cannot
+be proven while nothing can pick. **Neither half is a box on its own.**
+
+**2. The resolver is a decision over values, not a function that reads the
+environment.** Same shape and same reason as
+[`at_a_keyboard`](src/main.rs): read inside, every row but one is
+unreachable from a test — `cargo test`'s own ends are pipes — and
+`just mutants-diff` proved that exact hole by replacing the body with `false`
+and with `||` and finding no test that could tell. The inputs are the flag, the
+kubeconfig's rows and whether there is a terminal; the answer is *connect with
+this* or *ask first*.
+
+**3. What counts as a real choice is rows, not landable rows.**
+[`screens/context.md` § Opening at startup](screens/context.md#opening-at-startup)
+says *two or more contexts, no `--context`*, and the picker already draws — and
+has a written sentence for — a row whose cluster the file does not define. A
+file holding one usable context and one broken entry is a file with something
+to say, and `views::landable` is the cursor's rule, not the opening rule.
+
+**4. Which failure is a wall and which is a modal is already ruled, and this
+family only carries it out.**
+[`screens/states.md` § Before the TUI ever starts](screens/states.md#before-the-tui-ever-starts):
+no kubeconfig at all is always stderr and a non-zero exit; *one context in the
+file, `--context` given, `--once`, or a non-tty* keep today's wall — which is
+`before_the_first_frame`, unchanged; and once two or more contexts have put the
+picker on screen, raw mode is already on and the failure is the modal in
+[`screens/context.md` § When the new cluster does not work](screens/context.md#when-the-new-cluster-does-not-work).
+The startup failure box's `esc` reopens the **same** startup picker, which is
+that page's § The same failure, from the startup picker.
+
+**5. `esc` on the startup picker quits the way `q` does** — `console()` answers
+`None`, nothing goes to stderr, exit `0`. It is a reader leaving, not a line
+being refused, and [D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 1's `2` is for a run that could not happen.
+
+**6. The `exec` login program gets `interactive_mode: Never`, and the
+alternative is not reachable rather than merely worse.**
+[D264](#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+ruling 32 measured 27 plugin runs over a 12 s session, each inheriting the
+terminal, and left the choice to this box: give up interactive login, or hand
+the terminal over at kube's own refresh. The second needs a hook at the moment
+kube re-runs the plugin, and kube runs it from inside the client at an arbitrary
+`await` point with nothing k8rs can wrap — so it is not a thing this codebase
+can choose, and pretending otherwise would put a raw-mode terminal under a
+program asking for a password. **The ruling is conditional on one fact the dev
+verifies and reports**: that kube reads `interactive_mode` off the in-memory
+`Kubeconfig` handed to `connect_with` before it runs the plugin. If it does not,
+the finding comes back and this ruling is made again rather than worked around.
+
+### D280 — the which-cluster review round: a header slot with no vocabulary, a mockup that cannot be drawn, and four tests weaker than they read (2026-09-26)
+
+[D279](#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24)'s
+family came back from `k8s-admin` with one blocker, six should-fix and four
+nits, and from `tester` with four test findings and three gaps. **Two of them
+are the same defect seen from opposite ends**, which is what a family read is
+for.
+
+**1. The header's fault slot is a screen gap, not a code gap, and it is the
+blocker.** `screens/widgets.md` § 1a says that while nothing is connected the
+right zone carries *the fault's own short word* — *"not a fifth connection word,
+and not a blank segment either"* — and `ui::Screen::context`'s doc states the
+same as the caller's obligation. `main::zone` joins no such word, so a failed
+switch draws `ctx: staging · admin`, where `admin` is the *permission* word that
+sat there over a live cluster a moment earlier. **`⚠ not allowed` is the only
+fault short word written anywhere**, and it belongs to `Fault::Refused`, which
+cannot reach this frame at all: `k8s::connect_with` answers `Err` only for a
+`Config` that will not load and a `Client` that will not build, so a 403 comes
+back `Ok(Session)` with `Coverage::Refused`. Every reachable fault therefore
+draws the blank the screen forbids. **Implementing the join was not available —
+there is nothing to join** — so the vocabulary is `tui-designer`'s and the code
+follows it.
+
+**2. The same contradiction from the other end.** `screens/context.md`'s
+headline mockup — *"staging said no"* — and its § After `esc dismiss` strip both
+need that unreachable `Refused` failure, and `ui::failed`'s entire `sent: true`
+branch is dead from the console for the same reason. A page whose opening
+mockup cannot be drawn is a page the next reader builds against, so it is ruled
+with item 1 rather than filed beside it.
+
+**3. `interactive_mode: Never` stands, and what was missing was its operator
+half.** Both reviewers verified the mechanism against kube-client 4.2.0 —
+`stdin` piped, stderr no longer inherited, at connect and at every refresh — so
+[D279](#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24)
+ruling 6's conditional is discharged. What it did not carry is the reader:
+someone whose plugin wants a device-code prompt now gets *"gave k8rs nothing to
+sign in with"* and **no next step**, while their own `kubectl` works on that same
+context. k8rs knows before connecting whether a context logs in with a program,
+so the clause is showable on exactly the contexts it is true of. **And it
+falsifies the D264 ruling 32 paragraph that sent the diagnosis to the terminal's
+stderr** — that door is now closed on purpose, and the page says otherwise.
+
+**4. `--namespace` survives a switch, and the author's choice is kept.** Nothing
+in `screens/` ruled it. `k8s-admin` argues a namespace is an object that lives in
+one cluster while `--read-only` is a fact about the human, and that a
+`payments` that does not exist on the new cluster draws *"0 pods and 3 nodes
+checked, none of them is in trouble right now"* — the sentence `zone`'s own doc
+calls the answer this tool exists not to give. **It stays a property of the
+process**, because dropping it silently widens the scope of a flag whose whole
+purpose is to narrow one, which is the worse surprise of the two. What it owes
+is the scoped-Alerts paragraph `screens/states.md` § You can only see some
+namespaces already specifies and which does not reach the console — backlogged,
+not this box, and independent of it. The LIST-against-a-missing-namespace return
+is **not measured**; the reviewer said so and it is not repeated here as if it
+were.
+
+**5. Four tests read stronger than they are, and one was proven so by planting
+the regression.** `x_opens_the_picker_the_header_just_described` compares
+`picker.startup()` against `wanted == Connection::Never`, where `wanted` is
+`Live` then `Dropped` — the expected value is the constant `false` both times —
+and then replaces the picker `X` built with one it constructs itself, so
+[D265](#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)
+ruling 4's regression is invisible to it: planted in a mirror, 1562 tests passed.
+The other three are an `||` whose second arm matches the frame the assertion
+exists to forbid, a crafted-name test that never calls `framed()` so *the frame
+stays 80×24* is proven nowhere, and an `assert!(!console.insecure)` over a
+fixture with no such row. **None is a defect in `src/`**, which is exactly why
+step 5 exists.
+
+**6. The pty harness was unsound, and running it is what said so.** The draft
+`scripts/picker-test.py` scored 14 of 34 against the real binary and every
+failure was the harness: a crafted name written as a Python `repr` inside a
+single-quoted YAML scalar, so no escape byte ever existed; an exit code reaped
+and discarded, so every row read `0`; alternate-screen rows matched against a
+transcript the matcher had already stripped. Rewritten to 80 checks and wired as
+`just picker` beside `just suspend`, with `--self-test` in the guards.
+**The three surviving `console` mutants are killable after all** — planted one at
+a time, 33, 32 and 33 failures of 62. **And the trap worth keeping**: a restored
+source with no rebuild left the next run scoring against the mutant's binary.
+*I restored it* is a claim about the source; the artifact is a separate fact.
+
+**7. What is deferred, and none of it is silence.** Six findings go to
+`backlog.md` with the evidence cited: an expired API-server certificate reached
+through a switch leaves the reader on a false *disconnected, retrying*, because
+`certificate_is_why`'s ten-line wall does not fit the thirteen-row ceiling; the
+taught `--context` carries the drawn name rather than the kubeconfig spelling,
+which for a bidi or over-long name is pasteable and wrong; `k8s.rs`'s
+token-hygiene sentence says *stdout* where `Never` now pipes stderr too — a
+comment in a file frozen since Phase 6, which is a reversal and not an edit, and
+the invariant itself holds (*select, never format*, verified); `Modal::
+Unconnected::coverage` is computed at its only construction site and read by
+nobody; `X` appends `$ kubectl config get-contexts` on every press with no
+dedupe; and `X` reconnects from a kubeconfig cached at startup, so a login that
+renews by **writing a fresh token into the file** is reconnected with the stale
+one — which `src/views.rs`'s `Fault::Expired` arm already records as *"the PM's
+to box rather than this arm's to guess at"*, and this is that box being owed
+rather than a new discovery.
+
+### D281 — round two: the fix that broke the quoting rule, a probe that was not one, and a frame that is honest as built and misreading as drawn (2026-09-26)
+
+[D280](#d280--the-which-cluster-review-round-a-header-slot-with-no-vocabulary-a-mockup-that-cannot-be-drawn-and-four-tests-weaker-than-they-read-2026-09-26)'s
+round landed, and the second read found **a blocker created by round one's own
+fix**. Both reviewers reached it from different ends — `k8s-admin` from the
+security gate's untrusted-input row, `tester` from the real binary with a context
+named `needs login` — which is the strongest signal this process produces.
+
+**1. `views::run_the_login` was a third spelling of a taught `kubectl` line, and
+it did not quote.** `ops::pasteable` is the one quoting rule, and
+[D278](#d278--the-flags-box-what-had-to-be-ruled-before-it-could-be-briefed-a-record-that-named-the-wrong-cluster-and-opsrs-reopens-for-a-taught-command-2026-09-24)
+ruling 5 reopened a frozen `ops.rs` to put it there. Six days later a new
+sentence interpolated the context name raw. Measured on the real binary: the
+strip spells one name `--context 'needs login'` and the box spells the same name
+`--context needs login`, **in one frame** — and for
+`prod eu; echo pwned`, the name D278 itself measured, the box hands the reader a
+shell injection to paste. `Choice::name` is `k8s::drawable`, which removes
+unprintables and caps length; **it is not a charset allowlist**, so a space and a
+`;` both survive. This surface is worse than the command log: the strip is
+ambient text a reader *may* paste, this is an imperative sentence telling them
+to. `views.rs` already imports `crate::ops` in 43 places, so the fix is a call,
+not plumbing.
+
+**2. A context whose name strips to nothing gets no next step at all.**
+`unwrap_or(UNNAMED)` produced `kubectl --context (unnamed) get ns`, which is not
+a wrong command but **not valid shell** — `syntax error near unexpected token`.
+`main::kubectl` already rules this input the other way, dropping the segment
+whole because *"`--context ` with an empty value after it is a line that does not
+run, so there is nothing to teach"*. Dropping the flag here is worse than
+silence, because `kubectl get ns` would then teach a command against the
+reader's *current* context, a third cluster. **So the next step is omitted
+entirely when there is no runnable name** — a dead end is better than a wrong
+errand.
+
+**3. `get ns` is not a permission-free probe, and there is no such thing.**
+The rationale claimed it *"asks for almost nothing, so it exercises the login
+without first needing the cluster-wide pod access"*. `namespaces` is
+**cluster-scoped**: a `Role` in one namespace grants `list namespaces` exactly
+as little as `list pods -A`, and this repo's own
+`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1 is the kubeconfig
+that proves it. The reader the sentence was written to protect runs it, is
+refused, and concludes a working login is broken — the failure it claims to
+avoid, one resource over. **The observation that dissolves it**: the login
+program runs *before* any request is sent, so every command exercises it equally.
+There is no probe to find, only a choice of which failure is confusable, and a
+`403` is itself proof that authentication succeeded. The wording is
+`tui-designer`'s; what is ruled here is that the rationale is false and goes.
+
+**4. The strip after a failed switch is honest as built and misreading as
+drawn.** `LOG_LINES` is 2 and both sites that build `Modal::ContextPick` append
+`GET_CONTEXTS` immediately, so the newest line is always the picker's own
+cluster-neutral file read and the old cluster's line reads as history beneath it.
+Measured both ways, it does not misread. **The page draws a one-row strip**, and
+on the page the only line names `prod-eu` directly under a header naming
+`aws-staging`, which does. The artifact that is wrong is the mockup, not the
+code — and **the invariant goes on the page**, because nothing enforces it: a
+`LOG_LINES` of 1, or a path reaching a failed switch without `X` having logged,
+brings the misread back in silence.
+
+**5. The carried halt is lifted into `pump` rather than documented as a hole.**
+Round one fixed a swallowed keypress by carrying the halt in `console()`, and
+both reviewers found the fix **uncovered** — revert it and every test stays
+green, because the drop is inside `console()` and no test reaches there.
+`tester` measured the reason it cannot be covered where it sits: `cargo mutants
+--list` offers **0 mutants in `console()`'s entire body against 3482 in the
+crate**, and `just picker` cannot reach the window either, since it needs a
+mutation that settles and therefore a cluster. A function nothing can mutate and
+nothing can drive is not a place to put a fix. `pump` has two callers in tests
+already, so the carry moves there and becomes provable — **the same shape as
+[D274](#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24)'s
+rule that every decision inside `console()` is a function over values**, applied
+to the one thing that was left inside it.
+
+**6. `just picker` joins `just suspend` as a phase-close obligation.** 94 checks
+over 20 journeys on a real pty, and it is the only thing that kills the three
+`console` mutants. It is not in `just check` for `just suspend`'s own reason
+([D277](#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)
+ruling 7): a pty and a built binary, neither of which CI has. **A gate that is
+only owed is a gate that is forgotten**, so it goes in the phase's close list
+beside its sibling rather than in a report.
+
+**7. Three of `tester`'s own harness defects are worth keeping**, because each
+made green checks green about nothing: an 8 s timeout too short for an `exec`
+connect, so rows failed for the harness's reason; `/bin/cat` as a failing login
+program, which *blocks* rather than failing and so raced between two faults; and
+a squeeze that kept the frame's borders, meaning **every needle longer than one
+drawn row could never match** — round one's checks were proven only for needles
+that fit a single row.
+
+**8. Deferred, with their evidence** — all to `backlog.md`: two pre-existing
+`##`-ordinal test sites (`## The tag column`, `## Unhappy states`) are fragile to
+a fence added under an earlier `###`, and `## Unhappy states`[3] fails
+*silently* because its test reads only `.len()`; `main::kubectl(None)`'s
+deliberate bare `$ kubectl` line now collides with the failed-switch frame, where
+the only name on screen is the refused one; the backlogged drawn-name-versus-key
+finding got more expensive, since a next step *instructs* the reader to run what
+the command log merely showed; and `cut` bounds the box's paragraph with no idea
+it is cutting a command, where `command_cut` exists and is unreachable from
+there.

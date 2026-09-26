@@ -79,15 +79,23 @@ body → Layout::horizontal([
   switch that has been refused, has expired or has otherwise failed leaves
   nothing for any of the four to describe**, from the moment its own box
   first draws through however long the reader leaves it dismissed: the slot
-  instead carries the fault's own short word, the same one
+  instead carries one short word, `⚠ not connected`, the same one
   [context.md § When the new cluster does not
   work](context.md#when-the-new-cluster-does-not-work) writes into the box
-  itself (`⚠ not allowed` for a `Refused`) — not a fifth connection word, and
-  not a blank segment either, for as long as nothing is connected
+  itself — not a fifth connection word, and not a blank segment either, for
+  as long as nothing is connected
   ([context.md § After `esc dismiss`, on a switch that failed with a cluster
   already live](context.md#after-esc-dismiss-on-a-switch-that-failed-with-a-cluster-already-live),
-  `reports/2026-09-19-the-strip-and-the-connection-word.md` § M1). **This
-  is a session fact, not a modal one — it does not end when the box
+  `reports/2026-09-19-the-strip-and-the-connection-word.md` § M1). **One word
+  for every fault, not one per fault**: `context.md` measures which of the
+  eleven `k8s::Fault` variants can actually reach a failed connect and finds
+  three, all sharing the one outcome a connect attempt can end in —
+  *could not be opened* — so the header has one sentence to describe, not
+  eleven, and a bespoke word per fault would be inventing distinctions the
+  box itself does not draw
+  ([context.md § Which faults can actually reach this box, and where the rest
+  live instead](context.md#which-faults-can-actually-reach-this-box-and-where-the-rest-live-instead)).
+  **This is a session fact, not a modal one — it does not end when the box
   closes.** The startup picker's own failure is not this case: dismissing it
   reopens the picker itself, whose header reads `choose a cluster`, not a
   context name at all ([context.md § Opening at
