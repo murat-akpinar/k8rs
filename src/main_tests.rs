@@ -15384,13 +15384,18 @@ fn the_connection_word_reads_the_fault_and_a_refusal_is_not_a_dropped_link() {
         ui::Link::Live,
         "a refused watch took both mutating keys off a live cluster"
     );
+    // **One dropped watch beside four that are answering is not a dropped connection**
+    // (NOTES § D285 ruling 1). It read `Lost` here until 2026-09-26, which is the measured defect:
+    // the four healthy watches have no row at all, so the only thing left to read was the one
+    // stale `Unanswered`.
     assert_eq!(
         linked(
             true,
             Some(&snapshot),
             &[in_trouble(ObjectKind::Pod, Some(&dead), false)]
         ),
-        ui::Link::Lost
+        ui::Link::Live,
+        "one watch's stale error took both mutating keys off a cluster still delivering"
     );
     assert_eq!(
         linked(
@@ -15412,6 +15417,243 @@ fn the_connection_word_reads_the_fault_and_a_refusal_is_not_a_dropped_link() {
             ]
         ),
         ui::Link::Expired
+    );
+}
+
+/// **`⚠ disconnected, retrying` is *no watch is answering*, and never *a watch is in trouble***
+/// (NOTES § D285 ruling 1). `screens/states.md` § The connection dropped draws a claim about the
+/// cluster — *"Not connected to the cluster **right now**"* — and it costs `s` and `r` for as long
+/// as it stands, so one quiet watch holding a stale error may not produce it.
+///
+/// **Measured: a cut all five watches resumed from inside 1.6 s left the node and workload watches
+/// `Unanswered` on a quiet cluster** — nothing to deliver is nothing to clear on — and the header
+/// said `disconnected` for 340 s while pod events flowed
+/// (`reports/2026-09-26-the-error-state-pass.md`).
+///
+/// **Eight shapes and a startup, because neither `any` nor `all` gets them all right**: the fourth
+/// is the scoped run a namespaced `Role` produces, where the node watch is refused for the life of
+/// the process and *every row carries `Unanswered`* would therefore never be true. The seventh is
+/// the one a predicate keyed on `k8s::Trouble::fault` gets backwards, and the eighth is the only
+/// case that can tell this arm's *order* from its *condition*.
+#[test]
+fn the_connection_word_says_disconnected_only_when_no_watch_answers() {
+    let store = a_cluster_with_cards();
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let dead = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+    let refused = watcher::Error::InitialListFailed(api_error(403, "Forbidden"));
+    // Read through `k8s::Trouble::fault`, the same public path `linked` reads, so the two fixtures
+    // are the faults this test claims they are and not whatever they happen to classify as.
+    assert_eq!(
+        in_trouble(ObjectKind::Pod, Some(&dead), true).fault(),
+        Some(k8s::Fault::Unanswered),
+        "the dropped-socket fixture is not the fault this test is about"
+    );
+    assert_eq!(
+        in_trouble(ObjectKind::Node, Some(&refused), false).fault(),
+        Some(k8s::Fault::Refused),
+        "the 403 fixture is not the fault this test is about"
+    );
+
+    // **The universe [`WATCHED`] names, pinned against the store itself.** `k8s::Store::troubles`
+    // reports only the watches that are not delivering, so what `linked` reads *nothing is
+    // arriving* off is *all five named*. Both ways that can go out of step are silent — a kind
+    // that stops being reported leaves `linked` unable to say `Lost` at all, a sixth it does not
+    // name is a watch whose health stops being counted — and neither shows up in any other
+    // assertion here, because every one of them builds its own rows. `Store::stop_waiting` is the
+    // one public way to put every watch of an untouched store into trouble at once.
+    let mut nothing_landed = k8s::Store::default();
+    nothing_landed.stop_waiting();
+    let reported: Vec<ObjectKind> = nothing_landed
+        .troubles()
+        .iter()
+        .map(|trouble| trouble.kind.clone())
+        .collect();
+    assert_eq!(
+        reported,
+        WATCHED.to_vec(),
+        "`k8s::Store::troubles` no longer reports the watches `WATCHED` names"
+    );
+
+    // A `fn` and not a closure: the borrow in the rows it builds outlives the call that built them.
+    fn each(failure: &watcher::Error) -> Vec<k8s::Trouble<'_>> {
+        WATCHED
+            .iter()
+            .map(|kind| in_trouble(kind.clone(), Some(failure), true))
+            .collect()
+    }
+    let word = |troubles: &[k8s::Trouble<'_>]| linked(true, Some(&snapshot), troubles);
+
+    // 1. All five dropped — a real total drop, and the shape a startup against a dead port ends in.
+    assert_eq!(
+        word(&each(&dead)),
+        ui::Link::Lost,
+        "no watch was answering and the header did not say so"
+    );
+    // **The same, before anything has ever been published** — the dead-port startup, where `Lost`
+    // has to beat `connecting…`. Measured on the binary against a released port: the header drew
+    // `⚠ disconnected, retrying` at the first frame and still at +15 s.
+    assert_eq!(
+        linked(true, None, &each(&dead)),
+        ui::Link::Lost,
+        "a startup that reached nothing said it was still arriving"
+    );
+
+    // 2. The measured defect: the pod watch cleared on its next `Apply`, the node and workload
+    //    watches had nothing to deliver and kept a stale `Unanswered`.
+    let pods_flowing: Vec<k8s::Trouble<'_>> = each(&dead)
+        .into_iter()
+        .filter(|trouble| trouble.kind != ObjectKind::Pod)
+        .collect();
+    // **The list is derived, so it says it found something first** (CLAUDE.md § Code phase rules,
+    // `write-guard.py`'s `CANARIES`). `linked` answers `Live` for an **empty** slice too, so a
+    // filter that threw everything away would pass the assertion below and prove nothing at all —
+    // measured, not argued: `tester` replaced the filter with `|_| false` and this test stayed
+    // green. What has to be on screen here is *four stale rows outvoted by one absence*, and four
+    // is the number that says so.
+    assert_eq!(
+        pods_flowing.len(),
+        WATCHED.len() - 1,
+        "an empty list reads `Live` whatever the predicate does, so the four quiet watches this \
+         shape is about were filtered away with the pod watch"
+    );
+    assert_eq!(
+        word(&pods_flowing),
+        ui::Link::Live,
+        "four quiet watches' stale errors outvoted the one that was delivering"
+    );
+
+    // 3. The scoped run: a namespaced `Role` cannot `list nodes`, and that is not a connection
+    //    state at all — the defect `linked`'s own doc exists to describe.
+    assert_eq!(
+        word(&[in_trouble(ObjectKind::Node, Some(&refused), false)]),
+        ui::Link::Live,
+        "a refused watch took both mutating keys off a live cluster"
+    );
+
+    // 4. The same scoped run, now really disconnected. A plain *every row is `Unanswered`* never
+    //    fires here, which is why the refusal counts as *not answering* rather than as evidence.
+    let scoped_and_dropped: Vec<k8s::Trouble<'_>> = WATCHED
+        .iter()
+        .map(|kind| {
+            let failure = if *kind == ObjectKind::Node {
+                &refused
+            } else {
+                &dead
+            };
+            in_trouble(kind.clone(), Some(failure), *kind != ObjectKind::Node)
+        })
+        .collect();
+    assert_eq!(
+        word(&scoped_and_dropped),
+        ui::Link::Lost,
+        "a scoped run could not say `disconnected` even with every other watch down"
+    );
+
+    // 5. And a refusal is never *evidence* of a drop, however many watches carry one: nothing here
+    //    is retrying and `Lost`'s *k8rs is retrying* would be the wrong sentence
+    //    (`k8s::Fault::standing`).
+    assert_eq!(
+        word(&each(&refused)),
+        ui::Link::Live,
+        "five standing refusals were reported as a connection k8rs is retrying"
+    );
+
+    // **The rows [`in_trouble`] cannot build**: it hardcodes both markers, and what the two shapes
+    // below turn on is exactly the markers. A `fn` returning `'static` because neither carries a
+    // `failure` to borrow from.
+    fn marked(kind: ObjectKind, ended: bool, unfinished: bool) -> k8s::Trouble<'static> {
+        k8s::Trouble {
+            kind,
+            listed: true,
+            failure: None,
+            ended,
+            unfinished,
+            outstanding: None,
+        }
+    }
+
+    // 6. Every watch wedged and none of them carrying a `failure` — `k8s::Store::stop_waiting`'s
+    //    own shape, which is how a run with a budget ends. `Fault::Unfinished` is the only fault
+    //    on screen and it is one of the two this arm reads.
+    let all_wedged: Vec<k8s::Trouble<'_>> = WATCHED
+        .iter()
+        .map(|kind| marked(kind.clone(), false, true))
+        .collect();
+    // `all` is true of an empty iterator, so the count comes first here too.
+    assert_eq!(
+        all_wedged.len(),
+        WATCHED.len(),
+        "this shape is about every watch being wedged and one of them is missing"
+    );
+    assert!(
+        all_wedged
+            .iter()
+            .all(|trouble| trouble.fault() == Some(k8s::Fault::Unfinished)),
+        "the wedged rows do not carry the fault this shape is about"
+    );
+    assert_eq!(
+        word(&all_wedged),
+        ui::Link::Lost,
+        "a run whose every watch was told the waiting is over said the cluster was answering"
+    );
+
+    // 7. **A stream that finished is not a watch that is answering**, and it is the row a
+    //    predicate keyed on `fault()` gets backwards: `ended` with no `failure` reads `None`
+    //    there (`k8s::Trouble::fault`), which is the same answer a healthy watch would give if
+    //    healthy watches had rows — and they do not. Nothing will arrive on it again, so the four
+    //    dropped watches beside it are the whole of the cluster.
+    let finished = marked(ObjectKind::Pod, true, false);
+    assert_eq!(
+        finished.fault(),
+        None,
+        "the finished-stream row does not have the shape this case is about"
+    );
+    let four_dropped_and_one_finished: Vec<k8s::Trouble<'_>> = std::iter::once(finished)
+        .chain(
+            each(&dead)
+                .into_iter()
+                .filter(|trouble| trouble.kind != ObjectKind::Pod),
+        )
+        .collect();
+    assert_eq!(
+        four_dropped_and_one_finished.len(),
+        WATCHED.len(),
+        "this shape is about every watch being accounted for and one of them is missing"
+    );
+    assert_eq!(
+        word(&four_dropped_and_one_finished),
+        ui::Link::Lost,
+        "a stream that had finished was counted as a watch still answering"
+    );
+
+    // 8. **The arms are ordered and this is what pins the order.** An expired login answers before
+    //    a dropped connection whatever else is on screen, and the sibling test cannot say so: its
+    //    `Expired`-beside-a-drop case carries two rows, so `answering` is true there and `Lost`
+    //    was never in the running. Here all five are accounted for, so both arms would fire.
+    let expired = watcher::Error::WatchError(
+        kube::core::Status::failure("expired", "Unauthorized")
+            .with_code(401)
+            .boxed(),
+    );
+    let expired_amid_a_drop: Vec<k8s::Trouble<'_>> = WATCHED
+        .iter()
+        .map(|kind| {
+            let failure = if *kind == ObjectKind::Node {
+                &expired
+            } else {
+                &dead
+            };
+            in_trouble(kind.clone(), Some(failure), true)
+        })
+        .collect();
+    assert_eq!(
+        word(&expired_amid_a_drop),
+        ui::Link::Expired,
+        "a login that ran out read as a connection k8rs is retrying, which sends the reader to \
+         the network instead of to `X switch cluster`"
     );
 }
 
@@ -17359,6 +17601,17 @@ fn every_ending_ends_the_log_line_on_a_word_the_strip_has_room_for() {
             fault: k8s::Fault::Refused,
             said: Some("forbidden".to_owned()),
         }),
+        // **A `Failed` is three words and not one** (NOTES § D285 ruling 2), and `login expired`
+        // is thirteen columns — joint-widest with `changed first`, and the word `views::SAID`'s
+        // thirteen is measured off, so it is the one that has to be fed to this.
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Expired,
+            said: None,
+        }),
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Conflict,
+            said: Some("the object changed".to_owned()),
+        }),
     ];
     for outcome in &endings {
         let word = outcome_word(outcome.as_ref());
@@ -17374,7 +17627,7 @@ fn every_ending_ends_the_log_line_on_a_word_the_strip_has_room_for() {
             "{word:?} is not one word-shaped fragment"
         );
     }
-    // Eight endings, eight words, and no two endings share one — the line says *which* ending.
+    // Ten endings, ten words, and no two endings share one — the line says *which* ending.
     let words: std::collections::BTreeSet<&str> =
         endings.iter().map(|o| outcome_word(o.as_ref())).collect();
     assert_eq!(
@@ -17382,6 +17635,63 @@ fn every_ending_ends_the_log_line_on_a_word_the_strip_has_room_for() {
         endings.len(),
         "two endings read the same: {words:?}"
     );
+}
+
+/// **A refusal that says *rejected* sends the reader somewhere else than the box beside it**
+/// (NOTES § D285 ruling 2, invariant 4's *neither record may lie*). [`outcome_word`] mapped every
+/// `ops::Outcome::Failed` to `rejected` whatever the fault, so two of the four short forms
+/// `views::Log::outcome`'s own doc names — `refused` and `login expired` — could not be produced by
+/// any journey: a real `403` on a delete and a real `409` both printed `→ rejected`
+/// (`reports/2026-09-26-the-error-state-pass.md`).
+///
+/// **`Conflict` staying `rejected` is the ruling and not an omission**: `views.rs` defines the
+/// vocabulary, and widening it is a screen ruling first.
+#[test]
+fn the_log_line_says_which_refusal_the_cluster_gave() {
+    // Every fault a `Failed` can carry, and the word its line ends on. The three kubeconfig faults
+    // cannot reach a call that was sent, and are here because the vocabulary is decided by the
+    // fault and not by which of them a caller can produce.
+    let words = [
+        (k8s::Fault::Refused, "refused"),
+        (k8s::Fault::Expired, "login expired"),
+        (k8s::Fault::NoCredential, "login expired"),
+        (k8s::Fault::Conflict, "rejected"),
+        (k8s::Fault::Rejected, "rejected"),
+        (k8s::Fault::Gone, "rejected"),
+        (k8s::Fault::Unanswered, "rejected"),
+        (k8s::Fault::Unfinished, "rejected"),
+        (k8s::Fault::Kubeconfig, "rejected"),
+        (k8s::Fault::NoContext, "rejected"),
+        (k8s::Fault::BadEntry, "rejected"),
+    ];
+    for (fault, expected) in words {
+        let failed = ops::Outcome::Failed {
+            fault,
+            said: Some("whatever the server said".to_owned()),
+        };
+        assert_eq!(
+            outcome_word(Some(&failed)),
+            expected,
+            "{fault:?} on the strip sends the reader somewhere the box does not"
+        );
+        // **The word is read off the fault and never off the sentence beside it** — `said` is the
+        // server's own words and is the refusal box's, bounded there (`views::SAID`).
+        assert_eq!(
+            outcome_word(Some(&ops::Outcome::Failed { fault, said: None })),
+            expected,
+            "{fault:?} read its word off the server's sentence"
+        );
+    }
+
+    // **And the fault does not leak into the arm beside it**: nothing was sent at all under a
+    // `NotSent`, which is a different event and keeps its own word whatever the fault.
+    for (fault, _) in words {
+        assert_eq!(
+            outcome_word(Some(&ops::Outcome::NotSent { fault, said: None })),
+            "not sent",
+            "{fault:?} on a call that was never sent read as one the cluster answered"
+        );
+    }
 }
 
 /// **What the two unwired panes actually draw, read off the cells** — the browser and each of the
@@ -17488,6 +17798,13 @@ fn the_strip_keeps_the_object_the_line_is_about_for_every_ending() {
         Some(ops::Outcome::Failed {
             fault: k8s::Fault::Refused,
             said: Some("forbidden".to_owned()),
+        }),
+        // **`login expired` is thirteen columns, joint-widest with `changed first`** — measured
+        // here rather than reasoned equal to it, because what this test is about is the row a
+        // widest word draws (NOTES § D285 ruling 2, `views::SAID`).
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Expired,
+            said: None,
         }),
     ];
     for outcome in endings {

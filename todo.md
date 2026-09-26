@@ -4794,9 +4794,34 @@ at HEAD). Every other box in this phase stays one at a time.
       the page draws four of the six only in prose. The behavioural pin — *which
       branch* produced the sentence — is the wiring box above this one's, and
       D282 says so rather than leaving it read as covered
-- [ ] Manual pass of the REQUIREMENTS error-state list (no kubeconfig, 403 on
+- [x] Manual pass of the REQUIREMENTS error-state list (no kubeconfig, 403 on
       read, 403 on write, API down mid-run, watch drop, rejected admission,
-      409 conflict)
+      409 conflict) — **the first thing that ever drove the wired console
+      through these states against a live API server**, ten journeys on a pty
+      against v1.36.1
+      ([reports/2026-09-26-the-error-state-pass.md](reports/2026-09-26-the-error-state-pass.md) ·
+      […-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md)).
+      Nine behaved as specified: three stderr walls at `exit 2` with no
+      alternate screen entered; a dead port drawing `⚠ disconnected, retrying`
+      forever at 0 CPU ticks rather than exiting; `docker stop`/`start` of the
+      control plane going out and back with the card still visible; a real `401`
+      (the ServiceAccount behind a bound token deleted mid-run) reading
+      `⚠ login expired` and promoting `X switch cluster`; and a real `409`
+      answering *The object changed first* with nothing overwritten.
+      **Two defects and both are fixed in this box** — [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26): one transient
+      watch drop left the header saying `⚠ disconnected, retrying` for the life
+      of the process and took `r`/`s` with it, because `linked()` read `any`
+      watch in trouble; and `outcome_word` mapped every failure to `→ rejected`,
+      so two of the four short forms `views::Log::outcome` defines could not be
+      produced by any journey. Re-measured after the fix: `live` at
+      `+10/+60/+160/+350 s` where it had held the warning at `+150/+280/+340`,
+      and `→ refused` / `→ login expired` drawn off a real 403 and a real 401.
+      **One row of the list is unmet and is Phase 13's first box, not a tick
+      here** — *permissions are checked before they are needed*: `may_i_in` is
+      unwired, so the typed-name delete still asks a reader who may not delete
+      ([D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards) ·
+      [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26) ruling 3). Five more findings are boxed in Phase 13 and three are
+      `backlog.md` lines
 - [ ] Idle CPU measured at 0%; memory measured at ~1000 pods
 
 **🔒 Security gate:** force a panic on purpose and check two things at once —
@@ -4821,6 +4846,115 @@ behaves as specified.
 ## Phase 13 — Ship v0.1 · **milestone M4**
 
 *Also read: [PRIOR-ART § J](PRIOR-ART.md#j-distribution) (every packaging channel is a support queue) and [§ L1](PRIOR-ART.md#l-two-observations-about-the-tracker-itself) (most reports are about the environment — the README answers kubeconfig and RBAC plainly, or the tracker becomes a support desk).*
+
+> **The five boxes below came out of Phase 12's error-state pass, not out of
+> shipping.** They are here because a box is never added to the phase that is
+> running ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)),
+> and they were ruled into this phase rather than into `backlog.md` by
+> [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+> ruling 3. The first is a **requirement**, not a polish item, and it comes
+> before the README for that reason. Evidence for all five, frame by frame:
+> [reports/2026-09-26-the-error-state-pass.md](reports/2026-09-26-the-error-state-pass.md).
+
+- [ ] **Wire `may_i_in`, because the typed-name delete still asks a reader who
+      may not delete.** Measured on a restricted credential, D23 verbatim: the
+      footer offered `r restart`, `ctrl-d` opened the box, the object's name was
+      typed in full, `⏎` — and *then* the cluster said
+      `cannot delete resource "deployments"`. `?` promised all three keys
+      unmarked. `may_i_in` is listed in `src/main.rs` § THE CONSOLE's *not wired
+      yet*, and `views.rs`'s `s no scale` / `r no restart` marks exist and are
+      unreachable from any journey. This is
+      [REQUIREMENTS § Error states](REQUIREMENTS.md#error-states-all-were-undefined-all-happen-on-first-launch)'s
+      *permissions are checked before they are needed, not after* row unmet —
+      the one row of that list Phase 12's pass could not tick
+      ([D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards) ·
+      [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+      ruling 3). **Done when** a key the credential cannot use is marked before
+      it is pressed, on a real restricted kubeconfig, and nobody is asked to
+      type a name they were never allowed to use
+- [ ] **A dialog cannot draw the server's whole sentence, and nothing tells the
+      reader where the rest of it is.**
+      [REQUIREMENTS.md](REQUIREMENTS.md) promises the server's message
+      verbatim; measured against a real `ValidatingAdmissionPolicy` rejection,
+      189 of 212 characters reached four quoted rows and the clause naming the
+      *reason* fell off the end. The bound is deliberate — `ui.rs`'s
+      `MODAL_ROWS` is 13 and does not widen with the terminal, measured at 100
+      columns — and the whole message **is** in the audit log
+      ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
+      So this is not *draw more*: it is either a pointer to the audit log on the
+      box, or the requirement's *verbatim* is narrowed to name where verbatim
+      lives. **A screen ruling before code** — `screens/dialogs.md` owns the
+      box's last row
+- [ ] **At startup against an unreachable API the header and the body disagree,
+      and the screen and the requirement disagree behind them.** Measured
+      against a dead port: header `⚠ disconnected, retrying`, body *reading the
+      cluster… 0 pods* and *Large clusters take a moment. Findings appear as
+      they are found…*. The code matches `screens/states.md` § *Over a pane with
+      nothing to show yet* — which was written about a pane that lost its link
+      **mid-read** — while
+      [REQUIREMENTS § Error states](REQUIREMENTS.md#error-states-all-were-undefined-all-happen-on-first-launch)
+      asks for *a banner that says so* for a startup that never connected at
+      all, and `notes()` keys on `unconnected`, which a dead port does not set.
+      **The defect is in the two documents, not in the code**, so this box is a
+      ruling first: which sentence a first launch with no answer draws. Nothing
+      here crashes and the header is already honest
+      ([D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27))
+- [ ] **A refused `get /apis` is invisible on the screen the reader is looking
+      at.** With discovery refused (`cannot get path "/apis"`) Alerts was
+      complete and correct and CPU was 1 tick per 2 s — and the sidebar still
+      drew all five RESOURCES groups with no sentence anywhere.
+      [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)'s
+      *"this kubeconfig may not `get /apis`"* reaches the headless drivers and
+      no console frame. The pane that would carry it is the `Table` fetch, which
+      is not wired — so the box is: where the sentence goes while the pane that
+      owns it does not exist yet
+- [ ] **A watch that stops delivering without erroring is read as delivering, so
+      the header says `live` over data that stopped arriving.** Measured with a
+      relay blackholing the socket — open, every byte dropped — rather than
+      closing it: with all six watches wedged there are no `Store::troubles` rows,
+      **no banner anywhere**, the header says `live` and nothing arrives for
+      120 s; with one wedged and the rest cut, the ALERTS badge froze across
+      `+12`/`+90`/`+200 s` while the only marker named a kind the reader was not
+      looking at. This is
+      [REQUIREMENTS § Error states](REQUIREMENTS.md#error-states-all-were-undefined-all-happen-on-first-launch)'s
+      *never silently freeze on stale state* — the **other** direction from the
+      one Phase 12 fixed, and older than that fix: the `any` predicate answered
+      `Live` on a wedged watch too, because a wedged watch has never had a row
+      ([D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26) ruling 4, which also says why the marker the old code drew here by
+      accident is not worth keeping). **The door is not `linked()` and not a
+      predicate over `troubles()`**: `k8s.rs` § WHAT A THROTTLE LOOKS LIKE already
+      documents why the state exists — `read_timeout` unset, `set_tcp_keepalive`
+      never called — and a client `read_timeout` above the 290 s watch timeout
+      closes it with no new field and no clock. **`k8s.rs` has been frozen since
+      Phase 6, so this box opens with a recorded reversal, and the timeout is
+      measured against a real watch before it is chosen**, not read off a default
+- [ ] **While the API server is restarting, the banner sends the operator to fix
+      their RBAC.** One frame, two sentences that cannot both be acted on: header
+      `⚠ disconnected, retrying`, banner *the role this kubeconfig uses needs to
+      `list` and `watch` pods*. A kube-apiserver coming back up really does answer
+      `403` before its authorizers are ready, so the classification is faithful
+      and the errand is still to the wrong place — and every rolling control
+      plane draws it. **The contradiction is also the detector**: a `Refused` row
+      while the link is `Lost` is not an RBAC problem, and nothing today reads the
+      two together ([D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26) ruling 4 ·
+      [reports/2026-09-26-the-error-state-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md))
+- [ ] **`screens/widgets.md` illustrates the command log's outcome words with
+      one the code cannot produce.** Line 300's gap rule names
+      `→ not sent`, `→ refused`, `→ not allowed`, `→ login expired` — and
+      `not allowed` is in neither `views::Log::outcome`'s four nor
+      `main.rs`'s `outcome_word`, where a 403 is `refused`. The word is real
+      elsewhere: it is the **header's** permission mark (`⚠ not allowed`), which
+      is a different zone answering a different question. So either the row is
+      illustrative and says so, or it is
+      [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+      ruling 2 run backwards — a screen naming a word nothing implements, which
+      is how the word gets implemented. `screens/` is `tui-designer`'s, which is
+      why this is a box and not a one-line edit. Found by `tester`, 2026-09-26
+- [ ] **The command log never marks a failing watch.** `screens/states.md`
+      draws `(reconnecting)` and `→ login expired` on the manifest line; through
+      the console those lines are logged at connect and never gain an outcome —
+      in the drop, the 410 and the 401 journeys alike. A nit against a written
+      screen, and the smallest of the five
 
 - [ ] `README.md` (EN): what/why, screenshot or asciinema, install, **both**
       RBAC examples, the `--read-only` flag, "no telemetry" statement, and an

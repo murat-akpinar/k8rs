@@ -306,6 +306,7 @@ its line moving with it.
 - [D282](#d282--the-two-sentences-opsrs-keeps-to-itself-stay-copied-and-the-guard-that-already-exists-is-what-pins-them-2026-09-26) — the two sentences `ops.rs` keeps to itself stay copied, and the guard that already exists is what pins them
 - [D283](#d283--the-dialog-strip-box-its-premise-was-closed-four-boxes-ago-the-type-goes-on-dialog-and-the-door-goes-on-object-2026-09-26) — the dialog-strip box: its premise was closed four boxes ago, the type goes on `Dialog` and the door goes on `Object`
 - [D284](#d284--the-dialog-strip-review-round-a-door-that-was-not-one-a-renderer-that-panics-on-the-strips-own-fixed-point-and-two-comments-that-were-lies-2026-09-26) — the dialog-strip review round: a door that was not one, a renderer that panics on the strip's own fixed point, and two comments that were lies
+- [D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26) — the error-state pass: one blip made the header lie for the life of the process, and the fix is a predicate rather than a clock
 
 ## Why it exists — where the gap is
 
@@ -25172,3 +25173,215 @@ paste was the test's *source* and never the value; `k8s::text` is idempotent at 
 fixed cap, so a re-strip produces no doubled marker; and both pty gates,
 `just suspend` (30 checks) and `just picker` (101 checks), are green over the
 diff.
+
+### D285 — the error-state pass: one blip made the header lie for the life of the process, and the fix is a predicate rather than a clock (2026-09-26)
+
+Phase 12's *manual pass of the REQUIREMENTS error-state list* is the first thing
+that ever drove the wired console through these states against a live API
+server. Ten journeys, v1.36.1, on a pty
+([reports/2026-09-26-the-error-state-pass.md](reports/2026-09-26-the-error-state-pass.md)).
+Nine behaved as specified. This entry is the two that did not, and the rulings the
+fix could not be written without.
+
+**Ruling 1 — `Link::Lost` is not `any` watch in trouble. It is *some watch has
+dropped and no watch is answering*.**
+
+The measurement: a relay cut all six established connections at `+20 s`; all
+five watches re-established at `+21.0–21.6 s` from the same `resourceVersion` — a resumed
+watch, no re-LIST. Pod events flowed again (the ALERTS badge moved, card ages
+advanced), so `pods.failure` cleared on its next `Apply`. The node and workload
+watches had nothing to deliver on a quiet cluster, so their `failure` never
+reached one of the clear points [`Watch::take`] allows — and `linked()` reads
+`Fault::Unanswered` with `any`, so the header said `⚠ disconnected, retrying`
+for the rest of the run. Measured out to `+340 s`. **The quieter the cluster,
+the longer the lie**, which is [D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)'s *one blip would stand for the session* re-paid
+one layer above the per-watch identity [D162](#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)
+bought.
+
+It is not only a word. With a Deployment card selected the footer carried
+`r restart` while `Live` and lost it after the cut, and `?` headed *Changing
+things* with **(paused while disconnected, retrying)** — one wifi hiccup and
+nothing can be restarted for the life of the process.
+
+**The screen is what decides the predicate, and it had already decided it.**
+[screens/states.md § The connection dropped](screens/states.md) draws
+*"⚠ Not connected to the cluster **right now**."* — a claim about the cluster,
+not about a watch. A single quiet watch holding a stale error may not produce
+it. So: `Lost` when **no watch is answering** and at least one watch is
+carrying a drop.
+
+**The predicate is: some watch is `Unanswered` / `Unfinished`, and no watch is
+answering.** A namespaced `Role` cannot `list nodes`, so every scoped run
+carries a permanently `Refused` node watch — and a plain *every watch carries
+`Unanswered`* would then never be true, so a scoped run could never draw
+`disconnected` at all. That is the same defect `linked()`'s own doc exists to
+describe, reached through the third door.
+
+**And *answering* is the absence of a row, not a row with no fault — this
+ruling first said the opposite and was wrong on the object.** `Store::troubles`
+**filters** (`k8s.rs:2197`: `failure.is_some() || *ended || *unfinished`) and its
+own doc line says *empty when all five are healthy*, so a healthy watch has no
+row at all. The first draft of this entry reasoned the five rows off the array
+the function is built from and never read the two lines under it — exactly the
+*claim reasoned from a definition instead of measured against the object* CLAUDE
+names, in a PM ruling, in the entry that ordered the fix. A row whose `fault()`
+is `None` does exist and means something else: `ended` with no `failure`, a
+stream that finished, which is **not** answering. So *answering* needs a
+universe to be absent from, and that is `main.rs`'s `WATCHED` — the five typed
+kinds, a `const` the test pins against a real `Store` so that a kind which stops
+being reported, or a sixth that `WATCHED` does not name, cannot go unnoticed.
+
+**`Fault::standing` is not in the predicate, and putting it there would have
+been wrong twice over.** Redundant first: a row's *presence* already means not
+answering, and a fault that is neither `Unanswered` nor `Unfinished` already
+fails the drop half. Wrong second: **`Fault::Unfinished` is itself `standing`**
+(`k8s.rs:1050`, on the `true` side beside `Refused` and `Conflict`), so *a
+standing one is neither answering nor evidence of a drop* and *some watch is
+`Unanswered` / `Unfinished`* cannot both be obeyed — a self-contradiction a
+second pass over this entry did not catch and `dev-ui` did, at step 3, by
+reading the two functions the entry cites. The drop list stands verbatim;
+*answering* is structural. The five shapes below come out as ruled either way,
+which is why the behaviour did not have to be re-decided — only the mechanism.
+
+**What the predicate cannot do, stated rather than discovered later: a cluster
+where *nothing at all* happens after the resume.** [`Watch::take`] clears a
+`failure` only on an `Apply`/`Delete` or an `InitDone` that completed a re-LIST,
+so on a wholly silent cluster all five rows stay stale, no watch is *answering*,
+and the header holds `disconnected` exactly as before. **The measured case is
+covered** — pod events were flowing within a second of the resume, which is what
+made the header's lie visible in the first place — and *no watch is answering* is
+by construction unable to tell a silent cluster from an unreachable one. The
+upgrade path is the clock below, and it is not taken: the compensating record is
+already drawn, because the pane keeps naming the kind
+(*"k8rs is not getting nodes from this cluster"*) while the header says `live`,
+so the narrower case degrades to *a stale header on a cluster with no traffic*
+rather than to silence. Recorded in [`backlog.md`](backlog.md), not boxed.
+
+**What this is not: a clock.** The first design timestamped the `Err` arm of
+[`updates`] and aged the fault out against kube's retry ceiling. That needed a
+new field on `Watch`, a new accessor on `Trouble`, a threshold measured off
+kube's backoff, and a reversal of `k8s.rs`'s Phase 6 freeze — for a header that
+would still have lied for the length of the threshold. The predicate needs
+none of it: `Fault::standing` and `Trouble::fault` already exist, the change is
+in one function in `main.rs`, and the answer is right at the first frame rather
+than a minute later. **Recorded because the expensive design was written first
+and the cheap one is not obviously equivalent** — it is equivalent because
+kube only reports an error while the watch is failing, so *a neighbour that is
+answering* is better evidence of a live cluster than *this watch has been quiet
+for N seconds*.
+
+**Ruling 2 — two of the four short forms `views.rs` documents were unreachable
+from the console, and that is a record under-describing its event.**
+
+[`views::Log::outcome`]'s doc names the vocabulary — `rejected`, `not sent`,
+`refused`, `login expired` — and `main.rs`'s `outcome_word` maps **every**
+`ops::Outcome::Failed { .. }` to `"rejected"` whatever the fault, so `refused`
+and `login expired` could not be produced by any journey. A real `403` on a
+delete and a real `409` both printed `→ rejected` on the strip while the dialog
+said something else, which is the conflation
+[D213](#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04)
+split `Fault::Conflict` out to prevent. Invariant 4's *neither record may lie*
+is the rule: the strip and the box describe one event, and two words that send
+the reader to two different places are not one description.
+
+**`Refused` → `refused`, `Expired` / `NoCredential` → `login expired`, and
+everything else stays `rejected` — `Conflict` included.** Not because a 409 is
+well served by `rejected`, but because `views.rs` says so at the point the
+vocabulary is defined: *widening it is a screen ruling first*. The 409's own
+sentence is the box's, and the box draws it. `Outcome::Changed`'s
+`"changed first"` is a different event and is not the arm to reuse.
+
+**Ruling 3 — five findings are not this phase's, and one of them is a
+requirement.** The pass's other findings are boxed in Phase 13 rather than
+added to the phase that is running
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)):
+the modal's 13-row ceiling cutting a `ValidatingAdmissionPolicy` message with
+no pointer to the audit log; a startup against an unreachable API whose body
+says *reading the cluster…* while its header says `disconnected` — where
+`screens/states.md` and `REQUIREMENTS.md` disagree and the code matches the
+screen; a refused `get /apis` that reaches no console frame; and the command
+log never marking a failing watch. **The one that is a requirement is D23's**:
+`may_i_in` is unwired, so the typed-name delete still asks a reader who may not
+delete — measured verbatim, footer offered `r restart`, the name typed in full,
+`⏎`, *then* `cannot delete resource "deployments"`. `s no scale` / `r no
+restart` exist in `views.rs` and are unreachable. That is the *permissions are
+checked before they are needed* row of
+[REQUIREMENTS § Error states](REQUIREMENTS.md#error-states-all-were-undefined-all-happen-on-first-launch)
+unmet, and it gets a box rather than a backlog line.
+
+**Ruling 4, added 2026-09-26 after the fix was measured — ruling 1 holds, and
+the two things the run said that the unit table could not.** Journey 4a re-run
+against the fixed binary, relay cutting all six connections at `+35 s`
+([reports/2026-09-26-the-error-state-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md)):
+the header read `live` at `+10`, `+60`, `+160` and `+350 s` where it had held
+`⚠ disconnected, retrying` at `+150`, `+280` and `+340`; `r restart` was never
+withheld; `?` stopped heading *Changing things* with *(paused while
+disconnected, retrying)*; and **the compensating record is intact** — the banner
+kept naming the kind and walked from nodes to StatefulSets as the busier watches
+cleared, while the header said `live`. A real outage still reads as one:
+`docker stop` the control plane gives `⚠ disconnected, retrying` with `r` gone,
+and `docker start` clears the word, the banner and the withholding completely.
+
+**The `Lost` frame is not painted at all on a fast cut, and that is the shape
+the expectation got wrong.** Searching the bytes across the cut for
+`disconnected, retrying` found none — `live` to `live`. Five errors and five
+recoveries interleave inside ~800 ms, so *all five carrying a row at one
+instant* either never held or held inside the ~100 ms coalescing window
+(invariant 7). Nothing was stale for a measurable time, so this is not a defect;
+it is recorded because *Lost then live* is what the fix was expected to draw and
+a reader of this entry would otherwise go looking for a frame that does not
+exist.
+
+**What the fix does not close, and the ruling on whose it is: a watch that stops
+delivering without erroring has no row, and absence of a row is read as
+delivery.** Measured with the relay blackholing the socket — open, every byte
+dropped — instead of closing it: with all six wedged there are no rows, no
+banner anywhere, the header says `live` and nothing arrives for 120 s; with one
+wedged and the others cut, the badge froze across `+12`/`+90`/`+200 s` while the
+only marker named a kind the reader was not looking at. **The all-wedged half is
+untouched by this change** — the old `any` predicate also answered `Live` there,
+because a wedged watch has never had a row to be `any` of. The mixed half is
+where the fix took something away: the old code said `disconnected`, which was
+wrong about a cluster that was reachable but did accidentally mark the stale
+pane. **That is not a reason to keep it** — a header that says disconnected
+while connected is the defect this entry opened with, and an accidental marker
+is not a record invariant 4 would accept. It is a reason to name the real door,
+which is neither `linked()` nor a predicate over `troubles()`:
+`k8s.rs` § WHAT A THROTTLE LOOKS LIKE already documents why the state exists
+(`read_timeout` unset, `set_tcp_keepalive` never called), and a client
+`read_timeout` above the 290 s watch timeout closes it with no new field and no
+clock. **Boxed in Phase 13**, because it is a `k8s.rs` change to a file frozen
+since Phase 6 and the timeout has to be measured before it is chosen.
+
+**Ruling 5, 2026-09-26 — what `tester`'s attack changed, and the two guards it
+asked for and did not get.** The gate is green (`just check` exit 0, 1572 + 40
+tests; `just picker` 101/101), and the attack found one test that could not
+fail: the shape that carries the whole measured defect — *four quiet watches'
+stale errors must not outvote the one that is delivering* — built its list by
+filtering and would have passed on an empty one, **measured** by making the
+filter vacuous and watching it stay green. That is CLAUDE's *a derived list
+asserts it found something*, and it is fixed in the same box rather than
+boxed: it is a defect in the box being landed.
+
+**No guard for the sixth watch, and the trigger is written down instead.** The
+five kinds are spelled in four places — `Store`'s fields, `troubles()`'s array,
+`still_listing()`'s array, and `main.rs`'s `WATCHED` — and the new pin covers
+the join that feeds `linked`. A watch added to `Store` **and** to the merge but
+never to `troubles()` would be invisible to all of them, because `troubles()` is
+the only public window. `tester` costed the guard at 80–100 lines in
+`copy-guard.py` and argued against writing it in the same breath: there are zero
+instances to point it at, and **a guard written against plants only is a guard
+nobody can check** — which is this repo's own *seen red before trusted* read
+from the other end. **Ruled: no guard today.** The trigger is **v0.5's Events
+watch**, which CLAUDE.md already names as rule 11's blocker and which is exactly
+the sixth-watch shape; whoever adds it writes the guard with a real instance to
+aim at.
+
+**And one shape left deliberately untested because the code cannot reach it.**
+Five finished streams with no fault read `Live`, and a *delivering* pod watch
+carrying a never-cleared `ended` row would read `Lost` — both unreachable today,
+proved rather than assumed: kube's `watcher()` is a `stream::unfold` returning
+`Some(..)` unconditionally and `StandingBackoff` never returns `None`, so the
+`ended` marker never fires. A test on either would pin behaviour on a shape the
+running console has no route to. **The day a backoff gives up, the second one is
+what to re-read.**

@@ -1929,7 +1929,57 @@ recorded reversal and a later box rather than a dev round
   tail of a `--once` output into a ticket. The data exists
   (`Watch::last_progress`) but `Trouble` does not carry it, so this is a `k8s.rs`
   shape question; `screens/once.md` does not draw the state at all, which makes it
-  `tui-designer`'s first. Found by `k8s-admin`, 2026-08-30
+  `tui-designer`'s first. Found by `k8s-admin`, 2026-08-30. **Reproduced through
+  the wired console on 2026-09-26** — first time in a TUI frame rather than in
+  `--once` output: after a real drop the header held `nodes 2/2` with no `(… ago)`
+  beside it, and the pane's own *What you see below is from N ago* line
+  (`screens/states.md` § The connection dropped) was absent too, so the frame
+  carried **no** staleness marker but the ▲ card. Same entry, not a second one
+  ([reports/2026-09-26-the-error-state-pass.md](reports/2026-09-26-the-error-state-pass.md))
+
+- **A sixth watch would be invisible to every reader of `Store::troubles`.** The
+  five watched kinds are spelled in four places — `Store`'s `Watch<…>` fields,
+  `troubles()`'s array, `still_listing()`'s array, and `main.rs`'s `WATCHED` —
+  and `WATCHED`'s pin covers the join that feeds `linked`. A watch added to
+  `Store` **and** to the merge but never to `troubles()` is seen by none of them,
+  because `troubles()` is the only public window. `tester` costed a guard in
+  `scripts/copy-guard.py` at 80–100 lines and argued against it in the same
+  breath: zero instances to aim at, and a guard written against plants only is
+  one nobody can check.
+  [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 5 refused it and wrote the trigger here instead: **v0.5's Events watch
+  is exactly this shape** — whoever adds it writes the guard with a real instance
+  to aim at. Found by `tester`, 2026-09-26
+
+- **A `401` on a real call is titled *The cluster refused this*, while the strip
+  beside it now says `→ login expired`.** `screens/dialogs.md` state 2 rules that
+  title for any refusal of a real call and the box quotes `Unauthorized`, so the
+  frame is what the screen draws — and the header carries the login sentence in
+  the same frame, so nobody is stranded. Named only because
+  [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 2 moved the strip's word and the title stayed where it was: a screen
+  question before a code one, and `tui-designer`'s. Found by `k8s-admin` against a
+  real 401 timed into an open dialog, 2026-09-26
+  ([reports/2026-09-26-the-error-state-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md))
+
+- **On a cluster where nothing at all happens, the header still holds
+  `disconnected` after a blip.** What
+  [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 1's predicate deliberately cannot reach: `linked` answers `Lost` when no
+  watch is *answering*, and a watch stops being counted as not-answering only when
+  `Watch::take` clears its `failure` — an `Apply`/`Delete`, or an `InitDone` that
+  completed a re-LIST. A resumed watch does neither, so a cluster with **no**
+  traffic at all leaves all five rows stale and the header wrong, which is the
+  measured defect in its narrowest surviving form. **The measured case is fixed**
+  (pod events were flowing a second after the resume). The upgrade path is the
+  design D285 refused: stamp the `Err` arm of `k8s::updates` and age the fault out
+  against kube's retry ceiling — a new `Watch` field, a new `Trouble` accessor, a
+  threshold measured off kube's backoff, and a reversal of `k8s.rs`'s Phase 6
+  freeze. Not worth it for a stale word on a cluster with no traffic, and the pane
+  still names the kind while the header says `live`, so nothing is silent. Would
+  need measuring on a genuinely idle cluster before it is worth anything: whether
+  a watch **bookmark** reaches `Watch::take` at all is not measured, and if it
+  does the clear point may already exist. Found by `dev-ui`, 2026-09-26
 
 - **The API's own error body reaches stdout as if the container had written
   it.** `--previous` on a crashlooper whose previous log the runtime has already

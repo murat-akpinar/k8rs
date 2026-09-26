@@ -9194,8 +9194,26 @@ fn vitals(
     }
 }
 
-/// **What the connection is doing** (`ui::Link`) — read off the *faults* the watches carry, and
-/// never off the fact that a watch is in trouble at all.
+/// **The five watches [`k8s::Store::troubles`] reports on, in its own declared order** — what
+/// [`linked`] counts *no watch is answering* against (NOTES § D285 ruling 1).
+///
+/// **It is a universe and not a count, because that call reports only the watches that are not
+/// delivering**: a healthy watch has no row there at all, so *every one of these named*
+/// is the only way a reader of `&[k8s::Trouble]` can see that nothing is arriving. **Pinned against
+/// a real [`k8s::Store`]** by `the_connection_word_says_disconnected_only_when_no_watch_answers`,
+/// because both ways this list can go out of step are silent: a kind that stops being reported
+/// there leaves [`linked`] unable to say `Lost` at all, and a sixth watch it does not name is a
+/// watch whose health stops being counted.
+const WATCHED: [ObjectKind; 5] = [
+    ObjectKind::Pod,
+    ObjectKind::Node,
+    ObjectKind::Deployment,
+    ObjectKind::StatefulSet,
+    ObjectKind::DaemonSet,
+];
+
+/// **What the connection is doing** (`ui::Link`) — read off the *faults* the watches carry and off
+/// which of them carry none, never off the fact that a watch is in trouble at all.
 ///
 /// **That distinction is the whole of this function, and getting it wrong costs the commonest
 /// non-admin shape there is.** `ui::Link`'s own doc says a lost link withholds both mutating keys,
@@ -9207,9 +9225,15 @@ fn vitals(
 /// `Pane::Denied`).
 ///
 /// **So a refusal is not a connection state**: the pane says what was refused and the link stays
-/// whatever it was. What moves the link is a cluster that is not answering
-/// (`k8s::Fault::Unanswered`, `Unfinished`) and a login that has run out (`Expired`), which is the
-/// one that promotes `X switch cluster` onto the footer because renewing is *the* next step.
+/// whatever it was. What moves the link is a cluster **no** watch is hearing from
+/// (`k8s::Fault::Unanswered` or `Unfinished` on one of them and no other watch delivering,
+/// NOTES § D285 ruling 1) and a login that has run out (`Expired`), which is the one that promotes
+/// `X switch cluster` onto the footer because renewing is *the* next step.
+///
+/// **One watch in trouble was enough until 2026-09-26, and that read `disconnected` over a cluster
+/// whose other watches were delivering** for as long as the quiet one held its stale error — the
+/// same cost through a third door, charged to everybody rather than to a scoped run
+/// (`reports/2026-09-26-the-error-state-pass.md`).
 fn linked(
     connected: bool,
     snapshot: Option<&ClusterSnapshot>,
@@ -9237,7 +9261,25 @@ fn linked(
     if fault(k8s::Fault::Expired) || fault(k8s::Fault::NoCredential) {
         return ui::Link::Expired;
     }
-    if fault(k8s::Fault::Unanswered) || fault(k8s::Fault::Unfinished) {
+    // **`Lost` is *no watch is answering*, and never *some watch is in trouble*** (NOTES § D285
+    // ruling 1). Both halves have to hold: something has dropped, and nothing is arriving.
+    //
+    // **A watch that is answering is one with no row here at all** — `k8s::Store::troubles`
+    // reports only the watches that are not delivering ([`WATCHED`] is the universe it reports
+    // over), so a neighbour's absence is the evidence that the cluster is live. A standing fault
+    // is on neither side of it: a refused watch is not answering and is not retrying either, which
+    // is what keeps a scoped run's permanent refusal out of both halves — the link stays whatever
+    // it was, and a real drop *inside* that run still reads `Lost`.
+    let dropped = troubles.iter().any(|trouble| {
+        matches!(
+            trouble.fault(),
+            Some(k8s::Fault::Unanswered | k8s::Fault::Unfinished)
+        )
+    });
+    let answering = WATCHED
+        .iter()
+        .any(|kind| !troubles.iter().any(|trouble| trouble.kind == *kind));
+    if dropped && !answering {
         return ui::Link::Lost;
     }
     match snapshot {
@@ -10043,9 +10085,15 @@ fn installed(console: &mut Console<'_>, asked: Published) {
 /// and the reader lost the object the line was about, behind `… (shortened by k8rs)`. The sentence
 /// still reaches the reader: it is what the refusal box draws.
 ///
-/// **These eight words are this box's and want a screen's blessing** — `screens/dialogs.md` draws
-/// `→ rejected` and `screens/states.md` draws `login expired`; the other six are written to that
-/// shape and are flagged in this turn's report rather than assumed.
+/// **Ten words over eight endings, because a `Failed` is read down to its fault** —
+/// `Refused` → `refused`, `Expired` / `NoCredential` → `login expired`, every other fault
+/// → `rejected` (NOTES § D285 ruling 2). One word for every `Failed` left `refused` and
+/// `login expired` unreachable from the console, so `views::Log::outcome` documented a vocabulary
+/// half of which nothing could produce.
+///
+/// **`screens/dialogs.md` draws `→ rejected` and `screens/states.md` draws `login expired`; the
+/// other eight are written to that shape** and were flagged for a screen's blessing rather than
+/// assumed.
 fn outcome_word(outcome: Option<&ops::Outcome>) -> &'static str {
     match outcome {
         // NOTES § D21 — nothing was sent, because the attempt could not be written down.
@@ -10056,7 +10104,15 @@ fn outcome_word(outcome: Option<&ops::Outcome>) -> &'static str {
         Some(ops::Outcome::Gone) => "already gone",
         Some(ops::Outcome::Changed) => "changed first",
         Some(ops::Outcome::NotSent { .. }) => "not sent",
-        Some(ops::Outcome::Failed { .. }) => "rejected",
+        Some(ops::Outcome::Failed { fault, .. }) => match fault {
+            k8s::Fault::Refused => "refused",
+            k8s::Fault::Expired | k8s::Fault::NoCredential => "login expired",
+            // **`Conflict` is here and not on a word of its own** — `views::Log::outcome` defines
+            // the vocabulary and widening it is a screen ruling first; the 409's own sentence is
+            // the refusal box's (NOTES § D285 ruling 2). A `_` and not eleven arms for the same
+            // reason: what a fault nobody has classified yet should say *is* `rejected`.
+            _ => "rejected",
+        },
     }
 }
 
