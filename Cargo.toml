@@ -49,6 +49,14 @@ exclude = [
 k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
 x509-parser = "0.18.1"
 
+# **`raise(SIGSTOP)` and three signal constants — that is the whole of it**
+# (NOTES § D276). Raw mode clears `ISIG`, so Ctrl-Z arrives as a key and
+# suspending is something the program has to do to itself; `std` and `tokio`
+# offer neither the call nor the numbers, and the numbers differ on the two
+# darwin targets CI builds. Already linked under `tokio`, so naming it leaves
+# `Cargo.lock` at 319 packages.
+libc = "0.2.189"
+
 # The client and the watch machinery Phase 5 is built on. **4.2.0 is the version
 # that pairs with the pin above**, read off the crates.io index rather than
 # guessed: kube 4.x requires `k8s-openapi ^0.28.0` and 3.1.0 requires `^0.27.0`,
@@ -77,9 +85,9 @@ kube = { version = "4.2.0", default-features = false, features = [
     "ring",
 ] }
 
-# Required by kube-rs, and later the single `select!` loop. Two features now —
-# a runtime and `#[tokio::main]`; `signal` and `time` arrive with the box that
-# needs them rather than being reserved here.
+# Required by kube-rs, and later the single `select!` loop. A runtime and
+# `#[tokio::main]`, plus the three named below as the boxes that need them
+# arrived.
 tokio = { version = "1.53.1", default-features = false, features = [
     "rt-multi-thread",
     "macros",
@@ -101,6 +109,15 @@ tokio = { version = "1.53.1", default-features = false, features = [
     # adds no code; naming it is what stops a *bound on a security-relevant wait*
     # from resting on a transitive crate's feature choice.
     "time",
+    # **`signal` for job control, and it is the box's own requirement**
+    # ([NOTES § D24](NOTES.md), `k8s-admin`
+    # `reports/2026-09-24-the-terminal-handover.md` § 3). `kill -STOP` cannot be
+    # caught, so `SIGCONT` is the only signal a resume can be recovered through,
+    # and `tokio::signal::unix` is the only way to reach one from inside the
+    # single `select!` without a second loop (invariant 7). Measured, not
+    # assumed: see the report in the turn that added it — `cargo tree` and the
+    # `Cargo.lock` package count before and after.
+    "signal",
 ] }
 
 # **The eleventh crate, and the first reversal of invariant 10** (D178 is the
@@ -173,6 +190,36 @@ tokio-rustls = { version = "0.26.4", default-features = false }
 # advisory is a hazard on a path this build does not have.
 serde_yaml_ng = "0.10.0"
 
+# **The eighth of the approved twelve to arrive, and the line D238 said Phase 11
+# would move** — this is that change, the one that first draws a real screen
+# (todo.md § Phase 11). It sat in `[dev-dependencies]` while the only thing that
+# linked it was Phase 8's `examples/` spike, because compiling a TUI library into
+# the published binary to learn an event loop puts a TUI back in the payload D193
+# had just taken out of the prose. `ui.rs` calls it now, so it is a dependency
+# now.
+#
+# **`crossterm` is not named beside it, though invariant 10 approves it too.**
+# 0.30 re-exports the backend's own — `pub use ratatui_crossterm::crossterm`,
+# resolved at `^0.29` — and a second version number in this manifest is how a tree
+# ends up with two crossterms in it, where the backend refuses the `Event` the
+# product hands it. `deny.toml` has `multiple-versions = "warn"`, so that would
+# arrive as a warning and not a red build.
+#
+# **That day came on 2026-09-24 and the answer is still no line** (NOTES § D274
+# ruling 3). Phase 12's console calls crossterm directly — `event::read()` on the
+# key thread, `KeyCode`, `KeyEvent`, `KeyEventKind` in the router — and it reaches
+# all of it through `ratatui::crossterm::…`. The re-export satisfies D165's *name
+# what we write* without the second version number the paragraph above warns
+# about: what our code compiles against is whatever the pinned ratatui resolved,
+# which is one fact and not two that can drift. **`event-stream` is off in that
+# resolution** — measured, `cargo tree -e features -i crossterm` gives
+# `bracketed-paste`, `derive-more`, `events`, `underline-color`, `windows` — so
+# `crossterm::event::EventStream` does not exist here, and the console reads keys
+# on a `std::thread` into a `tokio::sync::mpsc` instead. Naming crossterm to turn
+# that feature on would buy a stream and cost the two-crossterms hazard; the
+# channel costs nothing and is what makes the loop testable with no terminal.
+ratatui = "0.30.2"
+
 [dev-dependencies]
 # **Named because our test code uses them, not because the build lacked them**
 # ([NOTES § D165](NOTES.md)) — the shape D143 argued for `futures-util`. Measured
@@ -186,7 +233,24 @@ serde_yaml_ng = "0.10.0"
 # left here is `io-util`, for the stub API server that exercises § EVERY KIND THE
 # CLUSTER SERVES' legacy fallback — the branch a supported-with-a-note pre-1.27
 # cluster reaches and no other test can (D149, D152 failure 1).
-tokio = { version = "1.53.1", features = ["net", "io-util"] }
+# **`test-util` for the one thing a deadline needs and cannot buy: a clock the
+# test moves.** `ops::CHECK_DEADLINE` bounds `perform`'s `dryRun=All`
+# ([NOTES § D273](NOTES.md)) and the operator review raised it above the
+# apiserver's own ceiling, which is the right number and an unrunnable test: a
+# suite that pays a real deadline once pays it on every CI run forever.
+# `tokio::time::pause`/`advance` is the answer and it lives behind this feature.
+# **It was asked for twice before it was granted** — `k8s_tests.rs` hit the same
+# wall on 2026-08-27 and paid wall clock, and `dev-core` hit it again writing
+# D273's tests.
+#
+# **It does not reach the shipped binary, and that is measured rather than
+# reasoned from the resolver's documentation** — edition 2024 selects resolver 3,
+# which keeps a `[dev-dependencies]` feature out of the normal build, and
+# `cargo tree -e features,no-dev -i tokio` is what says so about *this* tree.
+# `net` and `io-util` above carry the same claim for the same reason
+# ([NOTES § D165](NOTES.md)): name what our own code writes, inherit nothing
+# silently.
+tokio = { version = "1.53.1", features = ["net", "io-util", "test-util"] }
 
 # Only the fixture tests parse JSON in Phase 3 — the decode they exercise is
 # `serde` into `k8s_openapi::api::core::v1::Pod`. It moves up to a real
@@ -196,24 +260,6 @@ tokio = { version = "1.53.1", features = ["net", "io-util"] }
 # already comes through in that file, so the Table decode named no new
 # dependency at all (2026-08-22).
 serde_json = "1"
-
-# **The eighth of the approved twelve to arrive, and it is here rather than in
-# `[dependencies]` on purpose** ([NOTES § D238](NOTES.md)). Phase 8's spike is an
-# `examples/` file and examples link dev-dependencies; the published binary does
-# not. Phase 5's release box is open, and D193 has just taken a TUI *claim* out of
-# this crate's description because the binary has no TUI — compiling a TUI library
-# into the same artifact to learn an event loop puts it back in the payload
-# instead of the prose. Phase 11 moves this line up, in the change that first
-# draws a real screen.
-#
-# **`crossterm` is not named beside it, though invariant 10 approves it too.**
-# 0.30 re-exports the backend's own — `pub use ratatui_crossterm::crossterm`,
-# resolved at `^0.29` — and a second version number in this manifest is how a tree
-# ends up with two crossterms in it, where the backend refuses the `Event` the
-# product hands it. `deny.toml` has `multiple-versions = "warn"`, so that would
-# arrive as a warning and not a red build. It gets named the day our own code
-# calls it directly (D165's shape: name what we write, inherit nothing silently).
-ratatui = "0.30.2"
 
 [profile.release]
 lto = true

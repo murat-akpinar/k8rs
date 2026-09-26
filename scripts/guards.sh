@@ -90,6 +90,24 @@ python3 scripts/write-guard.py
 # fix" that unpins an action is a red build rather than a line nobody re-reads.
 python3 scripts/security-guard.py --self-test
 python3 scripts/security-guard.py
+# The half of the terminal handover no test in this repo can see: `TestBackend`
+# answers a `CSI 6n` out of a field, so the suite is green with a `Terminal::clear`
+# in the repaint — and on a real `fg` the run ends instead of redrawing
+# (NOTES § D24).
+python3 scripts/handover-guard.py --self-test
+python3 scripts/handover-guard.py
+# The live half of the same box is `just suspend`, which needs a pty and a built
+# binary and so cannot run here (NOTES § D277 ruling 7). This is the half that
+# can: every check in it fed a healthy transcript and then one broken variant of
+# itself, so a red run there names which door of the three failed.
+python3 scripts/suspend-test.py --self-test
+# The same split, one box along: `just picker` drives the startup picker on a real
+# pty, which `cargo test` cannot reach at all — `main` asks `at_a_keyboard` before
+# it builds a runtime and this suite's own ends are both pipes, so `console()` is
+# never entered from it (NOTES § D279 ruling 2). This is the half that runs with
+# no terminal: every check fed a healthy transcript and then one broken variant of
+# itself.
+python3 scripts/picker-test.py --self-test
 # Every fixture is trusted because a jq predicate in cluster.sh said it reached
 # the state its rule is about. Those predicates only ever ran against a live
 # cluster, where too-loose and too-tight look identical.
@@ -131,6 +149,23 @@ python3 scripts/reports-guard.py
 # 2026-08-28: 639 tests pass with `k8s.rs`'s at sixty days).
 python3 scripts/twin-guard.py --self-test
 python3 scripts/twin-guard.py
+# The same debt in two shapes `twin-guard.py` cannot read, because it parses a
+# `SignedDuration` and these are a sentence and a table. `ops::SCALABLE` /
+# `RESTARTABLE` are private and frozen, so `ui.rs` hand-copies each into a
+# `works on …` line that `screens/help.md` then draws. Measured 2026-09-18: a
+# rewording reddens, but only against the copy next door — `ops.rs` against its
+# own quoted sentence, `ui.rs` against the page — so every red clears by
+# updating the neighbour and the far end is never read. `from_api` and
+# `addressed` are worse: filing `Job` under `apps`, or spelling `cronjob` as
+# `cronjobs`, leaves `cargo test --all-targets` fully green (NOTES § D51). And
+# `ops::ACCEPTED` / `UNCHECKABLE` and `removal`'s hedges are the same seam once
+# more: `ui_tests.rs` retypes each so a `Dialog` fixture carries what `ops.rs`
+# really returns, and `screens/dialogs.md` draws each of them over and over, in
+# its mockups and in the prose that quotes them. The copy stays and there is no reversal (NOTES § D282) — a `pub(crate)`
+# const would unify the two Rust files and leave the page, the artifact the next
+# reader builds against, pinned by nothing.
+python3 scripts/copy-guard.py --self-test
+python3 scripts/copy-guard.py
 # `cargo fmt` reflows code and leaves comments alone, so the 100-column rule was
 # a convention until this ran. rustfmt's own options for it are nightly-only.
 python3 scripts/width-guard.py --self-test

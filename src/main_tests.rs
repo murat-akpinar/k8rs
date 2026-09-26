@@ -1170,8 +1170,15 @@ fn the_wall_clock_reads_the_wall_clock() {
 // --- WHAT `main` IS A WRAPPER AROUND ---
 
 /// No arguments is not a crash and not an empty report: it is the usage text and exit 2
-/// (NOTES § D17). The text has to say this build cannot reach a cluster, because the name
-/// promises one.
+/// (NOTES § D17). The text has to name every door to a cluster this build has, because the name
+/// promises one and a reader decides here whether it is safe to try against production.
+///
+/// **The claim outlived two spellings of the sentence that carries it.** It was *this build
+/// cannot reach a cluster* until `ops` landed, then *without --once, --live, --logs, --describe,
+/// --yaml or ops this build reads files only* until the console did — a bare `k8rs` reaches a
+/// cluster with none of those six words on it (`screens/states.md` § The command line's own
+/// synopsis). What has not changed is what the test is for: the **list** is complete, so nothing
+/// that reaches a cluster is missing from the one page a reader checks.
 #[test]
 fn no_arguments_is_the_usage_text_and_not_a_report() {
     let Err(problem) = run(&[]) else {
@@ -1179,12 +1186,16 @@ fn no_arguments_is_the_usage_text_and_not_a_report() {
     };
 
     assert!(problem.starts_with("usage: k8rs "), "{problem}");
-    // **The qualification is part of the claim** (todo.md 3749). *cannot reach a cluster* alone
-    // stayed true of this string while the sentence around it went false — `ops` reaches one now
-    // — so the substring asserted here is the whole list of what does, and
-    // `the_usage_says_ops_reaches_a_cluster_too` reads the other half of the same line.
     assert!(
-        problem.contains("--yaml or ops this build reads files only — it cannot reach a cluster"),
+        problem.contains(
+            "--once, --live, --logs, --describe, --yaml and ops are its other doors to a cluster"
+        ),
+        "{problem}"
+    );
+    // **And the console, which is the door with no word on it** — the half that sentence had to
+    // be rewritten to admit.
+    assert!(
+        problem.contains("without one, this build opens a console instead of reading nothing"),
         "{problem}"
     );
 }
@@ -1401,6 +1412,16 @@ fn listed(pods: Vec<Pod>) -> k8s::Store {
     store.pod(&now(), Event::InitDone);
     the_other_four(&mut store);
     store
+}
+
+/// **A store whose first LIST has not landed** — `k8s::Store::snapshot` answers `None` for one, so
+/// [`vanished`] answers *k8rs cannot tell* and D22's guard is off (NOTES § D289 ruling 1).
+///
+/// **Every key-press test that is not about that guard is handed this one**, which is what keeps
+/// them about the key they press. The tests that *are* about it build a listed store with
+/// [`listed`], where an absent `uid` means absent.
+fn before_the_list() -> k8s::Store {
+    k8s::Store::default()
 }
 
 /// The four watches these tests carry no objects on, each opened and closed. Written out rather
@@ -1810,11 +1831,12 @@ fn live_is_the_flag_that_names_a_cluster_and_context_names_which_one() {
         live_context(&args(&["--live", "--context=--analysis"])),
         Some(Some("--analysis"))
     );
-    // First-wins, which is the opposite of `kubectl`'s last-wins — stated because it was stated
-    // nowhere, and the real flag box (Phase 12) should follow `kubectl` rather than this.
+    // **Last-wins, which is `kubectl`'s rule** — it was first-wins, and the flags box that
+    // released this flag is the box both parsers' docs had deferred the fix to
+    // (`k8s-admin`, 2026-09-24; [`context_arg`], which carries the wrapper it turns on).
     assert_eq!(
         live_context(&args(&["--live", "--context", "a", "--context", "b"])),
-        Some(Some("a"))
+        Some(Some("b"))
     );
     // A longer flag that merely starts the same way is not this one.
     assert_eq!(
@@ -1867,11 +1889,11 @@ fn namespace_names_the_one_namespace_this_run_watches_in_either_spelling() {
         );
     }
 
-    // First-wins on repeats, [`live_context`]'s rule and not `kubectl`'s last-wins — written
-    // down because an unwritten tie-break is the one that changes by accident.
+    // **Last-wins on repeats, across the two spellings**, which is `kubectl`'s rule and the one
+    // `alias kp='k8rs -n a'` needs to be overridable ([`value_of`]).
     assert_eq!(
         live_namespace(&args(&["--live", "-n", "a", "--namespace", "b"])),
-        Some("a")
+        Some("b")
     );
     // A longer flag that merely starts the same way is not this one.
     assert_eq!(
@@ -1887,6 +1909,427 @@ fn namespace_names_the_one_namespace_this_run_watches_in_either_spelling() {
     assert_eq!(live_namespace(&args(&["--live", "-nginx"])), None);
     // Nothing after the flag is `None` here, and refused by [`mistyped`] before it is used.
     assert_eq!(live_namespace(&args(&["--live", "--namespace"])), None);
+}
+
+/// **One parser for `--context`, and the console reads it on a line [`live_context`] is silent
+/// about** (todo.md § Phase 12's flags box).
+///
+/// **The two functions had to be split and may not drift**: `live_context` answers `None` for
+/// every line without `--once`, `--live` or a verb on it, which is exactly the line that opens a
+/// console — so the console needed an answer that function cannot give, and a second parser for
+/// it is how this repo has already shipped a silent wrong cluster three times (that function's
+/// own doc). Every spelling below goes through both.
+#[test]
+fn the_context_flag_has_one_parser_and_a_console_line_reads_the_same_answer() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    // The line `live_context` says nothing about is the line the console is opened by.
+    assert_eq!(live_context(&line(&["--context", "prod-eu"])), None);
+    assert_eq!(
+        context_arg(&line(&["--context", "prod-eu"])),
+        Some(Some("prod-eu"))
+    );
+
+    for (words, answer) in [
+        (vec!["--context", "kind-k8rs"], Some(Some("kind-k8rs"))),
+        (vec!["--context=kind-k8rs"], Some(Some("kind-k8rs"))),
+        // `--context=` keeps the empty value rather than quietly becoming the current context.
+        (vec!["--context="], Some(Some(""))),
+        (vec!["--context"], Some(None)),
+        // A flag is never a context name — the second line, behind [`mistyped`]'s sentence.
+        (vec!["--context", "--live"], Some(None)),
+        // An `=` says the value was meant, so a flag-shaped one after it is kept.
+        (vec!["--context=--live"], Some(Some("--live"))),
+        // Last-wins, which is `kubectl`'s rule — it was first-wins until the flags box.
+        (vec!["--context", "a", "--context", "b"], Some(Some("b"))),
+        // A longer flag that merely starts the same way is not this one.
+        (vec!["--contextual", "x"], None),
+        (vec![], None),
+    ] {
+        assert_eq!(context_arg(&line(&words)), answer, "{words:?}");
+        // **The same line under `--live` answers the same context**, which is what one parser
+        // buys: a console and the temporary driver cannot come to connect to two clusters off
+        // one spelling.
+        let driven: Vec<&str> = std::iter::once("--live")
+            .chain(words.iter().copied())
+            .collect();
+        assert_eq!(
+            live_context(&line(&driven)),
+            Some(answer.flatten()),
+            "{driven:?}"
+        );
+    }
+}
+
+/// **Which lines open the console, and what the four flags on them asked for**
+/// (todo.md § Phase 12's flags box).
+///
+/// **The premise is the defect, measured at the commit before this one**: `main`'s console arm
+/// asked `args.is_empty()`, so `k8rs --read-only` fell past it into the file-driven report, read
+/// `--read-only` as a path, and dropped the one flag on the line that may not be dropped in
+/// silence. Every row here is a line that reached the wrong driver.
+#[test]
+fn every_console_flag_opens_a_console_and_arrives_as_what_it_asked_for() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    // A bare `k8rs` is still a console, with nothing asked for.
+    let nothing = line(&[]);
+    let bare = opening(&nothing).expect("a bare k8rs opens the console");
+    assert!(!bare.read_only, "a bare k8rs is not read-only");
+    assert_eq!(bare.context, None, "a bare k8rs names no context");
+    assert_eq!(bare.namespace, None, "a bare k8rs names no namespace");
+
+    for (words, read_only, context, namespace) in [
+        (vec!["--read-only"], true, None, None),
+        (vec!["--context", "prod-eu"], false, Some("prod-eu"), None),
+        (vec!["--context=prod-eu"], false, Some("prod-eu"), None),
+        (
+            vec!["--namespace", "payments"],
+            false,
+            None,
+            Some("payments"),
+        ),
+        (vec!["--namespace=payments"], false, None, Some("payments")),
+        (vec!["-n", "payments"], false, None, Some("payments")),
+        (vec!["-n=payments"], false, None, Some("payments")),
+        // All three at once, in either order — the scan is over the whole line.
+        (
+            vec!["--read-only", "--context=prod-eu", "-n", "payments"],
+            true,
+            Some("prod-eu"),
+            Some("payments"),
+        ),
+        (
+            vec!["-n=payments", "--context", "prod-eu", "--read-only"],
+            true,
+            Some("prod-eu"),
+            Some("payments"),
+        ),
+    ] {
+        let typed = line(&words);
+        let opened = opening(&typed)
+            .unwrap_or_else(|| panic!("{words:?} opened no console, so its flags were dropped"));
+        assert_eq!(
+            opened.read_only, read_only,
+            "{words:?} answered the wrong thing about --read-only"
+        );
+        assert_eq!(
+            opened.context, context,
+            "{words:?} would connect to the wrong context"
+        );
+        assert_eq!(
+            opened.namespace, namespace,
+            "{words:?} would watch the wrong namespace"
+        );
+    }
+}
+
+/// **`--once` keeps the temporary driver, and so does every other line that is not a console
+/// line** (todo.md § Phase 12, NOTES § D17).
+///
+/// **`--once` is the row that matters**, because it is released: a console opened under it would
+/// replace a report on stdout with a screen nothing in a pipeline can read, and the exit code
+/// `screens/once.md` sells would go with it.
+#[test]
+fn a_cluster_flag_a_verb_or_a_file_never_opens_a_console() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    // **Each row names the driver it keeps, and not merely *not the console***: a build where
+    // [`opening`] answered `None` to everything would pass a test that asserted only the
+    // absence — and that build is exactly the one this box replaced.
+    for (words, cluster) in [
+        (vec!["--once"], true),
+        (vec!["--once", "--read-only"], true),
+        (
+            vec!["--once", "--context", "prod-eu", "-n", "payments"],
+            true,
+        ),
+        (vec!["--live"], true),
+        (vec!["--live", "--namespace=payments"], true),
+        (vec!["--logs", "--object", "default/web"], true),
+        (vec!["--describe", "--object", "default/web"], true),
+        (vec!["--yaml", "--object", "default/web"], true),
+        // A file, with and without the one flag that is neither the console's nor a cluster's.
+        (vec!["pod.json"], false),
+        (vec!["--analysis", "pod.json"], false),
+        (vec!["--analysis"], false),
+        (vec!["-x", "file.json"], false),
+    ] {
+        let typed = line(&words);
+        assert!(
+            opening(&typed).is_none(),
+            "{words:?} opened a console instead of keeping the driver it named"
+        );
+        assert_eq!(
+            live_context(&typed).is_some(),
+            cluster,
+            "{words:?} did not keep the driver it named — `live_context` answered the other one"
+        );
+        // And nothing on these lines is refused on the way, so the driver is really reached.
+        assert_eq!(mistyped(&typed), None, "{words:?}");
+    }
+}
+
+/// **The header's right zone says what the run is scoped to, and not only which cluster**
+/// (`screens/widgets.md` § 1a's zone table: *context · namespace scope · connection state · …*).
+///
+/// **Measured before the fix, against the kind cluster**: `k8rs -n kube-system` drew
+/// `ctx: kind-k8rs · live · admin` — the same header a cluster-wide run draws — while the Alerts
+/// pane held `1 ● 1 ▲` instead of `25 ● 2 ▲`. A reader who cannot see the scope reads
+/// `○ nothing is broken` over one namespace as a statement about the cluster, which is
+/// `screens/states.md` § You can only see some namespaces' whole subject.
+///
+/// **One zone for both causes** (`k8s::Coverage`, NOTES § D46): `--namespace` and the 403 fallback
+/// produce the same scope, so they produce the same header and nothing here asks which it was.
+#[test]
+fn the_header_zone_names_the_namespace_a_scoped_run_covers() {
+    assert_eq!(zone(Some("prod-eu"), None), "ctx: prod-eu");
+    assert_eq!(
+        zone(Some("prod-eu"), Some("payments")),
+        "ctx: prod-eu · ns: payments"
+    );
+    // **The cluster's name comes first and the scope second**, which is not cosmetic: `shortened`
+    // eats the *front* of this zone, so what erodes under a narrow terminal is the context and
+    // never the scope or the permission word behind it (NOTES § D249).
+    assert!(
+        zone(Some("prod-eu"), Some("payments")).starts_with("ctx: "),
+        "the scope displaced the cluster's name, so the wrong end erodes"
+    );
+    // **`(unnamed)` is the one thing a `None` context can be** (NOTES § D202) — and it still
+    // carries the scope, because the two facts are independent.
+    assert_eq!(
+        zone(None, None),
+        format!("ctx: {}", views::UNNAMED),
+        "a context that stripped to nothing lost its slot"
+    );
+    assert_eq!(
+        zone(None, Some("payments")),
+        format!("ctx: {} · ns: payments", views::UNNAMED)
+    );
+    // The label the pane title carries is this same spelling and not a second one
+    // (`ui::Screen::namespace`).
+    assert!(zone(Some("prod-eu"), Some("payments")).ends_with(&scoped("payments")));
+}
+
+/// **`--read-only` does not open the audit log at all**, and that is not NOTES § D21 weakened
+/// (PM ruling, todo.md § Phase 12's flags box).
+///
+/// **The count is the assertion and the answer is not.** `ui::Writes::ReadOnly` reads the same
+/// whether the file was opened and then ignored or never opened — but a run that opened it would
+/// have created it, set its mode, and printed `ops::audit_log`'s notes about a log it will never
+/// write a line to. And a run that opened it and *failed* would carry `Writes::Unaudited`, whose
+/// sentence — *fix that, then start k8rs again* — is false advice while the flag stands.
+#[test]
+fn read_only_never_opens_the_audit_log_and_every_other_run_does() {
+    let opens = std::cell::Cell::new(0);
+
+    assert!(
+        audit_log_for(true, || {
+            opens.set(opens.get() + 1);
+            Ok::<(), String>(())
+        })
+        .is_none(),
+        "--read-only was handed an audit log it can never write a line to"
+    );
+    assert_eq!(opens.get(), 0, "--read-only opened the audit log anyway");
+
+    assert!(
+        audit_log_for(true, || {
+            opens.set(opens.get() + 1);
+            Err::<(), String>("no state directory".to_string())
+        })
+        .is_none(),
+        "--read-only carries the refusal of a log it will never use"
+    );
+    assert_eq!(
+        opens.get(),
+        0,
+        "--read-only opened the audit log to find out why it would not open"
+    );
+
+    assert!(
+        matches!(
+            audit_log_for(false, || {
+                opens.set(opens.get() + 1);
+                Ok::<(), String>(())
+            }),
+            Some(Ok(()))
+        ),
+        "a run that may write did not get its log"
+    );
+    assert_eq!(opens.get(), 1, "a run that may write did not open its log");
+
+    // **A log that will not open is still a refusal to carry** — a banner and every write key
+    // dead — for the run that could have written.
+    assert!(matches!(
+        audit_log_for(false, || Err::<(), String>("no state directory".to_string())),
+        Some(Err(said)) if said == "no state directory"
+    ));
+}
+
+/// **A path beside a console flag is refused, never read with the flag silently dropped** —
+/// [`mistyped`]'s *a cluster and a file are two inputs* rule, one door over (todo.md § Phase 12's
+/// flags box, NOTES § D189).
+///
+/// **Measured at the commit before this one**: `k8rs --read-only pod.json` passed `mistyped`,
+/// missed the console arm for not being a bare `k8rs`, and printed the file's report with
+/// `--read-only` gone and nothing on any stream to say so.
+///
+/// **The sentence names the flag that is on the line and not a mode that is not** (NOTES § D190's
+/// class): a run with no `--live` on it may not be told that `--live` reads a cluster.
+///
+/// **The subject claims membership and nothing else, and two rounds of it were wrong**
+/// (`k8s-admin` and `tester`, 2026-09-24, invariant 14). *"--read-only opens the console"* was
+/// true of the run and false of the flag — `k8rs --read-only ops delete …` opens none.
+/// *"--read-only on its own opens the console"* was true of the flag and false of a line carrying
+/// two more flags, which is the row set below that let it ship: every row fed **one** console
+/// flag, so nothing here could see the word `on its own` become false.
+///
+/// **Both halves are rows now**: a line with `ops` on it, and lines with two and three console
+/// flags beside the path.
+#[test]
+fn a_path_beside_a_console_flag_is_refused_rather_than_read_with_the_flag_dropped() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    for (words, flag) in [
+        (vec!["--read-only", "pod.json"], "--read-only"),
+        (vec!["--context", "prod-eu", "pod.json"], "--context"),
+        (vec!["--context=prod-eu", "pod.json"], "--context"),
+        (vec!["--namespace", "payments", "pod.json"], "--namespace"),
+        (vec!["--namespace=payments", "pod.json"], "--namespace"),
+        (vec!["-n", "payments", "pod.json"], "-n"),
+        (vec!["-n=payments", "pod.json"], "-n"),
+        // **Two and three console flags beside the path** — the rows the last round did not
+        // have, and the gap a clause claiming *on its own* sailed through
+        // (`tester`, 2026-09-24). The flag named is the first on the line, whichever it is.
+        (
+            vec!["--read-only", "--context", "prod-eu", "pod.json"],
+            "--read-only",
+        ),
+        (
+            vec![
+                "--namespace=payments",
+                "--context=prod-eu",
+                "--read-only",
+                "pod.json",
+            ],
+            "--namespace",
+        ),
+        (
+            vec![
+                "-n",
+                "payments",
+                "--read-only",
+                "--context=prod-eu",
+                "pod.json",
+            ],
+            "-n",
+        ),
+        (
+            vec![
+                "--context",
+                "prod-eu",
+                "-n=payments",
+                "--read-only",
+                "pod.json",
+            ],
+            "--context",
+        ),
+    ] {
+        let problem = mistyped(&line(&words))
+            .unwrap_or_else(|| panic!("{words:?} was accepted, so {flag} is dropped in silence"));
+        assert_eq!(
+            problem,
+            format!(
+                "k8rs: {flag} belongs to the console, which reads a cluster, so k8rs cannot \
+                 also read pod.json — run it with the flag, or with the file, not both\n{USAGE}"
+            ),
+            "{words:?}"
+        );
+    }
+
+    // **What is echoed is the flag and never the word that carried it** (the security gate's
+    // *sizes are bounded* row). `--context`'s value is the one word on a console line nothing has
+    // bounded — `--namespace`'s is checked against `k8s::namespace_name` further up — so a
+    // 64 KiB context name must not come back out in the refusal.
+    let enormous = format!("--context={}", "c".repeat(65536));
+    let problem = mistyped(&line(&[enormous.as_str(), "pod.json"]))
+        .expect("a path beside --context is refused");
+    assert!(
+        problem.starts_with("k8rs: --context belongs to the console, which reads a cluster"),
+        "{problem}"
+    );
+    assert!(
+        !problem.contains("cccc"),
+        "the refusal printed the context name back at {} bytes",
+        problem.len()
+    );
+
+    // **The subject may not claim the flag opens a console, because `ops` is a line where it
+    // does not** (invariant 14). A reader who forgot `ops` in front of `may-i` is told about a
+    // console, so the rule they carry away has to be one that holds everywhere.
+    let forgot = mistyped(&line(&["--read-only", "may-i", "get", "pods"]))
+        .expect("a bare `may-i` is a path beside a console flag");
+    assert!(
+        forgot.starts_with("k8rs: --read-only belongs to the console, which reads a cluster"),
+        "{forgot}"
+    );
+    for claim in ["opens the console", "on its own"] {
+        assert!(
+            !forgot.contains(claim),
+            "the subject claims {claim:?}, which `k8rs --read-only ops …` falsifies: {forgot}"
+        );
+    }
+    // And the line that proves the claim: the same flag in front of `ops` opens no console,
+    // because [`ops_line`] takes the line before [`mistyped`] or [`opening`] is ever asked.
+    let claimed = ops_line(
+        &line(&["--read-only", "ops", "delete", "deployment/web"]),
+        nowhere,
+        unwired,
+        unanswered,
+    );
+    assert!(
+        claimed.is_some(),
+        "`--read-only ops …` fell through to the console arm, so the clause would be false"
+    );
+
+    // **A one-dash word this build does not have is a usage error on a console line too**, which
+    // is the sentence `k8rs --once -o json` already gets.
+    let problem =
+        mistyped(&line(&["--read-only", "-o", "json"])).expect("-o is not a flag k8rs has");
+    assert!(
+        problem.starts_with("k8rs: -o is not a flag k8rs has"),
+        "{problem}"
+    );
+
+    // **`k8rs -x file.json` with no console flag on it is still a path** — [`NAMESPACE_SHORT`]'s
+    // doc promises it, and the flags box does not take it away.
+    assert_eq!(mistyped(&line(&["-x", "file.json"])), None);
+    assert_eq!(mistyped(&line(&["pod.json"])), None);
+    assert_eq!(mistyped(&line(&["--analysis", "pod.json"])), None);
+    // A console line with no path on it is not refused either.
+    assert_eq!(mistyped(&line(&["--read-only"])), None);
+    assert_eq!(
+        mistyped(&line(&["--context", "prod-eu", "-n", "pay"])),
+        None
+    );
+
+    // **The cluster flags keep their own subject**, which is the whole of why the gate and the
+    // sentence are one function ([`cluster_reader`]).
+    for (words, subject) in [
+        (vec!["--once", "pod.json"], "--once"),
+        (vec!["--live", "pod.json"], "--live"),
+        (
+            vec!["--logs", "--object", "default/web", "pod.json"],
+            "--logs",
+        ),
+    ] {
+        let problem = mistyped(&line(&words)).unwrap_or_else(|| panic!("{words:?} was accepted"));
+        assert!(
+            problem.starts_with(&format!("k8rs: {subject} reads a cluster,")),
+            "{words:?} → {problem}"
+        );
+    }
 }
 
 /// **A `--namespace` with nothing usable after it is refused, and `--context`'s is not**
@@ -4017,11 +4460,150 @@ $ kubectl get deployments -A --watch
 $ kubectl get statefulsets -A --watch
 $ kubectl get daemonsets -A --watch";
 
+/// **Every line k8rs shows carries `--context <name>`, immediately after `kubectl`**
+/// (`screens/context.md` § What the command log shows, invariant 4, NOTES § D8).
+///
+/// **Measured before the fix**: `grep -c -- --context` over every `$ kubectl` literal in
+/// `src/main.rs` was **0** (`k8s-admin`, 2026-09-24). A reader who pastes
+/// `kubectl get pods -A --watch` gets their own `current-context`, which is a different cluster
+/// the moment k8rs was started with `--context` — the line teaches a command that reads somewhere
+/// else and says nothing about it.
+///
+/// **Not only the lines after a switch.** `screens/context.md` writes the rule for the switcher,
+/// and its reason — *honest, and it teaches the flag that makes `kubectl` safe to use across
+/// clusters* — is about the paste reproducing the read, which is every line's problem.
+#[test]
+fn every_kubectl_line_names_the_context_it_was_read_from() {
+    // **The connected context and not the flag**, so a run that typed none still teaches it.
+    assert_eq!(kubectl(Some("staging")), "$ kubectl --context staging");
+    // **The gap drops the segment whole** — NOTES § D202's third state, a name that stripped to
+    // nothing. `--context ` with an empty value is a line that does not run.
+    assert_eq!(kubectl(None), "$ kubectl");
+    assert_eq!(kubectl(Some("")), "$ kubectl");
+    // Invariant 9, on a name argv never touched but a kubeconfig can hold.
+    assert_eq!(
+        kubectl(Some("prod\u{202e}eu")),
+        "$ kubectl --context prodeu",
+        "a bidi override in a context name reached the strip that every drawn string meets"
+    );
+
+    // **A name made *only* of characters the strip removes is the gap, not an empty flag**
+    // (`k8s-admin`'s step-7 pass, 2026-09-24). The emptiness test used to run on the raw
+    // name: it passed, `sanitize` then emptied it, and `ops::pasteable` quoted the nothing —
+    // `$ kubectl --context ''`, which is the empty-valued flag this function's own doc
+    // refuses two lines up and a line that does not run. `ops::context_segment` had the same
+    // hole and was fixed by cleaning first; this is that order, so the two taught surfaces
+    // cannot disagree on the one input their shared quoting rule exists for.
+    //
+    // **Every class `k8s::unprintable` covers**, because one of them is not proof of the
+    // others (NOTES § D29): a control character, the soft hyphen, the zero-width and bidi
+    // ranges, the invisible-operator range, and the byte-order mark.
+    for stripped in [
+        "\u{202e}",
+        "\u{7}",
+        "\u{ad}",
+        "\u{200b}",
+        "\u{200f}",
+        "\u{202a}",
+        "\u{2060}",
+        "\u{206f}",
+        "\u{feff}",
+        "\u{202e}\u{200b}\u{feff}",
+    ] {
+        assert_eq!(
+            kubectl(Some(stripped)),
+            "$ kubectl",
+            "{stripped:?} stripped to nothing and was drawn as a flag with no value"
+        );
+    }
+    // And the two spellings of nothing that never reach the strip at all.
+    assert_eq!(kubectl(None), "$ kubectl");
+    assert_eq!(kubectl(Some("")), "$ kubectl");
+
+    // **A name the shell would not read whole is quoted, and the line stays the command k8rs
+    // ran** (invariant 4, `ops::pasteable`, NOTES § D278 ruling 5 — one rule for this surface
+    // and for the three taught mutation lines). **Measured against the real binary before it**:
+    // `kubectl config rename-context kind-k8rs 'prod eu; echo pwned'` and then `k8rs --once`
+    // printed `$ kubectl --context prod eu; echo pwned get --raw /version` — a line the command
+    // log exists to have pasted, doing something else when it is. k8rs executes nothing either
+    // way; what it may not do is teach a line that is not the one it ran.
+    //
+    // **The ordinary names stay bare**, so the line is still the one `screens/context.md` draws.
+    for plain in [
+        "kind-k8rs",
+        "staging",
+        "gke_my-project_europe-west1_prod",
+        "arn:aws:eks:eu-west-1:123456789012:cluster/production-eu",
+    ] {
+        assert_eq!(
+            kubectl(Some(plain)),
+            format!("$ kubectl --context {plain}"),
+            "an ordinary context name was quoted, so the taught line stopped being the drawn one"
+        );
+    }
+    assert_eq!(
+        kubectl(Some("prod eu; echo pwned")),
+        "$ kubectl --context 'prod eu; echo pwned'",
+        "a context name with shell syntax in it is pasted as syntax"
+    );
+    // A `'` is the one character single quotes cannot hold, and this is the standard closing,
+    // escaping and reopening.
+    assert_eq!(
+        kubectl(Some("it's prod")),
+        r"$ kubectl --context 'it'\''s prod'",
+        "a quote inside the name ended the quoting early"
+    );
+    // **Every shape the allowlist refuses is quoted and not guessed at** — the rule is what is
+    // safe bare, not a list of what is dangerous, so a character nobody thought of is quoted.
+    for hostile in [
+        "a b", "a;b", "a|b", "a&b", "a$b", "a`b", "a>b", "a(b", "a*b", "a\\b", "a\"b", "a#b",
+        "a!b", "a~b",
+    ] {
+        let line = kubectl(Some(hostile));
+        assert!(
+            line.starts_with("$ kubectl --context '") && line.ends_with('\''),
+            "{hostile:?} was left bare on a line meant to be pasted: {line:?}"
+        );
+    }
+
+    // **Every line, not the first one** — the probe, the version, discovery, the seven reports
+    // and the five watches all come out of one head.
+    let lines = command_log(
+        true,
+        &kubectl(Some("staging")),
+        &k8s::Coverage::Cluster,
+        None,
+    );
+    assert!(lines.len() >= 12, "the log shrank: {lines:?}");
+    for line in &lines {
+        assert!(
+            line.starts_with("$ kubectl --context staging "),
+            "a line k8rs shows would paste into a different cluster: {line:?}"
+        );
+    }
+    // **The position is the spelling `kubectl` accepts**: a global flag goes before the verb, so
+    // `kubectl --context staging get …` and never `kubectl get --context staging …`.
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == "$ kubectl --context staging get pods -A --watch"),
+        "the watch line is not the one `screens/context.md` draws: {lines:?}"
+    );
+    assert!(
+        lines.iter().all(|line| !line.contains("get --context")),
+        "the flag landed after the verb, where kubectl does not take it: {lines:?}"
+    );
+
+    // And the same log with no context named is byte-identical to what it printed before.
+    let bare = command_log(true, &kubectl(None), &k8s::Coverage::Cluster, None);
+    assert_eq!(bare.join("\n"), ANALYSIS_LOG);
+}
+
 /// **A bare run prints one line per read, in the order the code starts them** — and the
 /// `--analysis` run prints the seven a report fetches between discovery and the watches.
 #[test]
 fn the_command_log_is_every_read_this_run_performs_in_the_order_it_starts_them() {
-    let log = |analysis, coverage| command_log(analysis, &coverage, None).join("\n");
+    let log = |analysis, coverage| command_log(analysis, "$ kubectl", &coverage, None).join("\n");
 
     let bare = log(false, k8s::Coverage::Cluster);
     println!("{bare}");
@@ -4068,7 +4650,13 @@ fn the_command_log_is_every_read_this_run_performs_in_the_order_it_starts_them()
 /// `certificatesigningrequests` are cluster-scoped and `kubectl top nodes` is about machines.
 #[test]
 fn a_scoped_run_narrows_exactly_the_reads_that_are_narrowed() {
-    let scoped = command_log(false, &k8s::Coverage::Asked("payments".to_string()), None).join("\n");
+    let scoped = command_log(
+        false,
+        "$ kubectl",
+        &k8s::Coverage::Asked("payments".to_string()),
+        None,
+    )
+    .join("\n");
     println!("{scoped}");
     assert_eq!(
         scoped, SCOPED_LOG,
@@ -4080,7 +4668,12 @@ fn a_scoped_run_narrows_exactly_the_reads_that_are_narrowed() {
          ask for: {scoped}"
     );
 
-    let reports = command_log(true, &k8s::Coverage::Asked("payments".to_string()), None);
+    let reports = command_log(
+        true,
+        "$ kubectl",
+        &k8s::Coverage::Asked("payments".to_string()),
+        None,
+    );
     for line in &reports {
         println!("{line}");
     }
@@ -4113,7 +4706,7 @@ fn a_scoped_run_narrows_exactly_the_reads_that_are_narrowed() {
         k8s::Coverage::Blind("payments".to_string()),
     ] {
         assert_eq!(
-            command_log(false, &coverage, Some("payments")).join("\n"),
+            command_log(false, "$ kubectl", &coverage, Some("payments")).join("\n"),
             format!("$ kubectl get --raw '/api/v1/pods?limit=1'\n{SCOPED_LOG}"),
             "a scope k8rs fell back to printed a cluster-wide command log while the watches were \
              narrowed, or lost the refused probe that put it in this arm"
@@ -4136,7 +4729,7 @@ fn a_scoped_run_narrows_exactly_the_reads_that_are_narrowed() {
 #[test]
 fn the_scope_probe_prints_once_twice_or_not_at_all_and_the_context_decides_which() {
     let probes = |coverage: k8s::Coverage, context: Option<&str>| -> Vec<String> {
-        command_log(false, &coverage, context)
+        command_log(false, "$ kubectl", &coverage, context)
             .into_iter()
             .take_while(|line| line.contains("/pods?limit=1"))
             .collect()
@@ -4208,7 +4801,7 @@ fn the_scope_probe_prints_once_twice_or_not_at_all_and_the_context_decides_which
 #[test]
 fn the_command_log_is_stripped_display_text_and_nothing_executes_it() {
     let crafted = k8s::Coverage::Refused("pay\u{1b}[2Jments".to_string());
-    let log = command_log(true, &crafted, Some("payments"));
+    let log = command_log(true, "$ kubectl", &crafted, Some("payments"));
     for line in &log {
         println!("{line}");
         assert!(
@@ -4250,7 +4843,7 @@ fn no_line_in_the_command_log_pages_a_whole_cluster_one_object_at_a_time() {
         k8s::Coverage::Blind("default".to_string()),
     ] {
         for analysis in [false, true] {
-            for line in command_log(analysis, &coverage, None) {
+            for line in command_log(analysis, "$ kubectl", &coverage, None) {
                 assert!(
                     !line.contains("--chunk-size"),
                     "a page-size flag is back in the command log, and on the probe it turns one \
@@ -4261,7 +4854,7 @@ fn no_line_in_the_command_log_pages_a_whole_cluster_one_object_at_a_time() {
     }
     // The probe's own spelling, positively: exact, single-quoted so the `?` survives a shell, and
     // the same `get --raw` shape `/version` two lines under it already uses.
-    let probe = &command_log(false, &k8s::Coverage::Cluster, None)[0];
+    let probe = &command_log(false, "$ kubectl", &k8s::Coverage::Cluster, None)[0];
     println!("{probe}");
     assert_eq!(
         probe, "$ kubectl get --raw '/api/v1/pods?limit=1'",
@@ -4287,7 +4880,7 @@ fn the_command_log_reaches_the_stream_one_line_at_a_time() {
     let mut written = Vec::new();
     log_to(
         &mut written,
-        command_log(true, &k8s::Coverage::Cluster, None),
+        command_log(true, "$ kubectl", &k8s::Coverage::Cluster, None),
     );
     let written = String::from_utf8(written).expect("the command log is text");
     print!("{written}");
@@ -4299,7 +4892,7 @@ fn the_command_log_reaches_the_stream_one_line_at_a_time() {
     );
     assert_eq!(
         written.lines().count(),
-        command_log(true, &k8s::Coverage::Cluster, None).len(),
+        command_log(true, "$ kubectl", &k8s::Coverage::Cluster, None).len(),
         "a line was dropped or doubled on the way out"
     );
 
@@ -4315,7 +4908,7 @@ fn the_command_log_reaches_the_stream_one_line_at_a_time() {
     }
     log_to(
         &mut Closed,
-        command_log(false, &k8s::Coverage::Cluster, None),
+        command_log(false, "$ kubectl", &k8s::Coverage::Cluster, None),
     );
 }
 
@@ -4333,11 +4926,11 @@ fn the_wall_prints_the_reads_that_happened_and_the_run_prints_them_the_same_way(
         (k8s::Coverage::Refused("default".to_string()), None),
         (k8s::Coverage::Blind("default".to_string()), Some("shop")),
     ] {
-        let attempted = connect_log(&coverage, context);
+        let attempted = connect_log("$ kubectl", &coverage, context);
         println!("{attempted:?}");
         for analysis in [false, true] {
             assert!(
-                command_log(analysis, &coverage, context).starts_with(&attempted),
+                command_log(analysis, "$ kubectl", &coverage, context).starts_with(&attempted),
                 "the wall and the run spell the connect reads differently, which is two \
                  sentences that can disagree about one request"
             );
@@ -6280,6 +6873,13 @@ fn the_block_a_run_with_no_pods_ends_on_names_the_scope_and_a_next_step_that_fit
     );
     // **The README is not cited**, because there is not one until Phase 13.
     assert!(!wide.contains("README"), "{wide:?}");
+    // **`--once` runs at a shell, so the flag is the whole next step** — the restart wording is
+    // the TUI's, and both contain the flag (NOTES § D264 ruling 23).
+    assert!(
+        wide.ends_with("or run k8rs in one namespace you can read: --namespace <name>")
+            && !wide.contains("start k8rs again"),
+        "a run that has already ended was told to quit and start again: {wide:?}"
+    );
 
     let scoped = pods_unread(
         &unread(&refused),
@@ -6314,6 +6914,11 @@ fn the_block_a_run_with_no_pods_ends_on_names_the_scope_and_a_next_step_that_fit
     assert!(
         blind.contains("k8rs had to guess default") && blind.contains("--namespace <name>"),
         "the one scope the reader did not choose was told to choose a different one: {blind:?}"
+    );
+    assert!(
+        blind.ends_with("Say which namespace you work in: --namespace <name>")
+            && !blind.contains("start k8rs again"),
+        "a run that has already ended was told to quit and start again: {blind:?}"
     );
 
     // **Nothing answered is not a permission problem and is not given a role to ask for.**
@@ -7215,15 +7820,16 @@ fn argv(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| (*word).to_string()).collect()
 }
 
-/// **One selector for four consumers, in both spellings, first wins** (NOTES § D194,
+/// **One selector for four consumers, in both spellings, last wins** (NOTES § D194,
 /// [`value_of`]).
 ///
 /// **Both spellings, for `--context`'s reason**: matching only `--object NAME` lets
 /// `--object=NAME` fall through, and a selector that silently selects nothing is worse than one
-/// that refuses. **First wins is written down** because an unwritten tie-break is the one that
-/// changes by accident.
+/// that refuses. **Last wins is written down** because an unwritten tie-break is the one that
+/// changes by accident — and because this one moved: it was first-wins until the flags box
+/// (`k8s-admin`, 2026-09-24, [`value_of`]).
 #[test]
-fn the_object_selector_reads_both_spellings_and_takes_the_first() {
+fn the_object_selector_reads_both_spellings_and_takes_the_last() {
     assert_eq!(
         object_arg(&argv(&["--logs", "--object", "payments/web"])),
         Some(Some("payments/web"))
@@ -7236,8 +7842,9 @@ fn the_object_selector_reads_both_spellings_and_takes_the_first() {
         object_arg(&argv(&[
             "--logs", "--object", "first", "--object", "second"
         ])),
-        Some(Some("first")),
-        "a repeated selector is not first-wins, so the tie-break is whatever the loop happens to do"
+        Some(Some("second")),
+        "a repeated selector did not take the last one, so a correction typed at the end of a \
+         recalled command is silently ignored"
     );
     assert_eq!(
         object_arg(&argv(&["--logs", "--object"])),
@@ -7739,8 +8346,8 @@ async fn the_picker_does_not_call_a_container_that_failed_done() {
 /// **What a container is doing, in a word a beginner reads** (invariant 14) — never the API's own
 /// `reason`, which is the jargon this product exists to translate.
 ///
-/// **And never a second spelling of [`container_state`]'s word.** The picker is the screen where a
-/// reader chooses which container's log explains a failed pod, and it printed `done` for a
+/// **And never a second spelling of [`views::container_state`]'s word.** The picker is the screen
+/// where a reader chooses which container's log explains a failed pod, and it printed `done` for a
 /// container that exited `1` while describe printed `failed` for the same state — the one word
 /// that sends the reader to the wrong log (`k8s-admin`, Phase 6 close).
 #[test]
@@ -8998,27 +9605,6 @@ async fn a_pod_with_no_events_and_one_whose_events_could_not_be_read_print_the_s
     );
 }
 
-/// **A read that found no events says why on stderr, and one that found some says nothing** —
-/// `screens/detail.md` § No events at all, whose whole point is the *second* sentence: *nothing
-/// left* and *nothing happened* are different facts wearing the same empty list, and only one of
-/// them is true of a pod that has been up for a week.
-#[tokio::test]
-async fn a_read_that_found_no_events_says_why_and_one_that_found_some_says_nothing() {
-    let said = no_events(&k8s::Happened::default()).expect("an empty list has something to say");
-    assert!(
-        said.contains("Kubernetes only keeps events for a while") && said.contains("none are left"),
-        "the sentence says the list is empty without saying why it can be: {said:?}"
-    );
-    assert_eq!(
-        no_events(&k8s::Happened {
-            lines: vec![happening(None, "Pulled", "")],
-            cut: false,
-        }),
-        None,
-        "a pod whose events were printed was told it has none"
-    );
-}
-
 /// **A cut list withdraws the *newest first* claim in the heading, because that is where the claim
 /// is** (`k8s::Happened::cut`, `k8s::EVENTS_KEPT`).
 ///
@@ -9246,11 +9832,11 @@ async fn a_describe_run_reads_the_pod_then_its_own_events() {
 /// above. The deadline is the test's for [`describe_run`]'s stated reason.
 ///
 /// **What the first arm pins is the exit code and not the sentence beside it**, and the limit is
-/// worth stating rather than discovering: [`NO_EVENTS`] goes to stderr, which belongs to the
-/// process (§ WATCHING A CLUSTER), so a reversion that printed the wrong line here would still
-/// pass. The words are pinned one test up, by
-/// [`a_read_that_found_no_events_says_why_and_one_that_found_some_says_nothing`] over
-/// [`no_events`]; what is proven here is that a read which succeeded and found nothing ends the
+/// worth stating rather than discovering: [`views::NO_EVENTS`] goes to stderr, which belongs to
+/// the process (§ WATCHING A CLUSTER), so a reversion that printed the wrong line here would still
+/// pass. The words are pinned in `views_tests.rs`, by
+/// `an_empty_events_read_gets_the_sentence_and_a_full_one_does_not` over [`views::no_events`]
+/// (NOTES § D254); what is proven here is that a read which succeeded and found nothing ends the
 /// run *happily*, which is the half `screens/detail.md` says only the code can carry.
 #[tokio::test]
 async fn the_three_endings_of_a_describe_are_told_apart_by_the_exit_code() {
@@ -9631,7 +10217,7 @@ async fn a_yaml_run_with_no_kind_reads_a_pod() {
 #[test]
 fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
     let stopped = |reason: Option<&str>, exit_code| {
-        container_state(Some(&ContainerState::Terminated(rules::Terminated {
+        views::container_state(Some(&ContainerState::Terminated(rules::Terminated {
             reason: reason.map(str::to_string),
             exit_code,
             started_at: None,
@@ -9640,7 +10226,7 @@ fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
         })))
     };
     let waiting = |reason: Option<&str>| {
-        container_state(Some(&ContainerState::Waiting {
+        views::container_state(Some(&ContainerState::Waiting {
             reason: reason.map(str::to_string),
             message: None,
         }))
@@ -9704,10 +10290,13 @@ fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
     assert_eq!(waiting(None), ("waiting".to_string(), None));
 
     assert_eq!(
-        container_state(Some(&ContainerState::Running { started_at: None })),
+        views::container_state(Some(&ContainerState::Running { started_at: None })),
         ("running".to_string(), None)
     );
-    assert_eq!(container_state(None), ("not started".to_string(), None));
+    assert_eq!(
+        views::container_state(None),
+        ("not started".to_string(), None)
+    );
 
     // **The log picker is this function's word and not a second spelling of it.** It said `done`
     // about a container that exited `137` while describe said `failed` about the same state, on
@@ -9742,7 +10331,7 @@ fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
     ] {
         assert_eq!(
             doing(state.as_ref()),
-            container_state(state.as_ref()).0,
+            views::container_state(state.as_ref()).0,
             "the picker and the describe row spell one state two ways again: {state:?}"
         );
     }
@@ -10093,8 +10682,8 @@ const AFTER_ONE_STRIP: &str = "[2Jallocating 240MB of cache [accounts] for the a
 /// so it needs nothing added on the day one arrives.
 ///
 /// **Three of the four were run**, each against a planted producer: `card` wrapping the evidence
-/// at 80 columns, `raw_and_message` cutting at 100 characters, and `dump` padding every line to a
-/// column width. Each fails naming its own path.
+/// at 80 columns, `views::raw_and_message` cutting at 100 characters, and `dump` padding every
+/// line to a column width. Each fails naming its own path.
 ///
 
 #[tokio::test]
@@ -10135,6 +10724,19 @@ async fn one_line_comes_out_of_every_emit_path_with_one_transformation_on_it() {
     let fetched = String::from_utf8(fetched).expect("k8rs writes UTF-8");
 
     // **`--describe`**, where a controller's sentence is the second line of an event's block.
+    //
+    // **This arm is fed [`AFTER_ONE_STRIP`] and every other one [`FROM_THE_CLUSTER`], because
+    // that is the shape the pipeline hands it** (CLAUDE.md § A check is proven only for the input
+    // shapes it was fed). [`happening`]'s own doc is the contract — *one event, as `k8s::events`
+    // hands it over* — and `k8s::events` hands over an ingested `Happening`, so a message with an
+    // `ESC` still in it is a value that path cannot produce. The strip itself is proven at the
+    // door, against a stub server, by `k8s_tests.rs`'s
+    // `an_events_words_are_stripped_before_anything_can_draw_them`.
+    //
+    // **It was fed the raw line while `main.rs` carried a second strip of its own**, and that
+    // strip did not move with the wording: nothing in `views.rs` strips, because ingest already
+    // did (NOTES § D254). What this arm proves is unchanged — that `described` carries the value
+    // out whole, cutting nothing, padding nothing inside it and folding nothing.
     let pod = pod_read("healthy").await;
     let described = described(
         &pod,
@@ -10142,7 +10744,7 @@ async fn one_line_comes_out_of_every_emit_path_with_one_transformation_on_it() {
             lines: vec![happening(
                 Some("2026-08-30T21:35:41Z"),
                 "Unhealthy",
-                FROM_THE_CLUSTER,
+                AFTER_ONE_STRIP,
             )],
             cut: false,
         }),
@@ -11093,12 +11695,15 @@ fn no_refusal_ever_names_a_word_the_same_sentence_offers_back() {
 /// **The namespace may be named once and no more, and `k8rs ops` refuses rather than picking
 /// one** (`k8s-admin` and `tester`, 2026-09-04; PM ruling).
 ///
-/// **[`value_of`]'s first-wins is right for the read path and cannot be carried onto a write.**
-/// `kubectl` is last-wins — measured here on `kubectl` v1.36.3, client-side and against no
-/// cluster: `kubectl create deployment web --image=nginx --dry-run=client -o yaml -n payments -n
-/// prod` prints `namespace: prod`, and so does the same line with `--namespace payments -n prod`.
-/// So first-wins here would send a mutation to a namespace the reader's own habit says is the
-/// other one. It is also the
+/// **The read path resolves a repeat and this one refuses it, and that is not the two
+/// disagreeing.** `kubectl` is last-wins — measured here on `kubectl` v1.36.3, client-side and
+/// against no cluster: `kubectl create deployment web --image=nginx --dry-run=client -o yaml -n
+/// payments -n prod` prints `namespace: prod`, and so does the same line with `--namespace
+/// payments -n prod`. [`value_of`] followed that measurement as of the flags box and takes the
+/// last too; the argument this doc used to make — *first-wins would send a mutation to whichever
+/// of the two the reader's habit says is the other one* — went with it. What it rested on did
+/// not: a read taken against the wrong namespace costs a re-run and a mutation does not, so this
+/// path buys its certainty with a refusal rather than with a tie-break. It is also the
 /// contradiction two doc comments in this region already rule out: [`ops_words`]' *a word
 /// silently skipped is a run doing something other than what was typed*, and [`ops_namespace`]'s
 /// refusal to guess a namespace nobody typed. Refusing to guess when none was typed and then
@@ -11916,8 +12521,75 @@ fn one_context(server: Option<&str>) -> kube::config::Kubeconfig {
     .expect("a kubeconfig this test wrote itself")
 }
 
-/// **Which cluster the audit line names comes off the kubeconfig, not off a field on a frozen
-/// `k8s::Session`** (NOTES § D220 ruling 5).
+/// **[`two_contexts`] whose *current* row turns TLS verification off** — the one shape that can
+/// tell `k8s::contexts(…, Some(key))` from `k8s::contexts(…, None)` by the answer alone
+/// (`tester` F4, NOTES § D280 item 5): asked for nothing, `alpha` is current and insecure and
+/// `main::tls_unverified` answers `true`; asked for a name the file does not hold, no row is
+/// current and it answers `false`.
+fn two_contexts_one_unverified() -> kube::config::Kubeconfig {
+    serde_yaml_ng::from_str(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: alpha\n\
+         contexts:\n\
+         - name: alpha\n  \
+           context: { cluster: a, user: k8rs }\n\
+         - name: beta\n  \
+           context: { cluster: b, user: k8rs }\n\
+         clusters:\n\
+         - name: a\n  \
+           cluster:\n    \
+             server: 'https://alpha.invalid:6443'\n    \
+             insecure-skip-tls-verify: true\n\
+         - name: b\n  \
+           cluster: { server: 'https://beta.invalid:6443' }\n\
+         users:\n\
+         - name: k8rs\n  \
+           user: {}\n",
+    )
+    .expect("a kubeconfig this test wrote itself")
+}
+
+/// **A second context in the file, so `--context` has a row to name that is not the file's own
+/// current one** — the one shape [`one_context`] cannot make.
+fn two_contexts(first: &str, second: &str) -> kube::config::Kubeconfig {
+    serde_yaml_ng::from_str(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: alpha\n\
+         contexts:\n\
+         - name: alpha\n  \
+           context:\n    \
+             cluster: a\n    \
+             user: k8rs\n\
+         - name: beta\n  \
+           context:\n    \
+             cluster: b\n    \
+             user: k8rs\n\
+         clusters:\n\
+         - name: a\n  \
+           cluster:\n    \
+             server: {first}\n\
+         - name: b\n  \
+           cluster:\n    \
+             server: {second}\n\
+         users:\n\
+         - name: k8rs\n  \
+           user: {{}}\n"
+    ))
+    .expect("a kubeconfig this test wrote itself")
+}
+
+/// **Which cluster the audit line names comes off the row k8rs connected to** (NOTES § D220
+/// ruling 5) — the `current` row of the same `k8s::contexts` list the connection was chosen from.
+///
+/// **The blocking half, measured** (`k8s-admin`, 2026-09-24): the function used to take the
+/// kubeconfig and ask `k8s::contexts(…, None)` for itself. That is right for an `ops` line, which
+/// takes no `--context`, and wrong for the console, which now connects with one — so
+/// `k8rs --context beta`, one restart, and `ops::Record::attempt_line` wrote
+/// `context beta · server <alpha's URL>`. Invariant 4: **neither record may lie**, and the field
+/// that lied is the one `ops::Mutation::server` exists to be the backstop for, because a context
+/// name does not identify a cluster.
 ///
 /// **The three `k8s::Address` states become two answers here**, because a log line has one job:
 /// an address it can state, or the gap `ops::Record::attempt_line` already spells. Telling
@@ -11927,13 +12599,32 @@ fn one_context(server: Option<&str>) -> kube::config::Kubeconfig {
 /// server comes from here rather than being remembered a second time on the way into a file that
 /// is kept.
 #[test]
-fn the_server_the_record_names_is_the_one_the_current_context_points_at() {
+fn the_server_the_record_names_is_the_one_the_run_connected_to() {
+    // **The finding itself**: two clusters in one file, and the answer follows `--context`.
+    let two = two_contexts("https://alpha.invalid:6443", "https://beta.invalid:6443");
+    assert_eq!(
+        current_server(&k8s::contexts(&two, None)),
+        "https://alpha.invalid:6443",
+        "a run that named no context did not get the file's own current-context"
+    );
+    assert_eq!(
+        current_server(&k8s::contexts(&two, Some("beta"))),
+        "https://beta.invalid:6443",
+        "the audit line would have named `context beta` beside alpha's server URL, which is \
+         invariant 4's neither record may lie"
+    );
+    // A context the file does not have leaves no row marked current, so there is nothing to name
+    // — and the connection under it fails anyway.
+    assert_eq!(current_server(&k8s::contexts(&two, Some("gamma"))), "");
+
+    let current =
+        |kubeconfig: &kube::config::Kubeconfig| current_server(&k8s::contexts(kubeconfig, None));
     // **A reserved host and not the `127.0.0.1` a real kind writes**, because
     // `scripts/security-guard.py` reads a loopback URL in this tree as a second outbound path and
     // is right to; the port is what carries the point, and `ops_tests.rs`'s own fixture already
     // pays this price for the same reason.
     assert_eq!(
-        current_server(&one_context(Some("https://k8rs-tests.invalid:41751"))),
+        current(&one_context(Some("https://k8rs-tests.invalid:41751"))),
         "https://k8rs-tests.invalid:41751"
     );
     // **A password in the URL never reaches the log** — `k8s::Address` dropped it before this
@@ -11944,17 +12635,17 @@ fn the_server_the_record_names_is_the_one_the_current_context_points_at() {
     // reads the whole authority — so the credential half is a separate literal.
     let with_password = format!("https://{}@{}", "root:hunter2", "prod.invalid:6443");
     assert_eq!(
-        current_server(&one_context(Some(&with_password))),
+        current(&one_context(Some(&with_password))),
         "https://prod.invalid:6443",
         "a kubeconfig password reached the audit log"
     );
     // An entry that names no cluster, and one whose address k8rs will not state: both are the gap.
-    assert_eq!(current_server(&one_context(None)), "");
-    assert_eq!(current_server(&one_context(Some("https://[oops"))), "");
+    assert_eq!(current(&one_context(None)), "");
+    assert_eq!(current(&one_context(Some("https://[oops"))), "");
     // No current context at all — nothing to name, and nothing to invent.
     let empty: kube::config::Kubeconfig =
         serde_yaml_ng::from_str("apiVersion: v1\nkind: Config\n").expect("an empty kubeconfig");
-    assert_eq!(current_server(&empty), "");
+    assert_eq!(current(&empty), "");
 }
 
 /// **A run that never reached a cluster says nothing was changed, and then says why**
@@ -12291,9 +12982,12 @@ fn every_refusal_of_an_ops_line_exits_two() {
     }
 }
 
-/// **The usage stops saying this build cannot reach a cluster without qualifying it**
-/// (todo.md 3749). It was true until the first operation landed, and it is the sentence a reader
-/// checks before deciding whether it is safe to experiment against production.
+/// **`ops` is on the list of what reaches a cluster, and the list is the whole list**
+/// (todo.md 3749). The sentence around it has now been rewritten twice — *this build cannot
+/// reach a cluster*, then *without --once, --live … this build reads files only*, now
+/// *--once, --live … and ops are its other doors to a cluster* — and what this test is for has
+/// survived all three: it is the sentence a reader checks before deciding whether it is safe to
+/// experiment against production, so a door missing from it is the dangerous kind of omission.
 #[test]
 fn the_usage_says_ops_reaches_a_cluster_too() {
     let Err(problem) = run(&[]) else {
@@ -12317,8 +13011,8 @@ fn the_usage_says_ops_reaches_a_cluster_too() {
     // binary, so the pin costs one `contains` on an invocation that is paid for either way.
     let last = problem.lines().last().expect("the usage has a last line");
     assert!(
-        last.contains("--yaml or ops this build reads files only"),
-        "the line that says what cannot reach a cluster still leaves `ops` out of it: {last:?}"
+        last.contains("--yaml and ops are its other doors to a cluster"),
+        "the line listing what reaches a cluster still leaves `ops` out of it: {last:?}"
     );
     // **Offered *and* explained.** A bracketed flag on a mutating form reads as *and then it
     // scales*; what it does is refuse, and the prose is where that fits without a fourth line
@@ -12505,7 +13199,7 @@ async fn a_headless_scale_prints_the_dialog_as_three_lines_and_exits_zero() {
             "deployment/web in payments",
             "This stops all 3 copies of your app — nothing will be left running. Right now: 3 \
              copies. After: 0 copies.",
-            "$ kubectl scale deployment/web --replicas=0 -n payments",
+            "$ kubectl --context kind-k8rs scale deployment/web --replicas=0 -n payments",
         ],
         "the headless dialog is not the three lines screens/dialogs.md prints"
     );
@@ -12729,7 +13423,7 @@ async fn a_headless_restart_prints_the_dialog_as_three_lines_and_exits_zero() {
             "This asks Kubernetes to replace every copy of your app with a new one. How many \
              stop at the same time is a setting on this deployment — it can be a few, or all of \
              them at once. A paused deployment will not start until you resume it.",
-            "$ kubectl rollout restart deployment/web -n payments",
+            "$ kubectl --context kind-k8rs rollout restart deployment/web -n payments",
         ],
         "the headless dialog is not the three lines screens/dialogs.md prints"
     );
@@ -12773,7 +13467,8 @@ async fn a_headless_restart_prints_the_dialog_as_three_lines_and_exits_zero() {
     );
     assert!(
         written.contains(
-            "kubectl: kubectl rollout restart deployment/web -n payments · call: PATCH \
+            "kubectl: kubectl --context kind-k8rs rollout restart deployment/web -n payments \
+             · call: PATCH \
              /apis/apps/v1/namespaces/payments/deployments/web · resourceVersion not sent"
         ) && written.contains("· no uid was read ·")
             && written.contains("· the change was made"),
@@ -12847,7 +13542,7 @@ async fn a_headless_restart_of_a_paused_deployment_says_so_above_the_prompt_and_
         "the paused line is not the one under the taught command: {lines:?}"
     );
     assert_eq!(
-        lines[2], "$ kubectl rollout restart deployment/web -n payments",
+        lines[2], "$ kubectl --context kind-k8rs rollout restart deployment/web -n payments",
         "the paused line moved above the command it is about: {lines:?}"
     );
     assert!(
@@ -13366,8 +14061,9 @@ fn only_a_question_takes_the_subresource_flag() {
             ended.said
         );
     }
-    // **Named twice is refused for the namespace's own reason** — `value_of` is first-wins and
-    // `kubectl` is last-wins, so guessing asks a different question from the one that was typed.
+    // **Named twice is refused for the namespace's own reason** — a read may resolve a repeat
+    // ([`value_of`], last-wins like `kubectl` since the flags box) because it can be re-run, and
+    // a question about permission that asks about the wrong subresource cannot be taken back.
     //
     // **Both spellings, because they are counted on two different lines** (my own second pass,
     // found by `just mutants-diff`): a row with only the attached form left `replace += with *=`
@@ -13400,6 +14096,77 @@ fn only_a_question_takes_the_subresource_flag() {
 /// **The usage says the question exists, in both places a reader can find it** — the top-level
 /// synopsis, which is the only place a reader learns a mode exists, and `k8rs ops`'s own rows.
 ///
+/// **The synopsis leads with the console, and its last line no longer denies one**
+/// (`screens/states.md` § The command line's own synopsis, which is this text's authority and was
+/// written for the flags box).
+///
+/// **Two runs printed the contradiction** (`k8s-admin`, 2026-09-24). `k8rs --read-only | cat`
+/// printed a usage with no line for the flag just typed; `k8rs --read-only pod.json` printed the
+/// new refusal — *`--read-only` on its own opens the console, which reads a cluster* — directly
+/// above *without --once, --live, --logs, --describe, --yaml or ops this build reads files only —
+/// it cannot reach a cluster*. One write to stderr, two sentences that cannot both be true.
+///
+/// **The synopsis is the only place a reader learns a form exists**, which is [`READ_ONLY`]'s own
+/// argument for itself, measured at zero mentions before it landed — and it reaches the console
+/// as a whole: nothing the binary printed said that typing `k8rs` alone opens anything.
+#[test]
+fn the_usage_leads_with_the_console_and_stops_denying_it() {
+    println!("{USAGE}");
+    let synopsis = USAGE.lines().next().expect("the usage has a first line");
+    assert!(
+        synopsis.starts_with(
+            "usage: k8rs [--read-only] [--context <name>] [--namespace <name>]   |   k8rs \
+             [--analysis] <file.json>..."
+        ),
+        "the console form does not lead the synopsis: {synopsis:?}"
+    );
+    // **Seven alternatives**, counted off the separator the line is built from.
+    assert_eq!(
+        synopsis.matches("   |   ").count() + 1,
+        7,
+        "an alternative was added or lost: {synopsis:?}"
+    );
+    // **The claim the console form makes false, gone** — and the six doors it replaced with a
+    // true sentence still named, because a reader needs each of them too.
+    assert!(
+        !USAGE.contains("this build reads files only"),
+        "the synopsis still says a line without the six mode words cannot reach a cluster"
+    );
+    assert!(
+        USAGE.contains(
+            "A path on the line is always the file-driven form, and nothing else; without one, \
+             this build opens a console instead of reading nothing"
+        ),
+        "the rewritten trailing sentence is not the one screens/states.md writes: {USAGE}"
+    );
+    for door in ["--once", "--live", "--logs", "--describe", "--yaml", "ops"] {
+        assert!(
+            USAGE.contains(door),
+            "the synopsis stopped naming {door}, which still reaches a cluster"
+        );
+    }
+    // **`--analysis` is not on the console form**, and this asserts the *text* and not a
+    // behaviour (PM ruling, 2026-09-24; backlog.md carries the reasoning). `--analysis` is not a
+    // console flag and never opens a console — `k8rs --analysis` alone is the file form with no
+    // file — but `k8rs --read-only --analysis` does open one and drops the word, because the
+    // console draws the seven panes anyway and refusing a flag it already satisfies costs the
+    // reader more than it saves. The assertion this replaced claimed the behaviour and was
+    // shaped to pass: `!starts_with("usage: k8rs [--analysis] [--read-only]")` ruled out one
+    // spelling of a thing it said it forbade, so `[--read-only] [--analysis] …` sailed through.
+    let console_form = synopsis
+        .strip_prefix("usage: ")
+        .and_then(|line| line.split("   |   ").next())
+        .expect("the synopsis has a first alternative");
+    assert_eq!(
+        console_form, "k8rs [--read-only] [--context <name>] [--namespace <name>]",
+        "the console form is not the one screens/states.md writes"
+    );
+    assert!(
+        !console_form.contains("--analysis"),
+        "the console form offers a flag the console has nothing to mean: {console_form:?}"
+    );
+}
+
 /// **`may-i`'s shape is not the operations' shape**, and the synopsis showed only theirs
 /// (`k8s-admin`, 2026-09-05): a reader who followed `ops <operation> <kind>/<name>` for a question
 /// would write `may-i delete/nodes`.
@@ -13435,5 +14202,5623 @@ fn the_usage_offers_the_question_in_the_synopsis_and_in_the_ops_rows() {
             line.chars().count() <= 100,
             "a usage row is a paragraph: {line:?}"
         );
+    }
+}
+
+// --- THE CONSOLE LOOP ---
+//
+// **The coalescer is what these are about, and it is the one claim the loop cannot make for
+// itself** (todo.md § Phase 12, PRIOR-ART § A5). k9s merged *skip the reconcile cycle when the
+// informer data is unchanged* and reverted it a month later: a coalescer that drops the **last**
+// event of a burst shows stale data for ever, and it passes every test that only checks that events
+// arrived. So the assertion here is made **after the quiet** — the storm is fed, the feed stops,
+// the window expires, and what is on the screen then has to be the last event.
+//
+// **No terminal and no cluster.** [`pump`] is a function over a stream of updates, a channel of
+// keys and something to draw into, so the whole loop runs against a `TestBackend` and a
+// `stream::iter`; the clock is tokio's paused one, so the 100 ms window costs the suite nothing and
+// the frame count is deterministic rather than a race.
+
+/// A console with nothing in it — every run-level fact at the value a fresh connection gives it.
+fn bare_console<'a>() -> Console<'a> {
+    Console {
+        app: views::App::default(),
+        log: views::Log::default(),
+        depth: theme::Depth::Ansi16,
+        writes: ui::Writes::Live,
+        insecure: false,
+        context: views::Stripped::of("ctx: k8rs"),
+        clock: None,
+        kinds: Vec::new(),
+        contexts: Vec::new(),
+        // **Something connected, which is every run that has a store to press a key against** —
+        // the startup states are `Connection::Never`, and they are driven from `console()` itself.
+        connection: views::Connection::Live(Some("k8rs".to_owned())),
+        unconnected: false,
+        link: ui::Link::Live,
+        opened: None,
+        // **What the *last frame* offered, which for a console that has drawn none is nothing** —
+        // the same value `console()` starts with, so a test that presses a mutating key has to draw
+        // a frame first, exactly as a reader does.
+        offer: views::Offer::Nothing { switch: false },
+        carried: None,
+        // **Armed, which is every run that reached a keyboard** — the refusal `false` buys is its
+        // own test ([`ctrl_z_does_nothing_at_all_when_the_resume_could_not_be_armed`]).
+        resumable: true,
+    }
+}
+
+/// **A burst of watch events, then quiet: one frame for the burst, and the last event on it.**
+///
+/// **The count is the pods LIST's own progress**, so every one of the fourteen events moves what is
+/// on the screen and the last one is `14 pods` — a coalescer that dropped it would draw `13`, which
+/// is the defect `PRIOR-ART § A5` names and which no *did the events arrive* assertion can see.
+///
+/// **Two frames and not fourteen**: the first is the still-loading screen the loop owes before
+/// anything has happened at all, the second is the whole burst. That is invariant 7's *"a rollout
+/// that restarts 200 pods produces one redraw, not 200"* measured rather than asserted about.
+#[tokio::test(start_paused = true)]
+async fn a_storm_that_goes_quiet_ends_on_the_last_event_and_costs_one_frame() {
+    let pods = objects::<Pod>("kube-system-pods.json");
+    let counted = pods.len();
+    let mut storm: Vec<k8s::Update> = vec![Box::new(|store: &mut k8s::Store| {
+        store.pod(&now(), Event::Init);
+    })];
+    for pod in pods {
+        storm.push(Box::new(move |store: &mut k8s::Store| {
+            store.pod(&now(), Event::InitApply(pod));
+        }));
+    }
+    // **No `InitDone`**, so the bootstrap gate stays shut and the screen is the still-loading one
+    // whose paragraph counts what has landed (NOTES § D28, `screens/states.md` § Still loading).
+    let mut updates = Updates {
+        merged: futures_util::stream::select_all(vec![futures_util::stream::iter(storm).boxed()]),
+        drained: false,
+        asked: std::collections::BTreeSet::new(),
+        asking: tokio::sync::mpsc::unbounded_channel().0,
+    };
+    let (pressing, mut keys) = tokio::sync::mpsc::unbounded_channel();
+    // **`q` long after the window, so the assertion is made on a screen the storm drew and not on
+    // one a keypress forced.** A key draws at once (`Owing::now`), so a `q` sent beside the burst
+    // would paint the frame this test is trying to catch the coalescer not painting.
+    tokio::spawn(async move {
+        tokio::time::sleep(COALESCE * 10).await;
+        let _ = pressing.send(Woke::Key(ratatui::crossterm::event::Event::Key(
+            ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Char('q'),
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ),
+        )));
+    });
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+    let mut console = bare_console();
+    let mut store = k8s::Store::default();
+    let at = Watching {
+        renewal: None,
+        coverage: k8s::Coverage::Cluster,
+    };
+    let halt = pump(
+        &mut console,
+        &mut terminal,
+        &mut store,
+        &mut updates,
+        &mut keys,
+        &at,
+        None,
+    )
+    .await;
+    assert!(matches!(halt, Halt::Quit), "the loop did not end on `q`");
+
+    let drawn: Vec<String> = (0..terminal.backend().buffer().area.height)
+        .map(|row| {
+            (0..terminal.backend().buffer().area.width)
+                .map(|column| terminal.backend().buffer()[(column, row)].symbol())
+                .collect()
+        })
+        .collect();
+    let screen = drawn.join("\n");
+    // The canary: this is the console's own frame and not an empty buffer that would pass every
+    // absence below (CLAUDE.md § A derived list asserts it found something).
+    assert!(screen.contains("ALERTS"), "not a console frame:\n{screen}");
+    assert!(
+        screen.contains(&format!("{counted} pods")),
+        "the last event of the burst never reached the screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains(&format!("{} pods", counted - 1)),
+        "the screen stopped one event short of the burst:\n{screen}"
+    );
+    assert_eq!(
+        terminal.get_frame().count(),
+        2,
+        "the burst was drawn once per event instead of once:\n{screen}"
+    );
+}
+
+/// **A console needs both ends of the terminal, and neither one alone will do**
+/// (`screens/context.md`'s own rule for the startup picker, extended to the console it opens in).
+///
+/// **All four rows, because the process this suite runs in can only ever produce the last one** —
+/// `cargo test`'s stdin and stdout are both pipes, so a function that read them itself was one
+/// `false` away from opening a console in CI with nothing to catch it (`just mutants-diff`).
+#[test]
+fn a_console_opens_only_with_a_terminal_at_both_ends() {
+    assert!(at_a_keyboard(true, true), "a person at a keyboard");
+    assert!(
+        !at_a_keyboard(true, false),
+        "`k8rs > out.txt` has nothing to draw into"
+    );
+    assert!(
+        !at_a_keyboard(false, true),
+        "`… | k8rs` has no keys to read"
+    );
+    assert!(
+        !at_a_keyboard(false, false),
+        "a harness, and every CI run — the row this suite is in"
+    );
+}
+
+/// One object of a committed single-object capture, decoded — [`objects`]'s other shape.
+fn object<T: DeserializeOwned>(name: &str) -> T {
+    let text = std::fs::read_to_string(fixture(name)).expect("the fixture reads");
+    serde_json::from_str(&text).expect("the capture decodes")
+}
+
+/// **A store with three cards in it**, every initial LIST landed — three *broken* pods, because a
+/// card is a finding and the healthy captures produce none. Each is its own owner, so three
+/// captures are three rows for the content cursor to move across.
+///
+/// **Committed captures and not hand-written objects** (NOTES § D53): these are the same three
+/// `rules_tests.rs` reads, and what this file adds is what the *keys* do once cards exist.
+fn a_cluster_with_cards() -> k8s::Store {
+    listed(vec![
+        object::<Pod>("crashloop.json"),
+        object::<Pod>("evicted.json"),
+        object::<Pod>("image.json"),
+        // **The fourth is *owned*, and it is here for [`filed_under`]** — the three above are bare
+        // pods, whose card is filed under the pod itself, so *the owner* and *a pod of the card*
+        // are the same `ObjectId` and a lookup reading one as the other cannot be told apart (`just
+        // mutants-diff` turned that `||` into `&&` and nothing failed).
+        objects::<Pod>("owned-pods.json")
+            .into_iter()
+            .next()
+            .expect("the owned capture holds a pod"),
+    ])
+}
+
+/// One key press, with no modifier.
+fn key(code: ratatui::crossterm::event::KeyCode) -> ratatui::crossterm::event::Event {
+    ratatui::crossterm::event::Event::Key(ratatui::crossterm::event::KeyEvent::new(
+        code,
+        ratatui::crossterm::event::KeyModifiers::NONE,
+    ))
+}
+
+/// One key press with `ctrl` held — `ctrl-c` and `ctrl-d`, the two the map carries.
+fn control(code: ratatui::crossterm::event::KeyCode) -> ratatui::crossterm::event::Event {
+    ratatui::crossterm::event::Event::Key(ratatui::crossterm::event::KeyEvent::new(
+        code,
+        ratatui::crossterm::event::KeyModifiers::CONTROL,
+    ))
+}
+
+/// `Char(c)`, the commonest of the two above.
+fn typed(character: char) -> ratatui::crossterm::event::Event {
+    key(ratatui::crossterm::event::KeyCode::Char(character))
+}
+
+/// **`q` and `ctrl-c` are one answer, and a write on the wire refuses both** (NOTES § D12,
+/// `views::App::may_quit`: quitting mid-`PATCH` leaves the audit log holding an attempt with no
+/// result). `ctrl-c` is a key and not a signal because raw mode clears `ISIG`.
+#[test]
+fn q_and_ctrl_c_quit_and_a_write_on_the_wire_refuses_both() {
+    let store = a_cluster_with_cards();
+    for pressed in [
+        typed('q'),
+        control(ratatui::crossterm::event::KeyCode::Char('c')),
+    ] {
+        let mut console = bare_console();
+        assert!(
+            matches!(keyed(&mut console, pressed.clone(), &store), Did::Quit),
+            "{pressed:?} did not quit"
+        );
+
+        let mut busy = bare_console();
+        busy.app.changing = Some(views::Object::new(
+            "deployment",
+            Some("payments".to_owned()),
+            "web".to_owned(),
+            None,
+        ));
+        assert!(
+            matches!(keyed(&mut busy, pressed.clone(), &store), Did::Nothing),
+            "{pressed:?} quit out of a write that was still running"
+        );
+    }
+}
+
+/// **`ctrl-z` is answered from every mode and leaves that mode alone** (NOTES § D24): the handover
+/// is not a command, so neither a filter with focus nor an open dialog can swallow it — and those
+/// two are exactly the states [`pressed`] answers *before* it reaches the key map, which is why a
+/// key added to the map would have been unreachable from both.
+#[test]
+fn ctrl_z_suspends_from_every_mode_and_leaves_that_mode_alone() {
+    let store = a_cluster_with_cards();
+    let ctrl_z = || control(ratatui::crossterm::event::KeyCode::Char('z'));
+
+    let mut console = bare_console();
+    assert!(
+        matches!(keyed(&mut console, ctrl_z(), &store), Did::Suspend),
+        "`ctrl-z` with no mode open reached nothing"
+    );
+
+    // **While a filter has focus every printable key is text, and `ctrl-z` is not one of them**
+    // (`screens/widgets.md` § 2b).
+    let mut typing = bare_console();
+    let _ = keyed(&mut typing, typed('/'), &store);
+    assert!(typing.app.typing.is_some(), "`/` did not open the filter");
+    assert!(
+        matches!(keyed(&mut typing, ctrl_z(), &store), Did::Suspend),
+        "`ctrl-z` while typing was swallowed by the filter"
+    );
+    assert_eq!(
+        typing.app.typed().map(views::Input::text),
+        Some(""),
+        "`ctrl-z` put a `z` in the filter"
+    );
+
+    // **And from under a modal, which it leaves open**: `fg` comes back to the screen the reader
+    // left, so the suspend is not a `esc`.
+    let mut modal = bare_console();
+    modal.app.modal = Some(views::Modal::Help);
+    assert!(
+        matches!(keyed(&mut modal, ctrl_z(), &store), Did::Suspend),
+        "`ctrl-z` under Help reached nothing"
+    );
+    assert_eq!(
+        modal.app.modal,
+        Some(views::Modal::Help),
+        "the suspend closed Help"
+    );
+
+    // A bare `z` is not the key — `screens/help.md` binds no `z` at all.
+    assert!(
+        matches!(keyed(&mut bare_console(), typed('z'), &store), Did::Nothing),
+        "a bare `z` suspended the process"
+    );
+}
+
+/// **A console that could not arm `SIGCONT` does not stop at all** (PM ruling, 2026-09-24,
+/// [`may_stop`]): every recovery there is lives under `Woke::Resumed`, so a `ctrl-z` without it
+/// hands the terminal back and nothing ever takes it back — `fg` to a cooked tty and a dead
+/// keyboard, which is the failure this whole family exists to remove and which the red run for the
+/// signal arms measured. Never hand back a terminal you cannot take back.
+///
+/// **A key that does nothing is honest here**: it is what `ctrl-z` did before this box, and raw
+/// mode means the terminal raises nothing either way.
+#[test]
+fn ctrl_z_does_nothing_at_all_when_the_resume_could_not_be_armed() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    console.resumable = false;
+    assert!(
+        matches!(
+            keyed(
+                &mut console,
+                control(ratatui::crossterm::event::KeyCode::Char('z')),
+                &store
+            ),
+            Did::Nothing
+        ),
+        "`ctrl-z` handed the terminal back with nothing armed to take it back"
+    );
+}
+
+/// **The handover is two inverse sequences and each carries the cursor** (NOTES § D24,
+/// PRIOR-ART § D4) — the alternate screen *and* the cursor, which is the half `ratatui::restore`
+/// does not carry and the half a suspend cannot get from `Terminal::drop`.
+///
+/// **It is the sequence that is asserted and not the `ioctl`**: raw mode needs a real tty, these
+/// are bytes, and the bytes are what a `fg` that came back to a dead screen would be missing.
+///
+/// **Nothing here calls [`stopped`]**, which would stop the test binary with `SIGSTOP` and hang the
+/// suite until somebody found it — the composition is what a test can hold.
+#[test]
+fn the_handover_is_two_inverse_sequences_and_each_carries_the_cursor() {
+    let (mut given, mut taken) = (Vec::new(), Vec::new());
+    handover(&mut given, false).expect("a `Vec` takes the sequence");
+    handover(&mut taken, true).expect("a `Vec` takes the sequence");
+    let given = String::from_utf8(given).expect("the sequence is text");
+    let taken = String::from_utf8(taken).expect("the sequence is text");
+    // The canary: an empty sink passes every absence below (CLAUDE.md § A derived list asserts it
+    // found something).
+    assert!(
+        !given.is_empty() && !taken.is_empty(),
+        "the handover wrote nothing at all"
+    );
+
+    for (direction, wrote, alternate, cursor) in [
+        (
+            "handing the terminal back",
+            &given,
+            "\x1b[?1049l",
+            "\x1b[?25h",
+        ),
+        (
+            "taking the terminal back",
+            &taken,
+            "\x1b[?1049h",
+            "\x1b[?25l",
+        ),
+    ] {
+        assert!(
+            wrote.contains(alternate),
+            "{direction} left the alternate screen alone: {wrote:?}"
+        );
+        assert!(
+            wrote.contains(cursor),
+            "{direction} left the cursor alone: {wrote:?}"
+        );
+    }
+    // **Inverses, which is the claim a pair of one-way assertions does not make**: neither
+    // direction may carry the other's half, or a resume would hide the cursor it just showed.
+    assert!(
+        !given.contains("\x1b[?1049h") && !given.contains("\x1b[?25l"),
+        "handing the terminal back also took it: {given:?}"
+    );
+    assert!(
+        !taken.contains("\x1b[?1049l") && !taken.contains("\x1b[?25h"),
+        "taking the terminal back also gave it away: {taken:?}"
+    );
+}
+
+/// **The hook restores the terminal and *then* runs the one it replaced** (`screens/widgets.md`
+/// § 1, invariant 8) — and the stand-in underneath is what makes both halves visible: it stands in
+/// for ratatui's own restoring hook, so the list it appends to is the order the panic path ran in.
+///
+/// **This is the test `tester` F1 sent back, and the shape it sent back is why the seam moved.** A
+/// version that only counted the stand-in passed with `chain_panic_hook`'s body emptied — measured,
+/// not argued: with no chain installed the stand-in *is* the hook and runs anyway. What cannot pass
+/// is an order, so the restoring half is handed in and the order is the claim.
+///
+/// **The hook is process-global and this binary runs `main_tests`, `ops_tests` and `rules_tests` on
+/// N threads with six deliberate panic sites**, so the stand-in records only this thread's panic
+/// and forwards every other thread's to the hook it replaced — a stand-in that swallowed them would
+/// take away another thread's failure message for as long as this test holds the hook.
+#[test]
+fn the_panic_hook_restores_the_terminal_before_the_hook_it_chains_prints() {
+    let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (restoring, printing) = (std::sync::Arc::clone(&order), std::sync::Arc::clone(&order));
+    let mine = std::thread::current().id();
+    let libtest: std::sync::Arc<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync> =
+        std::sync::Arc::from(std::panic::take_hook());
+    let forwarding = std::sync::Arc::clone(&libtest);
+    std::panic::set_hook(Box::new(move |info| {
+        if std::thread::current().id() == mine {
+            printing
+                .lock()
+                .expect("the order")
+                .push("the hook underneath ran");
+        } else {
+            (*forwarding)(info);
+        }
+    }));
+    chain_panic_hook(move || {
+        // **The same thread guard as the stand-in below, and for the same reason**: without it
+        // another thread's panic appends here and reddens this test for somebody else's failure.
+        if std::thread::current().id() == mine {
+            restoring
+                .lock()
+                .expect("the order")
+                .push("the terminal went back");
+        }
+    });
+    let panicked = std::panic::catch_unwind(|| panic!("a canary, not a failure"));
+    std::panic::set_hook(Box::new(move |info| (*libtest)(info)));
+
+    assert!(panicked.is_err(), "the canary did not panic");
+    assert_eq!(
+        *order.lock().expect("the order"),
+        ["the terminal went back", "the hook underneath ran"],
+        "the panic path did not restore first and forward second"
+    );
+}
+
+/// **Each half of the pair writes its own direction** (`tester` F2) — the wrappers, not just
+/// [`handover`]: swapping the argument in either of them leaves the sequences perfectly inverse and
+/// the terminal perfectly wrong.
+///
+/// **The `ioctl` is the part no suite without a tty can reach**, so it is the part not asserted:
+/// `taken_back` answers `Err` here because `enable_raw_mode` has no terminal to work on, and the
+/// bytes it wrote before saying so are the claim.
+#[test]
+fn each_half_of_the_pair_writes_its_own_direction() {
+    let (mut back, mut taken) = (Vec::new(), Vec::new());
+    handed_back(&mut back).expect("handing a `Vec` back cannot fail: no raw mode was ever on");
+    let _ = taken_back(&mut taken);
+    let back = String::from_utf8(back).expect("the sequence is text");
+    let taken = String::from_utf8(taken).expect("the sequence is text");
+
+    assert!(
+        back.contains("\x1b[?1049l") && back.contains("\x1b[?25h"),
+        "`handed_back` did not give the screen and the cursor back: {back:?}"
+    );
+    assert!(
+        taken.contains("\x1b[?1049h") && taken.contains("\x1b[?25l"),
+        "`taken_back` did not take the screen and the cursor: {taken:?}"
+    );
+}
+
+/// **A resume hands the terminal back before it takes it, and then repaints** — the order is the
+/// whole of `k8s-admin` finding 1 and `tester` F4: `crossterm`'s `enable_raw_mode` returns `Ok(())`
+/// and touches no tty while it believes raw mode is on, so after an external `SIGTSTP` — which
+/// disabled nothing — a `taken_back` on its own leaves the terminal **cooked** and every key
+/// line-buffered, with the frame redrawn over the top of it.
+#[test]
+fn a_resume_gives_the_terminal_back_before_it_takes_it_and_then_repaints() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+    let at = Watching {
+        renewal: None,
+        coverage: k8s::Coverage::Cluster,
+    };
+    drawn(&mut terminal, &mut console, &store, &at).expect("the frame draws");
+    assert!(
+        screened(&terminal).contains("ALERTS"),
+        "not a console frame"
+    );
+
+    let mut wrote = Vec::new();
+    // `Err` here is the `enable_raw_mode` with no tty, the one part of this a suite cannot hold.
+    let _ = resumed(&mut wrote, &mut terminal);
+    let wrote = String::from_utf8(wrote).expect("the sequence is text");
+    let gave = wrote
+        .find("\x1b[?1049l")
+        .expect("the resume never gave the screen back");
+    let took = wrote
+        .find("\x1b[?1049h")
+        .expect("the resume never took the screen");
+    assert!(
+        gave < took,
+        "the resume took the terminal without giving it back first, so raw mode stayed off: \
+         {wrote:?}"
+    );
+
+    drawn(&mut terminal, &mut console, &store, &at).expect("the frame draws");
+    assert!(
+        screened(&terminal).contains("ALERTS"),
+        "the frame after a resume was the difference against a screen that is gone:\n{}",
+        screened(&terminal)
+    );
+}
+
+/// **`?` opens the key map and either of the two keys its own footer names closes it**
+/// (`screens/help.md`: *`? or esc to close`*).
+#[test]
+fn help_opens_on_question_and_closes_on_either_key_it_names() {
+    let store = a_cluster_with_cards();
+    for closing in [typed('?'), key(ratatui::crossterm::event::KeyCode::Esc)] {
+        let mut console = bare_console();
+        let _ = keyed(&mut console, typed('?'), &store);
+        assert_eq!(console.app.modal, Some(views::Modal::Help));
+        let _ = keyed(&mut console, closing.clone(), &store);
+        assert_eq!(console.app.modal, None, "{closing:?} left Help open");
+    }
+}
+
+/// **`q` still quits from under Help, and a write on the wire refuses it there too**
+/// (`screens/help.md` draws `q quit` on the Help footer beside `? or esc to close`, and its
+/// § *While the call is running* refuses the same key until the call returns).
+///
+/// **This is the pair [`q_and_ctrl_c_quit_and_a_write_on_the_wire_refuses_both`] cannot reach**:
+/// that one presses `q` with no modal open, so [`over_modal`]'s own guard was never asked.
+/// Measured: replacing it with `false` survived the whole suite (`just mutants-diff`, 2026-09-24).
+#[test]
+fn q_quits_from_under_help_and_a_write_on_the_wire_refuses_it_there_too() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    console.app.modal = Some(views::Modal::Help);
+    assert!(
+        matches!(keyed(&mut console, typed('q'), &store), Did::Quit),
+        "`q` under the key map did not quit"
+    );
+
+    let mut busy = bare_console();
+    busy.app.modal = Some(views::Modal::Help);
+    busy.app.changing = Some(views::Object::new(
+        "deployment",
+        Some("payments".to_owned()),
+        "web".to_owned(),
+        None,
+    ));
+    assert!(
+        matches!(keyed(&mut busy, typed('q'), &store), Did::Nothing),
+        "`q` under the key map quit out of a write that was still running"
+    );
+    assert_eq!(
+        busy.app.modal,
+        Some(views::Modal::Help),
+        "the refused key closed Help instead of being refused"
+    );
+}
+
+/// **A box that asks only for a press takes no typing, so `⌫` costs it no frame** — and a box
+/// that asks for the object's name shortens its buffer (`screens/dialogs.md`: the restart box names
+/// `⏎` and `esc` and no `⌫`; only a delete's *type the name* box has a buffer to shorten,
+/// invariant 2's typed name).
+///
+/// **The frame is the half a mutation found**: popping an empty buffer draws the same screen, so
+/// what the guard decides is the *answer* — [`Did::Changed`] against [`Did::Nothing`] — and a key
+/// that changed nothing must not cost a redraw (invariant 7). Measured: the guard replaced with
+/// `true` survived the whole suite (`just mutants-diff`, 2026-09-24).
+#[test]
+fn a_box_that_asks_only_for_a_press_spends_no_frame_on_backspace() {
+    let mut console = bare_console();
+    installed(&mut console, Published::Opening(an_open_dialog()));
+    installed(
+        &mut console,
+        Published::Checked {
+            verdict: "The cluster checked it first and accepted it.",
+            asks: None,
+        },
+    );
+    let answered = over_modal(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Backspace),
+        views::Detailing::Closed,
+        &[],
+        &before_the_list(),
+    );
+    assert!(
+        matches!(answered, Did::Nothing),
+        "`⌫` cost a frame on a box with nothing to type"
+    );
+
+    // And the same key on the box that does ask shortens what was typed.
+    let mut asked = bare_console();
+    installed(&mut asked, Published::Opening(an_open_dialog()));
+    installed(
+        &mut asked,
+        Published::Checked {
+            verdict: "k8rs did not check this one with the cluster first",
+            asks: Some("web".to_owned()),
+        },
+    );
+    for letter in ['w', 'e'] {
+        let _ = over_modal(
+            &mut asked,
+            pressing(ratatui::crossterm::event::KeyCode::Char(letter)),
+            views::Detailing::Closed,
+            &[],
+            &before_the_list(),
+        );
+    }
+    let shortened = over_modal(
+        &mut asked,
+        pressing(ratatui::crossterm::event::KeyCode::Backspace),
+        views::Detailing::Closed,
+        &[],
+        &before_the_list(),
+    );
+    assert!(
+        matches!(shortened, Did::Changed),
+        "`⌫` did not redraw the box it shortened"
+    );
+    let Some(views::Modal::Confirm(dialog)) = &asked.app.modal else {
+        panic!("the box closed on a `⌫`")
+    };
+    assert_eq!(
+        dialog.typed.text(),
+        "w",
+        "`⌫` did not take the last letter off the typed name"
+    );
+}
+
+/// **`↑` moves a free-text pane back up and `↓` moves it on**, and either one takes follow
+/// mode off (`views::App::scroll_by`, `screens/widgets.md` § 4).
+///
+/// **Measured, and it is the plainest survivor of the round**: [`Step::lines`] always answering
+/// `1`, and the same function with its `-` deleted, both survived the whole suite — every other
+/// test that moves a detail pane moves it *down*, where the two answers agree (`just mutants-diff`,
+/// 2026-09-24). A reader whose `↑` scrolled down would be the defect.
+#[test]
+fn the_up_arrow_moves_a_detail_pane_back_up_and_the_down_arrow_moves_it_on() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    console.opened = Some(Opened::Tabs {
+        object: ObjectId {
+            kind: ObjectKind::Pod,
+            namespace: Some("default".to_owned()),
+            name: "broken-crashloop".to_owned(),
+            uid: None,
+        },
+        from_step: false,
+    });
+    let tab = console.app.tab.at();
+    console.app.scroll[tab] = 5;
+    console.app.following = true;
+
+    let went = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Up),
+        &store,
+    );
+    assert!(matches!(went, Did::Changed), "`↑` drew nothing");
+    assert_eq!(
+        console.app.scroll[tab], 4,
+        "`↑` did not move the pane back up"
+    );
+    assert!(
+        !console.app.following,
+        "`↑` left the pane pinned to the tail it was scrolled away from"
+    );
+
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Down),
+        &store,
+    );
+    assert_eq!(console.app.scroll[tab], 5, "`↓` did not move the pane on");
+}
+
+/// **`tab` moves between the two panels and `↑↓` move whichever one has it** (`screens/help.md`:
+/// `tab  next panel`, `views::Panel`).
+///
+/// **The two cursors are asserted separately**, because the defect a shared one would produce is
+/// exactly *the reader moved the sidebar and the card under `s` changed with it*.
+#[test]
+fn tab_moves_the_focus_and_the_arrows_move_the_panel_that_has_it() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    console.kinds = vec![k8s::Browsable {
+        group: "apps".to_owned(),
+        version: "v1".to_owned(),
+        kind: "Deployment".to_owned(),
+        plural: "deployments".to_owned(),
+        namespaced: true,
+        verbs: vec!["list".to_owned()],
+    }];
+    let anchors = [None, None, None, None, None, None, None, None];
+
+    // Focus starts on the content pane, which is the pane `screens/alerts.md`'s footer is about.
+    assert_eq!(console.app.focus, views::Panel::Content);
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Down),
+        &store,
+    );
+    assert_eq!(console.app.content.selected(&anchors), Some(1));
+    assert_eq!(
+        console.app.nav.selected(&anchors),
+        Some(0),
+        "the sidebar moved with the pane"
+    );
+
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Tab),
+        &store,
+    );
+    assert_eq!(console.app.focus, views::Panel::Sidebar);
+    let _ = keyed(&mut console, typed('j'), &store);
+    assert_eq!(console.app.nav.selected(&anchors), Some(1));
+    assert_eq!(
+        console.app.content.selected(&anchors),
+        Some(1),
+        "the pane moved with the sidebar"
+    );
+    let _ = keyed(&mut console, typed('k'), &store);
+    assert_eq!(console.app.nav.selected(&anchors), Some(0));
+}
+
+/// **`/` and `n` open the field they name, every printable key is text while one has focus, and
+/// `esc` empties the field before it leaves it** (`screens/widgets.md` § 2b).
+#[test]
+fn the_two_filters_open_on_their_own_key_and_take_every_printable_one() {
+    let store = a_cluster_with_cards();
+    for (opens, field) in [('/', views::Typing::Text), ('n', views::Typing::Namespace)] {
+        let mut console = bare_console();
+        let _ = keyed(&mut console, typed(opens), &store);
+        assert_eq!(console.app.typing, Some(field));
+        // `q` is a letter while a filter has focus — that section's own example.
+        for character in "quit".chars() {
+            let _ = keyed(&mut console, typed(character), &store);
+        }
+        assert_eq!(console.app.typed().map(views::Input::text), Some("quit"));
+        let _ = keyed(
+            &mut console,
+            key(ratatui::crossterm::event::KeyCode::Backspace),
+            &store,
+        );
+        assert_eq!(console.app.typed().map(views::Input::text), Some("qui"));
+        // `⏎` commits and keeps what was typed; the filter was live throughout.
+        let _ = keyed(
+            &mut console,
+            key(ratatui::crossterm::event::KeyCode::Enter),
+            &store,
+        );
+        assert_eq!(console.app.typing, None);
+        assert!(console.app.filters.any(), "the filter was thrown away");
+    }
+}
+
+/// **A resize discards every free-text offset** (`screens/widgets.md` § 4: a row measured against
+/// one wrap names nothing at another width) **and a keypress does not.**
+#[test]
+fn a_resize_rewinds_every_tab_offset_and_an_ordinary_key_does_not() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    console.app.scroll = [7, 8, 9, 10];
+    let _ = keyed(&mut console, typed('?'), &store);
+    assert_eq!(
+        console.app.scroll,
+        [7, 8, 9, 10],
+        "a key that is not a resize rewound the panes"
+    );
+    let _ = keyed(
+        &mut console,
+        ratatui::crossterm::event::Event::Resize(120, 40),
+        &store,
+    );
+    assert_eq!(console.app.scroll, [0, 0, 0, 0]);
+}
+
+/// **Inside a detail tab the arrows scroll, `[` and `]` move between tabs, and `f` toggles follow**
+/// (`screens/detail.md`, `screens/widgets.md` § 4 — and a manual scroll turns follow off, which is
+/// `views::App::scroll_by`'s one call so no handler can do half of it).
+#[test]
+fn a_detail_tabs_keys_scroll_that_tab_and_move_between_the_four() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    console.opened = Some(Opened::Tabs {
+        object: ObjectId {
+            kind: ObjectKind::Pod,
+            namespace: Some("default".to_owned()),
+            name: "broken-crashloop".to_owned(),
+            uid: None,
+        },
+        from_step: false,
+    });
+    console.app.following = true;
+
+    let _ = keyed(&mut console, typed('j'), &store);
+    assert_eq!(console.app.scroll[views::Tab::Logs.at()], 1);
+    assert!(
+        !console.app.following,
+        "a manual scroll left follow mode on"
+    );
+
+    let _ = keyed(&mut console, typed(']'), &store);
+    assert_eq!(console.app.tab, views::Tab::Describe);
+    let _ = keyed(&mut console, typed('j'), &store);
+    assert_eq!(console.app.scroll[views::Tab::Describe.at()], 1);
+    assert_eq!(
+        console.app.scroll[views::Tab::Logs.at()],
+        1,
+        "describe's scroll moved the logs tab's own offset"
+    );
+    let _ = keyed(&mut console, typed('['), &store);
+    assert_eq!(console.app.tab, views::Tab::Logs);
+
+    let _ = keyed(&mut console, typed('f'), &store);
+    assert!(console.app.following, "`f` did not turn follow back on");
+
+    // `esc` closes the slot — the caller's, because `App` holds no field for what is open — and
+    // every offset goes with it (§ 4: opening the slot again reads everything fresh).
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Esc),
+        &store,
+    );
+    assert!(console.opened.is_none(), "`esc back` left the tab open");
+    assert_eq!(console.app.scroll, [0, 0, 0, 0]);
+}
+
+/// **`l`, `d` and `y` open the slot on the selected object at the tab each one names**
+/// (`screens/help.md` § Looking at things).
+#[test]
+fn the_three_reading_keys_open_the_tab_each_one_names() {
+    let store = a_cluster_with_cards();
+    for (pressed, tab) in [
+        ('l', views::Tab::Logs),
+        ('d', views::Tab::Describe),
+        ('y', views::Tab::Yaml),
+    ] {
+        let mut console = bare_console();
+        let _ = keyed(&mut console, typed(pressed), &store);
+        assert!(
+            matches!(
+                console.opened,
+                Some(Opened::Tabs {
+                    from_step: false,
+                    ..
+                })
+            ),
+            "`{pressed}` opened no detail"
+        );
+        assert_eq!(console.app.tab, tab);
+    }
+}
+
+/// **`X` opens the cluster picker and the log says what it read** (`screens/context.md` § What the
+/// command log shows).
+#[test]
+fn x_opens_the_picker_and_logs_the_read_behind_it() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let _ = keyed(&mut console, typed('X'), &store);
+    assert!(
+        matches!(console.app.modal, Some(views::Modal::ContextPick(_))),
+        "`X` opened no picker"
+    );
+    assert_eq!(
+        console.log.lines().last().map(views::Stripped::as_str),
+        Some(views::GET_CONTEXTS)
+    );
+}
+
+/// **A mutating key with nothing selected reaches nothing** — invariant 2's *an explicitly selected
+/// object*, and `views::App::may_mutate`'s own answer for a pane with no cards in it.
+///
+/// **And a view whose rows this wiring does not have reaches nothing either**: the content cursor
+/// is one index over whatever the open pane draws, so reading it as a card while the browser is
+/// open would act on the object at that index in a *different* list.
+#[test]
+fn a_mutating_key_reaches_nothing_with_nothing_selected_and_nothing_off_alerts() {
+    let empty = k8s::Store::default();
+    let mut console = bare_console();
+    for pressed in [
+        typed('r'),
+        control(ratatui::crossterm::event::KeyCode::Char('d')),
+    ] {
+        assert!(
+            matches!(keyed(&mut console, pressed.clone(), &empty), Did::Nothing),
+            "{pressed:?} acted on a pane that has answered nothing"
+        );
+    }
+
+    let store = a_cluster_with_cards();
+    let mut browsing = bare_console();
+    browsing.app.view = views::View::Resources(0);
+    for pressed in [
+        typed('r'),
+        control(ratatui::crossterm::event::KeyCode::Char('d')),
+        typed('l'),
+        key(ratatui::crossterm::event::KeyCode::Enter),
+    ] {
+        assert!(
+            matches!(keyed(&mut browsing, pressed.clone(), &store), Did::Nothing),
+            "{pressed:?} read the Alerts list while the browser was open"
+        );
+    }
+}
+
+/// **The seven panes the sidebar draws are the seven the report prints** ([`PANES`], the one array
+/// both read) — and each is `None` until the store has answered, which is what `screens/states.md`
+/// § Still loading draws as a row with no badge beside it.
+#[test]
+fn the_seven_panes_are_named_once_and_arrive_with_the_first_snapshot() {
+    let labels: Vec<&str> = panes(None, &[]).iter().map(|(label, _)| *label).collect();
+    assert_eq!(
+        labels,
+        vec![
+            "capacity",
+            "certificates",
+            "drain safety",
+            "posture",
+            "restarts",
+            "waste",
+            "versions"
+        ]
+    );
+    assert!(
+        panes(None, &[]).iter().all(|(_, report)| report.is_none()),
+        "a pane carried a report before the store had answered"
+    );
+
+    // The same seven, computed, once there is a snapshot to compute them from.
+    let store = a_cluster_with_cards();
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let findings = analyze(&snapshot);
+    let held = panes(Some(&snapshot), &findings);
+    assert_eq!(held.len(), labels.len());
+    for (label, report) in &held {
+        let report = report
+            .as_ref()
+            .unwrap_or_else(|| panic!("{label} is empty"));
+        assert!(
+            !report.title.is_empty(),
+            "{label} produced a pane with no title"
+        );
+    }
+}
+
+/// **The TLS warning belongs to the context this run is *on***, and `current` and `insecure` are
+/// two facts (`ui::Screen::insecure`, NOTES § D265 ruling 8) — a row that is one without the other
+/// puts no warning in the header.
+#[test]
+fn the_tls_warning_reads_the_current_row_and_only_when_that_row_turns_it_off() {
+    let row = |current: bool, insecure: bool| k8s::Choice {
+        name: Some("prod-eu".to_owned()),
+        key: "prod-eu".to_owned(),
+        server: k8s::Address::Server("https://prod-eu.invalid:6443".to_owned()),
+        shadowed: false,
+        namespace: None,
+        insecure,
+        tag: k8s::Tag::Blank,
+        current,
+    };
+    assert!(tls_unverified(&[row(true, true)]), "the run's own context");
+    assert!(
+        !tls_unverified(&[row(true, false)]),
+        "the current context verifies TLS and the header claimed otherwise"
+    );
+    assert!(
+        !tls_unverified(&[row(false, true)]),
+        "a context nobody is on took the warning into the header"
+    );
+    assert!(!tls_unverified(&[]), "no contexts, no warning");
+}
+
+/// **A console that never reached a cluster says what `--live` says** — one sentence, off the same
+/// [`because`], so the two paths cannot come to word one failure differently (`screens/states.md` §
+/// Before the TUI ever starts).
+#[test]
+fn a_console_that_cannot_connect_says_so_in_the_drivers_own_words() {
+    let said = no_cluster_to_watch(&k8s::NotConnected::Kubeconfig(
+        kube::config::KubeconfigError::CurrentContextNotSet,
+    ));
+    println!("{said}");
+    assert!(
+        said.starts_with("k8rs: no cluster to watch — "),
+        "the console invented a lead clause of its own: {said:?}"
+    );
+    // The fault's own wording, which is `views::because`'s and not this file's.
+    assert!(
+        said.contains("current-context"),
+        "the sentence does not name what could not be read: {said:?}"
+    );
+
+    // **A cluster that answered nothing names what k8rs was trying to do, and the login program the
+    // kubeconfig names** — the two halves `--live`'s own wall carries, from the same call.
+    let dead = no_cluster_to_watch(&k8s::NotConnected::Client {
+        failure: kube::Error::Service(Box::new(std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "nobody is listening",
+        ))),
+        renewal: Some("aws-iam-authenticator".to_owned()),
+    });
+    println!("{dead}");
+    assert!(
+        dead.contains(views::REACH),
+        "the sentence does not say what k8rs was trying to do: {dead:?}"
+    );
+    assert!(
+        dead.starts_with("k8rs: no cluster to watch — "),
+        "the lead clause moved: {dead:?}"
+    );
+}
+
+/// **A terminal that stopped taking frames ends the run on a sentence, never a panic** — the reason
+/// is the backend's own string, run through [`sanitize`] like every other outside text.
+#[test]
+fn a_screen_that_cannot_be_drawn_ends_the_run_on_a_sentence() {
+    let said = broken_terminal(&std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+    println!("{said}");
+    assert!(
+        said.starts_with("k8rs: the screen could not be drawn — "),
+        "the sentence does not say what failed: {said:?}"
+    );
+    // The library's own reason is kept, because *broken pipe* is a thing a reader can act on.
+    assert!(said.len() > "k8rs: the screen could not be drawn — ".len());
+    // And a reason carrying a control character is stripped before it can rewrite the terminal that
+    // is already in trouble (invariant 9).
+    let planted = broken_terminal(&"one\u{1b}[2Jtwo");
+    assert!(
+        !planted.contains('\u{1b}'),
+        "an escape reached the sentence: {planted:?}"
+    );
+}
+
+/// **A detail tab finds its card by the owner *or* by one of the pods filed under it**
+/// ([`filed_under`], `screens/detail.md` § Every finding about this object pinned at the top of
+/// every tab) — and finds nothing for an object Alerts has nothing to say about.
+#[test]
+fn a_card_is_found_by_its_owner_and_by_every_pod_filed_under_it() {
+    let store = a_cluster_with_cards();
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let findings = analyze(&snapshot);
+    let cards = views::cards(&findings, &snapshot.workloads, &now());
+    assert!(!cards.is_empty(), "the captures produced no card at all");
+
+    // **The card to assert against is one whose owner is *not* one of its own pods** — an owned
+    // pod's card is filed under its workload, so the two lookups are two different objects and a
+    // predicate that demanded both would find neither.
+    let grouped = cards
+        .iter()
+        .find(|card| card.pods().iter().all(|pod| **pod != card.owner))
+        .expect("the owned capture produced no card filed under a workload");
+    println!("owner {:?}, pods {:?}", grouped.owner.name, grouped.pods());
+    assert!(
+        filed_under(&cards, &grouped.owner).is_some(),
+        "a card could not be found by its own owner"
+    );
+    for pod in grouped.pods() {
+        assert!(
+            filed_under(&cards, pod).is_some(),
+            "a pod filed under a card found none: {}",
+            pod.name
+        );
+    }
+    let stranger = ObjectId {
+        kind: ObjectKind::Pod,
+        namespace: Some("default".to_owned()),
+        name: "nothing-is-wrong-with-me".to_owned(),
+        uid: None,
+    };
+    assert!(
+        filed_under(&cards, &stranger).is_none(),
+        "an object with no findings was filed under somebody else's card"
+    );
+}
+
+/// One watch in trouble, built by hand — [`k8s::Store::troubles`]'s own shape, so the two functions
+/// the header is drawn from can be fed a fault without a cluster behind it.
+fn in_trouble<'a>(
+    kind: ObjectKind,
+    failure: Option<&'a watcher::Error>,
+    listed: bool,
+) -> k8s::Trouble<'a> {
+    k8s::Trouble {
+        kind,
+        listed,
+        failure,
+        ended: false,
+        unfinished: false,
+        outstanding: None,
+    }
+}
+
+/// **`nodes 3/3` counts the ready ones, `nodes …` is a read that has not answered, and a node watch
+/// that never listed draws *nothing at all*** (`screens/widgets.md` § 1a: *a vital that cannot be
+/// read is blank, never guessed*).
+///
+/// **The blank one is the row that matters**: `nodes` is cluster-scoped and no namespaced `Role`
+/// grants it, so `0/0` is what every scoped run would otherwise print over a cluster it cannot see
+/// — the same defect [`header`] already carries this rule for.
+#[test]
+fn the_header_counts_the_ready_nodes_and_leaves_a_refused_count_blank() {
+    let store = identified(
+        objects::<Pod>("kube-system-pods.json"),
+        objects::<Node>("nodes.json"),
+        nearly_out(Some("v1.36.1")),
+    );
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let total = snapshot.nodes.len();
+    assert!(total > 0, "the nodes capture is empty");
+    let ready = snapshot
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.conditions
+                .iter()
+                .any(|c| c.type_ == "Ready" && c.status == "True")
+        })
+        .count();
+
+    let drawn = vitals(true, Some(&snapshot), &[]);
+    assert_eq!(drawn.as_str(), format!("nodes {ready}/{total}"));
+
+    // Nothing has answered yet: the ellipsis, which is this product's own mark for *in progress*.
+    assert_eq!(vitals(true, None, &[]).as_str(), "nodes …");
+
+    // **Nothing connected is blank and not `nodes …`** — that reading is *while connecting*, and a
+    // switch that failed is connecting to nothing (`screens/context.md` § After `esc dismiss`,
+    // whose left zone is empty).
+    assert_eq!(
+        vitals(false, Some(&snapshot), &[]).as_str(),
+        "",
+        "a node count survived the switch that threw the nodes away"
+    );
+
+    // The node watch was refused before it listed — blank, and never a measured zero.
+    let refused = watcher::Error::InitialListFailed(api_error(403, "Forbidden"));
+    assert_eq!(
+        vitals(
+            true,
+            Some(&snapshot),
+            &[in_trouble(ObjectKind::Node, Some(&refused), false)]
+        )
+        .as_str(),
+        "",
+        "a node count k8rs was refused was printed anyway"
+    );
+    // A *pod* watch in trouble says nothing about the node count, and a node watch that listed and
+    // then broke still has one to show.
+    assert_eq!(
+        vitals(
+            true,
+            Some(&snapshot),
+            &[in_trouble(ObjectKind::Pod, Some(&refused), false)]
+        )
+        .as_str(),
+        format!("nodes {ready}/{total}")
+    );
+    assert_eq!(
+        vitals(
+            true,
+            Some(&snapshot),
+            &[in_trouble(ObjectKind::Node, Some(&refused), true)]
+        )
+        .as_str(),
+        format!("nodes {ready}/{total}")
+    );
+}
+
+/// **A refused watch is not a dead link, and that is the whole of this test** (`ui::Link`, whose
+/// own doc says a lost link withholds both mutating keys).
+///
+/// **A namespaced `Role` cannot `list nodes`**, so every scoped run carries a permanently refused
+/// node watch. Reading that as *disconnected* would take `s` and `r` from a developer whose
+/// `RoleBinding` allows them, for the life of the session — the defect that type exists to close,
+/// reached through the other door.
+#[test]
+fn the_connection_word_reads_the_fault_and_a_refusal_is_not_a_dropped_link() {
+    let store = a_cluster_with_cards();
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let refused = watcher::Error::InitialListFailed(api_error(403, "Forbidden"));
+    let expired = watcher::Error::WatchError(
+        kube::core::Status::failure("expired", "Unauthorized")
+            .with_code(401)
+            .boxed(),
+    );
+    let dead = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+
+    assert_eq!(linked(true, None, &[]), ui::Link::Connecting);
+    assert_eq!(linked(true, Some(&snapshot), &[]), ui::Link::Live);
+    // **A switch that failed is no connection at all** (`ui::Link::Unconnected`): the store is
+    // empty after `views::App::switched`, which is the shape of a first launch, so a frame that
+    // read only the store would say `connecting…` over a cluster that already said no.
+    assert_eq!(
+        linked(false, None, &[]),
+        ui::Link::Unconnected,
+        "a connection that failed was described as one that is arriving"
+    );
+    assert_eq!(
+        linked(
+            true,
+            Some(&snapshot),
+            &[in_trouble(ObjectKind::Node, Some(&refused), false)]
+        ),
+        ui::Link::Live,
+        "a refused watch took both mutating keys off a live cluster"
+    );
+    // **One dropped watch beside four that are answering is not a dropped connection**
+    // (NOTES § D285 ruling 1). It read `Lost` here until 2026-09-26, which is the measured defect:
+    // the four healthy watches have no row at all, so the only thing left to read was the one
+    // stale `Unanswered`.
+    assert_eq!(
+        linked(
+            true,
+            Some(&snapshot),
+            &[in_trouble(ObjectKind::Pod, Some(&dead), false)]
+        ),
+        ui::Link::Live,
+        "one watch's stale error took both mutating keys off a cluster still delivering"
+    );
+    assert_eq!(
+        linked(
+            true,
+            Some(&snapshot),
+            &[in_trouble(ObjectKind::Pod, Some(&expired), false)]
+        ),
+        ui::Link::Expired
+    );
+    // An expired login answers first, whatever else is in trouble beside it — renewing is *the*
+    // next step and `X switch cluster` is promoted onto the footer for it.
+    assert_eq!(
+        linked(
+            true,
+            Some(&snapshot),
+            &[
+                in_trouble(ObjectKind::Pod, Some(&dead), false),
+                in_trouble(ObjectKind::Node, Some(&expired), false),
+            ]
+        ),
+        ui::Link::Expired
+    );
+}
+
+/// **`⚠ disconnected, retrying` is *no watch is answering*, and never *a watch is in trouble***
+/// (NOTES § D285 ruling 1). `screens/states.md` § The connection dropped draws a claim about the
+/// cluster — *"Not connected to the cluster **right now**"* — and it costs `s` and `r` for as long
+/// as it stands, so one quiet watch holding a stale error may not produce it.
+///
+/// **Measured: a cut all five watches resumed from inside 1.6 s left the node and workload watches
+/// `Unanswered` on a quiet cluster** — nothing to deliver is nothing to clear on — and the header
+/// said `disconnected` for 340 s while pod events flowed
+/// (`reports/2026-09-26-the-error-state-pass.md`).
+///
+/// **Eight shapes and a startup, because neither `any` nor `all` gets them all right**: the fourth
+/// is the scoped run a namespaced `Role` produces, where the node watch is refused for the life of
+/// the process and *every row carries `Unanswered`* would therefore never be true. The seventh is
+/// the one a predicate keyed on `k8s::Trouble::fault` gets backwards, and the eighth is the only
+/// case that can tell this arm's *order* from its *condition*.
+#[test]
+fn the_connection_word_says_disconnected_only_when_no_watch_answers() {
+    let store = a_cluster_with_cards();
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let dead = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+    let refused = watcher::Error::InitialListFailed(api_error(403, "Forbidden"));
+    // Read through `k8s::Trouble::fault`, the same public path `linked` reads, so the two fixtures
+    // are the faults this test claims they are and not whatever they happen to classify as.
+    assert_eq!(
+        in_trouble(ObjectKind::Pod, Some(&dead), true).fault(),
+        Some(k8s::Fault::Unanswered),
+        "the dropped-socket fixture is not the fault this test is about"
+    );
+    assert_eq!(
+        in_trouble(ObjectKind::Node, Some(&refused), false).fault(),
+        Some(k8s::Fault::Refused),
+        "the 403 fixture is not the fault this test is about"
+    );
+
+    // **The universe [`WATCHED`] names, pinned against the store itself.** `k8s::Store::troubles`
+    // reports only the watches that are not delivering, so what `linked` reads *nothing is
+    // arriving* off is *all five named*. Both ways that can go out of step are silent — a kind
+    // that stops being reported leaves `linked` unable to say `Lost` at all, a sixth it does not
+    // name is a watch whose health stops being counted — and neither shows up in any other
+    // assertion here, because every one of them builds its own rows. `Store::stop_waiting` is the
+    // one public way to put every watch of an untouched store into trouble at once.
+    let mut nothing_landed = k8s::Store::default();
+    nothing_landed.stop_waiting();
+    let reported: Vec<ObjectKind> = nothing_landed
+        .troubles()
+        .iter()
+        .map(|trouble| trouble.kind.clone())
+        .collect();
+    assert_eq!(
+        reported,
+        WATCHED.to_vec(),
+        "`k8s::Store::troubles` no longer reports the watches `WATCHED` names"
+    );
+
+    // A `fn` and not a closure: the borrow in the rows it builds outlives the call that built them.
+    fn each(failure: &watcher::Error) -> Vec<k8s::Trouble<'_>> {
+        WATCHED
+            .iter()
+            .map(|kind| in_trouble(kind.clone(), Some(failure), true))
+            .collect()
+    }
+    let word = |troubles: &[k8s::Trouble<'_>]| linked(true, Some(&snapshot), troubles);
+
+    // 1. All five dropped — a real total drop, and the shape a startup against a dead port ends in.
+    assert_eq!(
+        word(&each(&dead)),
+        ui::Link::Lost,
+        "no watch was answering and the header did not say so"
+    );
+    // **The same, before anything has ever been published** — the dead-port startup, where `Lost`
+    // has to beat `connecting…`. Measured on the binary against a released port: the header drew
+    // `⚠ disconnected, retrying` at the first frame and still at +15 s.
+    assert_eq!(
+        linked(true, None, &each(&dead)),
+        ui::Link::Lost,
+        "a startup that reached nothing said it was still arriving"
+    );
+
+    // 2. The measured defect: the pod watch cleared on its next `Apply`, the node and workload
+    //    watches had nothing to deliver and kept a stale `Unanswered`.
+    let pods_flowing: Vec<k8s::Trouble<'_>> = each(&dead)
+        .into_iter()
+        .filter(|trouble| trouble.kind != ObjectKind::Pod)
+        .collect();
+    // **The list is derived, so it says it found something first** (CLAUDE.md § Code phase rules,
+    // `write-guard.py`'s `CANARIES`). `linked` answers `Live` for an **empty** slice too, so a
+    // filter that threw everything away would pass the assertion below and prove nothing at all —
+    // measured, not argued: `tester` replaced the filter with `|_| false` and this test stayed
+    // green. What has to be on screen here is *four stale rows outvoted by one absence*, and four
+    // is the number that says so.
+    assert_eq!(
+        pods_flowing.len(),
+        WATCHED.len() - 1,
+        "an empty list reads `Live` whatever the predicate does, so the four quiet watches this \
+         shape is about were filtered away with the pod watch"
+    );
+    assert_eq!(
+        word(&pods_flowing),
+        ui::Link::Live,
+        "four quiet watches' stale errors outvoted the one that was delivering"
+    );
+
+    // 3. The scoped run: a namespaced `Role` cannot `list nodes`, and that is not a connection
+    //    state at all — the defect `linked`'s own doc exists to describe.
+    assert_eq!(
+        word(&[in_trouble(ObjectKind::Node, Some(&refused), false)]),
+        ui::Link::Live,
+        "a refused watch took both mutating keys off a live cluster"
+    );
+
+    // 4. The same scoped run, now really disconnected. A plain *every row is `Unanswered`* never
+    //    fires here, which is why the refusal counts as *not answering* rather than as evidence.
+    let scoped_and_dropped: Vec<k8s::Trouble<'_>> = WATCHED
+        .iter()
+        .map(|kind| {
+            let failure = if *kind == ObjectKind::Node {
+                &refused
+            } else {
+                &dead
+            };
+            in_trouble(kind.clone(), Some(failure), *kind != ObjectKind::Node)
+        })
+        .collect();
+    assert_eq!(
+        word(&scoped_and_dropped),
+        ui::Link::Lost,
+        "a scoped run could not say `disconnected` even with every other watch down"
+    );
+
+    // 5. And a refusal is never *evidence* of a drop, however many watches carry one: nothing here
+    //    is retrying and `Lost`'s *k8rs is retrying* would be the wrong sentence
+    //    (`k8s::Fault::standing`).
+    assert_eq!(
+        word(&each(&refused)),
+        ui::Link::Live,
+        "five standing refusals were reported as a connection k8rs is retrying"
+    );
+
+    // **The rows [`in_trouble`] cannot build**: it hardcodes both markers, and what the two shapes
+    // below turn on is exactly the markers. A `fn` returning `'static` because neither carries a
+    // `failure` to borrow from.
+    fn marked(kind: ObjectKind, ended: bool, unfinished: bool) -> k8s::Trouble<'static> {
+        k8s::Trouble {
+            kind,
+            listed: true,
+            failure: None,
+            ended,
+            unfinished,
+            outstanding: None,
+        }
+    }
+
+    // 6. Every watch wedged and none of them carrying a `failure` — `k8s::Store::stop_waiting`'s
+    //    own shape, which is how a run with a budget ends. `Fault::Unfinished` is the only fault
+    //    on screen and it is one of the two this arm reads.
+    let all_wedged: Vec<k8s::Trouble<'_>> = WATCHED
+        .iter()
+        .map(|kind| marked(kind.clone(), false, true))
+        .collect();
+    // `all` is true of an empty iterator, so the count comes first here too.
+    assert_eq!(
+        all_wedged.len(),
+        WATCHED.len(),
+        "this shape is about every watch being wedged and one of them is missing"
+    );
+    assert!(
+        all_wedged
+            .iter()
+            .all(|trouble| trouble.fault() == Some(k8s::Fault::Unfinished)),
+        "the wedged rows do not carry the fault this shape is about"
+    );
+    assert_eq!(
+        word(&all_wedged),
+        ui::Link::Lost,
+        "a run whose every watch was told the waiting is over said the cluster was answering"
+    );
+
+    // 7. **A stream that finished is not a watch that is answering**, and it is the row a
+    //    predicate keyed on `fault()` gets backwards: `ended` with no `failure` reads `None`
+    //    there (`k8s::Trouble::fault`), which is the same answer a healthy watch would give if
+    //    healthy watches had rows — and they do not. Nothing will arrive on it again, so the four
+    //    dropped watches beside it are the whole of the cluster.
+    let finished = marked(ObjectKind::Pod, true, false);
+    assert_eq!(
+        finished.fault(),
+        None,
+        "the finished-stream row does not have the shape this case is about"
+    );
+    let four_dropped_and_one_finished: Vec<k8s::Trouble<'_>> = std::iter::once(finished)
+        .chain(
+            each(&dead)
+                .into_iter()
+                .filter(|trouble| trouble.kind != ObjectKind::Pod),
+        )
+        .collect();
+    assert_eq!(
+        four_dropped_and_one_finished.len(),
+        WATCHED.len(),
+        "this shape is about every watch being accounted for and one of them is missing"
+    );
+    assert_eq!(
+        word(&four_dropped_and_one_finished),
+        ui::Link::Lost,
+        "a stream that had finished was counted as a watch still answering"
+    );
+
+    // 8. **The arms are ordered and this is what pins the order.** An expired login answers before
+    //    a dropped connection whatever else is on screen, and the sibling test cannot say so: its
+    //    `Expired`-beside-a-drop case carries two rows, so `answering` is true there and `Lost`
+    //    was never in the running. Here all five are accounted for, so both arms would fire.
+    let expired = watcher::Error::WatchError(
+        kube::core::Status::failure("expired", "Unauthorized")
+            .with_code(401)
+            .boxed(),
+    );
+    let expired_amid_a_drop: Vec<k8s::Trouble<'_>> = WATCHED
+        .iter()
+        .map(|kind| {
+            let failure = if *kind == ObjectKind::Node {
+                &expired
+            } else {
+                &dead
+            };
+            in_trouble(kind.clone(), Some(failure), true)
+        })
+        .collect();
+    assert_eq!(
+        word(&expired_amid_a_drop),
+        ui::Link::Expired,
+        "a login that ran out read as a connection k8rs is retrying, which sends the reader to \
+         the network instead of to `X switch cluster`"
+    );
+}
+
+/// **The still-loading paragraph counts the LIST that is running and the healthy one counts what
+/// was read** (`screens/states.md` § Still loading, § Nothing is broken).
+#[test]
+fn the_empty_panes_paragraphs_count_what_the_store_actually_read() {
+    let waiting = notes(
+        true,
+        None,
+        &[k8s::Listing {
+            kind: ObjectKind::Pod,
+            so_far: 2140,
+            since: None,
+        }],
+    );
+    let said: Vec<&str> = waiting.iter().map(views::Stripped::as_str).collect();
+    println!("{said:?}");
+    assert!(
+        said[0].contains("2,140 pods"),
+        "the count is not the LIST's own progress, grouped: {said:?}"
+    );
+    assert!(said[0].starts_with("reading the cluster…"));
+    assert!(
+        said[1].contains("this list"),
+        "the second paragraph is missing: {said:?}"
+    );
+
+    // A LIST of another kind is not the pod count this paragraph is about.
+    let other = notes(
+        true,
+        None,
+        &[k8s::Listing {
+            kind: ObjectKind::Node,
+            so_far: 9,
+            since: None,
+        }],
+    );
+    assert!(
+        other[0].as_str().contains("0 pods"),
+        "a node LIST was counted as pods: {:?}",
+        other[0].as_str()
+    );
+
+    let store = a_cluster_with_cards();
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let healthy = notes(true, Some(&snapshot), &[]);
+    let said = healthy[0].as_str();
+    println!("{said}");
+    assert!(
+        said.contains(&plural(snapshot.pods.len(), "pod")),
+        "the pod count is not the store's: {said:?}"
+    );
+    assert!(
+        said.ends_with("none of them is in trouble right now."),
+        "the sentence is not `screens/states.md`'s: {said:?}"
+    );
+
+    // **Nothing connected says so and does not claim to be reading** (`screens/context.md`
+    // § After `esc dismiss`): the reason is not repeated — the reader just read it in the box they
+    // dismissed — and what is here instead is the one key out.
+    let stranded = notes(false, None, &[]);
+    let said: Vec<&str> = stranded.iter().map(views::Stripped::as_str).collect();
+    println!("{said:?}");
+    assert_eq!(
+        said,
+        vec![
+            "⚠ Not connected to the cluster right now.",
+            "Press X to try again, or pick a different cluster.",
+        ],
+        "the frame behind a dismissed failure is not the page's"
+    );
+    // And it says so whatever the store happens to hold, since nothing in the store is this
+    // cluster's.
+    assert_eq!(
+        notes(
+            false,
+            Some(&snapshot),
+            &[k8s::Listing {
+                kind: ObjectKind::Pod,
+                so_far: 2140,
+                since: None,
+            }]
+        )
+        .iter()
+        .map(views::Stripped::as_str)
+        .collect::<Vec<&str>>(),
+        said,
+        "a store left over from another cluster was read as this one's progress"
+    );
+}
+
+/// **What the detail slot is showing, in the terms the keys are decided in** ([`detailing`]) — the
+/// step and the tabs are two states and `from_step` is carried through the second (NOTES § D270).
+#[test]
+fn the_detail_slot_answers_closed_the_step_or_the_tabs() {
+    let object = ObjectId {
+        kind: ObjectKind::Pod,
+        namespace: Some("default".to_owned()),
+        name: "broken-crashloop".to_owned(),
+        uid: None,
+    };
+    let mut console = bare_console();
+    assert_eq!(detailing(&console), views::Detailing::Closed);
+
+    console.opened = Some(Opened::Pods(object.clone()));
+    assert_eq!(detailing(&console), views::Detailing::Pods);
+
+    for from_step in [false, true] {
+        console.opened = Some(Opened::Tabs {
+            object: object.clone(),
+            from_step,
+        });
+        assert_eq!(
+            detailing(&console),
+            views::Detailing::Tabs {
+                containers: 0,
+                from_step
+            },
+            "the step `⏎` came through was not carried into the tabs"
+        );
+    }
+}
+
+/// A confirmation as [`installed`] builds one — the dialog `show` publishes, with no verdict yet.
+fn an_open_dialog() -> views::Dialog {
+    views::Dialog {
+        verb: RESTART,
+        object: views::Object::new(
+            "deployment",
+            Some("payments".to_owned()),
+            "web".to_owned(),
+            Some("u-1".to_owned()),
+        ),
+        consequence: views::Stripped::of("This replaces every copy of your app, one at a time."),
+        warning: None,
+        kubectl: views::Stripped::of("kubectl rollout restart deployment/web -n payments"),
+        verdict: None,
+        asks: None,
+        typed: views::Input::default(),
+    }
+}
+
+/// **The box opens with a dead button and the command log gains the line it is about**
+/// (`screens/dialogs.md` rule 3, § Scale — which draws the `$` line in the strip under an open
+/// dialog), **then the verdict lands in the box that is already open** and arms it
+/// ([`views::Dialog::armed`]).
+#[test]
+fn the_dialog_opens_dead_and_the_verdict_arms_the_box_that_is_already_open() {
+    let mut console = bare_console();
+    installed(&mut console, Published::Opening(an_open_dialog()));
+    let Some(views::Modal::Confirm(dialog)) = &console.app.modal else {
+        panic!("`show` opened no confirmation: {:?}", console.app.modal)
+    };
+    assert!(dialog.waiting(), "the button was live before the check was");
+    assert!(!dialog.armed());
+    // **The strip carries nothing yet** (`screens/dialogs.md` rule 7): a dialog that is open
+    // teaches its command through its own frame, and a line on the strip would put the running mark
+    // on a command nobody has agreed to — on a `delete`, on one that has not been sent at all.
+    assert!(
+        console.log.lines().is_empty(),
+        "the strip gained a mutation's line while its dialog was still asking: {:?}",
+        console.log.lines()
+    );
+
+    installed(
+        &mut console,
+        Published::Checked {
+            verdict: "The cluster checked it first and accepted it.",
+            asks: None,
+        },
+    );
+    let Some(views::Modal::Confirm(dialog)) = &console.app.modal else {
+        panic!("the verdict closed the box")
+    };
+    assert!(!dialog.waiting(), "the verdict did not land");
+    assert!(dialog.armed(), "the button did not come alive");
+    assert_eq!(
+        dialog.consequence,
+        an_open_dialog().consequence,
+        "the verdict replaced the box instead of landing in it"
+    );
+    // **Still nothing on the strip** — the verdict is the *check* answering, and rule 7 says the
+    // line waits for the real call, dry-run included.
+    assert!(
+        console.log.lines().is_empty(),
+        "an answered check put the line on the strip before anyone agreed to it"
+    );
+
+    // **The yes is what appends it, with the running mark** — and the command is the box's own.
+    // **A store with nothing to say about this dialog's object, and it is the fixture rather than
+    // a convenience.** [`over_modal`]'s confirm arm now asks the store whether the selected object
+    // is still there ([`vanished`], NOTES § D22, § D289 ruling 1), and
+    // [`a_cluster_with_cards`] is a healthy listed store holding four pods and **no Deployment** —
+    // so it answers *gone* about [`an_open_dialog`]'s `payments/web`, correctly, about a console
+    // that cannot exist: a card filed under a Deployment owner needs that Deployment on its own
+    // watch. This test is about the box's key map and not about a cluster, so the store it presses
+    // against is one that has not listed. The guard's own five shapes are
+    // [`a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command`].
+    let store = before_the_list();
+    let answered = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Enter),
+        &store,
+    );
+    assert!(matches!(answered, Did::Answered(Reply::Yes(_))));
+    let line = console
+        .log
+        .lines()
+        .last()
+        .map(views::Stripped::as_str)
+        .unwrap_or_default();
+    // **The command half is asserted and the gap is not**: `views::OUTCOME_GAP` is that file's own
+    // width and restating it here is the second copy that goes stale (`views::outcome_of` is the
+    // reader the strip itself uses).
+    let (command, running) = views::outcome_of(line);
+    assert_eq!(
+        command, "$ kubectl rollout restart deployment/web -n payments",
+        "the yes did not put the box's own command on the strip"
+    );
+    assert!(
+        running.ends_with('…') && !running.contains('→'),
+        "the line went on already answered: {line:?}"
+    );
+}
+
+/// A confirmation whose check has answered — armed, so `⏎` confirms it (`views::Dialog::armed`).
+fn an_armed_dialog() -> views::Dialog {
+    views::Dialog {
+        verdict: Some("The cluster checked it first and accepted it."),
+        ..an_open_dialog()
+    }
+}
+
+/// **Drive one mutation the way a reader does** — the box opens, the check answers, `⏎` confirms,
+/// and `ops` comes back with this outcome. Returns the console so a test can read what the strip
+/// and the modal hold at the end.
+fn answered_with(outcome: Option<ops::Outcome>) -> Console<'static> {
+    // **A store with nothing to say about this dialog's object, and it is the fixture rather than
+    // a convenience.** [`over_modal`]'s confirm arm now asks the store whether the selected object
+    // is still there ([`vanished`], NOTES § D22, § D289 ruling 1), and
+    // [`a_cluster_with_cards`] is a healthy listed store holding four pods and **no Deployment** —
+    // so it answers *gone* about [`an_open_dialog`]'s `payments/web`, correctly, about a console
+    // that cannot exist: a card filed under a Deployment owner needs that Deployment on its own
+    // watch. This test is about the box's key map and not about a cluster, so the store it presses
+    // against is one that has not listed. The guard's own five shapes are
+    // [`a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command`].
+    let store = before_the_list();
+    let mut console = bare_console();
+    installed(&mut console, Published::Opening(an_armed_dialog()));
+    let answered = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Enter),
+        &store,
+    );
+    assert!(
+        matches!(answered, Did::Answered(Reply::Yes(_))),
+        "the armed box did not confirm"
+    );
+    settled(
+        &mut console,
+        Ok(ops::Performed {
+            outcome,
+            recorded: true,
+        }),
+    );
+    console
+}
+
+/// **Every terminal path of `ops::perform` replaces the modal** — the whole of what this wiring
+/// owes (NOTES § D272 § 2: nothing in `views.rs` can perform a `Confirm → Refused` transition, and
+/// `esc` is inert while a check is out, so a driver that dropped the ball would leave a box nothing
+/// can close).
+///
+/// **Eight endings, and the assertion is *the confirmation is gone*, not *a particular box is
+/// drawn*** — that is the claim; which box replaces it is the arm below it.
+#[test]
+fn every_ending_replaces_the_confirmation_and_says_what_happened() {
+    let endings: Vec<(&str, Result<ops::Performed, String>)> = vec![
+        (
+            "done",
+            Ok(ops::Performed {
+                outcome: Some(ops::Outcome::Done),
+                recorded: true,
+            }),
+        ),
+        (
+            "started",
+            Ok(ops::Performed {
+                outcome: Some(ops::Outcome::Started),
+                recorded: true,
+            }),
+        ),
+        (
+            "cancelled",
+            Ok(ops::Performed {
+                outcome: Some(ops::Outcome::Cancelled),
+                recorded: true,
+            }),
+        ),
+        (
+            "gone",
+            Ok(ops::Performed {
+                outcome: Some(ops::Outcome::Gone),
+                recorded: true,
+            }),
+        ),
+        (
+            "changed",
+            Ok(ops::Performed {
+                outcome: Some(ops::Outcome::Changed),
+                recorded: true,
+            }),
+        ),
+        (
+            "the check never went out",
+            Ok(ops::Performed {
+                outcome: Some(ops::Outcome::NotSent {
+                    fault: k8s::Fault::Unanswered,
+                    said: None,
+                }),
+                recorded: true,
+            }),
+        ),
+        (
+            "the call failed",
+            Ok(ops::Performed {
+                outcome: Some(ops::Outcome::Failed {
+                    fault: k8s::Fault::Refused,
+                    said: Some("forbidden".to_owned()),
+                }),
+                recorded: true,
+            }),
+        ),
+        (
+            "nothing could be recorded",
+            Ok(ops::Performed {
+                outcome: None,
+                recorded: false,
+            }),
+        ),
+    ];
+    for (what, performed) in endings {
+        let mut console = bare_console();
+        installed(&mut console, Published::Opening(an_armed_dialog()));
+        console.app.changing = Some(an_armed_dialog().object);
+        settled(&mut console, performed);
+        assert!(
+            !matches!(console.app.modal, Some(views::Modal::Confirm(_))),
+            "{what} left the confirmation on screen with no key that can close it"
+        );
+        assert!(
+            console.app.changing.is_none(),
+            "{what} left the header saying a write was still running"
+        );
+    }
+
+    // **And no ending leaves the strip's line running for ever** — driven through the yes, because
+    // that is the only thing that puts a line there at all (`screens/dialogs.md` rule 7).
+    for outcome in [
+        None,
+        Some(ops::Outcome::Done),
+        Some(ops::Outcome::Started),
+        Some(ops::Outcome::Gone),
+        Some(ops::Outcome::Changed),
+        Some(ops::Outcome::NotSent {
+            fault: k8s::Fault::Unanswered,
+            said: None,
+        }),
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Refused,
+            said: Some("forbidden".to_owned()),
+        }),
+    ] {
+        let word = outcome_word(outcome.as_ref());
+        let console = answered_with(outcome);
+        let last = console
+            .log
+            .lines()
+            .last()
+            .map(views::Stripped::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        println!("{word}: {last}");
+        // The running mark is private to `views.rs`, so the line is read the way the strip reads
+        // it: `views::outcome_of` splits it into the command and whatever followed, and an answered
+        // line's tail carries the outcome word (`views::Log::outcome`).
+        let (_, after) = views::outcome_of(&last);
+        assert!(
+            after.contains("→ "),
+            "{word} left the command log line running for ever: {last:?}"
+        );
+    }
+
+    // **A box nobody said yes to leaves the strip empty** — *Cancelled appends nothing*
+    // (NOTES § D233 ruling 1), which here is the whole of what `esc` does to the log.
+    let store = a_cluster_with_cards();
+    let mut cancelled = bare_console();
+    installed(&mut cancelled, Published::Opening(an_armed_dialog()));
+    let dismissed = keyed(
+        &mut cancelled,
+        key(ratatui::crossterm::event::KeyCode::Esc),
+        &store,
+    );
+    assert!(matches!(dismissed, Did::Answered(Reply::No)));
+    settled(
+        &mut cancelled,
+        Ok(ops::Performed {
+            outcome: Some(ops::Outcome::Cancelled),
+            recorded: true,
+        }),
+    );
+    assert!(
+        cancelled.log.lines().is_empty(),
+        "a cancelled mutation left a command on the strip: {:?}",
+        cancelled.log.lines()
+    );
+}
+
+/// **Which box replaces it, per ending** (`screens/dialogs.md` § The cluster said no, § The object
+/// went away) — and `sent` is the field that decides whether a check can be said to have stopped
+/// anything, so the two refusal shapes may not collapse into one.
+#[test]
+fn a_refusal_opens_the_box_that_says_which_side_of_the_call_it_was() {
+    let opened = |performed: Result<ops::Performed, String>| {
+        let mut console = bare_console();
+        installed(&mut console, Published::Opening(an_open_dialog()));
+        console.app.changing = Some(an_open_dialog().object);
+        settled(&mut console, performed);
+        console.app.modal
+    };
+    assert_eq!(
+        opened(Ok(ops::Performed {
+            outcome: Some(ops::Outcome::Done),
+            recorded: true
+        })),
+        None,
+        "a change that landed left a box over the screen"
+    );
+    assert!(matches!(
+        opened(Ok(ops::Performed {
+            outcome: Some(ops::Outcome::NotSent {
+                fault: k8s::Fault::Unanswered,
+                said: None
+            }),
+            recorded: true
+        })),
+        Some(views::Modal::Refused { sent: false, .. })
+    ));
+    assert!(matches!(
+        opened(Ok(ops::Performed {
+            outcome: Some(ops::Outcome::Failed {
+                fault: k8s::Fault::Refused,
+                said: Some("forbidden".to_owned())
+            }),
+            recorded: true
+        })),
+        Some(views::Modal::Refused {
+            sent: true,
+            said: Some(_),
+            ..
+        })
+    ));
+    // **The object the box claims is the one the confirmation was about**, carried across the
+    // moment the box closed on the yes (`views::App::changing`, NOTES § D20) — read from a modal
+    // that is already gone, this drew `Gone` about nothing.
+    let gone = opened(Ok(ops::Performed {
+        outcome: Some(ops::Outcome::Gone),
+        recorded: true,
+    }));
+    let Some(views::Modal::Gone { object, .. }) = gone else {
+        panic!("an object that went away opened no box: {gone:?}")
+    };
+    assert_eq!(object.name(), "web");
+    assert_eq!(object.namespace(), Some("payments"));
+}
+
+/// **A key that is not a press is not a key** — crossterm reports a release and a repeat on the
+/// terminals that support the kitty protocol, and a router that acted on all three would fire every
+/// key twice (`examples/spike_tui.rs`, which reads the same field).
+#[test]
+fn a_key_release_is_not_a_command() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let released =
+        ratatui::crossterm::event::Event::Key(ratatui::crossterm::event::KeyEvent::new_with_kind(
+            ratatui::crossterm::event::KeyCode::Char('q'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+            ratatui::crossterm::event::KeyEventKind::Release,
+        ));
+    assert!(
+        matches!(keyed(&mut console, released, &store), Did::Nothing),
+        "a key *release* quit the console"
+    );
+    assert!(matches!(keyed(&mut console, typed('q'), &store), Did::Quit));
+}
+
+/// **`esc` while a filter has focus empties the field before it leaves it** — narrow to wide, which
+/// is `views::Filters::clears`'s order so the footer that names the field and the key that empties
+/// it are one answer (`screens/widgets.md` § 2b, `screens/states.md` § The filter hides every row).
+#[test]
+fn esc_while_typing_clears_the_field_and_only_then_leaves_it() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let _ = keyed(&mut console, typed('/'), &store);
+    for character in "web".chars() {
+        let _ = keyed(&mut console, typed(character), &store);
+    }
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Esc),
+        &store,
+    );
+    assert_eq!(
+        console.app.typed().map(views::Input::text),
+        Some(""),
+        "the first `esc` left the field open and dropped what was in it, or the other way round"
+    );
+    assert_eq!(console.app.typing, Some(views::Typing::Text));
+
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Esc),
+        &store,
+    );
+    assert_eq!(console.app.typing, None, "the second `esc` did not leave");
+}
+
+/// **The cards a pane holds are two of its three answers, and *loading* is not one of them**
+/// (`views::Pane`, PRIOR-ART § C2 — collapsing *nothing came back yet* into *there is nothing* is
+/// the report k9s got most).
+#[test]
+fn the_router_reads_the_cards_a_refused_pane_still_has() {
+    let store = a_cluster_with_cards();
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let cards = views::cards(&analyze(&snapshot), &snapshot.workloads, &now());
+    assert!(!cards.is_empty());
+
+    assert!(carded_pane(&views::Pane::Loading).is_empty());
+    assert_eq!(
+        carded_pane(&views::Pane::Ready(cards.clone())).len(),
+        cards.len()
+    );
+    // A refusal carries whatever did come back — the cursor still has those rows to move across.
+    assert_eq!(
+        carded_pane(&views::Pane::Denied(
+            "k8rs is not getting pods".to_owned(),
+            cards.clone()
+        ))
+        .len(),
+        cards.len(),
+        "a refusal cleared the rows it came back with"
+    );
+}
+
+/// One frame, drawn into a test backend — the whole of [`drawn`], with no terminal and no cluster.
+fn framed(console: &mut Console<'_>, store: &k8s::Store) -> String {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+    let at = Watching {
+        renewal: None,
+        coverage: k8s::Coverage::Cluster,
+    };
+    drawn(&mut terminal, console, store, &at).expect("the frame draws");
+    screened(&terminal)
+}
+
+/// **What a test backend is holding, as lines** — [`framed`]'s own reading, split out for the test
+/// that draws twice into one terminal and asks what was on it in between.
+fn screened(terminal: &ratatui::Terminal<ratatui::backend::TestBackend>) -> String {
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.height)
+        .map(|row| {
+            (0..buffer.area.width)
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+/// **A resumed terminal is cleared, and the frame after it is sent whole** (NOTES § D24,
+/// [`repainted`]) — the two halves of the repaint, and each of them is passed by code that does
+/// only the other: a screen cleared without the buffer reset draws nothing at all next frame, and a
+/// buffer reset without the clear leaves the shell's scrollback under our cells.
+///
+/// **This is the claim the real run made fail.** `Terminal::clear` — the obvious call — reads the
+/// cursor position off stdin, which the key thread owns, so `fg` ended the run instead of redrawing
+/// it (test host, 2026-09-24). A `TestBackend` answers that read from a field and would have
+/// passed.
+#[test]
+fn a_repaint_clears_the_screen_and_makes_the_next_frame_a_whole_one() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+    let at = Watching {
+        renewal: None,
+        coverage: k8s::Coverage::Cluster,
+    };
+    drawn(&mut terminal, &mut console, &store, &at).expect("the frame draws");
+    // The canary: what follows is about a frame that was really there.
+    assert!(
+        screened(&terminal).contains("ALERTS"),
+        "not a console frame:\n{}",
+        screened(&terminal)
+    );
+
+    repainted(&mut terminal).expect("the repaint");
+    assert!(
+        !screened(&terminal).contains("ALERTS"),
+        "the screen kept the frame a suspend gave away:\n{}",
+        screened(&terminal)
+    );
+
+    drawn(&mut terminal, &mut console, &store, &at).expect("the frame draws");
+    assert!(
+        screened(&terminal).contains("ALERTS"),
+        "the frame after a repaint was the difference against a screen that is gone:\n{}",
+        screened(&terminal)
+    );
+}
+
+/// **The three frames this wiring can draw, read off the screen** — still loading, cards, and the
+/// cluster picker over an empty body (`screens/states.md` § Still loading, `screens/alerts.md`,
+/// `screens/context.md`).
+///
+/// **The picker's rows reach the screen only while it is open**, which is `ui::Screen::contexts`'
+/// own contract — *empty when nothing is picking* — and the only way to see that from outside
+/// [`drawn`] is to look at the cells.
+#[test]
+fn the_frames_this_wiring_draws_say_which_state_the_cluster_is_in() {
+    let mut console = bare_console();
+    console.contexts = vec![k8s::Choice {
+        name: Some("prod-eu".to_owned()),
+        key: "prod-eu".to_owned(),
+        server: k8s::Address::Server("https://prod-eu.invalid:6443".to_owned()),
+        shadowed: false,
+        namespace: None,
+        insecure: false,
+        tag: k8s::Tag::Blank,
+        current: true,
+    }];
+
+    // 1. Nothing has answered: the still-loading screen, and the header says so.
+    let waiting = framed(&mut console, &k8s::Store::default());
+    println!("{waiting}");
+    assert!(waiting.contains("reading the cluster…"), "{waiting}");
+    assert!(waiting.contains("nodes …"), "{waiting}");
+    assert!(waiting.contains("connecting…"), "{waiting}");
+    assert!(waiting.contains("ALERTS"), "{waiting}");
+    assert!(
+        !waiting.contains("prod-eu"),
+        "the picker's rows reached a screen with no picker open:\n{waiting}"
+    );
+
+    // 2. The cards, over a live link.
+    let store = a_cluster_with_cards();
+    let drawn_cards = framed(&mut console, &store);
+    println!("{drawn_cards}");
+    assert!(
+        drawn_cards.contains("broken-"),
+        "no card was drawn:\n{drawn_cards}"
+    );
+    assert!(drawn_cards.contains("live"), "{drawn_cards}");
+    assert!(
+        !drawn_cards.contains("nothing is broken"),
+        "a cluster with three broken pods was called healthy:\n{drawn_cards}"
+    );
+    assert!(
+        !drawn_cards.contains("reading the cluster"),
+        "a finished read still said it was reading:\n{drawn_cards}"
+    );
+
+    // 3. The picker, whose rows are handed over only now.
+    console.app.modal = Some(views::Modal::ContextPick(views::Picker::new(
+        &console.contexts,
+        views::Connection::Live(Some("prod-eu".to_owned())),
+    )));
+    let picking = framed(&mut console, &store);
+    println!("{picking}");
+    assert!(
+        picking.contains("prod-eu"),
+        "the picker drew no rows:\n{picking}"
+    );
+}
+
+/// **The two arrows are the one thing a filter does not take, and they move the same way they do
+/// outside typing** (`screens/widgets.md` § 2b: *"`↑` / `↓` still move the selection over whatever
+/// rows the live-narrowed list is currently showing, exactly as they do outside typing"* — an arrow
+/// is never a letter, which is what lets the picker's own list do the same thing).
+///
+/// **A `ctrl`-anything is neither text nor a command while a filter has focus**: `ctrl-c` puts no
+/// `c` in the buffer, and it does not quit either — `views::App::may_quit` is already no while
+/// typing (NOTES § D12).
+#[test]
+fn the_arrows_still_move_the_list_while_a_filter_is_being_typed() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let anchors = [None, None, None, None];
+    let _ = keyed(&mut console, typed('/'), &store);
+
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Down),
+        &store,
+    );
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Down),
+        &store,
+    );
+    assert_eq!(
+        console.app.content.selected(&anchors),
+        Some(2),
+        "`↓` stopped moving the list the moment a filter took focus"
+    );
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Up),
+        &store,
+    );
+    assert_eq!(
+        console.app.content.selected(&anchors),
+        Some(1),
+        "`↑` and `↓` moved the same way"
+    );
+    assert_eq!(
+        console.app.typed().map(views::Input::text),
+        Some(""),
+        "an arrow was typed into the filter"
+    );
+
+    let pressed = keyed(
+        &mut console,
+        control(ratatui::crossterm::event::KeyCode::Char('c')),
+        &store,
+    );
+    assert!(
+        matches!(pressed, Did::Nothing),
+        "`ctrl-c` while typing was a command"
+    );
+    assert_eq!(
+        console.app.typed().map(views::Input::text),
+        Some(""),
+        "`ctrl-c` put a `c` in the filter"
+    );
+}
+
+/// **`ctrl-d` on a selected object asks for a delete, and `r` on the same one reaches nothing** —
+/// the per-key offer (NOTES § D269, `views::Offer::act`): `ops::delete` serves a pod and
+/// `ops::restart` does not, so the two keys answer differently over one card and a router that
+/// asked one question for both would offer a restart no operation can perform.
+///
+/// **What comes back is the mutation, not the dialog** — the loop returns it so the `ops::Mutation`
+/// and the audit `File` can be built in the frame that runs the loop (NOTES § D232).
+#[test]
+fn ctrl_d_asks_for_a_delete_on_the_card_under_the_cursor_and_r_reaches_nothing() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    // The first card, whatever the captures ordered it as — its owner is what both keys ask about.
+    let cards = carded(&store);
+    let card = selected(&console, &cards).expect("the captures produced a selectable card");
+    println!("{:?} {:?}", card.owner.kind, card.owner.name);
+    // **A frame first, because the key is checked against the line that was drawn**
+    // ([`Console::offer`]): a console that has drawn nothing offers nothing.
+    let _ = framed(&mut console, &store);
+
+    let asked = keyed(
+        &mut console,
+        control(ratatui::crossterm::event::KeyCode::Char('d')),
+        &store,
+    );
+    let Did::Mutate(wanted) = asked else {
+        panic!("`ctrl-d` on a selected object reached nothing")
+    };
+    assert_eq!(wanted.verb, DELETE);
+    assert_eq!(wanted.name, card.owner.name);
+    assert_eq!(wanted.namespace, card.owner.namespace);
+    assert!(
+        KINDS.iter().any(|known| known.singular == wanted.kind),
+        "the kind handed to `ops` is not one the driver resolved: {:?}",
+        wanted.kind
+    );
+
+    // A pod has no `rollout restart`, so that key is not on the line and cannot be pressed either.
+    assert!(
+        matches!(keyed(&mut console, typed('r'), &store), Did::Nothing),
+        "`r` acted on a kind `ops::restart` does not serve"
+    );
+
+    // **And neither key reaches anything while a write is already on the wire** — a second mutation
+    // is refused while one is running (`views::App::may_mutate`, D20).
+    console.app.changing = Some(views::Object::new("pod", None, "web".to_owned(), None));
+    assert!(matches!(
+        keyed(
+            &mut console,
+            control(ratatui::crossterm::event::KeyCode::Char('d')),
+            &store
+        ),
+        Did::Nothing
+    ));
+}
+
+/// **`⏎` on a card opens the object it is about** (`views::App::pick_pods`: a bare pod's card is
+/// the pod itself, so it opens directly rather than through the which-pods step).
+#[test]
+fn enter_on_a_card_opens_the_object_that_card_is_about() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let cards = carded(&store);
+    let card = selected(&console, &cards).expect("a selectable card");
+    let expected = card
+        .pods()
+        .first()
+        .map_or_else(|| card.owner.clone(), |id| (*id).clone());
+
+    assert!(matches!(
+        keyed(
+            &mut console,
+            key(ratatui::crossterm::event::KeyCode::Enter),
+            &store
+        ),
+        Did::Changed
+    ));
+    match &console.opened {
+        // A group of two or more opens the step instead, which is the same key's other answer.
+        Some(Opened::Pods(owner)) => assert_eq!(*owner, card.owner),
+        Some(Opened::Tabs { object, from_step }) => {
+            assert_eq!(*object, expected);
+            assert!(!from_step, "`⏎` on a card came through the step");
+            assert_eq!(
+                console.app.tab,
+                views::Tab::default(),
+                "the slot opened on a tab nobody asked for"
+            );
+        }
+        None => panic!("`⏎` on a card opened nothing"),
+    }
+}
+
+/// **A store whose workload watch carries the committed Deployments too** — a card filed under a
+/// Deployment is the only shape `r restart` can act on, because `ops::restart` serves the three
+/// workloads and no pod (NOTES § D269).
+fn a_cluster_with_a_workload_card() -> k8s::Store {
+    let mut store = a_cluster_with_cards();
+    for deployment in objects::<Deployment>("deployments.json") {
+        store.deployment(&now(), Event::Apply(deployment));
+    }
+    store
+}
+
+/// **`r` on a kind `ops::restart` serves asks for one** — the other half of the per-key offer,
+/// whose negative (`r` on a pod) is asserted beside `ctrl-d`'s positive above.
+#[test]
+fn r_asks_for_a_restart_on_a_kind_that_has_one() {
+    let store = a_cluster_with_a_workload_card();
+    let mut console = bare_console();
+    let cards = carded(&store);
+    let at = cards
+        .iter()
+        .position(|card| card.owner.kind == ObjectKind::Deployment)
+        .expect("the committed Deployments produced no card");
+    let owner = cards[at].owner.clone();
+    console.app.content.select(at, &vec![None; cards.len()]);
+    assert_eq!(
+        selected(&console, &cards).map(|card| card.owner.clone()),
+        Some(owner.clone()),
+        "the cursor is not on the Deployment's card"
+    );
+    let _ = framed(&mut console, &store);
+
+    let asked = keyed(&mut console, typed('r'), &store);
+    let Did::Mutate(wanted) = asked else {
+        panic!("`r` on a Deployment reached nothing")
+    };
+    assert_eq!(wanted.verb, RESTART);
+    assert_eq!(wanted.kind, "deployment");
+    assert_eq!(wanted.name, owner.name);
+}
+
+/// **Keys that belong to a detail tab reach nothing while no tab is open** — `[`, `]` and `f` are
+/// the logs tab's own (`screens/detail.md`), and `X` is unbound while any modal is open
+/// (`views::App::may_switch_cluster`, NOTES § D16: switching clusters under an open box is how a
+/// dialog ends up naming an object on a cluster it was never read from).
+#[test]
+fn a_tabs_own_keys_and_the_switcher_are_refused_where_they_do_not_belong() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    for pressed in [typed('['), typed(']'), typed('f')] {
+        assert!(
+            matches!(keyed(&mut console, pressed.clone(), &store), Did::Nothing),
+            "{pressed:?} acted with no detail tab open"
+        );
+    }
+    assert_eq!(console.app.tab, views::Tab::default());
+    assert!(!console.app.following);
+
+    let _ = keyed(&mut console, typed('?'), &store);
+    let _ = keyed(&mut console, typed('X'), &store);
+    assert_eq!(
+        console.app.modal,
+        Some(views::Modal::Help),
+        "`X` opened the picker from under an open box"
+    );
+}
+
+/// **`esc` out of a tab the which-pods step opened goes back to the step, and out of one opened
+/// straight off a card goes back to the view** (`views::Detailing::Tabs`'s `from_step`, NOTES §
+/// D270 — the fact carried so the router has an answer that is not a private flag).
+#[test]
+fn esc_out_of_a_tab_goes_back_to_whatever_opened_it() {
+    let store = a_cluster_with_cards();
+    let object = ObjectId {
+        kind: ObjectKind::Pod,
+        namespace: Some("default".to_owned()),
+        name: "broken-crashloop".to_owned(),
+        uid: None,
+    };
+    let mut console = bare_console();
+    console.opened = Some(Opened::Tabs {
+        object: object.clone(),
+        from_step: true,
+    });
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Esc),
+        &store,
+    );
+    match &console.opened {
+        Some(Opened::Pods(owner)) => assert_eq!(*owner, object),
+        other => panic!(
+            "`esc` did not go back to the step it came through: {other:?}",
+            other = other.is_some()
+        ),
+    }
+
+    console.opened = Some(Opened::Tabs {
+        object,
+        from_step: false,
+    });
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Esc),
+        &store,
+    );
+    assert!(
+        console.opened.is_none(),
+        "`esc` out of a tab nobody stepped into went somewhere"
+    );
+}
+
+/// **A confirmation answers only the keys its own footer names, and only when it names them**
+/// (`screens/dialogs.md` § The verdict line, NOTES § D214): `⏎` is dead until the check answers,
+/// `esc` is inert for exactly as long, and a press-only box takes no typing at all.
+#[test]
+fn a_confirmation_refuses_every_key_its_footer_does_not_name() {
+    // **A store with nothing to say about this dialog's object, and it is the fixture rather than
+    // a convenience.** [`over_modal`]'s confirm arm now asks the store whether the selected object
+    // is still there ([`vanished`], NOTES § D22, § D289 ruling 1), and
+    // [`a_cluster_with_cards`] is a healthy listed store holding four pods and **no Deployment** —
+    // so it answers *gone* about [`an_open_dialog`]'s `payments/web`, correctly, about a console
+    // that cannot exist: a card filed under a Deployment owner needs that Deployment on its own
+    // watch. This test is about the box's key map and not about a cluster, so the store it presses
+    // against is one that has not listed. The guard's own five shapes are
+    // [`a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command`].
+    let store = before_the_list();
+    let mut console = bare_console();
+    installed(&mut console, Published::Opening(an_open_dialog()));
+
+    // While the check is out: no key does anything, and the box stays.
+    //
+    // **`ctrl-z` is in this list and is answered nowhere near the others** (NOTES § D24,
+    // `k8s-admin` finding 3): `ops::CHECK_DEADLINE` is 35 s of `CLOCK_MONOTONIC` and that clock
+    // runs while a process is stopped, so a suspend over an open confirmation comes back to *"k8rs
+    // waited 35 seconds to check this change and nothing came back"* — about a cluster that was
+    // never slow. It is the one window [`may_stop`] closes.
+    for pressed in [
+        key(ratatui::crossterm::event::KeyCode::Enter),
+        key(ratatui::crossterm::event::KeyCode::Esc),
+        typed('q'),
+        control(ratatui::crossterm::event::KeyCode::Char('z')),
+    ] {
+        assert!(
+            matches!(keyed(&mut console, pressed.clone(), &store), Did::Nothing),
+            "{pressed:?} acted while the cluster was still being asked"
+        );
+        assert!(
+            matches!(console.app.modal, Some(views::Modal::Confirm(_))),
+            "{pressed:?} closed a box whose check had not answered"
+        );
+    }
+
+    // A press-only dialog takes no typing — its own `asks` is `None`.
+    let _ = keyed(&mut console, typed('w'), &store);
+    let Some(views::Modal::Confirm(dialog)) = &console.app.modal else {
+        panic!("the box went")
+    };
+    assert_eq!(
+        dialog.typed.text(),
+        "",
+        "a press-only confirmation took a typed name"
+    );
+
+    // The verdict lands: `⏎` now confirms, and what it answers with is what the reader typed.
+    installed(
+        &mut console,
+        Published::Checked {
+            verdict: "The cluster checked it first and accepted it.",
+            asks: None,
+        },
+    );
+    // **And `ctrl-z` works again the instant it answers** (`screens/help.md` § Rules: *"both keys
+    // work again the instant it answers"*). This is the other side of the window above, and the
+    // only assertion that can tell [`may_stop`]'s `waiting()` from a guard that asked merely *is a
+    // box open* — measured: dropping it leaves all 1540 green (`tester`, 2026-09-24).
+    assert!(
+        matches!(
+            keyed(
+                &mut console,
+                control(ratatui::crossterm::event::KeyCode::Char('z')),
+                &store
+            ),
+            Did::Suspend
+        ),
+        "`ctrl-z` stayed inert after the check had answered"
+    );
+
+    let answered = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Enter),
+        &store,
+    );
+    assert!(
+        matches!(answered, Did::Answered(Reply::Yes(_))),
+        "`⏎` on an armed box did not confirm"
+    );
+    assert_eq!(console.app.modal, None, "the box stayed open on the yes");
+    assert!(
+        console.app.changing.is_some(),
+        "the header does not say a write is running"
+    );
+}
+
+/// **A card about a group of two**, constructed — the committed captures are all single broken
+/// pods, so a group is the one shape no fixture can produce and the which-pods step is the one
+/// screen that needs it.
+///
+/// **Constructed and not captured, which is not a breach of NOTES § D53** for `views_tests.rs`'s
+/// own reason: that rule is about *captures*, and `Card` and `Finding` are k8rs's own types. What
+/// this drives is what the **keys** do once a group exists.
+fn a_group_of_two() -> views::Card {
+    let owner = ObjectId {
+        kind: ObjectKind::Deployment,
+        namespace: Some("payments".to_owned()),
+        name: "web".to_owned(),
+        uid: Some("d-1".to_owned()),
+    };
+    let pod = |name: &str, uid: &str| ObjectId {
+        kind: ObjectKind::Pod,
+        namespace: Some("payments".to_owned()),
+        name: name.to_owned(),
+        uid: Some(uid.to_owned()),
+    };
+    let finding = |object: ObjectId| Finding {
+        severity: Severity::Critical,
+        title: "Containers exceeded their memory limit".to_owned(),
+        evidence: "limit 256Mi · exit 137".to_owned(),
+        action: "raise limits.memory".to_owned(),
+        kubectl_cmd: None,
+        owner: owner.clone(),
+        object,
+        timestamp: Some(four_minutes_ago()),
+    };
+    views::Card {
+        owner: owner.clone(),
+        findings: vec![finding(pod("web-1", "p-1")), finding(pod("web-2", "p-2"))],
+        affected: 2,
+        total: Some(3),
+    }
+}
+
+/// **`⏎` on a group opens the which-pods step, the step's own cursor moves inside it, and the
+/// second `⏎` opens the tabs on the pod that was picked** (`screens/detail.md` § Picking a pod,
+/// before Detail has one; NOTES § D270).
+///
+/// **The object the tabs open on is the card's own `ObjectId`, uid and all** — built from the
+/// cursor's anchor instead, which is the pod's *name*, `ui::pinned` matches nothing and the tab
+/// silently pins no findings at all (`ui::Detail::object`, raised by both Phase 11 reviews).
+#[test]
+fn a_group_opens_the_step_and_the_step_opens_the_pod_that_was_picked() {
+    let cards = vec![a_group_of_two()];
+    let pods: Vec<ObjectId> = cards[0].pods().into_iter().cloned().collect();
+    let mut console = bare_console();
+
+    let opened = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &cards,
+        &before_the_list(),
+    );
+    assert!(matches!(opened, Did::Changed));
+    match &console.opened {
+        Some(Opened::Pods(owner)) => assert_eq!(*owner, cards[0].owner),
+        _ => panic!("a group of two did not open the which-pods step"),
+    }
+    assert_eq!(detailing(&console), views::Detailing::Pods);
+
+    // The step's own cursor, not the view's — the card the reader opened is still under that one.
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Down),
+        &cards,
+        &before_the_list(),
+    );
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &cards,
+        &before_the_list(),
+    );
+    match &console.opened {
+        Some(Opened::Tabs { object, from_step }) => {
+            assert!(from_step, "the tabs do not know they came through the step");
+            assert_eq!(
+                *object, pods[1],
+                "the second row opened the wrong pod's tabs"
+            );
+            assert_eq!(
+                object.uid.as_deref(),
+                Some("p-2"),
+                "the object was built from the cursor's anchor and not from the card"
+            );
+        }
+        _ => panic!("`⏎` on a picked pod opened no tabs"),
+    }
+
+    // And `esc` goes back to the step it came through, not past it.
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Esc),
+        &cards,
+        &before_the_list(),
+    );
+    assert!(matches!(console.opened, Some(Opened::Pods(_))));
+}
+
+/// **A step stays open while its group still has pods, and closes itself when the group is gone** —
+/// [`drawn`]'s own two-part condition (`screens/detail.md` § Picking a pod's *"the same
+/// `esc`-shaped return"*, and `reports/2026-09-24-the-console-event-loop.md` § 6, which is where
+/// `k8s-admin` found the half this test's second frame is about).
+///
+/// **Both halves, because either one alone passes a frame that simply always closes the step.** The
+/// self-closing half was written for a pod list that emptied under an open step; with `||` where
+/// the `&&` is, the same line closes a step the reader is standing in — one frame after `⏎` opened
+/// it, so `esc` has nothing to go back to and `⏎` reaches nothing. Measured: `&&` → `||` survived
+/// the whole suite (`just mutants-diff`, 2026-09-24).
+#[test]
+fn a_step_stays_open_while_its_group_has_pods_and_closes_when_it_has_none() {
+    let store = a_cluster_with_cards();
+    let cards = carded(&store);
+    let card = cards.first().expect("the captures produced no card");
+
+    let mut standing = bare_console();
+    standing.opened = Some(Opened::Pods(card.owner.clone()));
+    let drawn = framed(&mut standing, &store);
+    println!("{drawn}");
+    assert!(
+        matches!(standing.opened, Some(Opened::Pods(_))),
+        "the frame closed a step whose group still has {} pod(s)",
+        card.pods().len()
+    );
+    assert_eq!(
+        detailing(&standing),
+        views::Detailing::Pods,
+        "the step the reader is standing in is not what the keys are decided against"
+    );
+
+    // The same step over an owner Alerts has no card for — what a pod list emptying under it
+    // leaves.
+    let mut emptied = bare_console();
+    emptied.opened = Some(Opened::Pods(ObjectId {
+        kind: ObjectKind::Deployment,
+        namespace: Some("default".to_owned()),
+        name: "nothing-is-wrong-with-me".to_owned(),
+        uid: None,
+    }));
+    let drawn = framed(&mut emptied, &store);
+    println!("{drawn}");
+    assert!(
+        emptied.opened.is_none(),
+        "a step with no group left under it stayed open, so `esc` needs two presses"
+    );
+    assert_eq!(detailing(&emptied), views::Detailing::Closed);
+}
+
+/// One key press as [`pressed`] takes it, with no modifier.
+fn pressing(code: ratatui::crossterm::event::KeyCode) -> ratatui::crossterm::event::KeyEvent {
+    ratatui::crossterm::event::KeyEvent::new(code, ratatui::crossterm::event::KeyModifiers::NONE)
+}
+
+/// **The cluster picker's own keys** (`screens/context.md`): `↑` / `↓` move over the rows the
+/// filter leaves, every printable key narrows it, `⌫` widens it again, `⏎` on the row that is
+/// already current just closes the box, and `esc` closes it too.
+///
+/// **`⏎` on a row that would *connect* answers [`Did::Switch`] with that row**, which
+/// [`console`]'s own frame turns into a second `connect()` (NOTES § D264 ruling 13).
+#[test]
+fn the_pickers_own_keys_move_narrow_and_close_it() {
+    let row = |name: &str, current: bool| k8s::Choice {
+        name: Some(name.to_owned()),
+        key: name.to_owned(),
+        server: k8s::Address::Server(format!("https://{name}.invalid:6443")),
+        shadowed: false,
+        namespace: None,
+        insecure: false,
+        tag: k8s::Tag::Blank,
+        current,
+    };
+    let contexts = vec![row("prod-eu", true), row("staging", false)];
+    let mut console = bare_console();
+    console.contexts = contexts.clone();
+    let opened = |console: &mut Console<'_>| {
+        console.app.modal = Some(views::Modal::ContextPick(views::Picker::new(
+            &contexts,
+            views::Connection::Live(Some("prod-eu".to_owned())),
+        )));
+    };
+    let at = |console: &Console<'_>| match &console.app.modal {
+        Some(views::Modal::ContextPick(picker)) => picker.selected(&contexts),
+        _ => None,
+    };
+
+    opened(&mut console);
+    assert_eq!(
+        at(&console),
+        Some(0),
+        "the picker did not open on the current row"
+    );
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Down),
+        &[],
+        &before_the_list(),
+    );
+    assert_eq!(at(&console), Some(1), "`↓` did not move the picker");
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Up),
+        &[],
+        &before_the_list(),
+    );
+    assert_eq!(at(&console), Some(0), "`↑` did not move it back");
+
+    // Typing narrows the list to the row it names, and the cursor gives way to what is shown.
+    for character in "stag".chars() {
+        let _ = pressed(
+            &mut console,
+            pressing(ratatui::crossterm::event::KeyCode::Char(character)),
+            &[],
+            &before_the_list(),
+        );
+    }
+    assert_eq!(
+        at(&console),
+        Some(1),
+        "the filter did not narrow the picker"
+    );
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Backspace),
+        &[],
+        &before_the_list(),
+    );
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Backspace),
+        &[],
+        &before_the_list(),
+    );
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Backspace),
+        &[],
+        &before_the_list(),
+    );
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Backspace),
+        &[],
+        &before_the_list(),
+    );
+    assert_eq!(at(&console), Some(0), "`⌫` did not widen the list again");
+
+    // `⏎` on the row that is already current is *yes, stay on this cluster*: the box closes.
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &[],
+        &before_the_list(),
+    );
+    assert_eq!(
+        console.app.modal, None,
+        "`⏎` on the current row left the box open"
+    );
+
+    // A row that is not the live one hands the connection out to the caller.
+    opened(&mut console);
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Down),
+        &[],
+        &before_the_list(),
+    );
+    let answered = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &[],
+        &before_the_list(),
+    );
+    match answered {
+        Did::Switch(asked) => {
+            assert_eq!(asked.key, "staging");
+            assert_eq!(asked.to.as_deref(), Some("staging"));
+            assert_eq!(
+                asked.before,
+                views::Before::Connected(Some("prod-eu".to_owned())),
+                "the way out did not name the cluster that was live"
+            );
+        }
+        _ => panic!("`⏎` on a row that would connect reached nothing"),
+    }
+
+    // `esc` closes it.
+    opened(&mut console);
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Esc),
+        &[],
+        &before_the_list(),
+    );
+    assert_eq!(console.app.modal, None, "`esc` did not close the picker");
+}
+
+/// **A delete's box asks for the name, and nothing arms it until the whole name is typed**
+/// (invariant 2, `views::Dialog::armed`, `screens/dialogs.md` § Delete).
+#[test]
+fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
+    let mut console = bare_console();
+    let mut dialog = an_open_dialog();
+    dialog.verb = DELETE;
+    dialog.object =
+        views::Object::new("pod", Some("payments".to_owned()), "web-1".to_owned(), None);
+    dialog.kubectl = views::Stripped::of("kubectl delete pod/web-1 -n payments");
+    // `delete` sends no check, so its verdict is `Some` from the moment the box opens (NOTES § D225
+    // ruling 1) — what is left to wait for is the name.
+    dialog.verdict = Some("k8rs did not check this one with the cluster first");
+    dialog.asks = Some(views::Stripped::of("web-1"));
+    installed(&mut console, Published::Opening(dialog));
+
+    for character in "web-".chars() {
+        let _ = pressed(
+            &mut console,
+            pressing(ratatui::crossterm::event::KeyCode::Char(character)),
+            &[],
+            &before_the_list(),
+        );
+    }
+    let Some(views::Modal::Confirm(held)) = &console.app.modal else {
+        panic!("the box went")
+    };
+    assert_eq!(held.typed.text(), "web-");
+    assert!(!held.armed(), "half a name armed the button");
+    let dead = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &[],
+        &before_the_list(),
+    );
+    assert!(
+        matches!(dead, Did::Nothing),
+        "`⏎` confirmed a delete whose name was half typed"
+    );
+
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Char('1')),
+        &[],
+        &before_the_list(),
+    );
+    let Some(views::Modal::Confirm(held)) = &console.app.modal else {
+        panic!("the box went")
+    };
+    assert!(held.armed(), "the whole name did not arm the button");
+    let answered = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &[],
+        &before_the_list(),
+    );
+    assert_eq!(
+        answered_name(answered).as_deref(),
+        Some("web-1"),
+        "what the reader typed is not what the operation is answered with"
+    );
+
+    // `⌫` takes the name apart again on a box that is still open.
+    let mut console = bare_console();
+    let mut dialog = an_open_dialog();
+    dialog.verdict = Some("k8rs did not check this one with the cluster first");
+    dialog.asks = Some(views::Stripped::of("web-1"));
+    installed(&mut console, Published::Opening(dialog));
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Char('w')),
+        &[],
+        &before_the_list(),
+    );
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Backspace),
+        &[],
+        &before_the_list(),
+    );
+    let Some(views::Modal::Confirm(held)) = &console.app.modal else {
+        panic!("the box went")
+    };
+    assert_eq!(held.typed.text(), "");
+
+    // And `esc` dismisses it, because its verdict has landed — a cancellation, not a confirmation.
+    let dismissed = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Esc),
+        &[],
+        &before_the_list(),
+    );
+    assert!(
+        matches!(dismissed, Did::Answered(Reply::No)),
+        "`esc` did not cancel"
+    );
+    assert_eq!(console.app.modal, None);
+}
+
+/// What a confirmation answered with, or `None` for anything else.
+fn answered_name(did: Did) -> Option<String> {
+    match did {
+        Did::Answered(Reply::Yes(typed)) => Some(typed),
+        _ => None,
+    }
+}
+
+/// **A listed store holding one real capture per kind the allowlist in [`vanished`] names** — all
+/// five of invariant 6's watches, so the guard can be asked a question it is able to answer about
+/// each of them, and every link of its snapshot chain has something in it.
+///
+/// **One capture per watch and not one for Deployments alone**, which is what let `snapshot.pods`
+/// and `snapshot.nodes` be dropped from that chain with the suite still green (`tester`,
+/// 2026-09-26): every case reaching it fed a Deployment, so two thirds of the chain was dead weight
+/// to the tests while `ctrl-d` on a running pod depended on it.
+fn a_listed_cluster() -> k8s::Store {
+    let mut store = listed(objects::<Pod>("kube-system-pods.json"));
+    for node in objects::<Node>("nodes.json") {
+        store.node(&now(), Event::Apply(node));
+    }
+    for deployment in objects::<Deployment>("deployments.json") {
+        store.deployment(&now(), Event::Apply(deployment));
+    }
+    for set in objects::<StatefulSet>("statefulsets.json") {
+        store.stateful_set(&now(), Event::Apply(set));
+    }
+    for set in objects::<DaemonSet>("daemonsets.json") {
+        store.daemon_set(&now(), Event::Apply(set));
+    }
+    store
+}
+
+/// **A listed store whose Deployment watch never answered** — every other watch listed, then
+/// `k8s::Store::stop_waiting` settles the one that did not, which is what makes
+/// `k8s::Store::snapshot` publish with an empty workload list while `k8s::Store::troubles`
+/// names the kind (`k8s::Store::still_listing` § *A watch that is not coming back is not
+/// listing*).
+///
+/// **The live shape is a watch the cluster refuses**, drawn in
+/// `reports/2026-09-26-the-error-state-pass.md` § 1: cards and a header over an empty list. Nothing
+/// here can set a `kube::Error` on a watch from outside `k8s.rs`, and `unfinished` reaches
+/// `troubles` through the same filter a failure does.
+fn a_deployment_watch_that_never_answered() -> k8s::Store {
+    let mut store = k8s::Store::default();
+    store.pod(&now(), Event::Init);
+    store.pod(&now(), Event::InitDone);
+    store.node(&now(), Event::Init);
+    store.node(&now(), Event::InitDone);
+    store.stateful_set(&now(), Event::Init);
+    store.stateful_set(&now(), Event::InitDone);
+    store.daemon_set(&now(), Event::Init);
+    store.daemon_set(&now(), Event::InitDone);
+    store.stop_waiting();
+    store
+}
+
+/// **A listed store whose *Node* watch never answered, and which holds no Deployment** — so a
+/// question about a Deployment has a true answer (*absent*) while `k8s::Store::troubles` names a
+/// different kind entirely.
+///
+/// **This is the store a trouble predicate widened to `!store.troubles().is_empty()` gets wrong**
+/// (`tester`, 2026-09-26): that spelling passes `==` → `!=` mutation and every case above, and
+/// switches D22's guard off for all five kinds the moment one watch anywhere is in trouble.
+fn a_node_watch_that_never_answered() -> k8s::Store {
+    let mut store = k8s::Store::default();
+    store.pod(&now(), Event::Init);
+    store.pod(&now(), Event::InitDone);
+    store.deployment(&now(), Event::Init);
+    store.deployment(&now(), Event::InitDone);
+    store.stateful_set(&now(), Event::Init);
+    store.stateful_set(&now(), Event::InitDone);
+    store.daemon_set(&now(), Event::Init);
+    store.daemon_set(&now(), Event::InitDone);
+    store.stop_waiting();
+    store
+}
+
+/// **The object went away while the box was open, so the yes becomes a refusal and no command is
+/// sent** (NOTES § D22, § D289 ruling 1; `screens/dialogs.md` § The object went away while the
+/// dialog was open).
+///
+/// **This is `restart`'s only identity guard.** `ops::restart` is an `Api::patch` and `PatchParams`
+/// carries no `preconditions` field (`ops::Mutation::uid_sent`), so nothing on the wire can refuse
+/// the write — the failure `ops.rs` records as measured is a Deployment deleted and recreated
+/// between the dry-run and the yes, leaving the audit line naming a `uid` nothing changed beside a
+/// `PATCH` that landed on a different instance.
+///
+/// **Two groups, because a guard is proven only for the shapes it was fed** (NOTES § D29) and the
+/// two groups feed different halves of it.
+///
+/// **The seven store shapes**: one where the object is *there*, two where it is *gone* — the
+/// second of those a store whose trouble is on a **different** kind — and four where k8rs cannot
+/// tell, none of which may read as gone: a ReplicaSet, which invariant 6 fetches on demand and
+/// never watches; a selection carrying no `uid`; a store whose first LIST has not landed; and a
+/// listed store whose own watch for the kind never answered.
+///
+/// **Then every word the allowlist carries, both ways** — and *both* is what makes each of them a
+/// pin rather than a passenger (`tester`, 2026-09-26, three hand-planted mutations that stayed
+/// green). A *held* uid pins that kind's link in [`vanished`]'s snapshot chain: drop `.pods` and a
+/// held pod reads as gone. An *absent* uid pins the word in the `matches!` itself: take `"pod"` out
+/// and the kind stops being watched, so the guard answers *false* — which a held-uid case expects
+/// anyway and cannot see. Neither direction covers the other, and `ctrl-d` on a running pod is what
+/// the first one costs.
+///
+/// **Every uid is read off the capture and none is written down** — a re-capture moves all of them,
+/// and a literal would let a case pass by agreeing with itself. The lookup panics rather than
+/// skipping a kind it cannot find one for (CLAUDE.md § *a derived list asserts it found
+/// something*).
+///
+/// **What each case asserts is the reply and the strip together** (`screens/dialogs.md` rule 7: the
+/// strip carries a mutation's line *"the instant the real call actually goes out"*). A `Gone`
+/// decided here sends nothing at all, so a line appended anyway would annotate a command that never
+/// left — invariant 4's *neither record may lie*.
+#[test]
+fn a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command() {
+    let live = a_listed_cluster();
+    let waiting = before_the_list();
+    let refusing = a_deployment_watch_that_never_answered();
+    let elsewhere = a_node_watch_that_never_answered();
+    let snapshot = live
+        .snapshot(now())
+        .expect("the five captures' LISTs all landed");
+    // **One object of each kind, found the way the guard itself maps a kind onto a word** —
+    // `ui::addressed`, so this lookup cannot disagree with the allowlist about what `"daemonset"`
+    // means. The panic is the *found something* assertion: a capture that stops holding a kind
+    // must fail the test rather than quietly drop a row from the loop below.
+    let held = |word: &str| {
+        snapshot
+            .pods
+            .iter()
+            .map(|pod| &pod.id)
+            .chain(snapshot.nodes.iter().map(|node| &node.id))
+            .chain(snapshot.workloads.iter().map(|workload| &workload.id))
+            .find(|id| ui::addressed(&id.kind).1 == word)
+            .unwrap_or_else(|| panic!("no capture holds a {word}, so its rows would prove nothing"))
+            .clone()
+    };
+    // **A `uid` no capture can hold**, so *absent* is a fact about the store and not a spelling
+    // accident.
+    let absent = || Some("6f1f2a94-0000-0000-0000-000000000000".to_owned());
+    let object = |word: &'static str, id: &ObjectId, uid: Option<String>| {
+        views::Object::new(word, id.namespace.clone(), id.name.clone(), uid)
+    };
+
+    // **One press per shape, and the assertions are one closure** — the two groups below feed it
+    // different things and neither may grow a second copy of what *the guard answered right* means.
+    let check = |what: &str, asked: views::Object, store: &k8s::Store, gone: bool| {
+        let mut console = bare_console();
+        let mut dialog = an_open_dialog();
+        dialog.object = asked;
+        installed(&mut console, Published::Opening(dialog));
+        installed(
+            &mut console,
+            Published::Checked {
+                verdict: "the cluster checked it first and accepted it",
+                asks: None,
+            },
+        );
+        let answered = pressed(
+            &mut console,
+            pressing(ratatui::crossterm::event::KeyCode::Enter),
+            &[],
+            store,
+        );
+        assert_eq!(
+            matches!(answered, Did::Answered(Reply::Gone)),
+            gone,
+            "{what}: the guard answered the wrong way"
+        );
+        assert!(
+            !gone == matches!(answered, Did::Answered(Reply::Yes(_))),
+            "{what}: a yes that is neither a confirmation nor a `Gone`"
+        );
+        // **The box closes either way and the object travels on `changing`** — `settled` reads it
+        // from there to open the *Already gone* box (`views::App::changing`).
+        assert_eq!(console.app.modal, None, "{what}: the box stayed open");
+        assert!(
+            console.app.changing.is_some(),
+            "{what}: nothing carried the object across the moment the box closed"
+        );
+        // **`contains` and not equality, because `views::Log::sent` appends its own running
+        // mark** — what is asserted is whether the command reached the strip at all.
+        let strip: Vec<&str> = console
+            .log
+            .lines()
+            .iter()
+            .map(views::Stripped::as_str)
+            .collect();
+        assert_eq!(
+            strip
+                .iter()
+                .any(|line| line.contains("rollout restart deployment/web")),
+            !gone,
+            "{what}: the strip and the call disagree about whether one went out: {strip:?}"
+        );
+    };
+
+    // --- THE SEVEN STORE SHAPES ---
+    let deployment = held("deployment");
+    check(
+        "the uid the store holds",
+        object("deployment", &deployment, deployment.uid.clone()),
+        &live,
+        false,
+    );
+    check(
+        "a uid the store does not hold",
+        object("deployment", &deployment, absent()),
+        &live,
+        true,
+    );
+    check(
+        "a ReplicaSet, which no watch answers for",
+        object("replicaset", &deployment, absent()),
+        &live,
+        false,
+    );
+    check(
+        "a selection carrying no uid at all",
+        object("deployment", &deployment, None),
+        &live,
+        false,
+    );
+    check(
+        "a store whose first LIST has not landed",
+        object("deployment", &deployment, absent()),
+        &waiting,
+        false,
+    );
+    check(
+        "a listed store whose Deployment watch never answered",
+        object("deployment", &deployment, absent()),
+        &refusing,
+        false,
+    );
+    // **The trouble is on the Node watch and the question is about a Deployment**, whose own watch
+    // listed and holds no such uid — so *gone* is the true answer and a predicate that asks merely
+    // *is anything in trouble* gets it wrong (`a_node_watch_that_never_answered`).
+    check(
+        "a listed store where a different kind's watch never answered",
+        object("deployment", &deployment, absent()),
+        &elsewhere,
+        true,
+    );
+
+    // --- EVERY WORD THE ALLOWLIST CARRIES, BOTH WAYS ---
+    // Written out rather than read off `vanished`'s own `matches!`, which no test can reach: a word
+    // added there and not here is a kind with a guard nothing proves, and that is the hole these
+    // rows exist to keep shut.
+    for word in ["pod", "node", "deployment", "statefulset", "daemonset"] {
+        let id = held(word);
+        check(
+            &format!("a {word} uid the store holds"),
+            object(word, &id, id.uid.clone()),
+            &live,
+            false,
+        );
+        check(
+            &format!("a {word} uid the store does not hold"),
+            object(word, &id, absent()),
+            &live,
+            true,
+        );
+    }
+}
+
+/// **`/` and `n` reach nothing while a detail pane is drawn over the list they narrow**
+/// (`screens/widgets.md` § A filter is kept over anything drawn on top of the list it narrows:
+/// *"Detail … has no `/ filter` or `n namespace` on its own closed footer, but none of them touch
+/// `App::filters` to get there"*; NOTES § D289 ruling 4).
+///
+/// **Asserted in both states, because a guard that refuses everywhere passes the refusal half
+/// on its own**: with the slot closed both keys take focus, with it open neither does, and a
+/// filter already committed is still there afterwards.
+///
+/// **`screens/detail.md` § The logs tab does give `/` a text search over the pane, and no such
+/// search exists** — refusing the key is today's correct behaviour, and building the search is its
+/// own box.
+#[test]
+fn the_two_filter_keys_are_refused_while_a_detail_pane_is_over_the_list() {
+    let cards = vec![a_group_of_two()];
+    for (key, typing) in [
+        (
+            ratatui::crossterm::event::KeyCode::Char('/'),
+            views::Typing::Text,
+        ),
+        (
+            ratatui::crossterm::event::KeyCode::Char('n'),
+            views::Typing::Namespace,
+        ),
+    ] {
+        // **Closed: the key is on the footer and it takes focus** — the half that proves the guard
+        // did not simply kill both keys.
+        let mut console = bare_console();
+        let did = pressed(&mut console, pressing(key), &cards, &before_the_list());
+        assert!(
+            matches!(did, Did::Changed),
+            "{key:?} reached nothing with the list on screen"
+        );
+        assert_eq!(
+            console.app.typing,
+            Some(typing),
+            "{key:?} did not open its own filter with the list on screen"
+        );
+
+        // **Open — the which-pods step and then the tabs, which are the two `Detailing`s that are
+        // not `Closed`.** A filter committed before the pane opened is what the reader loses if the
+        // key gets through: it is kept over the pane and cleared by nothing here.
+        for opened in [
+            Opened::Pods(cards[0].owner.clone()),
+            Opened::Tabs {
+                object: cards[0].owner.clone(),
+                from_step: false,
+            },
+        ] {
+            let mut console = bare_console();
+            for character in "pay".chars() {
+                console.app.filters.text.push(character);
+            }
+            console.opened = Some(opened);
+            let did = pressed(&mut console, pressing(key), &cards, &before_the_list());
+            assert!(
+                matches!(did, Did::Nothing),
+                "{key:?} acted from over the list it narrows"
+            );
+            assert_eq!(
+                console.app.typing, None,
+                "{key:?} took focus from over a detail pane"
+            );
+            assert_eq!(
+                console.app.filters.text.text(),
+                "pay",
+                "{key:?} reached the filter that narrows the list the pane is drawn over"
+            );
+        }
+    }
+}
+
+/// **A write on the wire refuses `X` and `q` from under an open box too** (NOTES § D12, § D16:
+/// switching clusters mid-`PATCH`, or quitting out of one, leaves the audit log holding an attempt
+/// with no result).
+#[test]
+fn a_write_on_the_wire_refuses_the_switcher_and_quitting_from_anywhere() {
+    let mut console = bare_console();
+    console.app.changing = Some(views::Object::new(
+        "deployment",
+        Some("payments".to_owned()),
+        "web".to_owned(),
+        None,
+    ));
+    assert!(
+        matches!(
+            pressed(
+                &mut console,
+                pressing(ratatui::crossterm::event::KeyCode::Char('X')),
+                &[],
+                &before_the_list(),
+            ),
+            Did::Nothing
+        ),
+        "`X` switched cluster with a write on the wire"
+    );
+    assert_eq!(console.app.modal, None);
+
+    // The same, from under Help, whose own footer names `q`.
+    console.app.modal = Some(views::Modal::Help);
+    assert!(
+        matches!(
+            pressed(
+                &mut console,
+                pressing(ratatui::crossterm::event::KeyCode::Char('q')),
+                &[],
+                &before_the_list(),
+            ),
+            Did::Nothing
+        ),
+        "`q` quit out of a write that was still running"
+    );
+}
+
+/// **`esc` dismisses either terminal box, and `⏎` belongs to the refusal box alone** — its footer
+/// draws `esc dismiss  ⏎ open`, because the write it reports on is over and the object it was about
+/// is still selected underneath; `Gone`'s draws the bare `esc dismiss`, because its object stopped
+/// existing (`views::App::footer`'s two arms, `screens/dialogs.md` states 0 and 1c,
+/// `screens/widgets.md` § A modal's footer).
+///
+/// **The `⏎` half is what this test was missing, and `⏎` is the only key either footer names**
+/// (NOTES § D289 ruling 3). It looped `['q', '?', 'r', 'X']` — not one of them on a footer — and
+/// its doc said the box *"offers only `esc dismiss`"*, which `views.rs` has never drawn:
+/// Phase 12's behaviour written down as though it were the specification.
+#[test]
+fn a_terminal_box_closes_on_esc_and_only_the_refusal_opens_on_enter() {
+    let cards = vec![a_group_of_two()];
+    let refused = || views::Modal::Refused {
+        sent: true,
+        fault: k8s::Fault::Refused,
+        said: Some("forbidden".to_owned()),
+    };
+    let gone = || views::Modal::Gone {
+        object: views::Object::new(
+            "deployment",
+            Some("payments".to_owned()),
+            "web".to_owned(),
+            Some("d-1".to_owned()),
+        ),
+        recreated: false,
+    };
+
+    for (what, modal) in [("the refusal box", refused()), ("the gone box", gone())] {
+        let mut console = bare_console();
+        console.app.modal = Some(modal);
+        // **Not one of these is on either footer** — a modal's footer is a closed, complete list
+        // (`screens/widgets.md` § A modal's footer), so each has to reach nothing and leave the box
+        // where it is.
+        for ignored in ['q', '?', 'r', 'X'] {
+            let did = pressed(
+                &mut console,
+                pressing(ratatui::crossterm::event::KeyCode::Char(ignored)),
+                &cards,
+                &before_the_list(),
+            );
+            assert!(
+                matches!(did, Did::Nothing),
+                "`{ignored}` acted from under {what}"
+            );
+            assert!(console.app.modal.is_some(), "`{ignored}` dismissed {what}");
+        }
+        let _ = pressed(
+            &mut console,
+            pressing(ratatui::crossterm::event::KeyCode::Esc),
+            &cards,
+            &before_the_list(),
+        );
+        assert_eq!(
+            console.app.modal, None,
+            "`esc dismiss` did not dismiss {what}"
+        );
+    }
+
+    // **`⏎ open` opens the object the refusal was about** — a group of two opens the which-pods
+    // step, which is exactly what `⏎` on that card does with no box in the way.
+    let mut console = bare_console();
+    console.app.modal = Some(refused());
+    let opened = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &cards,
+        &before_the_list(),
+    );
+    assert!(
+        matches!(opened, Did::Changed),
+        "`⏎ open` owed no frame, so the dismissed refusal box would stay on the screen"
+    );
+    assert_eq!(
+        console.app.modal, None,
+        "`⏎ open` left the refusal box on the screen"
+    );
+    match &console.opened {
+        Some(Opened::Pods(owner)) => assert_eq!(*owner, cards[0].owner),
+        _ => panic!("`⏎ open` did not open the object the refusal was about"),
+    }
+
+    // **And the same key reaches nothing under the gone box**, whose footer names no second key
+    // because there is no object left to open.
+    let mut console = bare_console();
+    console.app.modal = Some(gone());
+    let did = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &cards,
+        &before_the_list(),
+    );
+    assert!(
+        matches!(did, Did::Nothing),
+        "`⏎` acted from under the gone box"
+    );
+    assert!(
+        console.app.modal.is_some(),
+        "`⏎` dismissed the gone box, whose footer names only `esc`"
+    );
+    assert!(
+        console.opened.is_none(),
+        "`⏎` opened an object from under the gone box"
+    );
+}
+
+/// **`↑` / `↓` reach nothing on a view whose rows this wiring does not have** — the content cursor
+/// is one index over whatever the open pane draws, and the browser's rows come with its own `Table`
+/// (its own box).
+#[test]
+fn the_arrows_reach_nothing_on_a_view_this_wiring_cannot_draw_rows_for() {
+    let cards = vec![a_group_of_two()];
+    let mut console = bare_console();
+    console.app.view = views::View::Resources(0);
+    let anchors = [None, None];
+    for arrow in [
+        ratatui::crossterm::event::KeyCode::Down,
+        ratatui::crossterm::event::KeyCode::Up,
+    ] {
+        assert!(
+            matches!(
+                pressed(&mut console, pressing(arrow), &cards, &before_the_list()),
+                Did::Nothing
+            ),
+            "{arrow:?} moved a cursor over the Alerts list while the browser was open"
+        );
+    }
+    assert_eq!(console.app.content.selected(&anchors), Some(0));
+}
+
+/// **The mutation is driven for real, headlessly** — `ops::restart` and `ops::delete` over a client
+/// that refuses everything, so each operation's own `show` reaches the screen and the verb decides
+/// which command the reader is taught (invariant 4).
+///
+/// **Nothing is confirmed**: the answer channel is closed, which `mutating` reads as a
+/// cancellation, so no real call is ever sent (the same shape `tests/binary.rs` asserts for the
+/// headless driver).
+#[tokio::test]
+async fn each_verb_shows_its_own_command_and_nothing_is_sent_without_an_answer() {
+    let scratch = Scratch::named("console-mutating");
+    let client = refusing().await;
+    for (verb, expected) in [
+        // **The fixture's own context is `prod-eu`**, which `mutating` is handed three lines
+        // down — every taught command carries it now (NOTES § D278 ruling 5).
+        (
+            RESTART,
+            "kubectl --context prod-eu rollout restart deployment/web",
+        ),
+        (DELETE, "kubectl --context prod-eu delete deployment/web"),
+    ] {
+        let mut audit = scratch.file(&format!("audit-{verb}"));
+        let wanted = Wanted {
+            verb,
+            kind: "deployment",
+            name: "web".to_owned(),
+            namespace: Some("payments".to_owned()),
+            uid: None,
+        };
+        let shown = std::cell::RefCell::new(Vec::new());
+        let (answering, answered) = tokio::sync::mpsc::unbounded_channel();
+        // Closed before the call, so `ask` reads a cancellation the moment it is reached.
+        drop(answering);
+        let performed = mutating(
+            &client,
+            "https://prod-eu.invalid:6443",
+            "prod-eu",
+            &wanted,
+            &now(),
+            &mut audit,
+            &shown,
+            answered,
+        )
+        .await;
+        let published = shown.into_inner();
+        let Some(Published::Opening(dialog)) = published.first() else {
+            panic!("{verb} published no dialog: {} entries", published.len())
+        };
+        println!("{verb}: {}", dialog.kubectl.as_str());
+        assert_eq!(dialog.verb, verb);
+        assert!(
+            dialog.kubectl.as_str().starts_with(expected),
+            "{verb} taught the wrong command: {:?}",
+            dialog.kubectl.as_str()
+        );
+        // **The title bar's own spelling** — `views::Object::name` is the bare name, because
+        // `ui::name` joins it with the namespace; `ops::Shown::object` is the `kind/name` form the
+        // `$` line uses, and putting that here drew `payments/deployment/web`.
+        assert_eq!(dialog.object.name(), "web");
+        assert_eq!(dialog.object.namespace(), Some("payments"));
+        assert_eq!(dialog.object.kind, "deployment");
+        // Nothing was confirmed, so nothing was sent — whatever the cluster would have said.
+        match performed {
+            Ok(performed) => assert!(
+                !performed.changed(),
+                "{verb} changed something nobody confirmed"
+            ),
+            Err(refusal) => panic!("{verb} was refused before it could ask: {refusal}"),
+        }
+    }
+}
+
+/// **A `Gone` on the answer channel reaches `ops` as `ops::Answer::Gone`, so nothing is sent
+/// and the audit log says so** — the second half of D22's guard, and the half `over_modal`'s
+/// own test cannot see (NOTES § D22, § D289 ruling 1). `main.rs` decides *is the uid still in
+/// the store* and `mutating`'s `ask` closure is what turns that answer into the value
+/// `ops::perform` acts on; a `Cancelled` there would look identical on screen and be a different
+/// line in the record (invariant 4).
+///
+/// **`delete` is the verb, because it is the only one that sends no check** (NOTES § D225
+/// ruling 1) — so `ask` is reached against a client that can reach nothing at all. A `restart` ends
+/// as `Outcome::NotSent` on its own dry-run before the answer is ever read, which proves the
+/// dry-run and not this.
+#[tokio::test]
+async fn a_gone_on_the_answer_channel_stops_the_write_inside_ops() {
+    let scratch = Scratch::named("console-gone");
+    let client = refusing().await;
+    let mut audit = scratch.file("audit");
+    let wanted = Wanted {
+        verb: DELETE,
+        kind: "deployment",
+        name: "web".to_owned(),
+        namespace: Some("payments".to_owned()),
+        uid: Some("u-1".to_owned()),
+    };
+    let shown = std::cell::RefCell::new(Vec::new());
+    let (answering, answered) = tokio::sync::mpsc::unbounded_channel();
+    // Queued before the call, so `ask` reads it the moment it is reached — the receiver is alive
+    // for as long as `mutating`'s future is.
+    answering.send(Reply::Gone).expect("the channel is open");
+    let performed = mutating(
+        &client,
+        "https://prod-eu.invalid:6443",
+        "prod-eu",
+        &wanted,
+        &now(),
+        &mut audit,
+        &shown,
+        answered,
+    )
+    .await;
+    assert_eq!(
+        performed,
+        Ok(ops::Performed {
+            outcome: Some(ops::Outcome::Gone),
+            recorded: true,
+        }),
+        "a `Gone` answer did not stop the write inside `ops`"
+    );
+    // **The refusal is in the record too** — the security gate's *every attempt, success,
+    // failure or refusal, reaches the audit log*. The words are `ops::Record::result_line`'s and
+    // this only asserts that the line is the `Gone` one and names the object.
+    let written =
+        std::fs::read_to_string(scratch.0.join("audit")).expect("the audit log this run opened");
+    println!("{written}");
+    assert!(
+        written.contains("deployment/web"),
+        "the audit log does not name the object the guard refused:\n{written}"
+    );
+    assert!(
+        written.lines().count() >= 2,
+        "the attempt and its result are not both in the record:\n{written}"
+    );
+}
+
+/// **What `k8s::text` appends where it cut** — retyped, because `k8s::SHORTENED` is private to that
+/// file, and only ever read here for its length.
+const SHORTENED_BY_K8RS: &str = "\u{2026} (shortened by k8rs)";
+
+/// **The crafted name this box feeds the dialog path** — every one of [`CRAFTED_SHAPES`], so no row
+/// of the loop below is a check nothing can reach, plus ten thousand characters on one line
+/// (todo.md § Phase 12, NOTES § D283 ruling 5).
+fn crafted_name() -> String {
+    format!("web\u{1b}[31m\u{202e}\u{200b}{}", "z".repeat(10_000))
+}
+
+/// **Driven through `mutating` for real, `ops` refuses to address such a name and no box opens at
+/// all** — which is not what the box predicted and is the stronger answer.
+///
+/// **So this is the first of two halves rather than the whole proof.** `ops::restart` and
+/// `ops::delete` both check `k8s::object_name` *before* `perform` calls `show`, and that predicate
+/// allows only ASCII alphanumerics, `-` and `.` up to `k8s::NAME_MAX` — so not one of the three
+/// shapes can reach a `views::Dialog` by this route, and `main.rs`'s `settled` throws the sentence
+/// away rather than drawing it. What proves the strip at the door the wiring actually uses is
+/// [`a_crafted_name_the_wiring_hands_a_dialog_reaches_no_cell`].
+#[tokio::test]
+async fn a_crafted_name_is_refused_before_any_box_can_open_on_it() {
+    let scratch = Scratch::named("console-crafted-refused");
+    let client = refusing().await;
+    let store = a_cluster_with_cards();
+    // **One crafted carrier per row, and the other left clean** (NOTES § D31, § D284 ruling 4).
+    // Both fields poisoned in one call proved neither: `object_name` and `namespace_name` each
+    // refuse this value, so bypassing one left the test green on the other. The `which` string is
+    // the half of `ops::unaddressable`'s sentence that says *which* word was refused.
+    for (verb, name, namespace, which) in [
+        (
+            RESTART,
+            crafted_name(),
+            "payments".to_owned(),
+            "an object's own name",
+        ),
+        (
+            RESTART,
+            "web".to_owned(),
+            crafted_name(),
+            "the name of a namespace",
+        ),
+        (
+            DELETE,
+            crafted_name(),
+            "payments".to_owned(),
+            "an object's own name",
+        ),
+        (
+            DELETE,
+            "web".to_owned(),
+            crafted_name(),
+            "the name of a namespace",
+        ),
+    ] {
+        let what = format!("{verb} on {which}");
+        let mut audit = scratch.file(&format!("audit-{verb}-{}", which.len()));
+        let wanted = Wanted {
+            verb,
+            kind: "deployment",
+            name,
+            namespace: Some(namespace),
+            uid: None,
+        };
+        let shown = std::cell::RefCell::new(Vec::new());
+        let (answering, answered) = tokio::sync::mpsc::unbounded_channel();
+        drop(answering);
+        let performed = mutating(
+            &client,
+            "https://prod-eu.invalid:6443",
+            "prod-eu",
+            &wanted,
+            &now(),
+            &mut audit,
+            &shown,
+            answered,
+        )
+        .await;
+        let refusal =
+            performed.expect_err("a name Kubernetes would not accept was addressed anyway");
+        println!("{what} refused: {refusal}");
+        assert!(
+            refusal.contains(which),
+            "{what}: the refusal is about the other word: {refusal}"
+        );
+        assert!(
+            shown.into_inner().is_empty(),
+            "{what} published a dialog for a name it refused"
+        );
+        // **A box is opened first, so `modal.is_none()` has something to disprove** (ruling 4):
+        // `settled` sets it to `None` as its second statement on every path, so the assertion was
+        // unfalsifiable over a console that never had one.
+        let mut console = bare_console();
+        installed(&mut console, Published::Opening(an_armed_dialog()));
+        // **And the precondition is asserted, which is ruling 4's own class one line earlier**:
+        // with the `installed` above deleted, `modal.is_none()` below passes for ever.
+        assert!(
+            console.app.modal.is_some(),
+            "{what}: the box this asserts `settled` closes never opened"
+        );
+        // **The waiting line is planted, and the product cannot reach this state** — `Log::sent`'s
+        // one product caller is `over_modal`'s confirm arm, which never runs when `show` never
+        // ran, so on this path `Log::outcome` writes nothing at all and the refusal is silent on
+        // screen (backlog.md § From the dialog-strip box, a Phase 12 close blocker). What is
+        // planted is the line `outcome` would annotate if there were one.
+        console
+            .log
+            .sent("$ kubectl rollout restart deployment/web -n payments".to_owned());
+        settled(&mut console, Err(refusal));
+        assert!(console.app.modal.is_none(), "{what} left a box open");
+        // The crafted name never entered the console at all — `settled` discards the sentence —
+        // so this frame is that discard rather than a strip.
+        unhostile(&what, &framed(&mut console, &store), "broken-");
+    }
+}
+
+/// **The crafted name handed to a dialog through the calls `mutating`'s own `show` makes, and no
+/// cell of the frame holds one of its shapes** — invariant 9, NOTES § D283 rulings 1 and 3.
+///
+/// **Not a hand-built `views::Dialog`**: every hostile value goes through the wiring's own call
+/// over it — `views::Object::new` for the name and the namespace (ruling 3), `Stripped::of` for
+/// the consequence and the command (ruling 1), and [`installed`]'s `Stripped::of` for `asks`, the
+/// one field no constructor could have covered because it is assigned after the box is open. What
+/// this route skips, and why it has to, is
+/// [`a_crafted_name_is_refused_before_any_box_can_open_on_it`].
+///
+/// **Both shapes of box, because `asks` is only a typed-name one's** — a press-only box leaves the
+/// field `None` and never spends the one strip `installed` owns.
+#[test]
+fn a_crafted_name_the_wiring_hands_a_dialog_reaches_no_cell() {
+    let store = a_cluster_with_cards();
+    let crafted = crafted_name();
+    for asks in [None, Some(crafted.clone())] {
+        let typed_name = asks.is_some();
+        let what = if typed_name {
+            "a typed-name box"
+        } else {
+            "a press-only box"
+        };
+        let mut dialog = an_open_dialog();
+        dialog.object = views::Object::new(
+            "deployment",
+            Some(crafted.clone()),
+            crafted.clone(),
+            Some("u-1".to_owned()),
+        );
+        dialog.consequence = views::Stripped::of(&crafted);
+        dialog.kubectl = views::Stripped::of(&crafted);
+        // **`warning` is fed one even though the console cannot build one** — `mutating`'s `show`
+        // sets it `None` and nothing downstream can (backlog.md § From the dialog-strip box, a
+        // Phase 12 close blocker).
+        //
+        // **What earns it its place is not a third copy of the type's proof, it is the row budget's
+        // warning arm** (`tester`, 2026-09-26): an oversized hostile warning is the only fixture in
+        // the tree that reaches `ui::confirm`'s `marked(warning, columns, kept)` at all, and the
+        // printed frame below shows the documented give-way order at the extreme — the consequence
+        // down to its one row while the warning keeps nine. With `None` that arm is skipped
+        // entirely, in the function NOTES § D284 ruling 3 just edited.
+        dialog.warning = Some(views::Stripped::of(&crafted));
+        let mut console = bare_console();
+        installed(&mut console, Published::Opening(dialog));
+        installed(
+            &mut console,
+            Published::Checked {
+                verdict: "k8rs did not check this one with the cluster first",
+                asks: asks.clone(),
+            },
+        );
+        let Some(views::Modal::Confirm(dialog)) = &console.app.modal else {
+            panic!("{what} did not stay open")
+        };
+        assert_eq!(
+            dialog.asks.is_some(),
+            typed_name,
+            "{what}: installed dropped the name the box asks for"
+        );
+
+        // **Every carrier the box has, named, with what each is bounded to and whether it is
+        // *expected* to hold the name at all** — the claim is *no unprintable character survived*
+        // and *it is bounded*, and a failure has to say which field let one past.
+        //
+        // **The `carries` column is NOTES § D284 ruling 4**: an absence assertion passes on an
+        // empty value, so a door that silently dropped the name passed this loop whole. Each row
+        // that is handed the name asserts it is still there, in its printable half.
+        //
+        // **`warning` is the sixth carrier** — a field the console cannot fill today, fed above for
+        // the row budget's sake, so this row is about the field and not about an empty `Option`.
+        for (which, value, cap, carries) in [
+            (
+                "consequence",
+                dialog.consequence.as_str(),
+                k8s::FREE_TEXT,
+                true,
+            ),
+            (
+                "warning",
+                dialog.warning.as_ref().map_or("", views::Stripped::as_str),
+                k8s::FREE_TEXT,
+                true,
+            ),
+            ("kubectl", dialog.kubectl.as_str(), k8s::FREE_TEXT, true),
+            // **`k8s::FREE_TEXT` and not the 512 a name really carries** — the bound the *type*
+            // spends, the 512 being `ops::Record::of`'s and one file down (NOTES § D283 ruling 2).
+            // This route hands `installed` the raw name, which is exactly the caller `ops.rs` is
+            // not in the room for.
+            (
+                "asks",
+                dialog.asks.as_ref().map_or("", views::Stripped::as_str),
+                k8s::FREE_TEXT,
+                typed_name,
+            ),
+            ("object.name", dialog.object.name(), k8s::IDENTIFIER, true),
+            (
+                "object.namespace",
+                dialog.object.namespace().unwrap_or(""),
+                k8s::IDENTIFIER,
+                true,
+            ),
+        ] {
+            for shape in CRAFTED_SHAPES {
+                assert!(
+                    !value.contains(shape),
+                    "{what}: views::Dialog::{which} kept {shape:?}"
+                );
+            }
+            // **The security gate's *sizes are bounded* row** — the marked cut `k8s::text` appends
+            // is what puts a shortened value a little over its own cap.
+            assert!(
+                value.len() <= cap + SHORTENED_BY_K8RS.len(),
+                "{what}: views::Dialog::{which} is {} bytes, past the {cap} it is bounded to",
+                value.len()
+            );
+            assert_eq!(
+                value.contains("zzz"),
+                carries,
+                "{what}: views::Dialog::{which} does not hold the name this route gave it, so \
+                 every absence above passes on nothing"
+            );
+        }
+
+        // **The canary is the box's own last row**: the buttons are what a box that outgrew the
+        // body loses first, so a frame without them is not one this may call clean.
+        let frame = framed(&mut console, &store);
+        unhostile(what, &frame, "[ esc cancel ]");
+        // **And the printable half of the same name is on it** — without this the frame says
+        // nothing about *this* string: ratatui writes no cell for a zero-width grapheme either way
+        // ([`unhostile`]), so the absence above has to sit beside a presence.
+        assert!(
+            frame.contains("zzz"),
+            "{what}: nothing of the crafted name was drawn, so its absence proves nothing:\n{frame}"
+        );
+        // Printed under `--nocapture`, because *the frame stayed 80×24* is a claim a reader of the
+        // report should be able to see rather than take on the assertions above.
+        println!("{what}:\n{frame}");
+    }
+}
+
+/// **A mutating key is refused wherever the footer that was drawn does not offer it** — invariant
+/// 2's *unreachable, not merely unbound*, and the four facts a kind cannot see (`ui::offered`'s
+/// five; `k8s-admin`, 2026-09-24, `reports/2026-09-24-the-console-event-loop.md` § 2).
+///
+/// **Each row is drawn and then pressed**, because the value the key answers is the value the frame
+/// produced ([`Console::offer`]) — asserting the press alone would be asserting the router against
+/// itself.
+#[test]
+fn a_mutating_key_is_refused_wherever_the_drawn_footer_withholds_it() {
+    let store = a_cluster_with_cards();
+    let unaudited = String::from("k8rs could not open its audit log");
+
+    // 1. The ordinary frame offers them, which is what makes the four rows below mean something.
+    let mut console = bare_console();
+    let _ = framed(&mut console, &store);
+    assert!(
+        matches!(console.offer, views::Offer::Act { .. }),
+        "the baseline frame offered no mutating key at all: {:?}",
+        console.offer
+    );
+    assert!(matches!(
+        keyed(
+            &mut console,
+            control(ratatui::crossterm::event::KeyCode::Char('d')),
+            &store
+        ),
+        Did::Mutate(_)
+    ));
+
+    // 2. A detail slot open — the tabs' own footer names neither key (PRIOR-ART § G2).
+    let mut console = bare_console();
+    console.opened = Some(Opened::Tabs {
+        object: ObjectId {
+            kind: ObjectKind::Pod,
+            namespace: Some("default".to_owned()),
+            name: "broken-crashloop".to_owned(),
+            uid: None,
+        },
+        from_step: false,
+    });
+    let _ = framed(&mut console, &store);
+    assert_eq!(console.offer, views::Offer::Move { switch: false });
+
+    // 3. Writes are dead for the whole run — `ops::audit_log` could not open the log (NOTES § D21).
+    let mut dead = bare_console();
+    dead.writes = ui::Writes::Unaudited(&unaudited);
+    let _ = framed(&mut dead, &store);
+    assert!(
+        !matches!(dead.offer, views::Offer::Act { .. }),
+        "a run that cannot record a write still offered one: {:?}",
+        dead.offer
+    );
+    for pressed in [
+        typed('r'),
+        control(ratatui::crossterm::event::KeyCode::Char('d')),
+    ] {
+        assert!(
+            matches!(keyed(&mut dead, pressed.clone(), &store), Did::Nothing),
+            "{pressed:?} started a mutation on a run with no audit log"
+        );
+    }
+
+    // 4. The clock cannot be trusted — an age that reads fresher than it is decides which card
+    // somebody reacts to first (`screens/states.md` § Your computer's clock is off).
+    let mut skewed = bare_console();
+    skewed.clock = Some("⚠ this computer's clock is 20 minutes behind the cluster's".to_owned());
+    let _ = framed(&mut skewed, &store);
+    assert!(
+        !matches!(skewed.offer, views::Offer::Act { .. }),
+        "a frame nobody can trust the times on still offered a write: {:?}",
+        skewed.offer
+    );
+    assert!(matches!(
+        keyed(&mut skewed, typed('r'), &store),
+        Did::Nothing
+    ));
+}
+
+/// **`ctrl` held with anything the map does not bind is not the plain letter** — `ctrl-d` and
+/// `ctrl-c` are the two it has (`screens/help.md`), and the arms below them read `key.code` alone
+/// (`k8s-admin`, 2026-09-24, `reports/2026-09-24-the-console-event-loop.md` § 1).
+#[test]
+fn a_control_combination_the_map_does_not_have_reaches_nothing() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let _ = framed(&mut console, &store);
+    for held in ['r', 'l', 'y', 'n', 'f', 'j', 'k', 'q', 'X', '?', '/'] {
+        let before = console.app.clone();
+        let did = keyed(
+            &mut console,
+            control(ratatui::crossterm::event::KeyCode::Char(held)),
+            &store,
+        );
+        assert!(
+            matches!(did, Did::Nothing),
+            "`ctrl-{held}` reached an arm bound to the plain letter"
+        );
+        assert_eq!(
+            console.app, before,
+            "`ctrl-{held}` changed the screen's state"
+        );
+        assert!(console.opened.is_none(), "`ctrl-{held}` opened a detail");
+    }
+}
+
+/// **The command log's own line ends on a short word and never on a whole sentence** —
+/// `views::SAID` is 32 bytes and [`outcome_word`] is what fits in it; `ops::Performed::plainly`
+/// measured 56–58 columns of the strip's 76, which left the command 18
+/// (`reports/2026-09-24-the-console-event-loop.md` § 3).
+#[test]
+fn every_ending_ends_the_log_line_on_a_word_the_strip_has_room_for() {
+    let endings = [
+        None,
+        Some(ops::Outcome::Done),
+        Some(ops::Outcome::Started),
+        Some(ops::Outcome::Cancelled),
+        Some(ops::Outcome::Gone),
+        Some(ops::Outcome::Changed),
+        Some(ops::Outcome::NotSent {
+            fault: k8s::Fault::Unanswered,
+            said: None,
+        }),
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Refused,
+            said: Some("forbidden".to_owned()),
+        }),
+        // **A `Failed` is three words and not one** (NOTES § D285 ruling 2), and `login expired`
+        // is thirteen columns — joint-widest with `changed first`, and the word `views::SAID`'s
+        // thirteen is measured off, so it is the one that has to be fed to this.
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Expired,
+            said: None,
+        }),
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Conflict,
+            said: Some("the object changed".to_owned()),
+        }),
+    ];
+    for outcome in &endings {
+        let word = outcome_word(outcome.as_ref());
+        println!("{outcome:?} → {word}");
+        assert!(!word.is_empty(), "{outcome:?} has no word");
+        // **Thirteen is the longest any mockup draws** (`views::SAID`'s own doc, `login expired`).
+        assert!(
+            word.chars().count() <= 13,
+            "{word:?} is longer than the longest word any mockup draws"
+        );
+        assert!(
+            !word.contains('\n') && word.trim() == word,
+            "{word:?} is not one word-shaped fragment"
+        );
+    }
+    // Ten endings, ten words, and no two endings share one — the line says *which* ending.
+    let words: std::collections::BTreeSet<&str> =
+        endings.iter().map(|o| outcome_word(o.as_ref())).collect();
+    assert_eq!(
+        words.len(),
+        endings.len(),
+        "two endings read the same: {words:?}"
+    );
+}
+
+/// **A refusal that says *rejected* sends the reader somewhere else than the box beside it**
+/// (NOTES § D285 ruling 2, invariant 4's *neither record may lie*). [`outcome_word`] mapped every
+/// `ops::Outcome::Failed` to `rejected` whatever the fault, so two of the four short forms
+/// `views::Log::outcome`'s own doc names — `refused` and `login expired` — could not be produced by
+/// any journey: a real `403` on a delete and a real `409` both printed `→ rejected`
+/// (`reports/2026-09-26-the-error-state-pass.md`).
+///
+/// **`Conflict` staying `rejected` is the ruling and not an omission**: `views.rs` defines the
+/// vocabulary, and widening it is a screen ruling first.
+#[test]
+fn the_log_line_says_which_refusal_the_cluster_gave() {
+    // Every fault a `Failed` can carry, and the word its line ends on. The three kubeconfig faults
+    // cannot reach a call that was sent, and are here because the vocabulary is decided by the
+    // fault and not by which of them a caller can produce.
+    let words = [
+        (k8s::Fault::Refused, "refused"),
+        (k8s::Fault::Expired, "login expired"),
+        (k8s::Fault::NoCredential, "login expired"),
+        (k8s::Fault::Conflict, "rejected"),
+        (k8s::Fault::Rejected, "rejected"),
+        (k8s::Fault::Gone, "rejected"),
+        (k8s::Fault::Unanswered, "rejected"),
+        (k8s::Fault::Unfinished, "rejected"),
+        (k8s::Fault::Kubeconfig, "rejected"),
+        (k8s::Fault::NoContext, "rejected"),
+        (k8s::Fault::BadEntry, "rejected"),
+    ];
+    for (fault, expected) in words {
+        let failed = ops::Outcome::Failed {
+            fault,
+            said: Some("whatever the server said".to_owned()),
+        };
+        assert_eq!(
+            outcome_word(Some(&failed)),
+            expected,
+            "{fault:?} on the strip sends the reader somewhere the box does not"
+        );
+        // **The word is read off the fault and never off the sentence beside it** — `said` is the
+        // server's own words and is the refusal box's, bounded there (`views::SAID`).
+        assert_eq!(
+            outcome_word(Some(&ops::Outcome::Failed { fault, said: None })),
+            expected,
+            "{fault:?} read its word off the server's sentence"
+        );
+    }
+
+    // **And the fault does not leak into the arm beside it**: nothing was sent at all under a
+    // `NotSent`, which is a different event and keeps its own word whatever the fault.
+    for (fault, _) in words {
+        assert_eq!(
+            outcome_word(Some(&ops::Outcome::NotSent { fault, said: None })),
+            "not sent",
+            "{fault:?} on a call that was never sent read as one the cluster answered"
+        );
+    }
+}
+
+/// **What the two unwired panes actually draw, read off the cells** — the browser and each of the
+/// four detail tabs (`reports/2026-09-24-the-console-event-loop.md` § 4 and § 7 items 1 and 2,
+/// which asked for exactly this and could not run it).
+///
+/// **Both say *still reading* and neither says *there is nothing*** (PRIOR-ART § C2): the fetches
+/// behind them are their own box, and until it lands the honest frame is the one that has not
+/// answered — not an empty pane claiming an answer.
+#[test]
+fn the_panes_nothing_fetches_yet_say_they_are_still_reading() {
+    let store = a_cluster_with_cards();
+
+    let mut browsing = bare_console();
+    browsing.kinds = vec![k8s::Browsable {
+        group: "apps".to_owned(),
+        version: "v1".to_owned(),
+        kind: "Deployment".to_owned(),
+        plural: "deployments".to_owned(),
+        namespaced: true,
+        verbs: vec!["list".to_owned()],
+    }];
+    browsing.app.view = views::View::Resources(0);
+    let drawn = framed(&mut browsing, &store);
+    println!("{drawn}");
+    assert!(drawn.contains("ALERTS"), "not a console frame:\n{drawn}");
+    assert!(
+        !drawn.contains("nothing is broken"),
+        "the browser's own empty pane claimed the cluster is healthy:\n{drawn}"
+    );
+    assert!(
+        !drawn.contains("in trouble right now"),
+        "the browser drew the Alerts pane's own health sentence:\n{drawn}"
+    );
+
+    // Each of the four tabs, over an object with no read behind it yet.
+    for tab in views::Tab::ALL {
+        let mut open = bare_console();
+        open.app.tab = tab;
+        open.opened = Some(Opened::Tabs {
+            object: ObjectId {
+                kind: ObjectKind::Pod,
+                namespace: Some("default".to_owned()),
+                name: "broken-crashloop".to_owned(),
+                uid: None,
+            },
+            from_step: false,
+        });
+        let drawn = framed(&mut open, &store);
+        println!("=== {} ===\n{drawn}", tab.label());
+        assert!(
+            drawn.contains("broken-crashloop"),
+            "{} drew no object heading:\n{drawn}",
+            tab.label()
+        );
+        assert!(
+            drawn.contains("reading the cluster…"),
+            "{} did not say it was still reading:\n{drawn}",
+            tab.label()
+        );
+        assert!(
+            !drawn.contains("none right now") && !drawn.contains("no logs yet"),
+            "{} turned a read that has not answered into an empty answer:\n{drawn}",
+            tab.label()
+        );
+        // **And it says nothing about the *cluster's* health** — `Screen::note` is the Alerts
+        // pane's and `ui::note` draws it from every caller, so a non-empty one lands in here too.
+        assert!(
+            !drawn.contains("in trouble right now"),
+            "{} drew the Alerts pane's own health sentence:\n{drawn}",
+            tab.label()
+        );
+        // The tab row marks the open one, so the frame and `App::tab` cannot come apart.
+        assert!(
+            drawn.contains(&format!("‹ {} ›", tab.label())),
+            "{} is not the marked tab:\n{drawn}",
+            tab.label()
+        );
+    }
+}
+
+/// **The strip's own row for every ending, read off the cells at the 80-column floor** —
+/// `reports/2026-09-24-the-console-event-loop.md` § 7 item 3, which asked for the drawn row and not
+/// the composed `String`.
+///
+/// **The object is what the line is about, so it is what may never give way** (NOTES § D266,
+/// `screens/widgets.md` § 7): with `ops::Performed::plainly`'s whole sentence in the outcome slot
+/// the command was cut to 18 columns and `deployment/web` went with it. [`outcome_word`] is the fix
+/// and this is the measurement that holds it.
+#[test]
+fn the_strip_keeps_the_object_the_line_is_about_for_every_ending() {
+    // **A store with nothing to say about this dialog's object, and it is the fixture rather than
+    // a convenience.** [`over_modal`]'s confirm arm now asks the store whether the selected object
+    // is still there ([`vanished`], NOTES § D22, § D289 ruling 1), and
+    // [`a_cluster_with_cards`] is a healthy listed store holding four pods and **no Deployment** —
+    // so it answers *gone* about [`an_open_dialog`]'s `payments/web`, correctly, about a console
+    // that cannot exist: a card filed under a Deployment owner needs that Deployment on its own
+    // watch. This test is about the box's key map and not about a cluster, so the store it presses
+    // against is one that has not listed. The guard's own five shapes are
+    // [`a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command`].
+    let store = before_the_list();
+    let endings = [
+        None,
+        Some(ops::Outcome::Done),
+        Some(ops::Outcome::Started),
+        Some(ops::Outcome::Cancelled),
+        Some(ops::Outcome::Gone),
+        Some(ops::Outcome::Changed),
+        Some(ops::Outcome::NotSent {
+            fault: k8s::Fault::Unanswered,
+            said: None,
+        }),
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Refused,
+            said: Some("forbidden".to_owned()),
+        }),
+        // **`login expired` is thirteen columns, joint-widest with `changed first`** — measured
+        // here rather than reasoned equal to it, because what this test is about is the row a
+        // widest word draws (NOTES § D285 ruling 2, `views::SAID`).
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Expired,
+            said: None,
+        }),
+    ];
+    for outcome in endings {
+        let word = outcome_word(outcome.as_ref());
+        let mut console = bare_console();
+        let mut dialog = an_armed_dialog();
+        // The command `screens/dialogs.md` § The command log's own line measures its cut against.
+        dialog.kubectl = views::Stripped::of(
+            "kubectl rollout restart deployment/payments-api -n payments-production-eu",
+        );
+        installed(&mut console, Published::Opening(dialog.clone()));
+        // **Through the yes, because that is what puts the line on the strip** (rule 7).
+        let answered = keyed(
+            &mut console,
+            key(ratatui::crossterm::event::KeyCode::Enter),
+            &store,
+        );
+        assert!(matches!(answered, Did::Answered(Reply::Yes(_))));
+        settled(
+            &mut console,
+            Ok(ops::Performed {
+                outcome,
+                recorded: true,
+            }),
+        );
+        let drawn = framed(&mut console, &store);
+        let row = drawn
+            .lines()
+            .find(|line| line.contains("rollout restart"))
+            .unwrap_or_else(|| panic!("{word}: the strip drew no command row:\n{drawn}"));
+        println!("{word}:\n{row}");
+        assert!(
+            row.contains("deployment/payments-api"),
+            "{word}: the object the line is about was cut away:\n{row}"
+        );
+        assert!(
+            row.contains(word),
+            "{word}: the outcome word did not reach the strip:\n{row}"
+        );
+        assert!(
+            !row.contains("shortened by k8rs"),
+            "{word}: the outcome slot overflowed and k8rs said so on the line:\n{row}"
+        );
+    }
+}
+/// **A frame owed soon is never pushed out by one owed later** — [`Owing::owed`]'s `min`, which is
+/// the single line that makes this a throttle and not a debounce (PRIOR-ART § A5), and the single
+/// line behind [`Owing::now`]'s own clause: *"A keypress made to wait out a coalescing window is a
+/// tool that feels broken."*
+///
+/// **Neither half is reachable from a burst fed at one instant**: every event of such a burst
+/// computes the same deadline, so `min` and `max` return the same value and
+/// [`a_storm_that_goes_quiet_ends_on_the_last_event_and_costs_one_frame`] cannot tell them apart —
+/// measured, `already.max(at)` passed all 1512 tests (`tester`, 2026-09-23).
+#[tokio::test(start_paused = true)]
+async fn a_frame_owed_soon_is_never_pushed_out_by_one_owed_later() {
+    let mut owing = Owing::default();
+    owing.changed();
+    let burst = owing.0.expect("a watch event owes a frame");
+
+    // A second event of the same storm does not move the deadline the first one set.
+    tokio::time::advance(COALESCE / 4).await;
+    owing.changed();
+    assert_eq!(
+        owing.0,
+        Some(burst),
+        "a later event pushed the deadline out: a storm would then hold the screen for as long as \
+         it lasts, which is the unbounded staleness PRIOR-ART § A5 is about"
+    );
+
+    // And a key does not wait for it.
+    owing.now();
+    let pressed = owing.0.expect("a key owes a frame");
+    assert!(
+        pressed < burst,
+        "the key was made to wait out the coalescing window"
+    );
+    assert!(
+        pressed <= tokio::time::Instant::now(),
+        "the key's frame is owed in the future rather than at once"
+    );
+}
+
+/// **A storm that keeps coming is still redrawn inside the window** — the *throttle*, as opposed to
+/// the debounce, and the only assertion that reads the **bound** directly (PRIOR-ART § A5,
+/// invariant 7).
+///
+/// [`a_storm_that_goes_quiet_ends_on_the_last_event_and_costs_one_frame`] feeds its whole burst at
+/// one instant, so it measures *the last event arrives* and *the burst is one frame* — both of
+/// which a debounce also satisfies once the storm stops. What a debounce breaks is the bound: a
+/// deadline pushed out by each new event never fires while the storm lasts, so the screen sits on
+/// data of unbounded age. This feeds the same events 20 ms apart and asserts a frame landed
+/// *during* the storm, which is the clause [`COALESCE`]'s own doc makes: *"the frame lands at most
+/// this far behind."*
+#[tokio::test(start_paused = true)]
+async fn a_storm_that_keeps_coming_is_still_redrawn_inside_the_window() {
+    use futures_util::stream::StreamExt;
+    const GAP: std::time::Duration = std::time::Duration::from_millis(20);
+    let pods = objects::<Pod>("kube-system-pods.json");
+    let counted = pods.len();
+    let spans = GAP * u32::try_from(counted).expect("the capture is small");
+    // **Derived, not chosen**: the still-loading frame `pump` owes before anything has happened at
+    // all, plus one per whole [`COALESCE`] window the storm spans.
+    let owed =
+        1 + usize::try_from(spans.as_millis() / COALESCE.as_millis()).expect("the storm is short");
+    assert!(
+        owed >= 3,
+        "the storm spans under two windows and would prove nothing"
+    );
+
+    let feed = futures_util::stream::iter(pods).then(|pod| async move {
+        tokio::time::sleep(GAP).await;
+        let update: k8s::Update = Box::new(move |store: &mut k8s::Store| {
+            store.pod(&now(), Event::InitApply(pod));
+        });
+        update
+    });
+    let opening: k8s::Update = Box::new(|store: &mut k8s::Store| {
+        store.pod(&now(), Event::Init);
+    });
+    let mut updates = Updates {
+        merged: futures_util::stream::select_all(vec![
+            futures_util::stream::iter(vec![opening])
+                .chain(feed)
+                .boxed(),
+        ]),
+        drained: false,
+        asked: std::collections::BTreeSet::new(),
+        asking: tokio::sync::mpsc::unbounded_channel().0,
+    };
+    let (pressing, mut keys) = tokio::sync::mpsc::unbounded_channel();
+    // Long after the storm, for the reason the quiet-storm test sends it late: a key draws at once.
+    tokio::spawn(async move {
+        tokio::time::sleep(spans * 4).await;
+        let _ = pressing.send(Woke::Key(ratatui::crossterm::event::Event::Key(
+            ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Char('q'),
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ),
+        )));
+    });
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+    let mut console = bare_console();
+    let mut store = k8s::Store::default();
+    let at = Watching {
+        renewal: None,
+        coverage: k8s::Coverage::Cluster,
+    };
+    let halt = pump(
+        &mut console,
+        &mut terminal,
+        &mut store,
+        &mut updates,
+        &mut keys,
+        &at,
+        None,
+    )
+    .await;
+    assert!(matches!(halt, Halt::Quit), "the loop did not end on `q`");
+
+    let drawn: Vec<String> = (0..terminal.backend().buffer().area.height)
+        .map(|row| {
+            (0..terminal.backend().buffer().area.width)
+                .map(|column| terminal.backend().buffer()[(column, row)].symbol())
+                .collect()
+        })
+        .collect();
+    let screen = drawn.join("\n");
+    // The canary: a console frame and not an empty buffer that would pass everything below.
+    assert!(screen.contains("ALERTS"), "not a console frame:\n{screen}");
+    assert!(
+        screen.contains(&format!("{counted} pods")),
+        "the last event of the burst never reached the screen:\n{screen}"
+    );
+    let frames = terminal.get_frame().count();
+    assert!(
+        frames >= owed,
+        "a {}ms storm drew {frames} frame(s) and owed {owed}: the screen was held for the whole \
+         storm instead of landing at most one window behind it",
+        spans.as_millis()
+    );
+}
+
+/// **A crafted object name reaches the cells and the frame still holds** — invariant 9 and
+/// `screens/widgets.md` § 7, on the path that actually draws.
+///
+/// **The names are planted *past* the ingest strip on purpose.** Every string a cluster sends meets
+/// `k8s::text` behind `k8s::ingest`'s single door, so a card built here with an escape in it is a
+/// stronger input than anything a real watch can deliver — which is the point: if the renderer ever
+/// became the thing that had to strip, this is the test that says so. What is asserted is the
+/// property the security gate names — *a 50MB annotation or an endless log line must not blow up
+/// the renderer* — not a particular cut.
+///
+/// **Three framings, because one is not the class** (NOTES § D31): the escape as the whole name,
+/// the escape inside a name, and a single line far past any pane's width.
+#[test]
+fn a_crafted_object_name_cannot_rewrite_the_terminal_or_break_the_frame() {
+    let store = a_cluster_with_cards();
+    for (what, name) in [
+        ("an escape alone", "\u{1b}[2J\u{1b}[H".to_owned()),
+        (
+            "an escape inside a name",
+            "web\u{1b}[31m-\u{202e}drowssap\u{200b}1".to_owned(),
+        ),
+        ("ten thousand columns on one line", "w".repeat(10_000)),
+    ] {
+        let mut card = a_group_of_two();
+        card.owner.name = name.clone();
+        for finding in &mut card.findings {
+            finding.owner.name = name.clone();
+            finding.title = format!("{name} exceeded its memory limit");
+            finding.evidence = name.clone();
+        }
+        let mut console = bare_console();
+        console.opened = Some(Opened::Tabs {
+            object: card.pods()[0].clone(),
+            from_step: false,
+        });
+        // The frame is built the way the loop builds it, over a store that has answered — the cards
+        // it derives are the store's, and this hostile one is drawn through the detail slot's own
+        // heading and pinned block instead.
+        console.log.ran(format!("$ kubectl get pod {name}"));
+        let drawn = framed(&mut console, &store);
+
+        unhostile(what, &drawn, "ALERTS");
+    }
+}
+
+/// **The characters invariant 9 is about, as a test may plant them** — a real ANSI escape, a
+/// right-to-left override and a zero-width space (`k8s::unprintable`, NOTES § D154).
+const CRAFTED_SHAPES: [char; 3] = ['\u{1b}', '\u{202e}', '\u{200b}'];
+
+/// **A frame that drew, at the size the product is drawn to, with none of [`CRAFTED_SHAPES`] in a
+/// cell** — the security gate's *a 50MB annotation or an endless log line must not blow up the
+/// renderer*, asserted as a property rather than as a particular cut.
+///
+/// **The canary is the caller's and is not optional**: every assertion here but the last passes on
+/// an empty buffer, so what proves the frame is the one under test is a string only it draws.
+///
+/// **The row and cell counts are the half that can fail; the shapes are ratatui's** — measured
+/// 2026-09-26 by removing `views::Object::new`'s strip and running the dialog caller below: the
+/// escape and the override still reached no cell, because ratatui skips a zero-width grapheme
+/// instead of writing one. So a caller proves its *own* strip at the field and reads this for *the
+/// renderer did not blow up* — the canary going missing is a box that outgrew the body and lost its
+/// last row.
+fn unhostile(what: &str, drawn: &str, canary: &str) {
+    let rows: Vec<&str> = drawn.lines().collect();
+    assert_eq!(rows.len(), 24, "{what}: the frame is not 24 rows");
+    for (at, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row.chars().count(),
+            80,
+            "{what}: row {at} is not 80 cells: {row:?}"
+        );
+    }
+    for shape in CRAFTED_SHAPES {
+        assert!(
+            !drawn.contains(shape),
+            "{what}: {shape:?} reached the cells:\n{drawn}"
+        );
+    }
+    assert!(
+        drawn.contains(canary),
+        "{what}: {canary:?} is not on it, so this is not the frame the assertions above were \
+         about:\n{drawn}"
+    );
+}
+
+/// **What the console says instead of drawing, and in which order** ([`before_the_first_frame`]) —
+/// the decision `console` used to hold as three `return`s among the calls that produce them, which
+/// no test could reach (`tester`, 2026-09-24).
+#[tokio::test]
+async fn nothing_drawn_yet_answers_the_connection_first_and_the_clock_costs_only_a_sentence() {
+    // A kubeconfig that will not load and a client that will not build are one sentence.
+    let refused =
+        k8s::NotConnected::Kubeconfig(kube::config::KubeconfigError::CurrentContextNotSet);
+    let said = before_the_first_frame(Err(&refused), Some(&now()))
+        .expect("a connection that never happened ends the run");
+    assert!(said.starts_with("k8rs: no cluster to watch — "), "{said:?}");
+    // And it does not need a clock to say it.
+    assert_eq!(
+        before_the_first_frame(Err(&refused), None).as_deref(),
+        Some(said.as_str()),
+        "a machine with no readable clock lost the reason it could not connect"
+    );
+
+    // A session that answered: nothing here ends the run, so the console goes on to draw.
+    let session = k8s::session(refusing().await, k8s::Coverage::Cluster).await;
+    assert_eq!(
+        before_the_first_frame(Ok(&session), Some(&now())),
+        None,
+        "a live session was refused a frame"
+    );
+    // **A clock this machine cannot read costs the sentence and not the run** — the claim
+    // `console`'s own comment made and nothing checked.
+    assert_eq!(
+        before_the_first_frame(Ok(&session), None),
+        None,
+        "an unreadable clock ended a run that had a session"
+    );
+}
+
+// --- WHICH CLUSTER ---
+//
+// **One place decides which context is used** (todo.md § Phase 12, NOTES § D116, § D279) — and
+// what the box asks for is proven in two halves. The *rule* is [`which_cluster`], a decision over
+// values with every row reachable; the *run* — `k8rs --once` with two contexts and no terminal —
+// is `tests/binary.rs`'s and the report's, because this suite's own ends are both pipes and so it
+// can only ever produce one row of the table (NOTES § D279 ruling 2).
+
+/// **The whole truth table, because three of its four rows are unreachable from a live console**
+/// (NOTES § D279 ruling 2, [`at_a_keyboard`]'s own measured hole).
+///
+/// **Precedence, once**: `--context` beats the picker, the picker beats `current-context`.
+#[test]
+fn one_function_decides_which_context_is_used_and_it_is_not_three() {
+    let with = |opens: Opens<'_>| match opens {
+        Opens::With(context) => Ok(context.map(str::to_owned)),
+        Opens::Asking => Err("the picker"),
+    };
+
+    // `--context` beats the picker, at every row count and whether or not there is a keyboard.
+    for rows in [0, 1, 2, 9] {
+        for keyboard in [true, false] {
+            assert_eq!(
+                with(which_cluster(Some("prod-eu"), rows, keyboard)),
+                Ok(Some("prod-eu".to_owned())),
+                "`--context` gave way to the picker at {rows} rows, keyboard {keyboard}"
+            );
+        }
+    }
+
+    // The picker beats `current-context` — but only with a real choice and a terminal to draw in.
+    assert_eq!(
+        with(which_cluster(None, 2, true)),
+        Err("the picker"),
+        "two contexts and a keyboard did not open the picker"
+    );
+    assert_eq!(
+        with(which_cluster(None, 9, true)),
+        Err("the picker"),
+        "nine contexts and a keyboard did not open the picker"
+    );
+    // **A picker in a pipeline is a script that hangs forever** (NOTES § D116): ambiguity resolves
+    // the way it always did, silently, on `current-context`.
+    assert_eq!(
+        with(which_cluster(None, 2, false)),
+        Ok(None),
+        "a run with no terminal opened a picker nobody could answer"
+    );
+    // One context, or none: there is nothing to ask.
+    assert_eq!(with(which_cluster(None, 1, true)), Ok(None));
+    assert_eq!(with(which_cluster(None, 0, true)), Ok(None));
+}
+
+/// **What this run asked the watches to cover, before anything has answered** ([`asked_for`]) — the
+/// value a frame drawn mid-switch reads, and the one a connection that never opened hands its
+/// failure box.
+#[test]
+fn a_run_that_has_not_connected_covers_what_it_asked_for() {
+    assert_eq!(
+        asked_for(None).namespace(),
+        None,
+        "`--namespace` was never given"
+    );
+    assert_eq!(
+        asked_for(Some("payments")).namespace(),
+        Some("payments"),
+        "a scoped run drew a header that reads like a cluster-wide one"
+    );
+}
+
+/// **The login program never gets the terminal** (NOTES § D279 ruling 6, § D264 ruling 32) —
+/// `interactive_mode: Never` on every `exec` block in the value handed to `k8s::connect_with`.
+///
+/// **Every entry and not the one being connected with**: a switch connects with another context out
+/// of the same value, and this is the only reading of the file.
+///
+/// **The `Always` row is the one that matters.** A kubeconfig written by `aws eks
+/// update-kubeconfig` or `kubelogin` carries its own `interactiveMode`, so a pass that only filled
+/// in the missing ones would leave exactly the plugins that ask for a password inheriting a
+/// raw-mode terminal.
+#[test]
+fn every_login_program_in_the_file_is_told_not_to_take_the_terminal() {
+    let kubeconfig: kube::config::Kubeconfig = serde_yaml_ng::from_str(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: alpha\n\
+         contexts:\n\
+         - name: alpha\n  \
+           context: { cluster: a, user: asks }\n\
+         - name: beta\n  \
+           context: { cluster: a, user: quiet }\n\
+         clusters:\n\
+         - name: a\n  \
+           cluster: { server: 'https://a.invalid:6443' }\n\
+         users:\n\
+         - name: asks\n  \
+           user:\n    \
+             exec:\n      \
+               apiVersion: client.authentication.k8s.io/v1beta1\n      \
+               command: aws\n      \
+               interactiveMode: Always\n\
+         - name: unsaid\n  \
+           user:\n    \
+             exec:\n      \
+               apiVersion: client.authentication.k8s.io/v1beta1\n      \
+               command: kubelogin\n\
+         - name: quiet\n  \
+           user: {}\n",
+    )
+    .expect("a kubeconfig this test wrote itself");
+
+    // Seen red first: `Always` and the unset one are both on the way in.
+    let before: Vec<Option<kube::config::ExecInteractiveMode>> = kubeconfig
+        .auth_infos
+        .iter()
+        .filter_map(|named| named.auth_info.as_ref()?.exec.as_ref())
+        .map(|exec| exec.interactive_mode.clone())
+        .collect();
+    assert_eq!(
+        before,
+        vec![Some(kube::config::ExecInteractiveMode::Always), None],
+        "the fixture did not carry the two shapes this is about"
+    );
+
+    let quietened = login_stays_off_the_terminal(kubeconfig);
+    let plugins: Vec<&kube::config::ExecConfig> = quietened
+        .auth_infos
+        .iter()
+        .filter_map(|named| named.auth_info.as_ref()?.exec.as_ref())
+        .collect();
+    assert_eq!(plugins.len(), 2, "the two `exec` users are not both here");
+    for exec in plugins {
+        assert_eq!(
+            exec.interactive_mode,
+            Some(kube::config::ExecInteractiveMode::Never),
+            "a login program kept the terminal: {:?}",
+            exec.command
+        );
+    }
+    // A user with no login program is left exactly as the file wrote it.
+    assert!(
+        quietened
+            .auth_infos
+            .iter()
+            .any(|named| named.name == "quiet"
+                && named
+                    .auth_info
+                    .as_ref()
+                    .is_some_and(|auth| auth.exec.is_none())),
+        "the entry with no `exec` block was rewritten"
+    );
+}
+
+/// **Which picker a key opens** ([`opening_on`], NOTES § D265 ruling 4).
+///
+/// **`Live` under [`ui::Link::Expired`] has to become `Dropped`**, or `⏎` on the `(current)` row
+/// answers `Close` and *renew your login, then press `X`* shuts the picker instead of reconnecting.
+#[test]
+fn an_expired_login_opens_a_picker_that_can_reconnect_to_the_context_it_is_on() {
+    let live = views::Connection::Live(Some("prod-eu".to_owned()));
+    assert_eq!(
+        opening_on(&live, ui::Link::Expired),
+        views::Connection::Dropped(Some("prod-eu".to_owned())),
+        "an expired login opened a picker whose `⏎` only closes"
+    );
+    // Every other link leaves it alone — a live cluster's `(current)` row is *stay here*.
+    for link in [
+        ui::Link::Live,
+        ui::Link::Lost,
+        ui::Link::Connecting,
+        ui::Link::Unconnected,
+    ] {
+        assert_eq!(
+            opening_on(&live, link),
+            live,
+            "{link:?} promoted a live connection to dropped"
+        );
+    }
+    // A switch that failed already stored `Dropped`, carrying the context that was last live
+    // (NOTES § D264 ruling 15), and nothing here has to tell the two apart.
+    let dropped = views::Connection::Dropped(Some("prod-eu".to_owned()));
+    assert_eq!(opening_on(&dropped, ui::Link::Unconnected), dropped);
+    assert_eq!(
+        opening_on(&views::Connection::Never, ui::Link::Connecting),
+        views::Connection::Never
+    );
+}
+
+/// **`X` opens the picker on the link the frame drew** ([`Console::link`]) — and appends the one
+/// read behind it (NOTES § D264 ruling 29).
+///
+/// **The picker under test is the one `X` built, and that is what this test lacked** (`tester` F1,
+/// NOTES § D280 item 5). It compared `picker.startup()` against `wanted == Connection::Never`,
+/// where `wanted` was `Live` then `Dropped` — the constant `false` in both rows — and then
+/// *replaced* `X`'s picker with one it built itself from [`opening_on`], so the D265 ruling 4
+/// regression was invisible: planted in a mirror, 1562 tests passed.
+///
+/// **`⏎` on the `(current)` row is what tells the two variants apart**, because that is the whole
+/// of what the ruling is about: a `Live` picker answers `Chosen::Close` there and shuts, and a
+/// `Dropped` one connects — so *renew your login, then press `X`* either works or ends where it
+/// started (`views::Picker::chosen`).
+#[test]
+fn x_opens_the_picker_the_header_just_described() {
+    let store = a_cluster_with_cards();
+    let current = k8s::Choice {
+        name: Some("k8rs".to_owned()),
+        key: "k8rs".to_owned(),
+        server: k8s::Address::Server("https://k8rs.invalid:6443".to_owned()),
+        shadowed: false,
+        namespace: None,
+        insecure: false,
+        tag: k8s::Tag::Blank,
+        current: true,
+    };
+    for (link, connects) in [(ui::Link::Live, false), (ui::Link::Expired, true)] {
+        let mut console = bare_console();
+        console.link = link;
+        console.contexts = vec![current.clone()];
+        // **Pressed, and then never touched** — every assertion below is about the picker this key
+        // built.
+        let _ = keyed(&mut console, typed('X'), &store);
+        assert!(
+            matches!(console.app.modal, Some(views::Modal::ContextPick(_))),
+            "`X` opened no picker under {link:?}"
+        );
+        assert_eq!(
+            console.log.lines().last().map(views::Stripped::as_str),
+            Some(views::GET_CONTEXTS),
+            "`X` did not say what it read"
+        );
+        // **Never the startup variant**: something has connected, whatever the link says about it.
+        match &console.app.modal {
+            Some(views::Modal::ContextPick(picker)) => {
+                assert!(
+                    !picker.startup(),
+                    "{link:?} opened the startup picker mid-session"
+                );
+                assert_eq!(
+                    picker.verbs(),
+                    ("switch", "cancel"),
+                    "{link:?} drew the startup picker's words"
+                );
+            }
+            _ => unreachable!(),
+        }
+        let answered = pressed(
+            &mut console,
+            pressing(ratatui::crossterm::event::KeyCode::Enter),
+            &[],
+            &before_the_list(),
+        );
+        match (connects, answered) {
+            // A live cluster's own row is *yes, stay here*, and the box closes.
+            (false, Did::Changed) => assert_eq!(
+                console.app.modal, None,
+                "{link:?}: `⏎` on the live current row left the picker open"
+            ),
+            // An expired login's is *try this again*, or the one way back does nothing.
+            (true, Did::Switch(asked)) => {
+                assert_eq!(asked.key, "k8rs");
+                assert_eq!(
+                    asked.before,
+                    views::Before::Connected(Some("k8rs".to_owned())),
+                    "{link:?}: the way out did not name the context that was live"
+                );
+            }
+            (_, answered) => panic!(
+                "{link:?}: `⏎` on the current row answered {}",
+                match answered {
+                    Did::Changed => "Changed",
+                    Did::Nothing => "Nothing",
+                    Did::Switch(_) => "Switch",
+                    _ => "something else",
+                }
+            ),
+        }
+    }
+}
+
+/// **`⏎` connects with the file's own spelling and draws the stripped one** (NOTES § D264
+/// ruling 8, invariant 9) — the two are different strings whenever a context name carries a
+/// character that has no printed form, and a picker that handed the drawn name back would answer
+/// `k8s::Fault::NoContext` for a context that is right there in the file.
+///
+/// **Fed through `k8s::contexts` rather than hand-built**, which is the only framing that proves
+/// the strip the box owes (CLAUDE.md § A check is proven only for the shapes it was fed) — **and
+/// fed every shape, then drawn** (`tester` F3, NOTES § D280 item 5): a bell, an ANSI colour
+/// escape, a right-to-left override and a name ten thousand characters long. The first draft fed
+/// the bell alone and never called [`framed`], so *the frame stays 80×24* was proven nowhere in
+/// the suite — which is the half of invariant 9 that is about the terminal rather than the string.
+#[test]
+fn a_crafted_context_name_connects_by_its_key_and_is_drawn_stripped() {
+    let crafted = "stag\u{7}ing";
+    let huge = "g".repeat(10_000);
+    let kubeconfig: kube::config::Kubeconfig = serde_yaml_ng::from_str(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: alpha\n\
+         contexts:\n\
+         - name: alpha\n  \
+           context: {{ cluster: a, user: k8rs }}\n\
+         - name: \"stag\\u0007ing\"\n  \
+           context: {{ cluster: a, user: k8rs }}\n\
+         - name: \"\\x1b[31mred\"\n  \
+           context: {{ cluster: a, user: k8rs }}\n\
+         - name: \"pay\\u202Ements\"\n  \
+           context: {{ cluster: a, user: k8rs }}\n\
+         - name: \"{huge}\"\n  \
+           context: {{ cluster: a, user: k8rs }}\n\
+         - name: \"prod eu; echo pwned\"\n  \
+           context: {{ cluster: a, user: k8rs }}\n\
+         clusters:\n\
+         - name: a\n  \
+           cluster: {{ server: 'https://a.invalid:6443' }}\n\
+         users:\n\
+         - name: k8rs\n  \
+           user: {{}}\n"
+    ))
+    .expect("a kubeconfig this test wrote itself");
+    let contexts = k8s::contexts(&kubeconfig, None);
+    assert_eq!(contexts.len(), 6, "the fixture lost a row");
+    // **`k8s::drawable` is not a charset allowlist, and this is where that is proven** (NOTES
+    // § D281 item 1): it removes characters with no printed form and caps length, so a space and a
+    // `;` reach every reader of `Choice::name` intact. The sentence built from one is an
+    // instruction to paste, so it quotes — `ops::pasteable`, the one rule, never a third spelling.
+    let shell = contexts[5].name.as_deref().expect("a drawable name");
+    assert_eq!(
+        shell, "prod eu; echo pwned",
+        "the strip removed the dangerous half"
+    );
+    let told = views::run_the_login(Some(shell)).expect("a runnable name");
+    println!("{told}");
+    assert!(
+        told.contains(&crate::ops::pasteable(shell)) && !told.contains("--context prod eu;"),
+        "an unquoted name reached a sentence telling the reader to run it: {told:?}"
+    );
+    // **And a name with nothing left after the strip is told nothing at all** — `(unnamed)` is a
+    // shell syntax error and a bare `kubectl version` names a third cluster (NOTES § D281 item 2).
+    // **All three shapes of nothing**, because a check is proven only for the shapes it was fed
+    // (NOTES § D29): no name at all, a name that strips to nothing, and the empty one the `filter`
+    // exists for — unreachable through `k8s::drawable`, which answers `None` for it, and reachable
+    // from any other caller.
+    assert_eq!(views::run_the_login(None), None);
+    assert_eq!(views::run_the_login(Some("\u{202e}")), None);
+    assert_eq!(views::run_the_login(Some("")), None);
+    assert_eq!(
+        contexts[1].key, crafted,
+        "the key stopped being the file's own spelling"
+    );
+    assert_eq!(
+        contexts[4].key.chars().count(),
+        10_000,
+        "the key was bounded, and a key cut at 512 bytes opens no entry"
+    );
+
+    let mut console = bare_console();
+    console.contexts = contexts.clone();
+    console.app.modal = Some(views::Modal::ContextPick(views::Picker::new(
+        &contexts,
+        views::Connection::Live(Some(views::drawn_name(&contexts[0]).to_owned())),
+    )));
+
+    // **Drawn with every one of them on screen** — invariant 9's other half: a crafted name may
+    // not rewrite the reader's terminal, and a 10,000-character one may not blow up the frame.
+    let picked = framed(&mut console, &k8s::Store::default());
+    println!("{picked}");
+    let rows: Vec<&str> = picked.lines().collect();
+    assert_eq!(rows.len(), 24, "the frame stopped being 24 rows:\n{picked}");
+    for (n, row) in rows.iter().enumerate() {
+        assert!(
+            row.chars().count() <= 80,
+            "row {n} ran past 80 columns ({} chars):\n{picked}",
+            row.chars().count()
+        );
+    }
+    for (what, character) in [
+        ("a bell", '\u{7}'),
+        ("an escape", '\u{1b}'),
+        ("a right-to-left override", '\u{202e}'),
+    ] {
+        assert!(
+            !picked.contains(character),
+            "{what} reached the screen:\n{picked}"
+        );
+    }
+    // The canary: this is the picker's own frame with the crafted rows on it, and not an empty
+    // buffer that would pass every absence above (CLAUDE.md § A derived list asserts it found
+    // something).
+    assert!(
+        picked.contains("Switch cluster"),
+        "not a picker frame:\n{picked}"
+    );
+    assert!(
+        picked.contains("staging"),
+        "the crafted row never drew, so nothing above was tested:\n{picked}"
+    );
+
+    let _ = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Down),
+        &[],
+        &before_the_list(),
+    );
+    let answered = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &[],
+        &before_the_list(),
+    );
+    let Did::Switch(asked) = answered else {
+        panic!("`⏎` on the crafted row reached nothing")
+    };
+    assert_eq!(
+        asked.key, crafted,
+        "the connection was made with the drawn name, which names no context"
+    );
+    let to = asked.to.expect("a name that does not strip to nothing");
+    assert_eq!(to, "staging", "the failure box's title was not stripped");
+    assert!(
+        !to.chars().any(|character| character.is_control()),
+        "a control character reached the dialog: {to:?}"
+    );
+    // The header's zone is built from the same value and carries none either.
+    let zone = zone(Some(&to), None);
+    assert!(
+        !zone.chars().any(|character| character.is_control()),
+        "a control character reached the header: {zone:?}"
+    );
+    // And so is every command line this connection would teach.
+    let taught = kubectl(Some(&asked.key));
+    println!("{taught}");
+    assert!(
+        taught.contains("--context") && !taught.chars().any(|character| character.is_control()),
+        "the taught line lost the flag or kept the control character: {taught:?}"
+    );
+}
+
+/// **The startup picker's `esc` quits the way `q` does** (NOTES § D279 ruling 5): `console()`
+/// answers `None`, nothing goes to stderr and the process exits `0`. It is a reader leaving, not a
+/// line being refused.
+///
+/// **And the mid-session picker's `esc` cancels onto the cluster already connected** — the same key
+/// and two answers, which is the one thing that differs between the two pickers.
+#[test]
+fn esc_quits_the_startup_picker_and_only_cancels_the_other_one() {
+    let contexts = vec![
+        k8s::Choice {
+            name: Some("prod-eu".to_owned()),
+            key: "prod-eu".to_owned(),
+            server: k8s::Address::Server("https://prod-eu.invalid:6443".to_owned()),
+            shadowed: false,
+            namespace: None,
+            insecure: false,
+            tag: k8s::Tag::Blank,
+            current: true,
+        },
+        k8s::Choice {
+            name: Some("staging".to_owned()),
+            key: "staging".to_owned(),
+            server: k8s::Address::Server("https://staging.invalid:6443".to_owned()),
+            shadowed: false,
+            namespace: None,
+            insecure: false,
+            tag: k8s::Tag::Blank,
+            current: false,
+        },
+    ];
+    let mut starting = bare_console();
+    starting.contexts = contexts.clone();
+    starting.connection = views::Connection::Never;
+    starting.app.modal = Some(views::Modal::ContextPick(views::Picker::new(
+        &contexts,
+        views::Connection::Never,
+    )));
+    assert!(
+        matches!(
+            pressed(
+                &mut starting,
+                pressing(ratatui::crossterm::event::KeyCode::Esc),
+                &[],
+                &before_the_list(),
+            ),
+            Did::Quit
+        ),
+        "`esc` on the startup picker did not end the run"
+    );
+
+    let mut switching = bare_console();
+    switching.contexts = contexts.clone();
+    switching.app.modal = Some(views::Modal::ContextPick(views::Picker::new(
+        &contexts,
+        views::Connection::Live(Some("prod-eu".to_owned())),
+    )));
+    assert!(
+        matches!(
+            pressed(
+                &mut switching,
+                pressing(ratatui::crossterm::event::KeyCode::Esc),
+                &[],
+                &before_the_list(),
+            ),
+            Did::Changed
+        ),
+        "`esc` mid-session ended the run instead of cancelling"
+    );
+    assert_eq!(switching.app.modal, None, "the picker stayed open");
+}
+
+/// **The two frames nothing is connected behind** (`screens/context.md` § Opening at startup,
+/// `screens/widgets.md` § 1a).
+///
+/// **The startup picker's header says `choose a cluster`, not a context**, and the body behind it
+/// is genuinely empty — no sidebar, no vitals, no pane.
+///
+/// **A switch that failed draws no connection word at all** ([`ui::Link::Unconnected`]): the store
+/// is empty after `views::App::switched`, which is the shape of a first launch, so a frame that
+/// asked [`linked`] would say `connecting…` over a cluster that has already refused.
+#[test]
+fn nothing_connected_draws_no_context_at_startup_and_no_connection_word_after_a_failure() {
+    let mut starting = bare_console();
+    starting.context = views::Stripped::of("");
+    starting.connection = views::Connection::Never;
+    starting.contexts = vec![k8s::Choice {
+        name: Some("prod-eu".to_owned()),
+        key: "prod-eu".to_owned(),
+        server: k8s::Address::Server("https://prod-eu.invalid:6443".to_owned()),
+        shadowed: false,
+        namespace: None,
+        insecure: false,
+        tag: k8s::Tag::Blank,
+        current: true,
+    }];
+    starting.app.modal = Some(views::Modal::ContextPick(views::Picker::new(
+        &starting.contexts.clone(),
+        views::Connection::Never,
+    )));
+    let opening = framed(&mut starting, &k8s::Store::default());
+    println!("{opening}");
+    assert!(
+        opening.contains("Choose a cluster"),
+        "the startup picker did not draw:\n{opening}"
+    );
+    assert!(
+        opening.contains("choose a cluster · admin"),
+        "the header did not say which state this is:\n{opening}"
+    );
+    assert!(
+        !opening.contains("ctx:") && !opening.contains("connecting…"),
+        "a run that has picked nothing named a context:\n{opening}"
+    );
+    assert!(
+        !opening.contains("ALERTS"),
+        "the app frame drew behind a picker that has nothing behind it:\n{opening}"
+    );
+
+    // A switch that failed: the attempted context is still named, and the slot beside it says the
+    // connection is not one — **never blank, and never one of `ui::Link`'s four**
+    // (`screens/widgets.md` § 1a, NOTES § D280 item 1). This assertion read
+    // `after.contains("ctx: staging · admin")` for a round, which pinned the defect: `admin` is
+    // the *permission* word that sat there over a live cluster a moment earlier.
+    let mut failed = bare_console();
+    failed.context = views::Stripped::of(&format!(
+        "{} · {}",
+        zone(Some("staging"), None),
+        not_connected()
+    ));
+    failed.unconnected = true;
+    failed.connection = views::Connection::Dropped(Some("prod-eu".to_owned()));
+    let after = framed(&mut failed, &k8s::Store::default());
+    println!("{after}");
+    assert!(
+        after.contains("ctx: staging · ⚠ not connected · admin"),
+        "the header's connection slot is not the page's:\n{after}"
+    );
+    for word in ["connecting…", "live", "disconnected", "login expired"] {
+        assert!(
+            !after.contains(&format!("connected · {word}")),
+            "a second connection word was joined behind the first:\n{after}"
+        );
+    }
+    // **The body says what the state is, and does not claim to be reading anything** — nothing
+    // survived the switch, so *reading the cluster…* would be about a store that is not this
+    // cluster's (`screens/context.md` § After `esc dismiss`).
+    assert!(
+        after.contains("⚠ Not connected to the cluster right"),
+        "the body did not say nothing is connected:\n{after}"
+    );
+    assert!(
+        !after.contains("reading the cluster…"),
+        "a run connected to nothing claimed to be reading one:\n{after}"
+    );
+    // **The left zone is blank, not `nodes …`** — that reading is *while connecting*.
+    assert!(
+        !after.contains("nodes"),
+        "a node count survived the switch that threw the nodes away:\n{after}"
+    );
+    // **`X` is the way out and the footer says so** (`ui::offered`, NOTES § D264 ruling 15).
+    assert!(
+        after.contains("X switch cluster"),
+        "the one way out was not offered:\n{after}"
+    );
+    // The canary: this is a console frame and not an empty buffer that passes every absence above.
+    assert!(after.contains("ALERTS"), "not a console frame:\n{after}");
+}
+
+/// **A switch that cannot connect becomes the box, and nothing of the old cluster is left behind
+/// it** (`screens/context.md` § When the new cluster does not work, § What happens on `⏎` steps 1
+/// and 2; NOTES § D16 rulings 1 and 3, § D264 ruling 13).
+///
+/// **A context the file does not name is the one connection failure a suite with no cluster can
+/// produce**: kube resolves the context out of the value it was handed and refuses before a client
+/// is built, so nothing here reaches a network (`tests/binary.rs`
+/// § `no_test_here_can_reach_a_cluster` is why that matters).
+///
+/// **The frame in between is asserted too** — the connect is awaited, so without a draw before it
+/// the reader watches the old cluster's screen through a switch that has already thrown it away.
+#[tokio::test]
+async fn a_switch_that_cannot_connect_is_the_box_and_leaves_nothing_of_the_old_cluster() {
+    // **The `current` row turns TLS verification off**, so `insecure` below tells a switch that
+    // re-read the list *for the context it tried* from one that re-read the file's own current
+    // context — two lists that answer differently (`tester` F4).
+    let kubeconfig = two_contexts_one_unverified();
+    let mut console = bare_console();
+    // **`--read-only` is the process's and not the context's** (`screens/context.md` § What happens
+    // on `⏎`), so it has to survive `views::App::switched`.
+    console.writes = ui::Writes::ReadOnly;
+    // Everything the old cluster left behind, so that dropping it is observable rather than
+    // asserted about an already-empty console.
+    console.app.view = views::View::Resources(0);
+    console.app.filters.text.push('w');
+    console.opened = Some(Opened::Pods(pod_id("payments", "web-1")));
+    console.kinds = vec![browsable("apps", "Deployment", "deployments", true)];
+    console.clock = Some("the clocks disagree".to_owned());
+    console.insecure = true;
+    // **The strip as the running console actually leaves it when `⏎` is pressed** (`k8s-admin`,
+    // NOTES § D281): both sites that build `views::Modal::ContextPick` append
+    // `views::GET_CONTEXTS` the moment they open it, so the newest line on this frame is always
+    // the picker's own local file read and the old cluster's line is history beneath it. A
+    // one-line fixture with no `get-contexts` in it pinned a shape no path produces.
+    console
+        .log
+        .ran("$ kubectl --context prod-eu get pods -A --watch".to_owned());
+    console.log.ran(views::GET_CONTEXTS.to_owned());
+    let mut cluster = nothing_connected(None);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+
+    switched(
+        &mut console,
+        &mut terminal,
+        &mut cluster,
+        &kubeconfig,
+        Some("payments"),
+        Switching {
+            key: "nothing-in-the-file-names-this".to_owned(),
+            to: Some("nothing-in-the-file-names-this".to_owned()),
+            before: views::Before::Connected(Some("prod-eu".to_owned())),
+        },
+    )
+    .await
+    .expect("the frames draw");
+
+    // **The box, built from the fault, the run's scope and the login program**
+    // (todo.md § Phase 12).
+    match &console.app.modal {
+        Some(views::Modal::Unconnected {
+            to,
+            before,
+            sent,
+            fault,
+            said,
+            coverage,
+            renewal,
+        }) => {
+            assert_eq!(to.as_deref(), Some("nothing-in-the-file-names-this"));
+            assert_eq!(
+                before,
+                &views::Before::Connected(Some("prod-eu".to_owned())),
+                "the way out did not name the cluster that was live"
+            );
+            // **Nothing reached a cluster**, so the title is *could not be opened* and no scope is
+            // read (NOTES § D264 ruling 17, `ui::failed`).
+            assert!(
+                !sent,
+                "a connection that was never built claimed to have asked"
+            );
+            assert_eq!(*fault, k8s::Fault::NoContext);
+            assert_eq!(said.as_deref(), None);
+            assert_eq!(
+                coverage.namespace(),
+                Some("payments"),
+                "the box did not carry the scope this run asked for"
+            );
+            assert_eq!(renewal.as_deref(), None);
+        }
+        other => panic!("a switch that failed left {other:?} on screen"),
+    }
+
+    // **Nothing of the old cluster survived** (NOTES § D16 ruling 1), and what is not the old
+    // cluster's did.
+    assert!(
+        cluster.session.is_none(),
+        "the old session outlived the switch"
+    );
+    assert!(
+        cluster.updates.drained,
+        "the old cluster's streams were still being polled"
+    );
+    assert!(cluster.server.is_empty());
+    assert_eq!(console.app.view, views::View::Alerts);
+    assert!(
+        console.app.filters.text.is_empty(),
+        "the old cluster's filter survived"
+    );
+    assert!(
+        console.opened.is_none(),
+        "an open detail slot outlived the cluster it was read from"
+    );
+    assert!(
+        console.kinds.is_empty(),
+        "the old cluster's sidebar survived"
+    );
+    assert_eq!(
+        console.clock, None,
+        "a skew read against the old cluster survived"
+    );
+    // **The strip keeps the old cluster's last line** (NOTES § D280 item 2,
+    // `screens/context.md` § When the new cluster does not work): nothing was sent for the context
+    // that failed — `sent` is `false` for every fault this box draws — so there is no line about it
+    // to append, and emptying the strip on `⏎` left the reader a blank pane for the length of the
+    // connect and a blank one after it failed.
+    assert_eq!(
+        console
+            .log
+            .lines()
+            .iter()
+            .map(views::Stripped::as_str)
+            .collect::<Vec<&str>>(),
+        vec![
+            "$ kubectl --context prod-eu get pods -A --watch",
+            views::GET_CONTEXTS,
+        ],
+        "the strip did not keep what was already there, in the order it was there"
+    );
+    // **The newest line is the picker's own local read, never a cluster's** — which is what makes
+    // the frame honest: the line naming `prod-eu` reads as history under a header naming the
+    // context that was tried (`screens/context.md` § When the new cluster does not work).
+    assert_eq!(
+        console.log.lines().last().map(views::Stripped::as_str),
+        Some(views::GET_CONTEXTS)
+    );
+    assert!(
+        !console
+            .log
+            .lines()
+            .iter()
+            .any(|line| line.as_str().contains("nothing-in-the-file-names-this")),
+        "a line was invented about a context nothing was ever sent to: {:?}",
+        console.log.lines()
+    );
+    assert!(
+        !console.insecure,
+        "the TLS warning was read off the kubeconfig's current row and not the one that was tried"
+    );
+    assert_eq!(
+        console.writes,
+        ui::Writes::ReadOnly,
+        "`--read-only` did not outlive `X`"
+    );
+
+    // **The header names the context that was chosen and no connection word joins it**
+    // (NOTES § D16 ruling 3, `ui::Link::Unconnected`).
+    assert!(
+        console.unconnected,
+        "a failed switch was still a connection"
+    );
+    assert!(
+        console
+            .context
+            .as_str()
+            .contains("nothing-in-the-file-names-this"),
+        "the header lost the context the reader chose: {:?}",
+        console.context.as_str()
+    );
+    // **And the connection slot says what the connection is** (NOTES § D280 item 1,
+    // `screens/widgets.md` § 1a: *not a fifth connection word, and not a blank segment either*).
+    // Without it the zone reads `ctx: … · admin`, where `admin` is the permission word that sat
+    // there over a live cluster a moment earlier.
+    assert!(
+        console.context.as_str().ends_with(&not_connected()),
+        "the header's connection slot is blank over a cluster that was never opened: {:?}",
+        console.context.as_str()
+    );
+    // **What a later `X` opens on** (NOTES § D264 ruling 15).
+    assert_eq!(
+        console.connection,
+        views::Connection::Dropped(Some("prod-eu".to_owned())),
+        "`X` would no longer name the cluster that was last live"
+    );
+
+    // **A frame was drawn between `⏎` and its answer, and it is the new context's**
+    // (`screens/context.md` § What happens on `⏎` step 3): `ctx: <new> · connecting…`, over the
+    // loading body. **Both halves and no `||`** (`tester` F2): the name alone passes over a frame
+    // that said `live`, and an `…` alone is matched by `reading the cluster…` and `nodes …` — the
+    // old cluster's own frame, which is exactly what this assertion exists to forbid.
+    //
+    // **Read off the terminal before the second `switched` below overwrites it.**
+    let drawn = screened(&terminal);
+    println!("{drawn}");
+    assert!(
+        drawn.contains("nothing-in-the-file-names-this"),
+        "the frame in between did not name the context `⏎` chose:\n{drawn}"
+    );
+    assert!(
+        drawn.contains("connecting…"),
+        "the frame in between did not say a connection was in flight:\n{drawn}"
+    );
+    for stale in ["live", "⚠ not connected"] {
+        assert!(
+            !drawn.contains(stale),
+            "the frame in between said {stale:?} while the connect was still out:\n{drawn}"
+        );
+    }
+
+    // **A second failure in a row still names the context that was last live** (ruling 15): the
+    // way out is read off what had connected, and a run that never did gets the startup picker
+    // back instead.
+    switched(
+        &mut console,
+        &mut terminal,
+        &mut cluster,
+        &kubeconfig,
+        None,
+        Switching {
+            key: "still-not-in-the-file".to_owned(),
+            to: Some("still-not-in-the-file".to_owned()),
+            before: views::Before::Picking(views::Picker::new(
+                &k8s::contexts(&kubeconfig, None),
+                views::Connection::Never,
+            )),
+        },
+    )
+    .await
+    .expect("the frames draw");
+    assert_eq!(
+        console.connection,
+        views::Connection::Never,
+        "a run that has never connected was offered a cluster to go back to"
+    );
+    assert!(
+        matches!(
+            &console.app.modal,
+            Some(views::Modal::Unconnected {
+                before: views::Before::Picking(_),
+                ..
+            })
+        ),
+        "the startup picker was not what `esc` goes back to"
+    );
+}
+
+/// **A key pressed the instant a mutation settles reaches its consequence, and the `Halt` that
+/// carries it is not dropped** (`k8s-admin`, NOTES § D280 item 3).
+///
+/// **The arm this is about claimed both halts were unreachable, and the premise was false.** The
+/// inner [`pump`] does not return when a mutation completes — it runs [`settled`], sets its
+/// `running` slot to `None` and goes on looping — and `settled` takes `views::App::changing`, which
+/// is the field `views::App::may_mutate` and `may_switch_cluster` both read. So from that instant
+/// `ctrl-d`, `r` and `X` are live again *inside* a call whose caller was throwing their answers
+/// away, and the reader pressed the key twice.
+///
+/// **What is proven here is the reachability, which is the half a test can reach**: `console`'s own
+/// frame, where the halt is now carried into the next turn of the loop, needs a terminal and a
+/// cluster and is the same hole the three `console` mutants name.
+#[test]
+fn a_key_pressed_the_moment_a_mutation_settles_is_not_refused() {
+    let store = a_cluster_with_cards();
+    let mut console = bare_console();
+    let cards = carded(&store);
+    let card = selected(&console, &cards).expect("the captures produced a selectable card");
+    let _ = framed(&mut console, &store);
+
+    // **In flight**: the reader said yes, the box closed, and every mutating key is refused —
+    // `views::App::may_mutate` reads `changing` (`screens/dialogs.md` § While the call is running).
+    console.app.changing = Some(views::Object::new(
+        "pod",
+        card.owner.namespace.clone(),
+        card.owner.name.clone(),
+        None,
+    ));
+    for pressed in [
+        control(ratatui::crossterm::event::KeyCode::Char('d')),
+        typed('X'),
+    ] {
+        assert!(
+            matches!(keyed(&mut console, pressed.clone(), &store), Did::Nothing),
+            "{pressed:?} was live while a call was on the wire"
+        );
+    }
+
+    // **Settled** — the call ended, whichever way. `Err` is `ops::restart`'s own refusal and needs
+    // no cluster to produce; what matters is that `settled` runs at all.
+    settled(&mut console, Err("nothing was sent".to_owned()));
+    assert!(
+        console.app.changing.is_none(),
+        "`settled` left the object in flight"
+    );
+    let _ = framed(&mut console, &store);
+
+    // **And live again, in the same `pump` call** — which is the whole of why the arm that dropped
+    // these halts was wrong.
+    assert!(
+        matches!(
+            keyed(
+                &mut console,
+                control(ratatui::crossterm::event::KeyCode::Char('d')),
+                &store
+            ),
+            Did::Mutate(_)
+        ),
+        "a delete asked for after the dialog closed reached nothing"
+    );
+    // Dismiss the box that key opened, so `X` is not refused for the modal instead.
+    let _ = keyed(
+        &mut console,
+        key(ratatui::crossterm::event::KeyCode::Esc),
+        &store,
+    );
+    assert!(
+        matches!(keyed(&mut console, typed('X'), &store), Did::Changed),
+        "a switch asked for after the dialog closed opened no picker"
+    );
+}
+
+/// **A halt a frame cannot act on is parked, and one that can is answered** ([`parked`],
+/// NOTES § D281 item 5) — the decision over values that used to be an arm inside [`console`],
+/// where `cargo mutants --list` offers 0 mutants against 3482 in the crate and `just picker`
+/// cannot reach the window either.
+#[test]
+fn a_halt_a_mutation_frame_cannot_act_on_is_parked_rather_than_answered() {
+    let asked = || {
+        Halt::Mutate(Wanted {
+            verb: DELETE,
+            kind: "pod",
+            name: "web-1".to_owned(),
+            namespace: Some("payments".to_owned()),
+            uid: None,
+        })
+    };
+    // **A mutation's own frame holds the future, the `&mut File` and the strings they borrow
+    // (NOTES § D232), so it cannot build a second one** — the key is kept instead of dropped.
+    let mut carried = None;
+    assert!(matches!(parked(&mut carried, true, asked()), Halt::Carried));
+    assert!(
+        matches!(carried, Some(Halt::Mutate(_))),
+        "the key was answered away instead of parked"
+    );
+
+    // **A frame with nothing running answers on the spot**, and parks nothing — a slot filled here
+    // would be a keypress replayed one turn late.
+    let mut idle = None;
+    assert!(matches!(parked(&mut idle, false, asked()), Halt::Mutate(_)));
+    assert!(idle.is_none(), "an ordinary frame parked its own answer");
+
+    // Both halts a frame can be asked for, both ways.
+    let switching = || {
+        Halt::Switch(Switching {
+            key: "prod-eu".to_owned(),
+            to: Some("prod-eu".to_owned()),
+            before: views::Before::Connected(Some("staging".to_owned())),
+        })
+    };
+    let mut slot = None;
+    assert!(matches!(
+        parked(&mut slot, true, switching()),
+        Halt::Carried
+    ));
+    assert!(matches!(slot, Some(Halt::Switch(_))));
+    assert!(matches!(
+        parked(&mut None, false, switching()),
+        Halt::Switch(_)
+    ));
+}
+
+/// **A parked halt is the next call's first answer, before a key is read or a frame is drawn**
+/// ([`pump`], NOTES § D281 item 5).
+///
+/// **`q` is queued on purpose**: a [`pump`] that ignored the slot would read it and answer
+/// `Halt::Quit`, which is the shape this test tells apart — rather than hanging, which reads like
+/// a harness fault.
+#[tokio::test(start_paused = true)]
+async fn pump_answers_with_what_was_parked_before_it_reads_a_key() {
+    let mut console = bare_console();
+    let mut store = k8s::Store::default();
+    let mut updates = Updates {
+        merged: futures_util::stream::select_all(Vec::new()),
+        drained: true,
+        asked: std::collections::BTreeSet::new(),
+        asking: tokio::sync::mpsc::unbounded_channel().0,
+    };
+    let at = Watching {
+        renewal: None,
+        coverage: k8s::Coverage::Cluster,
+    };
+    let (pressing, mut keys) = tokio::sync::mpsc::unbounded_channel();
+    let _ = pressing.send(Woke::Key(typed('q')));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+        .expect("a terminal over a test backend");
+    console.carried = Some(Halt::Switch(Switching {
+        key: "prod-eu".to_owned(),
+        to: Some("prod-eu".to_owned()),
+        before: views::Before::Connected(Some("staging".to_owned())),
+    }));
+
+    let halt = pump(
+        &mut console,
+        &mut terminal,
+        &mut store,
+        &mut updates,
+        &mut keys,
+        &at,
+        None,
+    )
+    .await;
+    match halt {
+        Halt::Switch(asked) => assert_eq!(asked.key, "prod-eu"),
+        Halt::Quit => panic!("the parked halt was left in the slot and a key answered instead"),
+        _ => panic!("the parked halt did not come back"),
+    }
+    assert!(console.carried.is_none(), "the slot was not drained");
+}
+
+/// **Either key pressed the moment a mutation settles comes back out of the frame, parked** — the
+/// regression round one fixed inside [`console`], where nothing could prove it (NOTES § D281
+/// item 5; `k8s-admin` and `tester`, 2026-09-26).
+///
+/// **The window is real and this drives it**: `pump` takes its own `Running` slot to `None` the
+/// instant the call settles and goes on reading keys, so `views::App::may_mutate` and
+/// `may_switch_cluster` are both live again inside a call whose caller still holds the future and
+/// the audit `File`. Reverting [`parked`] to answer the halt puts the drop back, and the reader
+/// presses the key twice.
+///
+/// **Both halts, because one of them was pinned by nothing** (`tester`, round three): with only
+/// the `ctrl-d` pass, a plant that read the capture live *on the `Halt::Switch` site alone* left
+/// 1567 tests green — the other key's window had no test, and it is the same defect class.
+/// [`a_halt_a_mutation_frame_cannot_act_on_is_parked_rather_than_answered`] cannot see it either,
+/// being a pure-value test over `parked`'s three arguments with no view of where the second one
+/// came from.
+///
+/// **`X` then `↓` then `⏎`, because `X` alone opens the picker and does not ask for a switch** —
+/// `views::Chosen::Connect` needs a row that is not the live current one, which is why the fixture
+/// has two. The keys after the settle are ordinary keys; what is under test is only that the halt
+/// they finally produce leaves the frame in the slot.
+///
+/// **`Err` is the mutation's ending**, because what matters is that [`settled`] runs at all — and
+/// an `Err` needs no cluster to produce (`ops::restart`'s own refusal).
+#[tokio::test(start_paused = true)]
+async fn a_key_pressed_the_moment_a_mutation_settles_leaves_the_frame_parked() {
+    let row = |name: &str, current: bool| k8s::Choice {
+        name: Some(name.to_owned()),
+        key: name.to_owned(),
+        server: k8s::Address::Server(format!("https://{name}.invalid:6443")),
+        shadowed: false,
+        namespace: None,
+        insecure: false,
+        tag: k8s::Tag::Blank,
+        current,
+    };
+    let asking_to_delete = vec![control(ratatui::crossterm::event::KeyCode::Char('d'))];
+    let asking_to_switch = vec![
+        typed('X'),
+        key(ratatui::crossterm::event::KeyCode::Down),
+        key(ratatui::crossterm::event::KeyCode::Enter),
+    ];
+    for (what, presses) in [
+        ("a mutating key", asking_to_delete),
+        ("a switch", asking_to_switch),
+    ] {
+        let mut store = a_cluster_with_cards();
+        let mut console = bare_console();
+        console.contexts = vec![row("k8rs", true), row("staging", false)];
+        let cards = carded(&store);
+        let card = selected(&console, &cards).expect("the captures produced a selectable card");
+        // **In flight**: the reader said yes and the box closed (NOTES § D20).
+        console.app.changing = Some(views::Object::new(
+            "pod",
+            card.owner.namespace.clone(),
+            card.owner.name.clone(),
+            None,
+        ));
+        let mut updates = Updates {
+            merged: futures_util::stream::select_all(Vec::new()),
+            drained: true,
+            asked: std::collections::BTreeSet::new(),
+            asking: tokio::sync::mpsc::unbounded_channel().0,
+        };
+        let at = Watching {
+            renewal: None,
+            coverage: k8s::Coverage::Cluster,
+        };
+        let (pressing, mut keys) = tokio::sync::mpsc::unbounded_channel();
+        // **Long after the call has settled**, so the keys land in the window and not before it: a
+        // key queued up front is read first (the `select!` is biased) and refused while `changing`
+        // is set.
+        tokio::spawn(async move {
+            for press in presses {
+                tokio::time::sleep(COALESCE * 20).await;
+                let _ = pressing.send(Woke::Key(press));
+            }
+        });
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+            .expect("a terminal over a test backend");
+        let mut performing: std::pin::Pin<
+            Box<dyn Future<Output = Result<ops::Performed, String>>>,
+        > = Box::pin(async { Err("nothing was sent".to_owned()) });
+        let shown = std::cell::RefCell::new(Vec::new());
+        let (answering, _answered) = tokio::sync::mpsc::unbounded_channel();
+
+        let halt = pump(
+            &mut console,
+            &mut terminal,
+            &mut store,
+            &mut updates,
+            &mut keys,
+            &at,
+            Some(Running {
+                performing: &mut performing,
+                shown: &shown,
+                answering,
+            }),
+        )
+        .await;
+
+        assert!(
+            console.app.changing.is_none(),
+            "{what}: the mutation never settled, so this drove the wrong window"
+        );
+        assert!(
+            matches!(halt, Halt::Carried),
+            "{what}: the mutating frame answered a key it cannot act on instead of parking it"
+        );
+        match (what, console.carried) {
+            ("a mutating key", Some(Halt::Mutate(wanted))) => {
+                assert_eq!(wanted.verb, DELETE);
+                assert_eq!(wanted.name, card.owner.name);
+            }
+            ("a switch", Some(Halt::Switch(asked))) => {
+                assert_eq!(asked.key, "staging");
+                assert_eq!(
+                    asked.before,
+                    views::Before::Connected(Some("k8rs".to_owned())),
+                    "the way out did not name the cluster that was live"
+                );
+            }
+            (what, parked) => panic!(
+                "{what}: the reader's key was dropped — {}",
+                match parked {
+                    None => "the slot is empty",
+                    Some(_) => "the slot holds the other halt",
+                }
+            ),
+        }
     }
 }

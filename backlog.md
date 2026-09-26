@@ -27,6 +27,28 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
 
 ## Open
 
+### The console draws three things it never fetches, and none of them is boxed
+
+The browser's `Table` fetch (`k8s::Browsing`), the four detail reads (pod read,
+document, events, log stream) and the `may_i_in` permission probe are wired
+nowhere and have no box in any phase. `⏎` on a sidebar kind and all four detail
+tabs draw *reading the cluster…* indefinitely, and every mutating key draws
+unmarked because `Screen::refused` is `Refused::default()` — which is
+[D229](NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)
+ruling 4's fail-open and honest, but it means `s no scale` can never appear.
+
+**Phase 12's *Done when: k8rs runs against kind end-to-end* cannot be true while
+these stand**, so the phase-close triage decides whether Phase 12 extends or v0.1
+ships without the browser. That is a PM call, recorded here because a box may not
+be added to an open phase.
+
+The one member of this family that was worse than incomplete is already fixed: the
+Alerts paragraph was handed to every pane, so a ConfigMaps pane read *"41 pods and
+4 nodes checked, none of them is in trouble right now"* under its own title, three
+keys from the first screen — a false statement about other objects rather than a
+missing feature
+([D274](NOTES.md#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24)).
+
 - **Two `KubeconfigError` variants get a sentence in which every clause is false.**
   `KindMismatch` and `ApiVersionMismatch` group into `Fault::Kubeconfig`, which
   `main.rs`'s `because()` renders as *"the kubeconfig itself could not be read — it
@@ -307,6 +329,19 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   The fix is renderer-independent wording in `rules.rs`, not a line added to a
   card. Found while reading the driver's real output over the captures, where it
   printed 8 times. 2026-08-20.
+
+- **CLAUDE.md is read whole by six agents, and 405 of its lines are the PM's
+  alone.** § Agent workflow (314), § Phase close (53) and § Git rules (38) decide
+  nothing a `dev-core` writing a rule can act on, yet every dispatch pays for the
+  phase-close ritual and the changelog scopes. Moving them behind a PM-only file
+  leaves agents at ~470 lines / ~6k tokens, worth **~−36k per box at six
+  readers** — against the **−14k** the 2026-09-23 prose diet actually delivered
+  (16,788 → 14,408 tokens, measured after the cut; the ruling's −60k estimate
+  counted citations as stories). **It is not an edit**: ~30 of the 80 inbound
+  anchor links into CLAUDE.md live in `todo.md` and `NOTES.md`, so the move is a
+  coordinated change across two owners, and eight guards in `just check` read
+  markdown. Measured 2026-09-24 while cutting the second copies out of
+  CLAUDE.md. 2026-09-24.
 
 ### From the Phase 3 close cross-family review (2026-08-20)
 
@@ -680,6 +715,17 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   mutants / 0 missed for exactly that reason, and the reason is a coincidence of timing
   rather than a property of the gate. `tester` owns the `justfile`. Raised by the PM at
   the Phase 10 close, 2026-09-06
+
+- **A second Claude session held `src/` for most of 2026-09-06, and only mtimes said
+  so.** While this session closed Phase 10 and drove Phase 11's first drawing turn,
+  another session landed the fix round for the same review findings — `src/views.rs` at
+  11:24 carrying the `Pane::Denied(String)` → `Denied(String, T)` change `tester` had
+  just reported, `src/ui.rs` 767 → 873 lines at 12:38 with `ui_tests.rs` 958 → 1326. No
+  git state distinguishes that from a box this session left in flight, which is what
+  `/basla` tells a cold session to finish. Nothing was lost, because the second brief was
+  never dispatched — but it was written and ready. Worth a rule of its own, or worth
+  deciding that one session owns this repo at a time; recorded here rather than ruled,
+  because it is the user's call and not the PM's. Raised by the PM, 2026-09-06
 
 - **`scripts/certs-test.sh` has no `--self-test`.** It grew a second check this
   turn — the two files that pin an instant against the committed certificates —
@@ -1883,7 +1929,57 @@ recorded reversal and a later box rather than a dev round
   tail of a `--once` output into a ticket. The data exists
   (`Watch::last_progress`) but `Trouble` does not carry it, so this is a `k8s.rs`
   shape question; `screens/once.md` does not draw the state at all, which makes it
-  `tui-designer`'s first. Found by `k8s-admin`, 2026-08-30
+  `tui-designer`'s first. Found by `k8s-admin`, 2026-08-30. **Reproduced through
+  the wired console on 2026-09-26** — first time in a TUI frame rather than in
+  `--once` output: after a real drop the header held `nodes 2/2` with no `(… ago)`
+  beside it, and the pane's own *What you see below is from N ago* line
+  (`screens/states.md` § The connection dropped) was absent too, so the frame
+  carried **no** staleness marker but the ▲ card. Same entry, not a second one
+  ([reports/2026-09-26-the-error-state-pass.md](reports/2026-09-26-the-error-state-pass.md))
+
+- **A sixth watch would be invisible to every reader of `Store::troubles`.** The
+  five watched kinds are spelled in four places — `Store`'s `Watch<…>` fields,
+  `troubles()`'s array, `still_listing()`'s array, and `main.rs`'s `WATCHED` —
+  and `WATCHED`'s pin covers the join that feeds `linked`. A watch added to
+  `Store` **and** to the merge but never to `troubles()` is seen by none of them,
+  because `troubles()` is the only public window. `tester` costed a guard in
+  `scripts/copy-guard.py` at 80–100 lines and argued against it in the same
+  breath: zero instances to aim at, and a guard written against plants only is
+  one nobody can check.
+  [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 5 refused it and wrote the trigger here instead: **v0.5's Events watch
+  is exactly this shape** — whoever adds it writes the guard with a real instance
+  to aim at. Found by `tester`, 2026-09-26
+
+- **A `401` on a real call is titled *The cluster refused this*, while the strip
+  beside it now says `→ login expired`.** `screens/dialogs.md` state 2 rules that
+  title for any refusal of a real call and the box quotes `Unauthorized`, so the
+  frame is what the screen draws — and the header carries the login sentence in
+  the same frame, so nobody is stranded. Named only because
+  [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 2 moved the strip's word and the title stayed where it was: a screen
+  question before a code one, and `tui-designer`'s. Found by `k8s-admin` against a
+  real 401 timed into an open dialog, 2026-09-26
+  ([reports/2026-09-26-the-error-state-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md))
+
+- **On a cluster where nothing at all happens, the header still holds
+  `disconnected` after a blip.** What
+  [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 1's predicate deliberately cannot reach: `linked` answers `Lost` when no
+  watch is *answering*, and a watch stops being counted as not-answering only when
+  `Watch::take` clears its `failure` — an `Apply`/`Delete`, or an `InitDone` that
+  completed a re-LIST. A resumed watch does neither, so a cluster with **no**
+  traffic at all leaves all five rows stale and the header wrong, which is the
+  measured defect in its narrowest surviving form. **The measured case is fixed**
+  (pod events were flowing a second after the resume). The upgrade path is the
+  design D285 refused: stamp the `Err` arm of `k8s::updates` and age the fault out
+  against kube's retry ceiling — a new `Watch` field, a new `Trouble` accessor, a
+  threshold measured off kube's backoff, and a reversal of `k8s.rs`'s Phase 6
+  freeze. Not worth it for a stale word on a cluster with no traffic, and the pane
+  still names the kind while the header says `live`, so nothing is silent. Would
+  need measuring on a genuinely idle cluster before it is worth anything: whether
+  a watch **bookmark** reaches `Watch::take` at all is not measured, and if it
+  does the clear point may already exist. Found by `dev-ui`, 2026-09-26
 
 - **The API's own error body reaches stdout as if the container had written
   it.** `--previous` on a crashlooper whose previous log the runtime has already
@@ -1938,10 +2034,12 @@ recorded reversal and a later box rather than a dev round
   surface has an equivalent.** Measured 2026-08-31 on the fixture cluster: one
   kubeconfig with the CA dropped and the flag set produced output **byte-identical**
   to the verified run — `k8rs: watching — server v1.36.1 · 62 kinds …`, same 41
-  pods, same 4 nodes — and `grep -rn "\.insecure\b" src/*.rs` outside the tests
-  returns nothing. The flag is carried on a context-picker row
-  ([D174](NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28))
-  that Phase 11 has not drawn. **The security gate's row is *honoured and
+  pods, same 4 nodes. The flag is carried on a context-picker row
+  ([D174](NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28));
+  since Phase 11 `ui.rs` draws it on that row and in the header
+  ([D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)),
+  and the binary reaches neither until Phase 12. What stays open here is the
+  headless half. **The security gate's row is *honoured and
   surfaced*, and it is the one no script can check** — so it has been passing by
   hand on a half that does not exist. The answer is a screen decision before a
   Rust one (what `--once`, `--describe` and `--yaml` say about a connection whose
@@ -2515,6 +2613,171 @@ recorded reversal and a later box rather than a dev round
   directory — but it will go red on those three lines the moment it is switched
   on, so the box has to own the reflow too. Found by `tester`, 2026-09-05
 
+- **`scripts/screens-check.py` measures a mockup's width and height, but not
+  whether its box closes.** A top or bottom border 2 columns narrower than the
+  box's sides passed in two `screens/context.md` failure mockups, and so did an
+  excerpt whose rows had no side borders. Found by `dev-ui` drawing the page
+  ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)),
+  2026-09-13. The fix belongs to `scripts/`, which is `tester`'s.
+
+- **The typed `/` filter is drawn in no pane.** Whether `esc` clears the filter
+  or leaves the screen depends on text the reader cannot see. The picker covers
+  its own case, where the filter hides every row
+  ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+  ruling 7); Alerts, Resources and Analysis do not. Found by `k8s-admin`,
+  2026-09-13.
+
+- **`main.rs` still has three second copies that the D264 move did not reach.**
+  - `scoped_because` writes `Pass --namespace <name>` twice rather than
+    `{NAMESPACE}`.
+  - `scoped_because` also has "`list` pods across the whole cluster", beside
+    `views::scope`'s wording.
+  - `live` and `opened` format *no cluster to watch* separately.
+
+  Also, no `main_tests.rs` test pins `views::REACH` at its three call sites;
+  only a binary run did. **And a connect that fails in the login program prints
+  no next step.** `live`'s `Err` arm calls `because` alone, so a `NoCredential`
+  that reaches `--once` before any request is made does not get *Run that program
+  yourself…*. The picker's failure box does draw it
+  ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
+  ruling 22), and `tester` measured the gap with a missing login program,
+  2026-09-13. Found by `dev-core`, 2026-09-13. It is the temporary
+  driver's code, and it goes away with Phase 12's wiring, or with the box that
+  owns `--once`'s wording.
+
+- **No test reads the selected row's `theme::PANEL` fill, anywhere in the
+  product.** Replacing the picker's fill with a plain line passed all 1379 tests,
+  and neither the sidebar's fill nor the browser's is asserted either. Found by
+  `tester`, 2026-09-13. The screens name the fill; nothing holds it.
+
+- **`screens/states.md` draws `⚠ your clock is behind` in the header's right
+  zone, after `admin`/`read-only`** (every mockup under § Your computer's clock
+  is off and the two combined cases, ~l.648 and ~l.1072). `widgets.md` § 1a's
+  zone table has no clock segment and the product draws the clock as a
+  banner. Since [D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)
+  the header joins `admin`/`read-only` itself, so a caller that put the clock
+  text into `Screen::context` would land it *before* `read-only`. Found by
+  `dev-ui`, 2026-09-13; pre-existing.
+
+- **`screens/alerts.md` l.37 still says the header's right zone "is never
+  truncated"**, stale since [D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06)
+  made it shorten from its front. Found by `k8s-admin`, 2026-09-13.
+
+- **Several header mockups leave out the connection-state word** that
+  `widgets.md` § 1a puts before `admin`/`read-only`: `screens/states.md`
+  ~l.648, 1143, 1240, 1378 and `screens/analysis.md` ~l.262
+  (`ns: payments · read-only`, no `live`). Found by `tester`, 2026-09-13;
+  pre-existing.
+
+- **Every `ops` verb hangs forever against an apiserver that accepts the connection and never speaks
+  TLS, and `may-i` — which sends nothing and changes nothing — hangs with them.** Measured against
+  the real binary, 2026-09-20: `k8rs --once` is bounded and says so at 30 s, while
+  `ops scale`, `ops restart`, `ops delete` and `ops may-i` each ran to the kill at 40–45 s having
+  **printed nothing at all** — no dialog, no error, no audit line. The hang is in the driver's
+  pre-operation path, before `show` and before `ops::perform`, so neither
+  [D273](NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20)'s
+  bound on the check nor the bound it added to `ops::scale`'s pre-read reaches it; `may-i` never
+  enters `perform` at all, which is what rules out the contract as the place to fix it. The same
+  four calls `connect_with` makes are the ones `src/k8s.rs` § REPORT\_FETCH already records as
+  having no read deadline — this is that hole measured from the outside, on the one path where the
+  operator is sitting in front of it. Found by `tester`, 2026-09-20.
+
+- **`call(FOR_REAL)` is unbounded and deferred on purpose, which is a stated asymmetry rather than an
+  oversight.** The check is bounded at 35 s; the real call is not, so a cluster that accepts the
+  mutation and never answers leaves the modal closed, `changing…` in the header and `q` refused,
+  with nothing ending it. A bound there is not the same change as a bound on the check: it converts
+  a clean *never sent* into
+  [D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+  ruling 1's *k8rs does not know whether the change was made*, which is exactly what the delete
+  preflight was spent avoiding — so it needs a ruling about what the screen says, not a `timeout`.
+  Recorded by the PM with D273, 2026-09-20.
+
+- **Sending the deadline to the server instead of only keeping one locally.** `?timeout=30s` on the
+  `dryRun=All` would make the common slow-admission case end in the apiserver's own typed answer —
+  `Timeout: request did not complete within requested timeout`, measured — instead of k8rs guessing
+  from a local clock, with a local bound a few seconds above it as the backstop. It removes the
+  class that D273's review round re-tuned: the local number is currently 35 s because it sits just
+  above the 34 s ceiling **one** cluster was observed enforcing, and `--request-timeout` is a server
+  flag no client can read, so that margin is a guess everywhere else. Cost:
+  `PatchParams` carries no `timeout` field, so the request is built by hand. Proposed by
+  `k8s-admin` ([reports/2026-09-20-the-dry-run-deadline.md](reports/2026-09-20-the-dry-run-deadline.md)),
+  2026-09-20.
+
+- **Flags accepted on a line that silently drops them.** `k8rs --read-only --analysis`
+  opens the console and ignores `--analysis`; `k8rs --yaml --object default/web --read-only`
+  takes the verb path and drops `--read-only`. Both are harmless in this build — the console
+  always draws the ANALYSIS rows, and `--yaml` writes nothing — so neither is a wrong answer
+  today, only a word that taught the reader nothing. `mistyped`'s own doc (`src/main.rs:2148`)
+  already points here: *"Phase 12's real flag parsing is where a tighter answer belongs"*. The
+  flags box tightened the two cases that could mislead (a stray path beside a console flag, and
+  last-wins) and left these, because refusing a redundant-but-true flag costs a reader more than
+  it saves. Revisit when the temporary driver's ten scaffolding flags come out and the surface
+  is small enough to say *every word on the line does something*. Found by `k8s-admin`
+  (`reports/2026-09-24-the-console-flags.md` finding 9), 2026-09-24.
+
+- **The usage synopsis is one 609-column line.** `src/main.rs`'s `USAGE` is deliberately one
+  unwrapped printed line with `   |   ` between alternatives, and it was already ~537 columns
+  before the flags box added the console form. Every terminal wraps it at an arbitrary column,
+  so the alternative a reader needs is split across lines at no meaningful boundary — for a tool
+  whose thesis is that a beginner can read the screen (invariant 14). Not this box's to redesign:
+  `screens/states.md` § The command line's own synopsis is now the authority for the text, and it
+  ruled on *what the line says*, not on whether it should be one line. A real fix is one
+  alternative per output line, which is a screen ruling plus a `tests/binary.rs` change. Noticed
+  by the PM while checking the designer's 609-column measurement against the existing convention,
+  2026-09-24.
+
+- **`docs/architecture.md`'s status header describes a build from before Phase 7.** It says
+  *"the bottom of the pyramid — `rules.rs`, `analysis.rs`, `k8s.rs` — exists and runs behind a
+  temporary driver; the three views and the write path are still design."* All three claims are
+  now false: `ops.rs` landed in Phase 7 (and Phase 12 reopened it once, D278 ruling 5),
+  `theme.rs`/`views.rs`/`ui.rs` landed across Phases 9–11, and the console has been the bare
+  `k8rs` since D274. Left alone deliberately while fixing the CLI-surface rows in the same file:
+  it is not this box's surface, and a turn that absorbs every contradiction it walks past never
+  converges (D196). The honest fix is one rewrite of that block at Phase 12's close, when the
+  freeze list settles. Noticed by the PM during the flags box's docs sync, 2026-09-24.
+
+- **The command-log strip's own worked examples need the same re-derivation the dialogs just got.**
+  `screens/dialogs.md` § *While the call is running* and § *The command log's own line* still show
+  pre-`--context` example commands and a 76-column budget analysis computed against them. The
+  dialog boxes were redrawn when the taught line grew 53 → 73 columns (D278 ruling 10), and the
+  strip was deliberately left out of that turn's scope — but the `--context` floor lands inside
+  `command_cut` itself precisely so the strip inherits it, which means the strip's examples are now
+  describing a cut that behaves differently from the one they draw. Not urgent and not wrong on the
+  screen, only stale on the page. Found by `tui-designer` while ruling on the confirm box's width,
+  2026-09-24.
+
+- **Two `is_empty()`-before-strip sites survive in the temporary driver's scaffolding.**
+  `src/main.rs:5328` and `:5524` take a `false` arm on a raw `kind.group` and sanitize inside it, so
+  a wholly-strippable group would render *the one  adds* / *singular.* — the same shape as the
+  `kubectl()` defect D278 ruling 5 records. **Deliberately not fixed**, and the line is the surface:
+  `--analysis` is released, while `--describe`/`--yaml`/`--kind` are scaffolding that dies with the
+  temporary `main.rs` at Phase 12. The rule that made `action` (`:1591`) worth fixing — *a guard
+  correct only for the inputs it happens to get goes wrong when a later box widens them* — has no
+  later box here. Neither site is reachable today either: `Browsable::group` comes from API
+  discovery, where a non-core group is a server-validated DNS subdomain and a core-group kind is
+  `""` and takes the other arm. **If the scaffolding outlives Phase 12, these two come with it.**
+  Swept and reasoned by `dev-ui`, ruled by the PM, 2026-09-24.
+
+- **§ Scale's mockup breaks the consequence where the wrapper does not.** `screens/dialogs.md`
+  draws the break at the sentence (`This starts 1 more copy of your app.` / `Right now: 2 copies.
+  After: 3 copies.`); `ui::wrapped` packs greedily and breaks after `2 copies.`. Both render the
+  same sentence on the same two rows at the same width — only the break moves — but the page's own
+  prose calls that block *"one string wrapped to the box width — a rendering choice, not two
+  fields"*, so the drawing contradicts its own sentence. It matters more than cosmetics because
+  `ui_tests.rs` parses its expectations **out of that markdown**, so the coupling is weakened: the
+  test compares every other row exactly and those two joined. Left out of the flags box on purpose —
+  changing the mockup changes what the test parses and may need a code change with it, which is a
+  round for a line break in a tree that is green and internally consistent. Found by `dev-ui` while
+  landing D278 ruling 10, 2026-09-24.
+
+- **`ops::pasteable("")` returns `''`, and that is correct rather than a bug.** `''` is the only way
+  to pass an empty argument through a shell at all, so a general-purpose quoter owes it. What would
+  be wrong is a *caller* that wants the flag omitted and asks the quoter instead — and both callers
+  today decide the gap before they quote (`context_segment`, `kubectl()`, D278 ruling 5). Recorded
+  because `dev-ui` correctly flagged it as a trap for a third caller: the omit-or-quote decision
+  belongs to the caller and there is nothing in the type to enforce that. A doc line on `pasteable`
+  saying so is `dev-core`'s whenever `ops.rs` is next open. 2026-09-24.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
@@ -2698,3 +2961,726 @@ long-form version and stays the authority.*
   stops being true and the summary must be last and must name the steps. Not
   urgent: it costs a re-run, never a wrong answer. `tester`'s. Found by `tester`,
   2026-09-06
+
+- **`Table::from` can be reached without `ingest`, and nothing fails if it is.**
+  `k8s::ingest<K, T: From<K> + Bounded>` is the single door — `T::from` then `bound()` —
+  and its doc says the `From` is what makes it unavoidable for the browser's rows, because
+  `Table` has no `Deserialize`. That holds *inside* `k8s.rs`. Outside it, `Table` and
+  `TableResponse` are both crate-visible while `ingest` and `Bounded` are private, so a
+  decode written in another file reaches `Table::from` and skips the bound — the cells
+  would then be the one thing on screen that never went through `text()` (invariant 9).
+  **No such decode exists today** and the browser fetch is not wired, so this is a guard
+  worth writing rather than a hole that is open: `k8s_tests.rs` already derives a
+  field-list guard the same way, and the shape here is *`Table::from` appears in exactly
+  one place and that place is `ingest`*. Reported by `dev-ui` as a live invariant-9 defect
+  at the Resources box, measured by the PM to be narrower than that
+  ([D250](NOTES.md#d250--the-browser-pane-a-width-rule-that-is-not-widgetsmds-sentence-an-empty-list-that-is-not-nothing-is-broken-and-a-test-that-passed-on-the-screen-it-forbids-2026-09-06)
+  ruling 8). `tester`'s, once `k8s.rs`'s freeze allows the assertion to name it. 2026-09-06
+
+- **`k8s::Column::name`'s doc says the header is "cased for the screen by `views.rs`", and
+  `views.rs` has no such function.** The casing is presentation and it landed where
+  presentation lives, `ui.rs`'s `grid` — so the line is wrong about a file that never held
+  it. One sentence to fix, in a file that **freezes after Phase 6** (todo.md § Phase 5,
+  NOTES § D116), which is why it is here and not a box: it rides along the next time
+  `dev-core` legitimately opens `k8s.rs`. Found at the Resources box by `dev-ui`, confirmed
+  by the PM, 2026-09-06
+
+- **The Alerts card's own name is cut silently, and `screens/alerts.md` says in as many
+  words that it is not.** That file's § *The age, and what it costs the name* ends: *"Anything
+  that does not fit clips at the pane edge like every other string — **k8rs never truncates
+  one itself**, and the card's one deliberate cut is on the evidence line rather than here."*
+  `ui::identity` does truncate it itself — `fits(&name, room)` with no marker — and it has to
+  as the layout stands, because the age is right-aligned by padding to
+  `body - (width(left) + measured)` and an untruncated name would push the age off the card.
+  So there are **three** deliberate cuts in the product where `widgets.md` § 7 now names two
+  (the evidence line, and the browser's line under the table, ruled 2026-09-06). **It needs a
+  screen ruling before a line of code**: either `alerts.md` gains this as a third deliberate
+  cut and it takes `CUT` like the other two, or the layout stops truncating and the age is
+  what gives way. **Nothing reaches it today** — every card name in the committed captures is
+  short enough, and `ui::draw` has no caller until Phase 12 — which is exactly why it survived
+  a family review, a mutation run and two second passes. Found by `dev-ui` at the Resources
+  box's last round while implementing the *other* two cuts, confirmed by the PM against
+  `alerts.md`:963–966 and `ui.rs`'s `identity`. `tui-designer` first, then `dev-ui`.
+  2026-09-06
+
+- **Three frames in `screens/analysis.md` contradict that file's own grammar section, which
+  says every pane below obeys it.** Measured while drawing the pane, 2026-09-06: Posture and
+  Restarts draw a blank line after their opening `Row::Prose`, where scoped Capacity's `Prose`
+  (*"Still counted, from what you can see:"*) must hug the row beneath it — no rule satisfies
+  both without per-report knowledge, which rule 8 exists to forbid; and Certificates and
+  Restarts wrap a row's continuation back to region column 0, into the two-column band gutter,
+  where it reads as a second unbanded row. The renderer follows the **grammar section**, which
+  is the normative half and says so
+  ([D252](NOTES.md#d252--the-analysis-pane-one-renderer-for-seven-reports-a-shared-wrap-that-had-been-respelling-its-input-and-two-mutants-that-were-infinite-loops-2026-09-06)
+  ruling 3), so the frames are what is wrong. `tui-designer`'s: three frames to redraw, no
+  code change behind it. Found by `dev-ui`, confirmed by the PM against the section's own
+  *"every pane below obeys all eight"*, 2026-09-06
+
+- **`screens/analysis.md` draws six panes for seven sidebar entries, and nothing says which
+  ruling that is.** Versions sits at the foot of the Certificates pane while keeping its own
+  sidebar row and its own badge, and its `title` is never drawn. **Which panes exist and which
+  share one is `screens/`'s ruling**, not the renderer's — `analysis::Report`'s own doc says
+  so — and the two labels beside those badges still have no home in any type. Nothing in the
+  code changes when it lands: a shared pane is a longer `rows` and a title taken from the
+  first, which is what the renderer already draws. **Wanted before Phase 12 wires the sidebar
+  to the panes**, because a badge drawn for a pane that is not there is a wrong sidebar and
+  not a wrong report. Raised by `dev-ui` at the Analysis box, 2026-09-06
+
+- **`scripts/check-docs.py` cannot see a duplicate heading slug, because a duplicate slug
+  *resolves*.** Two `###` headings with identical text make every anchor to either one land on
+  the first, so the second section is permanently unlinkable — and the checker, which asks only
+  *does this link resolve*, passes. It happened in `screens/detail.md` on 2026-09-06 and was
+  caught by hand; the repo measures 0 duplicates today across `screens/`, `docs/`, `NOTES.md`,
+  `todo.md` and `README.md`, so a guard would land green and stay green. `tester`'s, whenever
+  `scripts/` is next open — roughly ten lines beside the existing `anchors()` walk, which
+  already collects every heading and only needs to count them. Raised by the PM at the
+  detail-tabs box
+  ([D254](NOTES.md#d254--the-events-tab-is-settled-before-it-is-drawn-describes-grammar-reused-whole-a-heading-that-only-comes-back-to-withdraw-a-promise-and-the-check-that-could-not-see-the-defect-it-was-written-after-2026-09-06)),
+  2026-09-06
+
+- **Nothing pins the `k8rs: ` prefix on the no-events stderr line.** `dev-core` measured it
+  during the Phase 11 de-duplication: drop the prefix and the whole suite stays green. Not a
+  regression — it was unpinned before the wording moved to `views.rs` too — but it is a
+  user-visible string with no test under it, and the prefix split is now load-bearing
+  (`views::NO_EVENTS` deliberately carries no prefix; the driver adds it). It belongs in
+  `tests/binary.rs`, which is **`tester`'s** file and not a dev's, which is why it was not closed
+  in the turn that found it.
+  **A second string is in the same state and belongs in the same box, but in `ui_tests.rs`:**
+  `ui.rs`'s log header formats `previous log: {:<3}`, and that `{:<3}` is the whole of the claim
+  that the `on` and `off` spellings start in the same column. `tester` planted `{}` in a copy of
+  the tree and the suite stayed green — 1257 passed, 0 failed — because one test feeds
+  `previous: false` for both captures and the assertion on the other is a substring.
+  **`cargo mutants` structurally cannot catch this class**: it does not mutate format strings, so
+  a padding claim has no gate but a test that asserts the column
+  ([D255](NOTES.md#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07)),
+  2026-09-07
+
+- **`container_choice` and `container_names` sanitise a value that ingest already stripped, and
+  `described` no longer does.** Created by the Phase 11 de-duplication and reported by its own
+  author. Both values come through `k8s::text(…, IDENTIFIER)` in `PodRead::of`, so the second
+  strip is redundant and the output is identical either way — **not** the two-readers-disagreeing
+  defect, just an asymmetry. Left alone deliberately: dropping a strip is not part of a
+  de-duplication and burying it in that commit would hide it from review. **One `sanitize` in
+  that region is load-bearing and must stay** — `which_container`'s refusal names a value that
+  comes from argv and never meets ingest, so a sweep that removes all three is wrong
+  ([D255](NOTES.md#d255--the-detail-tabs-mutation-round-three-mutants-no-test-can-kill-two-that-were-the-mockups-number-instead-of-the-rules-boundary-and-a-guard-whose-subject-moved-when-its-second-strip-went-away-2026-09-07)),
+  2026-09-07
+
+- **The Secret reveal `screens/detail.md` specifies cannot be built without reopening frozen
+  `k8s.rs`, and Phase 11's own security gate already assumes it exists.** Measured this turn, at
+  the detail-tabs box:
+  `screens/detail.md` § *A Secret, values hidden behind an explicit reveal* assigns **`v`**, gated
+  on the object being a Secret **and** holding at least one key, and Phase 11's security gate
+  carries the row *"Nothing revealed from a Secret is redrawn after the reveal is dismissed."*
+  **No box in Phase 11 builds it**, and the layer underneath cannot supply it: `k8s::document`
+  takes `(client, fetch, name, requested)` and no reveal flag, `mask()` is private and
+  unconditional, and `k8s.rs` froze at Phase 6's close.
+  **The obstacle is deliberate, which is what makes this a ruling and not a bug.** That path
+  never base64-decodes — the masked size is arithmetic over the base64 alphabet — and `k8s.rs`
+  states the reason: the plaintext is never materialised anywhere a formatter, a `Debug` or a
+  panic could find it, and it settles *a value that is not valid UTF-8 after decode is never
+  printed as text* for free. A `v` that reveals plaintext gives all of that up.
+  So there are three honest answers and the PM has ruled on none: reopen `k8s.rs` behind a
+  recorded reversal; drop `v` from the screen and let the masked sizes be the whole feature; or
+  put the reveal somewhere that is not the frozen read path. **Wanted before the Phase 11 box
+  that draws the key footer**, because that box will otherwise either bind a key that does
+  nothing — *"a key that does nothing is a bug this product has already shipped once"*, in the
+  screen's own words — or silently drop a row from a phase's security gate. Raised by the PM,
+  2026-09-07
+
+- **Carry `type` on `k8s::Happening`, so the events pane can tell a Warning from a Normal — and
+  decide what a Warning looks like before writing the field.** Ruled and deferred in
+  [D256](NOTES.md#d256--the-events-pane-cannot-tell-a-warning-from-a-normal-the-deadline-for-saying-so-was-this-box-and-a-doc-comment-naming-a-future-box-is-a-reminder-nothing-enforces-2026-09-07): the field is three lines, the *drawing* is a screen decision this product has a
+  vocabulary for (`●` `▲` `○`, `theme::band`) and this pane uses none of. **It needs a recorded
+  reversal**, because `k8s.rs` froze at Phase 6's close. Wanted before anyone calls the events tab
+  finished; the command log under that pane already teaches `kubectl events`, which prints a
+  `TYPE` column. Raised by `k8s-admin` at the detail-tabs review, 2026-09-07
+
+- **The events pane re-wraps the whole list every frame; the measured ceiling is 35.8 ms.**
+  `k8s-admin`, release build, 80×24, ten frames: 500 events each carrying a `FREE_TEXT`-length
+  message — the widest input the type permits — costs **35.8 ms per frame** and holds 2,047,500
+  bytes; the same 500 at realistic message lengths cost **975 µs**. The realistic number is fine
+  and the logs pane already has this shape, so nothing is being changed on a ceiling nobody has
+  hit. Recorded because it is per keystroke while scrolling, and because the number is measured
+  rather than guessed. Revisit only if a real cluster is ever seen producing long event messages
+  at volume. 2026-09-07
+
+- **Two smaller wording findings on the detail panes, neither wrong output.** `views::repeated`
+  can produce *"happened 2 times since just now"* when both stamps land inside the same age
+  bucket; and `views::identity` prints `Pod · unknown` for the one phase that means something
+  specific — the node stopped reporting — where it reads to a newcomer as *we don't know*, which
+  invariant 14 would rather it said outright. Both raised by `k8s-admin`, 2026-09-07
+
+- **`ContainerState::Terminated`'s `message` is discarded exactly the way `Waiting`'s was, and
+  fixing it is a screen change rather than a quiet code change.** Raised by `dev-ui` in the turn
+  that fixed the `Waiting` half, and deliberately not folded into it. `Waiting`'s fall-through now
+  carries the kubelet's sentence — `InvalidImageName` used to print bare jargon and now prints
+  *"Failed to apply default image tag …: couldn't parse image reference"* under it — but the
+  terminated arm still drops its own `message`, and it cannot simply copy that fix:
+  `screens/detail.md` pins the terminated detail line to `{phrase} — exit N`, so adding a
+  controller sentence to it changes a shape the screen fixes. **The ruling wanted is what that
+  line becomes**, and it belongs to `tui-designer` before `dev-ui`. The value is the same one that
+  justified the `Waiting` fix — a reason no table names is a word the reader cannot act on, and
+  the message is the sentence that says what to change. 2026-09-07
+
+- **`views::in_namespace` is a verbatim second copy of the private `rules::in_namespace`, and the
+  original carries the same latent defect — so sharing it would mean inheriting the bug.** Found by
+  `tester` at the command-log box. Both build ` -n <ns>` from an `ObjectId` and both document the
+  `Option` as the guard that makes them safe; measured, neither stops `Some("")`, which renders
+  `-n ` with no value and **swallows the next token** — worse than the `-n ""` the doc argues
+  about. `k8s::maybe` does not collapse an emptied string back to `None`, so `k8s::text` can
+  produce it from a namespace that was entirely control characters. `views.rs`'s copy is being
+  fixed in the box that found it; `rules.rs` is **frozen**, so its copy keeps the defect and the
+  two now differ. **The de-duplication needs a recorded reversal** — `fn` → `pub(crate) fn` on a
+  frozen file, zero behaviour change — and it should land together with the same guard, or the
+  reversal buys a shared function that is shared *and* wrong. This is D91's named failure mode
+  arriving exactly where D91 said it would: at a module boundary. 2026-09-07
+
+- **A mutation's `…` has no deadline, and `views::Log` cannot say k8rs stopped waiting.**
+  `k8s-admin`, at the command-log box: `ops.rs` carries no timeout on a mutation, and kube's
+  default `read_timeout` is 295 s — so a dead socket mid-`PATCH` leaves the running mark standing
+  for about five minutes with nothing on screen distinguishing it from a slow cluster. The type has
+  no third state between *running* and *an outcome word*; the shape it would need is an
+  `outcome("k8rs stopped waiting")` driven by a deadline. **Not fixable after `views.rs` freezes at
+  Phase 11's close without a reversal**, which is why it is recorded now rather than when Phase 12
+  wires a real cluster to it. The neighbouring case is clean and was checked: a second `started`
+  before the first resolves is made unreachable by `App::may_mutate`. 2026-09-07
+
+- **The command-log strip is drawn in `screens/` in words the manifest does not produce, and in an
+  order a tail of a feed cannot produce.** Measured by `k8s-admin` and enumerated by
+  `tui-designer` at the command-log box; deliberately **not** fixed there, because the manifest's
+  wording is `main.rs`'s and that file is `dev-core`'s. Every site:
+  `analysis.md:102-103` (Capacity) draws `$ kubectl get nodes -o json`, which matches **no**
+  manifest command at all, beside `top nodes`; `:433-434` (Drain safety) draws `get pdb -A` where
+  the manifest emits `get poddisruptionbudgets -A`, and puts the report fetch **above** the pods
+  watch; `:1124-1125` (Waste) draws one comma-joined `get svc,endpointslices,pvc,replicasets -A`
+  where the manifest emits five separate lines, same ordering problem; `:2015-2016`
+  (Certificates) draws `get csr` and `kubectl version` where the manifest says
+  `get certificatesigningrequests` and `get --raw /version`; and `:1460`, `:1618` (Posture, both
+  variants) and `:1747` (Restarts) each draw `get pods -A --watch` **alone**, which is manifest
+  line 11 of 15 and not the tail — the same stale-tail defect already fixed in `alerts.md`.
+  **Two questions, and they are different**: whether the manifest should be spelled the short way
+  a reader would type (`csr`, `pdb`, `version`) — `dev-core`'s, in `main.rs::command_log` — and
+  whether the strip should show *the tail of the feed* or *the commands behind the open pane*,
+  which is a design ruling nobody has made. `k8s-admin`'s judgement on the second, recorded
+  because it is the reason this is worth doing: two permanent rows reading
+  `statefulsets --watch` / `daemonsets --watch` are the two least informative of the fifteen, and
+  they cost an operator one card off a 16-row body. 2026-09-07
+
+- **The drawn Secret yaml line teaches a command that prints in full what the pane just masked,
+  and has no caveat where the headless surface has one.** `main.rs` writes *"k8rs: a Secret's
+  values are hidden here and shown as their sizes — the command above prints them in full"* under
+  its yaml command — a `k8s-admin` finding at Phase 6's close — and the TUI's two-row strip has no
+  equivalent, so the surface that also offers the `v` reveal is the one **without** the warning.
+  `tui-designer`'s ruling, asked for and given: it needs one, and it does not fit in the strip.
+  `LOG_LINES` is 2, so a caveat costs either the command line itself (defeating the teaching) or
+  the previous command (losing context); the honest options are widening the strip's
+  `Constraint::Length` — a frame change, not a mockup fix — or a dim one-line note **inside** the
+  yaml pane near the masked `data:` block. That is a layout ruling and wants its own box.
+  2026-09-07
+
+- **`states.md` and `alerts.md` disagree about whether a healthy watch line carries a running
+  mark.** Raised by `dev-ui` at the command-log box, after the type was reshaped so any line can
+  carry an outcome. `states.md:218` draws `$ kubectl get pods -A --watch   → login expired` in the
+  strip — which is only reachable if the caller marked that line as sent, and a watch is
+  long-lived, so the same line would carry D20's `…` for the entire time the watch is **healthy**.
+  `alerts.md` draws those watch lines with no `…` at all. Both cannot be right. The fact itself is
+  already drawn twice: `states.md` also puts `⚠ login expired` in the header, so the strip's
+  version is a second record of one event. **No code path produces this yet** — the caller is
+  Phase 12's — which is why it is boxed rather than blocking, but it wants settling before that
+  caller is written, because the answer decides whether a watch is `ran` or `sent`. 2026-09-07
+
+- **The Secret yaml tab's `v reveal` footer has no box.** `screens/detail.md:1390` gives that one
+  pane `[ ] tabs  v reveal  esc back  ? all keys  q quit`; measured at the footer box, the shipped
+  code draws it without `v reveal`, and it cannot do otherwise — `ui::Detail::secret_without_keys`
+  is the *opposite* case, so `App::footer` has no input that could decide it. Every other row of
+  `screens/widgets.md` § 2a that this box did not draw belongs to a Phase 11 box that exists; this
+  one belongs to the reveal, which no box in the phase names
+  ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+  ruling 5). 2026-09-10
+
+- **`ui.rs` is 2433 lines and `dialog.rs` is still unspent.** [D11](NOTES.md#d11--the-ninth-file-pre-approved)
+  pre-approves exactly one ninth file if `ui.rs` passes ~800 lines; it passed that three times over
+  and the file has stayed whole because nothing forced the split. The footer box added ~120 lines;
+  the four dialog boxes left in Phase 11 are the largest thing still to land in it, and they are
+  what D11 named the file *for*. Raised by `dev-ui` at the footer box — a size to read against the
+  dialogs when they are briefed, not a refactor to schedule. 2026-09-10
+
+- **The typed-name delete is marked only behind `?`, so the box's own motivating case is not
+  closed.** D23's scenario is a user typing a pod's name in full and only then learning they were
+  never permitted; `ctrl-d` reaches no footer, deliberately, because `ctrl-d no delete` is +16
+  columns on a footer already at 71 of 76. The cheap place is the delete confirmation dialog,
+  before the name field — `screens/dialogs.md`'s, and no box names it
+  ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  item 7). 2026-09-12
+
+- **A webhook authorizer could make fail-open fail in the one direction it may not.** If a
+  `Webhook` in the chain grants a verb while the `SelfSubjectRulesReview` returns
+  `incomplete: false`, `Permits::may` answers `No` and dims a key the login can use. The Node
+  authorizer sets `incomplete` and was measured doing so; a webhook one was never tried. The
+  experiment is one kind cluster with `--authorization-mode=RBAC,Webhook`
+  ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  item 11). 2026-09-12
+
+- **The delete clause's plural is tied to nothing, because `ops::removal` is private and `ops.rs`
+  is frozen.** `s` and `r` are pinned against `ops::scalable`/`restartable`'s own `ApiResource`;
+  the `ctrl-d` arm cannot be, and the test says so rather than implying three-of-three. Either an
+  accessor when `ops.rs` next opens, or a different tie
+  ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  item 4). 2026-09-12
+
+- **Two screen files still say the header context is never truncated, and it has not been true
+  since Phase 11's layout box.** `screens/alerts.md:37` says *"It is never truncated"* and cites
+  the very section that now says the opposite; `screens/states.md:259` uses the same claim as a
+  premise (its conclusion survives — a 171-character sentence does not fit a one-line header
+  however it is cut). Both predate
+  [D249](NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06),
+  which shortened the zone from its front behind a visible `…`, and `screens/widgets.md` § 1a was
+  corrected at the in-flight box. Raised by `tui-designer` there, which named a third spot,
+  `alerts.md:190` — **that one is the age column and is not this claim**, measured before writing
+  it down. `states.md` is the eight-states box's own file and can take its copy with it.
+  2026-09-12
+
+- **`Dialog::armed` has no doc comment and `Dialog::confirm` carries two.** `src/views.rs`'s block
+  at the head of `confirm` opens *"Whether the confirm button is drawn live"* and spends four
+  paragraphs on the dry-run, the empty-name guard and what the method authorises — all of it about
+  `armed`, which sits below it with nothing — before switching mid-block to `confirm`'s own
+  sentence with no separator. Landed with the dialog family
+  ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12));
+  nothing mechanical can see it, which is
+  [D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)'s
+  *rustfmt and the tests cannot see a typo in a comment* as a live example. Found by the PM
+  reading the region while briefing the in-flight box. 2026-09-12
+
+- **`ui::name` draws the `/node-3` its own doc forbids, and five callers share it.** `Some("")` is
+  not `None`: `views::Object::new` filters an empty `uid` and nothing else, and `k8s::text` **can**
+  return an empty string — a namespace of only bidi or control characters strips to nothing — so
+  `k8s::Row::bound`'s `maybe(&mut self.namespace, IDENTIFIER)` can hand one over. A namespaced
+  object then draws as the bare token `screens/README.md` § the five rules reserves for a
+  cluster-scoped one. Measured by `tester` at the in-flight box with
+  `Object::new("deployment", Some(String::new()), "node-3", None)`; the five callers are the
+  dialog title, the `Gone` body, the card owner, the detail heading and now the in-flight footer,
+  so the fix is one guard in `ui::name` or in `Object::new`, not five. 2026-09-12
+
+- **`ui::fits` is O(n²) and a zero-width character never advances it** — `"\u{202e}" × 10_000` as
+  an object name drew one frame in **1463 ms**, against 0 ms for the same length of `x` (`tester`,
+  2026-09-12, measured over `ui::render`). It walks a growing prefix and breaks only when the
+  measured width passes `columns`, which a zero-width character never does. Not reachable from
+  `metadata.name` (DNS-1123, ≤253 bytes) and shared with the browser's row name, so it is not the
+  in-flight box's — but it is the security gate's *sizes are bounded* row, and the box that first
+  hands `clipped` a server-printed `Table` cell is the one that meets it. 2026-09-12
+
+- **The audit sentence opens lowercase on screen, because `ops` writes it for a prefix the TUI
+  does not draw.** `main.rs` prints `format!("k8rs: {refusal}")`; in the pane there is no prefix, so
+  three of `ops::audit_log`'s four refusals put *"there is something at …"* at the top of the content
+  pane where every other banner opens with `⚠` or a capital. The drawn example happens to be the one
+  that starts `k8rs could not open…`. `ops.rs` is frozen (`k8s-admin`, the nine-states box). 2026-09-12
+
+- **The audit fixture reads the screen file, not `ops.rs`, because the pieces it would be built
+  from are private and `ops.rs` is frozen.** `ops::without`, `STILL_READS` and `Source` cannot be
+  named from `ui_tests.rs`, so `dead_log()` reads § *The audit log could not be opened*'s mockup and
+  checks it carries one of `Source::clause`'s two answers. A `pub(crate)` on those three would make the
+  sentence structural rather than transcribed — `dev-core`'s or the PM's call when `ops.rs` next
+  opens. 2026-09-12
+
+- **A worst-case audit sentence takes the whole calm block, including `reading the cluster…`.** The
+  calm block ranks by position — the audit sentence directly under the headline, the caller's
+  paragraphs after — so at the measured 1383-character sentence (an `XDG_STATE_HOME` of five
+  200-character segments) it fills all 13 rows and the count goes with it; on *Still loading* so does
+  the only line saying the pane is loading. The banner stack has the opposite rank on purpose. Not
+  reachable from an ordinary path, and it is the one place the two ranks' disagreement costs a
+  reader something (`dev-ui`, the nine-states box). 2026-09-12
+
+- **`k8s-admin`'s agent definition grants no `Write`, and CLAUDE.md's ownership table says
+  `reports/` is the one tree it writes.** `.claude/agents/k8s-admin.md` lists `Read, Grep, Glob, Bash,
+  WebFetch, WebSearch`; two of today's reviews could not land their own measurements and the PM
+  transcribed them. Adding `Write` to that list was refused by the permission classifier, so it is
+  the user's to grant — or the table's row changes to say the PM lands `k8s-admin`'s reports.
+  2026-09-12
+
+- **The product has two mechanisms for one cursor, and `screens/widgets.md` § 2 is wrong about
+  which.** That table says the delete dialog's typed-name field uses `Frame::set_cursor_position`;
+  `ui::typed_name` draws a literal `_`. § 2b's filter footer, built this turn, uses the real terminal
+  cursor, so both now exist side by side and the older one is the one the page misdescribes. Either
+  `typed_name` moves to the real cursor or § 2's row is corrected — `tui-designer`'s page, `dev-ui`'s
+  code, and neither is a defect a reader can see today. Found by `dev-ui` while building the footer
+  key box. 2026-09-18
+
+- **`?` lists `c container` on a single-container pod, where the key is unbound.** Help is the
+  exhaustive key map by design, and the footer now withholds `c` exactly where the picker has nothing
+  to offer (`screens/detail.md` § Choosing a container), so the two disagree about the same fact for
+  the same pod. `screens/help.md` § When a key is refused already has the vocabulary for a key that is
+  drawn and not available; nothing says whether Help should use it here. Found by `dev-ui`, same box.
+  2026-09-18
+
+- **The container picker draws init containers as peers of the app container.**
+  `rules::ContainerSnapshot::role` already answers `Regular` / `Init` / `Sidecar` off
+  `spec.initContainers[].restartPolicy`, and the picker reads only `state` and `restarts` — so a pod
+  stuck in `Init:0/2` lists `app  not started` above `init-db  running` with nothing saying the first
+  waits on the second, where `kubectl describe` separates them. A prefix column or a divider row, and
+  the fact is already in hand. Found by `k8s-admin`
+  (`reports/2026-09-18-filter-and-container-picker.md`), 2026-09-18.
+
+- **Nothing on screen says how many rows a filter removed.** The sidebar badge keeps the cluster's
+  totals, correctly, so the only way to notice a new critical alert arriving behind an active `/web`
+  is to watch a number two panes away and infer. `filter: "web"   3 of 7 shown   esc clears it` is one
+  defensible denominator — same list, same frame — and the cheapest thing that would make a filter
+  safe to leave running. Found by `k8s-admin`, same report, 2026-09-18.
+
+- **The narrowing runs twice per frame, and it allocates per cell.** `offered()` computes the filtered
+  list for the footer's shape and the pane computes it again; `contains_ignoring_case` allocates two
+  `String`s per field per row per call, so a `-A` pod table on 5000 pods is ~90k allocations per
+  frame, once per keystroke while typing. Not invariant 6 — nothing re-LISTs — but it is
+  PRIOR-ART § A4's per-object overhead. Hoisting the lowercased needle and computing the list once per
+  frame closes both, and Phase 12's wiring will touch this code anyway. Found by `dev-ui` and
+  `k8s-admin`, 2026-09-18.
+
+- **`help.md`'s key map and `detail.md`'s logs tab still say a restart is a crash.** The container
+  picker's own hint was corrected on 2026-09-18 — *"the log from before that restart, if the kubelet
+  still has it"* — because a container that exits 0 under `restartPolicy: Always` increments
+  `restartCount` without crashing, and `--previous` 404s once the kubelet has rotated the old log.
+  The identical claim stands in two other places nobody's box named. `tui-designer`'s, when a box
+  next opens either page. 2026-09-18
+
+- **An undrawn `ContainerPick` keeps `may_switch_cluster` false until a press is spent.** That gate
+  reads `modal.is_none()`, and a picker whose containers vanished is a modal nobody can see — the same
+  class this box closed for `escape` (NOTES § D268). No visible harm today, because `X` is not on a
+  detail tab's footer; a reader who reaches for it first simply gets nothing, and the first `esc`
+  heals it. One parameter and its call sites, and Phase 12's wiring touches this code anyway. Found by
+  `k8s-admin` and `dev-ui`, 2026-09-18.
+
+- **Help and the footer will disagree about `s`/`r` the day the `may_i` probe is wired.**
+  `ui::key_map` rewrites the `s` row to name the missing permission whenever `refused.scale()` is
+  true, and it knows nothing about the selected kind; the footer, since 2026-09-18, drops the key
+  entirely on a kind that has no such operation. Fire the probe for `scale` on a Node and Help would
+  say *you lack this permission* about a key the footer does not draw. Nothing wires either today
+  (`may_i_in` and `may_mutate` have no production caller), so it is a constraint on Phase 12's
+  wiring box, not a live defect: either do not ask about an operation the kind does not support, or
+  hand `key_map` the `Offer` too. Found by `tester`, 2026-09-18.
+
+- **A ReplicaSet card offers `s scale` and no `r restart`, and the card is usually an unresolved
+  owner rather than a bare ReplicaSet.** Measured on the fixture cluster: 8 of 8 ReplicaSets are
+  controlled by a Deployment, none bare — so what puts `ObjectKind::ReplicaSet` on a card is
+  `Store::unresolved_owners` (the first frames of every run, and permanently after a 403, a 404
+  mid-rollout or one dead socket, since nothing retries — D148, D151). On such a card `s scale`
+  reaches `replicasets/scale` and the Deployment controller reverts it, while `r restart` — the key
+  that would fix a crashlooping Deployment — is gone from the line with no word, and `ops::rollout`'s
+  own teaching sentence (*a replicaset is normally made by a deployment…*, D224) becomes unreachable
+  from the TUI. `Card` cannot tell unresolved from bare: the flag lives in `Store` behind a frozen
+  `k8s.rs`. Two shapes the reviewer would accept — draw `Move`'s line while the owner is unresolved,
+  or let the `s` dialog carry `ops::rollout`'s sentence — and the second belongs to Phase 12's dialog
+  wiring. `screens/widgets.md` § 2a should also stop using *a bare ReplicaSet* as that row's running
+  example; it is the case that does not occur. Found by `k8s-admin`
+  (`reports/2026-09-18-offer-per-kind-operator-read.md`), 2026-09-18.
+
+- **`ctrl-d delete` on a Node is asserted by no test.** A Node is `Act { scalable: false,
+  restartable: false }` and not `Offer::Move` precisely so a delete gate keyed on the shape stays
+  reachable on the one kind the screens say delete works on — but `may_mutate` has no production
+  caller yet, and `Act{false,false}` draws the same line `Move` does, so nothing enforces the promise.
+  The assertion is owed by Phase 12's `ctrl-d` box. Found by `k8s-admin`, same report, 2026-09-18.
+
+- **`scripts/screens-check.py` measures that a mockup *fits* 80×24 and not that one block's border
+  lines share a width, which is a review round it could have been a 40-second gate for.** It already
+  computes display columns correctly — `─` at three bytes and one column, East Asian W/F at two — and
+  already walks all 240 fenced blocks, so the missing assertion is *every line starting with a border
+  glyph inside one block has the same width*. Measured on the round that found it: 34 blocks in
+  `screens/detail.md`, 33 uniform, the newly written one out by a column on four lines and two on a
+  fifth, and `just check` green throughout
+  ([D270](NOTES.md#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18)).
+  `tui-designer`'s own definition now carries the check by hand, which is the copy that goes stale.
+  `tester`'s, and the guard must be seen red before it is trusted (D26). Found by the PM, 2026-09-18.
+
+- **The header's clock pointer is drawn on eight mockups and no code can produce it.**
+  `screens/states.md` ends the header with `⚠ your clock is behind` / `ahead` at `:727 :803 :860
+  :899 :947 :974 :1371 :1539`, and `header()` joins context → `Link::state` → the permission word →
+  the TLS mark → `changing…` and nothing else; `grep "your clock is" src/*.rs` finds it only in a
+  `theme.rs` doc comment and one test string. It sits *after* the permission word, so no caller can
+  smuggle it in through `Screen::context` either — the same slot-ownership reasoning that moved the
+  connection word onto `Screen::link` ([D265](NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13) ruling 1)
+  applies to it and nobody has boxed it. **The two screen files disagree, which is why this is a
+  ruling and not a patch**: `screens/states.md` § *It does not fit in the header, so it does not go
+  there whole* makes the split deliberate — the sentence goes in the pane, the header carries a
+  pointer sized like the two marks it already has — while `screens/widgets.md` § 1a's zone table
+  lists six segments and the pointer is not one of them. The code follows § 1a, and since
+  2026-09-19 a test *asserts* the pointer's absence for `(Link::Live, Some(SKEWED))`, so the gap is
+  nailed in. The reader is not blind meanwhile: `Screen::clock` draws the whole sentence over the
+  pane. Found by `tester` and `k8s-admin`
+  ([reports/2026-09-19-the-strip-and-the-connection-word.md](reports/2026-09-19-the-strip-and-the-connection-word.md)), 2026-09-19.
+
+- **Two screen files disagree about whether `esc` can ever be refused, and the code has had to
+  pick one.** `screens/widgets.md:1057` reads *"`esc` closes exactly one level, always. A modal
+  never traps the user."*; `screens/dialogs.md:673` § The verdict line reads *"for `scale` and
+  `restart`, `esc` is inert for as long as a real round trip to the cluster takes"*
+  ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
+  Phase 12's four-behaviours box implemented the dialogs.md side — `views::Dialog::waiting()`, and
+  `App::escape` puts a dialog back while its check is out — and wrote the disagreement into
+  `escape`'s own doc rather than leaving it silent. The two sentences can both stand if the
+  widgets.md one is read as *a modal never traps the user permanently*, but that is a reading and
+  not what the line says, and the line is in the file the key map is checked against. Found by
+  `dev-ui`, 2026-09-19.
+
+- **`screens/dialogs.md` draws no pending box, so the one state a confirm spends a round trip in
+  is the one state nobody has drawn.** Every mockup in that file carries `[ esc cancel ]` at full
+  weight, and `ui::buttons` therefore draws it at full weight while `Dialog::waiting()` is true —
+  a live-looking key beside a footer that, since 2026-09-19, says `waiting for the cluster` and
+  names no key at all. Whether the button dims, disappears or stays is a wording-and-weight
+  question `tui-designer` owns; the code cannot pick without inventing it, which is why it did not.
+  The state is unreachable until the `main.rs` wiring box opens a dialog for real. Found by
+  `dev-ui`, 2026-09-19.
+
+- **The logs pane tells the reader nothing about where they are or whether it is still following.**
+  Measured 2026-09-20: `j` pressed at the tail of a followed stream turns follow off and the frame
+  is **byte-identical** before and after, so an operator leaning on `j` while tailing a crashlooping
+  container gets a dead window and concludes the container stopped writing. Nothing on the screen
+  says follow is off — the header draws `container: app                      previous log: off` and
+  carries the convention for exactly this one column over, and the footer's `f follow` reads the
+  same in both states. **The four-behaviours box made this more likely, not less**: before it, `k`
+  and `j` out of follow saturated to line 0 — wrong, but loud. Related and in the same pane:
+  `screens/help.md:10` gives `↑ ↓ / j k` and nothing else, so the top of the 5000-line buffer
+  `screens/detail.md:599` sells as *"enough to scroll back through a crash"* is 5000 presses away,
+  and the one accidental way to get there in one key is what the box removed. An indicator, a
+  `g`/`G`, or both — new surface, so it is a later phase's box and not a defect in the landed code.
+  Found by `k8s-admin` ([reports/2026-09-20-the-four-behaviours.md](reports/2026-09-20-the-four-behaviours.md)), 2026-09-20.
+
+- **None of the four scrolling tab bodies draws a scrollbar, and `screens/widgets.md` disagrees with
+  itself about whether one is owed.** `grep -n "scrollbar(" src/ui.rs` finds four call sites — the
+  container picker, the pod-pick step, `leads`' pinned block and the which-pods list — and **none of
+  `scrolled`'s five**: `stream`, `describe`, `rows_into`, `yaml` and the tab body itself.
+  `screens/widgets.md:215` says a `Scrollbar` is rendered on *"any pane taller than its viewport"*
+  and § 4 writes a rule for the log pane's bar — *"the bar shows position within what is retained"* —
+  which is a sentence about a bar that pane does not have; the mockups draw none, and the code
+  followed the mockups. With the follow-indicator gap above, the net is that the pane an operator
+  lives in during an incident gives no position feedback at all. Pre-existing, a screen ruling
+  before it is a code box. Found by `k8s-admin`, same report, 2026-09-20.
+
+- **The cleanup path takes a lock the thing that broke may already hold.** The panic
+  hook calls `handed_back()` → `crossterm::terminal::disable_raw_mode()`, which takes
+  `parking_lot::Mutex` (`crossterm-0.29.0/src/terminal/sys/unix.rs:14,148`), and that
+  mutex is not reentrant: a panic raised *inside* crossterm's own critical section
+  deadlocks the hook, so the process hangs with a raw terminal and prints nothing. Two
+  ioctls wide, so vanishingly unlikely — and **not new**: `ratatui::restore()` had the
+  same shape and ratatui's own chained hook still does. Recorded for the class, which
+  is invisible until it happens: *the cleanup path depends on the thing that broke*.
+  Found by `k8s-admin` ([reports/2026-09-24-the-terminal-handover.md](reports/2026-09-24-the-terminal-handover.md)
+  finding 7), 2026-09-24.
+
+- **`raise` stops one process; a tty ctrl-z stops the whole foreground group — and v0.4
+  is where that difference starts to matter.** `suspended()` uses
+  `libc::raise(libc::SIGSTOP)`, which signals this process only. Today nothing else is
+  in the group and a pipeline never opens a console at all (`at_a_keyboard`,
+  `src/main.rs:437`, needs a tty at both ends), so the two are indistinguishable. When
+  v0.4's `e` spawns `$EDITOR` into the same process group, a ctrl-z pressed while the
+  editor is up would stop the editor and not k8rs, or the reverse, depending on who
+  holds the terminal. The handover pair is already the shared one D24 asked for; what is
+  undecided is the *group*. Found by `k8s-admin`, same report § question 1, 2026-09-24.
+
+- **Two edges of a suspend during a write, bounded and unproven.** `ctrl-z` is deliberately
+  not refused while the **real** call is on the wire (D276's family; the refusal covers only
+  the dry-run window): SIGSTOP freezes every thread, so the audit line is delayed to `fg`,
+  not lost. Two cases nobody has run, both needing a cluster: a suspend longer than the API
+  server's request timeout, where an applied write is recorded as a connection error; and
+  `kill -9` while the process is stopped, where the server applied a write that no audit
+  line records. Neither is created by the handover — a laptop lid does the same — and both
+  are invariant 4's edge rather than its breach. Found by `tester`, step 5 of the handover
+  family, 2026-09-24.
+
+- **`just check`'s cross matrix silently checks nothing on the test host.** The run prints the
+  skip loudly and still exits `0`: all four release targets (`aarch64`/`x86_64` × musl and
+  darwin) are skipped because their std is not installed there, so since D267 moved every run
+  to that host, `just cross` has been a step that reports rather than a step that builds. CI
+  still runs them, which is why a break shows up at the push instead of at the gate — exactly
+  the shape `just check` exists to prevent (CLAUDE.md § Running it: a missing step is an
+  invisible gap). Fix is `rustup target add` ×4 on the host plus the linkers `cross` wants,
+  or a recorded decision that the matrix is CI's alone. Found by `tester`, 2026-09-24.
+
+### From the which-cluster family and its two reviews (2026-09-26)
+
+All six are `k8s-admin`'s or `tester`'s findings on the family
+[D279](NOTES.md#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24)
+landed, triaged in
+[D280](NOTES.md#d280--the-which-cluster-review-round-a-header-slot-with-no-vocabulary-a-mockup-that-cannot-be-drawn-and-four-tests-weaker-than-they-read-2026-09-26)
+item 7. Evidence:
+[reports/2026-09-25-the-which-cluster-family.md](reports/2026-09-25-the-which-cluster-family.md).
+
+- **An expired API-server certificate reached through `X` leaves the reader on a false
+  `⚠ disconnected, retrying`, for ever.** `certificate_is_why` is asked on the startup path
+  only; a switch to the same cluster opens a session whose every watch fails the handshake,
+  and `s`/`r` are paused *while disconnected, retrying* — which cannot help and never will.
+  The ten-line wall does not fit the thirteen-row modal ceiling, so the fix needs a screen
+  and not a call. Contradicts `screens/context.md`'s own *the switch is the startup path,
+  run again*. Found by `k8s-admin`, finding 6.
+
+- **`--namespace` crosses a switch and the new cluster is never asked whether it has that
+  namespace.** Kept as a property of the process (D280 item 4); what it owes is the scoped
+  Alerts paragraph `screens/states.md` § You can only see some namespaces specifies, which
+  does not reach the console today and is independent of this box. The LIST return against a
+  missing namespace is **not measured**. Found by `k8s-admin`, finding 7.
+
+- **The taught `--context` carries the drawn name, not the spelling `kubectl` would resolve.**
+  `Session::context` is stripped and capped at 512 bytes; `connect_with` is handed the raw
+  key. For a bidi or over-long context name the strip prints a pasteable line naming a context
+  that does not exist. The two requirements genuinely conflict — the raw name may not be
+  printed — and the bare-`$ kubectl` fallback the function already has for a name that strips
+  to nothing is the shape the partial case wants. Found by `k8s-admin`, finding 8.
+
+- **`k8s.rs`'s token-hygiene comment says an exec plugin's *stdout* where `Never` now pipes
+  stderr too.** The invariant holds — nothing formats a kube error, *select, never format*,
+  verified — but the documented shape is narrower than the risk, and the next person reaching
+  for a kube error string reads that sentence. `k8s.rs` froze at Phase 6, so this is a
+  reversal and not an edit. Found by `k8s-admin`, finding 9.
+
+- **`Modal::Unconnected::coverage` is computed at its only construction site and read by
+  nobody**, and `X` appends `$ kubectl config get-contexts` on every press with no dedupe, so
+  two presses read as two kubeconfig reads that did not happen. Found by `k8s-admin`,
+  findings 10 and 11.
+
+- **`X` reconnects from the kubeconfig cached at startup**, so a login renewed by *writing a
+  fresh token into the file* is reconnected with the stale one — while `Fault::Expired`'s own
+  sentence tells the reader to renew it there and press `X`. `src/views.rs`'s `Fault::Expired`
+  arm already records this class as *"the PM's to box rather than this arm's to guess at"*;
+  the cache is deliberate (`X` must not re-read the kubeconfig to open a picker) and reversing
+  it is a decision. Found by `tester`, gap G2.
+
+- **`reports-guard.py` refuses any Rust path spelled `Token::`, `Secret::` or `Credential::`.**
+  Its rule is a credential-named field, a separator and a long value, and Rust's `::` satisfies
+  the separator — so a reviewer naming a kube-client symbol reds the build. **The guard is
+  right and narrowing it is worse**: excusing `::` would also excuse `token::` inside a real
+  leak's key path, which is the framing [D31](NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+  exists for. The cost is one red build per reviewer who has not met it yet, and the entry is
+  here so the next one recognises it. Found by `tester` and `k8s-admin`, 2026-09-26.
+
+### From the which-cluster round two (2026-09-26)
+
+Triaged in [D281](NOTES.md#d281--round-two-the-fix-that-broke-the-quoting-rule-a-probe-that-was-not-one-and-a-frame-that-is-honest-as-built-and-misreading-as-drawn-2026-09-26)
+item 8. Evidence:
+[reports/2026-09-26-which-cluster-round-two.md](reports/2026-09-26-which-cluster-round-two.md).
+
+- **Two test sites index a page's fenced blocks by `##`-ordinal and are fragile to a fence added
+  under an earlier `###`.** `## The tag column` (`[1] [2] [3]`) and `## Unhappy states`
+  (`[0] [3]`), neither with a shape canary. **`## Unhappy states`[3] fails silently** — its test
+  reads only `.len()`, so a different mockup with the same row count passes. This family fixed
+  the same class at two sites by addressing blocks by `###` heading instead; these two are
+  pre-existing and not this family's, and a guard for the class would red the gate on them.
+  Found by `tester`, round two finding 2.
+
+- **`main::kubectl(None)`'s bare `$ kubectl` line collides with the failed-switch frame.** A
+  context whose name strips to nothing drops the `--context` segment whole — right, and
+  documented in `src/ops.rs`. In the new frame the only cluster name on screen is the one that
+  was just refused, the strip's line came from a different cluster, and pasting it runs against
+  `current-context`, a third. This box created the frame, not the line. Found by `tester`,
+  round two finding 4.
+
+- **The backlogged drawn-name-versus-key finding got more expensive**, and the entry above it
+  should be read with this one: a next step now *instructs* the reader to run what the command
+  log merely showed, so a name that differs between `Choice::name` and `Choice::key` sends them
+  to a context `kubectl` cannot find as their way out of a dead end. Also: `ui::cut` bounds the
+  box's paragraph with no idea it is cutting a command, truncating a taught line mid-name where
+  `command_cut` exists and is not reachable from there. Found by `k8s-admin`, round two
+  finding 5.
+
+### From the which-cluster round three (2026-09-26)
+
+Evidence:
+[reports/2026-09-26-which-cluster-round-three.md](reports/2026-09-26-which-cluster-round-three.md)
+and the round-two report beside it. Neither is blocking; the round found no defect in the code.
+
+- **The `Halt::Mutate` arm's three `continue` guards can discard a halt that was already
+  drained.** `let Some(file) = audit.as_mut() else { continue }` and its two siblings sit after
+  the slot has been emptied, so a key parked during a mutation is lost if the run has no audit
+  log. Unreachable today — `--read-only` opens no audit log *and* reaches no mutating key — and
+  it predates the carry, but it is the one remaining `continue` that eats a real keypress and it
+  has no test. Found by `tester`, round three.
+
+- **`kubectl version` prints `Client Version:` locally before it contacts the server.** So the
+  reader whose login now works but whose cluster is unreachable sees two success-looking lines
+  above the error, presses `X`, and the switch fails again. It does not loop — the second box
+  draws a different fault — so the cost is one wasted attempt. **This is an estimate, not a
+  measurement**: nobody ran `kubectl version` against an unreachable server. The one-line run
+  would settle it. Found by `k8s-admin`, round three.
+
+### From the copy-guard box (2026-09-26)
+
+Two further copies of `ops::ACCEPTED` / `ops::UNCHECKABLE` that the new rows do not pin, found
+by `tester` and reported rather than written — each sits in a tree it does not own. **Neither is
+a silent hole**, which is why neither blocked the box
+([D282](NOTES.md#d282--the-two-sentences-opsrs-keeps-to-itself-stay-copied-and-the-guard-that-already-exists-is-what-pins-them-2026-09-26)).
+
+- **`src/ui.rs:3181`** quotes `k8rs did not check this one with the cluster first` inside
+  `spoken`'s doc comment, to explain why the function exists — the sentence starts with `NAME`,
+  and *"K8rs"* is a word this product never spells. Illustrative prose, not a drawn copy, and the
+  *behaviour* it explains is now pinned anyway: the guard reimplements `spoken`'s no-raise rule
+  and checks it against the page. A reword leaves the doc stale and nothing else.
+
+- **`src/ops_tests.rs:179`** is `const CHECKED_FIRST: &str = "dry-run: the cluster checked it
+  first and accepted it"` — a sixth copy carrying a `dry-run: ` prefix, in `dev-core`'s tree.
+  Pinning it needs a prefix convention the box did not ask for. A reword of `ops::ACCEPTED`
+  makes it **red**, loudly, because the product then builds a string the test does not assert —
+  it fails in a confusing place rather than quietly.
+
+- **Two shapes the guard states it cannot see**, in its own docstrings rather than left implied:
+  a copy rewritten end to end leaves both fragment counts intact, and the node clause's two
+  fragments overlap on the word `k8rs,` so a reword of that one word is invisible.
+
+### From the dialog-strip box (2026-09-26) — two of these are Phase 12 **close blockers**
+
+Found by `k8s-admin` and `tester` over one diff, ruled in
+[D284](NOTES.md#d284--the-dialog-strip-review-round-a-door-that-was-not-one-a-renderer-that-panics-on-the-strips-own-fixed-point-and-two-comments-that-were-lies-2026-09-26)
+rulings 6 and 8. The first two are **wrong output an operator acts on**, so the
+Phase 12 close triage fixes them; the rest are notes.
+
+- **CLOSE BLOCKER — the console never draws D224's paused-Deployment sentence.**
+  `ops::Checked::returned()` is `pub` and the headless driver reads it through
+  `while_paused` (`src/main.rs:7212`, used at `:7271`), but `Published::Checked`
+  (`src/main.rs:8818`) has no warning field, so `mutating`'s `show` sets
+  `warning: None` and nothing downstream can set it. An operator who presses `r`
+  on a **paused** Deployment gets the generic *"a paused deployment will not
+  start…"* line, an armed button, and a command log resolving to `→ done` with
+  nothing replaced — D224's defect verbatim, arriving through the one surface an
+  operator acts on. `screens/dialogs.md:801-843` draws the box the code cannot
+  produce, so the screen is right and the code is wrong. The fix is `main.rs`
+  only: a third field on `Published::Checked` and one assignment in `installed`.
+  Found by `k8s-admin`, finding 1.
+- **CLOSE BLOCKER — a refused mutation is completely silent on the console.**
+  `settled`'s `Err` arm calls `console.log.outcome("refused")`, and
+  `views::Log::outcome` does nothing when nothing is `waiting` — which only
+  `Log::sent` sets, and `Log::sent`'s one product caller is `over_modal`'s confirm
+  arm, which never runs on this path because `show` never ran. So: no box, no
+  command-log line, no audit line (ruled out by the preflight decision), no
+  stderr, because a TUI has none. A keypress that does nothing. Unreachable from a
+  conforming API server today — it needs `object_name` or `namespace_name` to
+  refuse a value that came through ingest — which is why it is a close blocker and
+  not a stop. Found by `k8s-admin`, finding 4.
+- **Invariant 4's headroom is a length argument that lives in no comment and no
+  test.** The taught line and the audit line are the same string only while it
+  stays under `FREE_TEXT`: `Record::of` cuts at 4096 and `main.rs:9948` re-spends
+  `Stripped::of` at the same cap, so a first cut makes the second call cut again
+  and the two records become two different commands. The longest line the product
+  can build today is ~900 bytes. Nothing catches a future operation that passes
+  4096. `k8s-admin`, finding 8.
+- **`unhostile`'s row assertion counts `chars()` where its message says cells.**
+  `screened` emits one symbol per cell and a symbol can be a grapheme cluster, so
+  a combining mark — which `k8s::text` deliberately keeps — reads as 107 chars in
+  an 80-cell row. Measured by `tester`, §5. The direction is a false **red**, never
+  a false green, and every caller today feeds a crafted name; but `ui.rs` draws API
+  free text where a combining mark is ordinary.
+- **`k8s::SHORTENED` now has four copies, pinned only incidentally.**
+  `tests/binary.rs:1687` and `scripts/picker-test.py:132` pin it end to end against
+  the real binary, and `main_tests.rs`'s new `SHORTENED_BY_K8RS` is read only for
+  its length inside a `<=` ceiling — so a *longer* marker goes red there and a
+  shorter one or a same-length reword goes quiet. No `copy-guard.py` row relates
+  the four. The same shape as `ACCEPTED`/`UNCHECKABLE` above, and a visibility
+  ruling on `k8s::SHORTENED` would remove all of them. `tester`, §9.
+- **The console polls metrics forever and the driver does not, and the frame it
+  owes paints nothing.** `main.rs:8270` pushes `k8s::node_usage_poll`
+  unconditionally, while the `--live` path gates it on `--analysis`/`ONCE` behind a
+  table whose own reason is that *`--live` with no Capacity pane on screen would ask
+  every thirty seconds for a paragraph nothing draws*. Measured at 1 011 pods: one
+  poll costs **13.0 ms mean**, every 30 s, for the life of the process — **0.043 %
+  of one core** — and all 12 periodic frames in the run wrote the identical
+  **25 bytes** of colour resets and hide-cursor, an empty diff, with a full
+  `snapshot` + `analyze` + seven report producers behind each. It is also the reason
+  no quiet window in the idle reading reaches 30 s. **Not boxed**: the fix is
+  starting and stopping a merged stream as panes open and close, which is real
+  machinery against 0.043 %, and the number is recorded here so nobody re-measures
+  it to find that out
+  ([D286](NOTES.md#d286--the-console-at-rest-idle-is-two-readings-the-poll-the-console-never-stops-and-a-budget-missed-by-the-same-margin-as-the-driver-2026-09-26) item 2).

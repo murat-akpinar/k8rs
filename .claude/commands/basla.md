@@ -15,7 +15,7 @@ Then, until told to stop:
    the boxes under it are the same **family** touching the same code, brief them
    as one turn (D104); unrelated boxes stay one at a time.
 2. Run the cycle: brief → (screen spec) → dev writes code + tests and proves its
-   own red/green → `just mutants` → `tester` attacks the assertions and runs
+   own red/green → `just mutants-diff` → `tester` attacks the assertions and runs
    `just check` → `k8s-admin` reviews the family → land it.
 3. Land = second pass over the landed tree · security gate · check the box in
    the work commit · CHANGELOG separately · push.
@@ -28,8 +28,13 @@ a mutation sweep, a build — runs in the foreground, blocking. If a sweep from
 an earlier run is already going, wait for it in the foreground or restart it;
 do not park on it and hand back a status report.
 
-A foreground call is capped at ten minutes and the whole mutation sweep is
-longer than one, so the phase-close sweep runs in shards — `--shard 0/4` then
+The whole mutation sweep (`just mutants`) mutates only `rules.rs` and
+`analysis.rs`, so a phase close owes it **only if the phase changed one of them
+or their tests** — `git log` over those paths first; an empty answer means no
+sweep
+([D210](../../NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
+When it is owed: a foreground call is capped at ten minutes and the sweep is
+longer than one, so it runs in shards — `--shard 0/4` then
 `1/4 2/4 3/4` (`k` is zero-based; `4/4` is an error, and an error prints no
 `MISSED` line), one call each, all four green or the gate is not passed
 ([D118](../../NOTES.md#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)).
@@ -41,4 +46,4 @@ account), or a reversal of a design decision — which is written into
 At phase close, run § *Phase close* in full, including the PR to `main`.
 
 Report at each push, in Turkish: which box closed, what was run, what it
-printed.
+printed. Report one line at each dispatch too, a phase close's included.

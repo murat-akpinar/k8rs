@@ -82,14 +82,14 @@ Eight rules follow from that table, and every pane below obeys all eight.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  What each node promised, and what it has     │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  What each node promised, and what it has     │
+│  RESOURCES         │                                               │
 │   workloads        │  ▲ node-2   6.2 of 8 cpu · 17.8Gi of 16Gi     │
 │   network          │      using 3.4 cpu and 12.1Gi                 │
 │   storage          │      Almost twice the memory is promised as   │
 │   config           │      node-2 has. If these pods use what they  │
 │   cluster          │      asked for, one of them is killed.        │
-│ ANALYSIS           │      → move some pods to another node, or     │
+│  ANALYSIS          │      → move some pods to another node, or     │
 │▸  capacity      1 ▲│        lower what they ask for (their         │
 │   certificates  30d│        requests)                              │
 │   drain safety     │    node-1   7.4 of 8 cpu · 9.8Gi of 16Gi      │
@@ -261,14 +261,14 @@ have been ([states.md](states.md#you-can-only-see-some-namespaces)).
 ```
  nodes 3/3                    ctx: prod-eu · ns: payments · read-only
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  What each node promised, and what it has     │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  What each node promised, and what it has     │
+│  RESOURCES         │                                               │
 │   workloads        │  Not checked here. Adding up what a node has  │
 │   network          │  promised needs every pod on it, and you can  │
 │   storage          │  only see payments — so every number would    │
 │   config           │  come out too low.                            │
 │   cluster          │                                               │
-│ ANALYSIS           │  Ask for cluster-wide read access, or drop    │
+│  ANALYSIS          │  Ask for cluster-wide read access, or drop    │
 │▸  capacity         │  the  --namespace  flag if you set one.       │
 │   certificates  30d│                                               │
 │   drain safety     │  Still counted, from what you can see:        │
@@ -413,14 +413,14 @@ three each get a row, because assuming any of them away is either a false
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  If you drained each node, what happens?      │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  If you drained each node, what happens?      │
+│  RESOURCES         │                                               │
 │   workloads        │  A drain below assumes --ignore-daemonsets, so│
 │   network          │  DaemonSet pods never count as moving.        │
 │   storage          │  ● node-3 would never finish draining         │
 │   config           │      This node has stopped responding. A drain│
 │   cluster          │      cannot confirm a pod is gone until it    │
-│ ANALYSIS           │      answers again, so it waits forever.      │
+│  ANALYSIS          │      answers again, so it waits forever.      │
 │   capacity      1 ▲│      → check the node itself: is it powered on│
 │   certificates  30d│        and reachable?                         │
 │▸  drain safety     │  ▲ node-2 has 2 pods nothing would restart    │
@@ -994,6 +994,81 @@ Six budgets, where the cap starts to matter:
   `relevant[1..]` against `blocked[1..]` instead — either way, a logic
   change, not a new field.
 
+### A row taller than the pane, and the cut that keeps the cursor's row on screen
+
+**A `List` item ratatui cannot fit in the viewport is never drawn, selected
+or not — not clipped, not scrolled to partially, simply skipped** (measured
+against `ratatui-widgets` 0.3.2). A drain-safety row can carry a node that is
+silent, a PDB explanation, a note that more budgets block the drain too, and
+up to three more paragraphs — files on local disk, pods with no controller
+behind them, and the rest — stacked with nothing bounding their total, and a
+node combining enough of them built a row 30 lines tall against a 14-line
+region. The result was not a long card; it was an empty pane, the row's own
+identity gone along with everything under it, and every other row in the list
+gone with it whenever the cursor was on or beside the tall one
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+
+**The fix is the one [alerts.md](alerts.md#how-wide-a-card-is-and-how-tall)
+already applies to its own unbounded field**: cap what `analysis.rs` built
+to the room the pane actually has, cut at a word boundary behind a visible
+`…`, before a `ListItem` is ever built — the widget must never be handed
+something taller than it can show, because ratatui's own answer to that is
+silence, not a scrollbar. The whole row is **14 lines**, the region
+([§ *How a report is drawn*](#how-a-report-is-drawn--the-grammar-every-pane-on-this-page-obeys),
+16 body lines less the pane's own one-line heading and the blank under it):
+
+1. Identity is always 1 line, and is never cut — the same rule 1 of this
+   page's own grammar already gives every `Row::Answer`.
+2. The action (`→ …`) is measured next, wrapped at its own indent, and is
+   never cut either — it is k8rs's own fixed wording plus the node's name,
+   the same "authors write short, the renderer does not shorten it" rule
+   [alerts.md](alerts.md#the-height) already gives its own action line.
+3. `room` is what is left: `14 − 1 − (the action's own line count)` — the
+   same *pane width, less the prefix, less the tail* shape
+   [resources.md § The line under the table](resources.md#the-line-under-the-table)
+   already states for a different field.
+4. The detail text — everything between the identity and the action, still
+   one wrapped block, no blank rows inside it — fits in `room` → drawn
+   whole, no mark.
+5. It does not → cut to `room` lines, walked back to a whole word on the
+   last one, one `…` glued to the last word kept — [`ui::cut`](../src/ui.rs),
+   the same function the *cluster said no* box already uses for the
+   cluster's own quoted text (§ *The cluster said no*, `dialogs.md`), reused
+   rather than reimplemented for a second unbounded field.
+
+Illustrative, not a captured run — the real cut point is the renderer's own
+measurement, and the committed corpus's own worst case already reaches it:
+`k8rs-worker3`'s row carries four problem paragraphs and draws 16 lines in
+full — identity, detail and action — against the 14-line region, `room` 11
+once its own 2-line action is taken out
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+The fourth paragraph gives up two of its three lines to the cut, word
+boundary and all, the same mechanism a node one paragraph worse still draws
+below:
+
+```
+● node-2 would never finish draining
+    This node has stopped responding. A drain cannot
+    confirm a pod is gone until it answers again, so
+    it waits forever.
+    team-a/api-pdb keeps at least 3 of the pods it
+    protects, and right now exactly 3 copies. A drain
+    has to take one away, so it waits forever.
+    team-b/web-pdb, team-c/db-pdb and 2 more block
+    the drain too.
+    2 pods here keep files on this machine's own disk
+    — what Kubernetes calls an emptyDir volume — and
+    a drain deletes them with the …
+    → check node-2 first — nothing on it can be
+      trusted until it answers again
+```
+
+Lines 2–12 are the detail text: 11 lines, `room`'s own ceiling at this
+node's 2-line action, the last word of the last line given up to the mark so
+the fifth paragraph is not dropped in silence. The row is 14 lines exactly
+(identity, 11 lines of detail, 2 of action), on screen whichever row the
+cursor sits on, which is the one thing today's build cannot promise.
+
 ### A budget that has not caught up yet — rebanded
 
 **A real defect the review caught: the fourth shape used to share this same
@@ -1104,14 +1179,14 @@ answer.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Things that cost you something for nothing   │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  Things that cost you something for nothing   │
+│  RESOURCES         │                                               │
 │   workloads        │  ● shop/api-svc matches no pod                │
 │   network          │      This Service points at nothing. Anything │
 │   storage          │      calling it gets a 503.                   │
 │   config           │      → fix its selector, or delete it         │
 │   cluster          │  ▲ data/pgdata-old is 128Mi nobody is using   │
-│ ANALYSIS           │      A disk was reserved for it and no pod is │
+│  ANALYSIS          │      A disk was reserved for it and no pod is │
 │   capacity      1 ▲│      mounting it. It stays reserved until     │
 │   certificates  30d│      somebody deletes it.                     │
 │   drain safety     │  ○ 4 pods were removed by a node and remain   │
@@ -1441,14 +1516,14 @@ to review, not an alarm to answer
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Pods that can read the node's own filesystem │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  Pods that can read the node's own filesystem │
+│  RESOURCES         │                                               │
 │   workloads        │  Nothing here is broken. Network, storage and │
 │   network          │  metrics agents are supposed to do this — the │
 │   storage          │  list says who can, not what to go and fix.   │
 │   config           │                                               │
 │   cluster          │  ○ /lib/modules                               │
-│ ANALYSIS           │      Read-only, mounted by 8 pods in          │
+│  ANALYSIS          │      Read-only, mounted by 8 pods in          │
 │   capacity      1 ▲│      kube-system.                             │
 │   certificates  30d│  ○ /var/lib/kubelet                           │
 │   drain safety     │      Read-only, mounted by 3 pods in          │
@@ -1599,14 +1674,14 @@ still says who can, not what to go and fix.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Pods that can read the node's own filesystem │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  Pods that can read the node's own filesystem │
+│  RESOURCES         │                                               │
 │   workloads        │  Network, storage and metrics agents are      │
 │   network          │  supposed to do this. The top row has a pod   │
 │   storage          │  outside kube-system, so k8rs cannot tell     │
 │   config           │  what it is. Nothing is marked broken; it     │
 │   cluster          │  still says who can, not what to go and fix.  │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│  ○ /var/log                                   │
 │   certificates  30d│      Read-only, mounted by 1 pod in default — │
 │   drain safety     │      outside kube-system, so k8rs cannot tell │
@@ -1728,14 +1803,14 @@ report, one question, matches every pane already on this screen.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Containers that keep restarting              │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  Containers that keep restarting              │
+│  RESOURCES         │                                               │
 │   workloads        │  Every container below is serving right       │
 │   network          │  now. A restart count never clears itself     │
 │   storage          │  — the second number, how long this run       │
 │   config           │  has lasted, is the signal.                   │
 │   cluster          │                                               │
-│ ANALYSIS           │  ○ payments/worker-7f9c · container api       │
+│  ANALYSIS          │  ○ payments/worker-7f9c · container api       │
 │   capacity      1 ▲│    Restarted 9 times since this pod started.  │
 │   certificates  30d│    This run started 6 hours ago.              │
 │   drain safety     │                                               │
@@ -1996,14 +2071,14 @@ times since its pod started.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  What expires, soonest first                  │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  What expires, soonest first                  │
+│  RESOURCES         │                                               │
 │   workloads        │  ▲ Your kubeconfig certificate expires in 30  │
 │   network          │  days                                         │
 │   storage          │      valid until 2026-09-20T00:00:00Z · this  │
 │   config           │      is the file on your own machine that     │
 │   cluster          │      proves who you are — nothing in the      │
-│ ANALYSIS           │      cluster is broken                        │
+│  ANALYSIS          │      cluster is broken                        │
 │   capacity      1 ▲│      → ask whoever gave you access for a new  │
 │▸  certificates  30d│        kubeconfig before that date — k8rs     │
 │   drain safety     │        cannot renew it, and after it kubectl  │

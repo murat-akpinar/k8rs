@@ -7,13 +7,13 @@ whole debugging loop without a typed command.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  ‹ logs › describe   yaml   events            │
-│   workloads        │  ───────                                      │
+│  RESOURCES         │  ‹ logs ›   describe   yaml   events          │
+│   workloads        │  ──────                                       │
 │   network          │  container: app ▾          previous log: on   │
 │   storage          │                                               │
 │   config           │  14:21:58  starting worker pool               │
 │   cluster          │  14:22:01  connected to postgres              │
-│ ANALYSIS           │  14:22:06  allocating 240MB cache             │
+│  ANALYSIS          │  14:22:06  allocating 240MB cache             │
 │   capacity      1 ▲│  14:22:07  --- killed here ---                │
 │   certificates  30d│                                               │
 │   drain safety     │  This is the log from before the last crash,  │
@@ -24,7 +24,7 @@ whole debugging loop without a typed command.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app --previous             │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  f follow  c container  ⇧p previous  / search  esc back   │
+│ [ ] tabs  f follow  c container  esc back  ? all keys  q quit      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -34,6 +34,599 @@ whole debugging loop without a typed command.
 | **describe** | the object plus its events | Assembled from what we already hold; the event list is fetched for this object only, never a global Events watch. |
 | **yaml** | the object as YAML | Key order is the API's, not alphabetised. Secret values are hidden behind an explicit reveal, and a revealed value never enters the command log, the audit log or this pane's copy buffer. |
 | **events** | this object's events, newest first | Plain-language reason word, the controller's own message kept beside it: `Unhealthy` reads "the health check failed" next to "Readiness probe failed: …", never instead of it. |
+
+**Every footer on every tab below loses exactly one word while a call
+confirmed elsewhere is still on the wire: `q quit`. Nothing else on any of
+them changes**
+([dialogs.md § Detail tabs and Analysis keep their own footer, not this line](dialogs.md#detail-tabs-and-analysis-keep-their-own-footer-not-this-line)).
+
+**The logs tab's footer carries `f follow` and `c container`, not `⇧p
+previous` or `/ search`.** **Neither of the two it leaves off does anything in
+this pane yet**, and
+[NOTES § D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted) is a map of
+what each key *means* — `/` searches this pane, `⇧p` shows the previous
+container's log — not a record of what is wired. Measured at HEAD, `⇧p` has no
+arm at all, and `/` is answered only while the detail is closed, where it
+filters the list this pane is drawn over (`../src/main.rs` says so in as many
+words, and refusing it here is the whole of the correct behaviour until the
+search is built). `?` marks both *not built yet* rather than promising them
+([help.md](help.md)). What this line is for holds either way: they are not two
+of the six things it has room to name before `? all keys  q quit`, the pair
+that never gives way outside its own one named exception, above
+([widgets.md § The footer](widgets.md#2a-the-footer)). Follow and the
+container picker are what a reader reaches for on nearly every open log pane;
+`⇧p` only matters once a container has actually crashed, and a text search is
+the same `/` every other pane already carries silently.
+
+## Leaving a tab, closing the object, and resizing the terminal
+
+**Switching tabs keeps your place.** `[` and `]` move between logs, describe,
+yaml and events, and each of the four keeps its own scroll position — scroll
+`yaml` halfway down a long Deployment, read `describe`, come back, and `yaml`
+is exactly where it was, not back at the top and not wherever `describe`'s
+own shorter body happened to land ([widgets.md § 4](widgets.md#4-scrolling)).
+
+**Closing the detail and opening it again does not — even on the very same
+object.** `esc` back to the browser or Alerts, then `⏎` on the same pod a
+second later: every tab starts at its own top again, or at the tail under
+follow, because opening the slot reads everything it shows fresh — a new log
+stream, a new copy of the object's YAML, a new read of its events — and there
+is no earlier buffer left for an old row number to mean anything against
+([widgets.md § 4](widgets.md#4-scrolling)).
+
+**Resizing the terminal does not, either.** A tab that has been scrolled away
+from its own top redraws from the top the next time the window changes size —
+deliberately: once the wrap a scrolled position was measured against no
+longer exists, there is no honest way left to say "the same line," so the
+pane says where it actually is instead of a number that only looks right
+([widgets.md § 4](widgets.md#4-scrolling)).
+
+Follow mode (`f`) is unaffected by any of this: a followed logs pane is
+always at the tail regardless of what any stored offset says, on a tab
+switch, a close and a re-open, or a resize alike.
+
+## The heading, when the name does not fit
+
+The heading is one `Paragraph` holding `namespace/name` in full — and until
+this round, nothing cut it: ratatui clipped it at the pane edge with no mark
+at all, the one silent truncation [widgets.md § 7](widgets.md#7-text-that-came-from-the-api)
+exists to forbid
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+It now runs through [the identity cut](widgets.md#7-text-that-came-from-the-api)
+first, the same rule every other object identity on this product now shares.
+Room is the content pane, less its own two-column pad each side — **53**
+columns at 80×24, the same figure `alerts.md`'s card region and
+`analysis.md`'s report region both measure against.
+
+Two pods from the same Deployment's two rollouts, differing only in their own
+generated suffix, at 53 columns of room:
+
+```
+…form/checkout-worker-service-canary-7d9f4bc86d-x2k9p
+…form/checkout-worker-service-stable-7d9f4bc86d-x2k9p
+```
+
+and two Deployments sharing a long OpenShift namespace:
+
+```
+…ter-node-tuning-operator/tuned-metrics-reader-canary
+…ter-node-tuning-operator/tuned-metrics-reader-stable
+```
+
+Before this round both pairs drew the identical heading —
+`team-alpha-payments-platform/checkout-worker-service-` and
+`openshift-cluster-node-tuning-operator/tuned-metrics-` — naming neither pod
+by the one thing that told them apart.
+
+## Picking a pod, before Detail has one
+
+D3 files one card per owner, not one per pod
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)) — a
+Deployment with three sick pods out of five is one card, `payments/web  ·  3
+of 5 pods`. `⏎` on that card cannot open Detail the way it does on a bare
+pod's card: Detail's four tabs are about one concrete object, and the card
+names an owner, not a pod. **On a grouped finding, `⏎` first lists which pods
+of the group are affected, then opens the one you pick** — the closing rule
+[the logs tab used to carry alone](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+and this section is where it is actually designed. The same step sits behind
+the browser's own `● web has 3 pods with problems — ⏎ to see`
+([resources.md § The line under the table](resources.md#the-line-under-the-table)) —
+one mechanism, reached from two screens, because both sentences name the same
+fact about the same card.
+
+This is not a small floating box like [the container
+picker](#choosing-a-container-and-when-there-is-nothing-to-choose). A
+container picker chooses among at most a handful of rows with short state
+words; this step can face D3's own founding number — a DaemonSet's pods on a
+40-node cluster, which is at least 40 findings, one `Finding::object` per
+pod, folded into one card by `Finding::owner`
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)) — and it
+has to hold the full pinned block beside the list, which [the next
+section](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+shows can already run past the whole 13-row body of an ordinary tab on its
+own, one block alone. A box capped the way `Confirm`, `Refused` and `ContainerPick` are
+([widgets.md § 5](widgets.md#5-the-modal-layer)) has no room for either. So
+this step is drawn **in the exact slot Detail already owns** — the same
+sidebar, the same header, the content pane handed the same way `screen.detail`
+already takes it "over the view, not instead of one," so `esc` goes back to
+that view exactly as it already does for an open Detail (`fn detail`'s own
+doc comment). What differs from an ordinary Detail is only the head row and
+the body's content: no tab row, no underline — there is no tab to be on until
+an object is chosen — and a `List` where a tab's `Paragraph` would be.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web  ·  3 of 5 pods — pick a pod    │
+│  RESOURCES         │  Containers exceeded their memory limit and   │
+│   workloads        │  were killed by the kernel (OOMKilled)        │
+│   network          │  limit 256Mi · exit 137 · 47 restarts         │
+│   storage          │  → raise limits.memory, or find the leak      │
+│   config           │                                               │
+│  ANALYSIS          │▸ ● web-7d9f4bc86d-m3p1q   Containers…         │
+│   capacity      1 ▲│  ● web-7d9f4bc86d-x2k9p   Containers…         │
+│   certificates  30d│  ● web-7d9f4bc86d-t8g2r   Container image is… │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Every row above is one line — the trailing fact **back-cuts** at a word
+boundary the same way [the container picker's own state word
+already does](#when-a-containers-own-state-is-what-does-not-fit) when it
+does not fit; it does not wrap the way the pinned block's own prose does,
+because a `List` row is one line and two facts on two lines would read as
+two rows. **The two facts drawn here are real titles, cut** —
+`"Containers exceeded their memory limit and were killed by the kernel
+(OOMKilled)"` and `"Container image is not usable, so the container never
+started (ErrImagePull)"`, the same two strings this file already quotes in
+full elsewhere, cut at this pane's own room the same way any title this
+long already has to be. No fact drawn on this page is ever the whole
+sentence; see the bullet below for the range.
+
+- **The head row keeps the owner's identity and adds `Card::count()`'s own
+  fragment** — `payments/web` (or the bare `node-3` shape, though a
+  cluster-scoped owner never reaches this step, [below](#a-group-of-one-pod-or-none-at-all--there-is-no-step))
+  plus `  ·  3 of 5 pods`, exactly the string the Alerts card and the
+  browser's own summary line already draw
+  ([`Card::count`](../src/views.rs)) — plus a fixed `— pick a pod` tail that
+  never gives way, the same protected-tail reasoning
+  [resources.md § When it does not fit](resources.md#when-it-does-not-fit-the-name-gives-way--and-now-it-says-so)
+  already gives `⏎ to see`: the identity is what fronts a cut, never the
+  instruction. Where the denominator is not readable, this reads `payments/web
+  · 3 pods — pick a pod`, `Card::count()`'s own other form, unchanged.
+- **The pinned block comes first, and there is exactly one of it — the
+  card's own deciding finding, not a stack of every finding the card
+  holds.** It is chosen by the identical two keys
+  [alerts.md § A card with more than one finding](alerts.md#a-card-with-more-than-one-finding)
+  already uses to pick which finding a stacked card draws on its face:
+  [`Card::severity`](../src/views.rs) (the worst present) and, where more
+  than one finding shares it, [`Card::newest`](../src/views.rs)'s own
+  tie-break (NOTES §
+  [D246 ruling 4](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)).
+  Showing anything else here would mean this step drew a different finding
+  than the `⏎` that opened it just showed on the card face — a second,
+  disagreeing answer to "what is wrong here", which is worse than showing a
+  stack, not merely smaller than one. **The rest of the card's findings are
+  not lost — they are why the rows underneath say what they do**: every pod
+  row's own trailing fact is that pod's own worst finding's title, so a
+  reader chasing a specific one of a DaemonSet's 38 findings picks the pod
+  it is about rather than scrolling a stack to find it. **Title, evidence
+  and action draw, identity does not** — the one place this block differs
+  from the four-part shape [the next
+  section](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+  otherwise keeps whole, and on purpose: this step's own head row already
+  carries the owner and the count a block's identity line would repeat, so
+  repeating it a second time two lines down would be the redundant kind of
+  pinned text this file elsewhere argues against, not a second fact.
+- **Every row is `▸ ` (the cursor, when selected) plus the pod's own
+  severity glyph plus its name, flexible, front-cut the way [the container
+  picker's own name column already is](widgets.md#7-text-that-came-from-the-api)
+  when two pods share a long owner-generated prefix** — the exact collision
+  [the heading section above](#the-heading-when-the-name-does-not-fit) already
+  draws for two rollouts of one Deployment. **The trailing fact is that pod's
+  own worst finding's title**, back-cut at a word boundary the same way [the
+  container picker's own state word already gives way](#when-a-containers-own-state-is-what-does-not-fit) —
+  not the raw reason (`OOMKilled` stays a card's job to translate, invariant
+  14, and this fact is that translation, already done).
+  **The floor this cut gives way at is 20 columns, and no real title is
+  drawn whole against it — none is.** Every distinct `Finding::title`
+  `rules::analyze` produces over the committed captures runs 37 to 82
+  columns, most in the high 60s to 90s
+  (`reports/2026-09-18-the-which-pods-step.md` § 1) — the two 17-column
+  strings this page used to justify the number by (`ran out of memory`,
+  `image pull failed`) were never real, and the mockups below are fixed to
+  match: a fact is two or three words and a `…` at this pane's own width,
+  every time, the same honest floor [the container picker's own state
+  word](#when-a-containers-own-state-is-what-does-not-fit) already draws
+  cut, not a whole sentence this column was ever wide enough to hold.
+- **Rows sort by severity band, then name — never recency.** Recency
+  already decided which *card* the reader is looking at before this step
+  ever opened; using it again here would re-sort the whole list under a
+  reader mid-scan of the 12 rows the pane shows at once, because every
+  restart of any one of a DaemonSet's 38 pods moves that pod's own
+  timestamp. `Cursor::follow` keeps *which pod* is selected, not *which
+  row* a reader's eye was on, so a list that moves under the cursor is a
+  list a reader cannot work through. Name is what holds still — the fact
+  every row already leads with, cut or not — so a reader who remembers a
+  pod by name can predict where it sits. Where the band ties, rows are stably
+  ordered by name; **this replaces the earlier promise of nothing**, which
+  was more pessimistic than a stable sort already is. Recency still
+  decides which finding represents a pod that carries more than one — the
+  same tie-break the pinned block above is chosen by, one function
+  ([`decides`](../src/ui.rs)) reused for both — this is only the order the
+  *rows* fall in, one level up from that.
+- **The command log strip carries over unchanged.** Moving the cursor here
+  runs nothing — no `kubectl` command exists for "look at a list k8rs already
+  holds" — so the strip still shows whatever last ran, blank on a fresh
+  session, and gains its next line only once a row is opened or a write is
+  confirmed elsewhere. The mockup above draws that blank case.
+- **The footer is `↑↓ move  ⏎ open  esc back  ? all keys  q quit`**, four
+  words this product already uses — `↑↓ move` and `⏎ open` are the Alerts and
+  Resources footers' own words
+  ([alerts.md](alerts.md), [resources.md](resources.md)), `esc back` is
+  Detail's own ([the logs tab's footer](#the-logs-tab)) — assembled, not
+  invented. **No `/` filter is offered.** A picker over a card's own pods is
+  already narrower than the list D3 was written to shrink, and adding a key
+  nothing here asked for is the invariant this file exists to avoid; a filter
+  for a 40-pod group is `backlog.md`'s to raise, not this box's to build.
+
+### A group of one pod, or none at all — there is no step
+
+**`Card::count()` returns `None` for exactly the two shapes this step has
+nothing to offer**: `affected == 0` — every node card, and any finding whose
+own `object` is not a pod at all (N1–N3, W1, W2) — and the bare-pod card,
+where `owner == object` and D246 ruling 2 already rules there is no group to
+speak of. Both reach [`Card::count`](../src/views.rs)'s `None`, and both
+already draw `⏎` opening the card's own object directly, unaffected by this
+box — this section adds a step only where one is real, it does not take one
+away.
+
+**`affected == 1` is a third shape, and `Card::count()` does not mark it —
+it reads `1 of 5 pods`, a real, non-`None` string.** A card can hold more
+than one finding (the Alerts face's own `1 more problem — ⏎ to see`) while
+still naming only one pod-kind `object` between them — one finding about the
+sick pod, a second about the Deployment's own readiness with no pod named at
+all — and `affected` counts distinct pod objects across every finding on the
+card, not findings. Whichever way a card arrives at `affected == 1`, there is
+still only one candidate, and **the same rule this product already applies
+to a single-container pod decides it**: *"a key that does nothing is a bug
+already shipped once here"*
+([§ Choosing a container](#choosing-a-container-and-when-there-is-nothing-to-choose)).
+`⏎` skips this step and opens that one pod's Detail directly, with every
+finding the card holds — not only the one naming that pod — pinned there
+exactly as [the next
+section](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+describes. **That equivalence is this shape's own, not a wider one.** The
+next section pins the findings about the object a tab is open on, plus any
+that name no pod at all — never the whole card — and on a card where
+`affected ≤ 1` there is no *other* pod for a finding to be about, so "every
+finding the card holds" and "every finding about that one pod" name the same
+set. They stop being the same set the moment `affected ≥ 2`, which is
+exactly the case this step exists for. A group only exists, and this step
+only appears, where `affected ≥ 2` — `Card::count()` reading `n of m pods`
+or `n pods` with `n ≥ 2`.
+
+### More pods than the pane shows
+
+The list is a `List` like the sidebar's own — the pinned block's own lines
+([there is exactly one block](#picking-a-pod-before-detail-has-one), never a
+stack) as unselectable rows ahead of the selectable ones (the pods), `↑↓`
+skipping the
+former exactly as it already skips a sidebar group heading
+([widgets.md § 2](widgets.md#2-element--widget)) — so it inherits
+`ListState`'s own guarantee for free: the selected row is always kept on
+screen, the same escape hatch the Alerts card list already relies on when a
+stack of banners eats into its row budget
+([alerts.md § The height](alerts.md#the-height)). A `Scrollbar` appears once
+the list is taller than the room left for it, the same rule as any other
+overflowing pane ([widgets.md § 2](widgets.md#2-element--widget)) — never
+before.
+
+There is no fixed number of pods this pane promises to show without
+scrolling, for the same reason [the next
+section](#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+gives for the ordinary tabs: the pinned block is not capped here either, so
+how many rows are left for the list depends on how long the card's own
+deciding finding is. What is fixed is the reach: `↓` gets to any pod in
+the group, however many there are.
+
+**Counted, not guessed, for one real shape.** The content pane is 16 rows
+([the arithmetic below](#the-arithmetic)); this step spends one on the head
+row, leaving **15** for the `List`. A log-shipper DaemonSet reading `38 of 40
+pods` holds at least 38 findings, one per pod — and pins its **one**
+deciding finding, not 38 of them, with an empty evidence line — a title that
+wraps to one line
+at 53 columns, an action that does too — spends 2 rows on the block and 1 on
+the blank separator: **15 − 3 = 12** rows left for pods before the bar
+appears. A taller block leaves fewer; the OOM example earlier, at 4 rows
+(title 2, evidence 1, action 1) plus its separator, leaves 10 — which is why
+its own three pods drew with room to spare and no bar at all.
+
+```
+   payments/log-shipper  ·  38 of 40 pods — pick a pod   ║
+   Nodes without enough memory refused to run this Pod   ║
+   → free up memory on these nodes, or lower the request ║
+                                                         ║
+ ▸ ● log-shipper-abc12   Nodes without enough memory…    ║
+   ● log-shipper-bcd23   Nodes without enough memory…    ║
+   ● log-shipper-cde34   Nodes without enough memory…    ║
+   ● log-shipper-def45   Nodes without enough memory…    ║
+   ● log-shipper-efg56   Nodes without enough memory…    ║
+   ● log-shipper-fgh67   Nodes without enough memory…    ║
+   ● log-shipper-ghi78   Nodes without enough memory…    ║
+   ● log-shipper-hij89   Nodes without enough memory…    ║
+   ● log-shipper-ijk90   Nodes without enough memory…    ║
+   ● log-shipper-jkl01   Nodes without enough memory…    ║
+   ● log-shipper-klm12   Nodes without enough memory…    ║
+   ● log-shipper-lmn23   Nodes without enough memory…    ║
+```
+
+Every row's fact is the block's own title, cut the same way any title this
+long is — a scheduling failure reads identically across every pod it hits,
+so twelve real, distinct pods legitimately carry one repeated fact, not a
+placeholder standing in for twelve different ones. Twelve pod rows, all
+drawn — the bar appears because 38 pods do not fit in 12, not because this
+mockup ran out of room to draw them. **The bar runs the
+full height of the `List`, block rows included, not only past the
+selectable ones** — the block and its blank separator are still rows of the
+same `List` [the section above](#more-pods-than-the-pane-shows) already
+calls them, and a `Scrollbar` tracks the widget's own content, not a filter
+over which of its rows a reader can land on; a bar that started three rows
+down would be answering a different, narrower question no scrollbar on this
+product has ever been asked. `↓` from the twelfth pod scrolls the thirteenth
+into view the same way `ListState` already promises everywhere else on this
+product, and the thumb reflects **15 of the list's 41 rows** visible — 3
+unselectable (title, action, separator) plus 38 pods — not 12 of 38, because
+the fraction is rows of the list on screen over rows of the list, and the
+block rows are never left out of either side of it. (Shown here without the
+frame around it — the fixed chrome is the same as the ordinary case above,
+and it is the list's own row count that changes.)
+
+### A pod that disappears while this list is open
+
+**Not the same fact as [the container picker's own pod-disappearing
+case](#the-pod-disappears-while-the-picker-is-open).** There, the *whole*
+object the picker was about was gone, so the picker had nothing left to be
+about and closed itself. Here the object this step is about is the **card**,
+not any one pod in it — the permanent Pod watch behind `rules::PodSnapshot`
+is what feeds this list too, and it can drop one row out of many while the
+rest of the group is still real. **One pod vanishing removes one row**,
+`ListState` moving the selection to a neighbour the same way any live list on
+this product already handles a row leaving from under the cursor; the count
+in the head row (`Card::count()`, recomputed from the same snapshot) drops
+with it, and nothing else about the step changes. **This step does not
+auto-close itself down to a single remaining row** — closing it out from
+under a reader who has not pressed anything would be a second surprise this
+box does not need to invent, and the "nothing to pick" rule above only ever
+governs what `⏎` does when the step is *opened*, not what a list already open
+does when its count changes under it. Only the group reaching **zero** — the
+last pod gone, which the same rule that filed the card in the first place has
+by then almost certainly also un-filed it — closes the step and hands back to
+the view beneath, the same `esc`-shaped return every other exit from this
+step already uses; there is no second `Gone` to draw, for the same reason the
+container picker's own case gives: picking a pod is not a pending mutation,
+so there is nothing to reassure the reader about.
+
+## Every finding about this object pinned at the top of every tab
+
+**All four tabs draw it, not only logs.** The rule below used to sit at the
+end of [§ The logs tab](#the-logs-tab), headed only "Rules for this screen,"
+and never said which screen that meant — an omission `ui.rs` could not
+guess, and the fix is this section, not a caption. The reason is in the rule
+itself: *"you never lose the reason you opened the object"* is a promise
+about the **object**, not about whichever tab happens to be open when you
+arrive at it. A reader who opens `describe` first, or switches to `yaml`
+mid-read, has not stopped needing to know why they are looking at
+`payments/web-7d9f4` at all.
+
+**And it is a promise about that one object, not about every finding the
+card behind it holds.** A tab pins the findings whose own `Finding::object`
+*is* the pod it is open on, plus any finding on the card that names no pod
+at all — an owner-level, W1/W2-shaped one, which has no more specific object
+to prefer. A DaemonSet card built from a rule that fires once per pod holds
+one `Finding::object` per pod and one shared `Finding::owner`
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)); opening
+pod #7's own Detail pins the finding **about pod #7**, never the other 37.
+[§ A pod's own findings, not the whole card's](#a-pods-own-findings-not-the-whole-cards),
+below, is where this is worked through.
+
+**What "pinned" means here, settled once.** The closing rules this section
+replaces said, in the same breath, that a card's finding or findings "stay
+visible at the top" and that each one "wraps to the pane and **scrolls with
+it** rather than being pinned." Both cannot be literally true of a fixed
+chrome row the way `fn detail`'s own name/tab-row/underline trio is — a
+truly fixed block big enough to hold a controller's whole message would
+shrink the space left for the tab it sits on top of, and [the arithmetic
+below](#the-arithmetic) shows one block alone can already exceed the entire
+body. **The second reading wins, and it is the only one that can be built:**
+the block or blocks are the **first lines of the tab's own scrollable body**,
+drawn before the log lines, the `describe` text, the YAML or the events —
+visible at the top the instant the tab is opened, at scroll offset zero,
+which is what "stays visible" actually means and is all the rule needs — and
+they scroll away exactly like everything below them once the reader scrolls
+past them, the same single `Paragraph`/offset every tab already draws
+([widgets.md § 4](widgets.md#4-scrolling)). Nothing about `fn detail`'s own
+three truly-pinned rows — the object's name, the tab row, its underline —
+changes; the block or blocks are not a fourth one, they are the top of the
+part that already scrolls.
+
+**Each block is the card's own four parts, not a smaller copy of them.**
+Identity, title and action wrap at the same 53-column width the card's own
+region does — this pane's own heading section already measures that figure
+off this exact width — so the same caps an author already writes to there
+hold here without being re-derived: title stays inside three lines, action
+inside five, because both are k8rs's own words and both were already bounded
+at this width before this screen existed. **Only evidence differs, and this
+is the one place it is not cut.** [Alerts.md § The
+height](alerts.md#the-height) caps it at three wrapped lines with `…`
+because a controller's message can run past any card; this is where the rest
+of it is — drawn in full, however many lines that takes, which is why there
+is no fixed cap on a block's own height to state here that would not be a
+guess. **The four parts, not three, is a tab's own rule** — the one place
+this page pins a block with the identity line left out is [the which-pods
+step](#picking-a-pod-before-detail-has-one), and only because that step's own
+head row already says what the identity line would; an ordinary tab's own
+heading names one pod, never the owner or the count, so nothing there already
+carries what the identity line says and it stays.
+
+### The arithmetic
+
+**16 rows in the content pane** ([alerts.md § The
+height](alerts.md#the-height)'s own count for the 80×24 floor: 1 header + 1
+top border + 16 body + 1 divider + 2 command log + 1 divider + 1 footer + 1
+bottom border), **less 3 for `fn detail`'s own pinned trio** — the object's
+name, the tab row, its underline, each a `Constraint::Length(1)` before the
+open tab's own `Constraint::Min(0)` — **leaves 13 rows for the open tab's own
+body** at 80×24. That 13 is what a block or blocks are drawn against.
+
+A single block's own worst case is unbounded — `1 (identity) + ≤3 (title) +
+E (evidence) + ≤5 (action)`, and `E` has no ceiling this file can honestly
+name. What is bounded is what a real block costs, measured off text this
+file has already drawn or already cited a real measurement for. **A stack
+of two or three here is [§ A pod's own findings, not the whole
+card's](#a-pods-own-findings-not-the-whole-cards) own case, not this page's
+disproven "every finding the card holds" one**: a single pod carrying two
+or three findings of its own — the ordinary way a stack happens at all,
+since a tab never pins a finding about a different pod.
+
+| Stack | Rows | Against the 13-row body |
+|---|---|---|
+| 1 block, the OOM finding [the which-pods step](#picking-a-pod-before-detail-has-one) draws — here **with** its identity line, which that step's own mockup leaves out for the one reason given above (identity 1 + title 2 + evidence 1 + action 1) | 5 | 8 rows of real tab content still visible at scroll offset 0 |
+| 2 blocks of that size + 1 blank separator | 11 | 2 rows visible |
+| 3 blocks of that size + 2 separators | 17 | none — the reader scrolls before seeing one line the tab itself drew |
+| 1 block, a title and action at typical length but evidence 9 lines wrapped (`identity 1 + title 2 + evidence 9 + action 1`) | 13 | none — the block alone exactly fills the body |
+| 1 block, every part at its own cap (`1 + 3 + 9 + 5`) | 18 | negative — this block alone is taller than the whole body |
+
+Nine wrapped lines of evidence is not invented for this table: it is two
+lines past the seven this file already measures for a real `runc` error
+([alerts.md § The height](alerts.md#the-height), *"a container whose
+`command` names a path that is not in the image carries containerd's whole
+`runc` error, which is 7 wrapped lines"*) — a controller's own message
+reaching nine is well inside the range this codebase has already put a
+number on, not a worst case dreamed up to make a point. **The honest
+conclusion is that this page promises no fixed number of rows for a stacked
+block against the body's own budget, on purpose** — the same conclusion
+[alerts.md](alerts.md#every-count-this-card-can-have) already reaches for a
+row it has not designed, stated here instead of guessed at: a reader who
+opens the logs tab of a pod with two or three findings of its own may need
+to scroll before the first log line, and that is the true cost of never
+cutting the evidence this
+screen exists to show in full.
+
+### When the stack is taller than a Loading or Empty tab has anything of its own
+
+**Measured against the built tree, not reasoned about**
+(`reports/2026-09-18-the-which-pods-step.md` § 4): two findings on one
+pod — a real shape, not invented, `default/broken-crashloop` and
+`default/broken-hostpath` both produce it on the committed captures — where
+the second quotes the `runc` error this file already measures at 7 wrapped
+lines reaches **14 rows** against the 13-row body. What was actually drawn
+was worse than the arithmetic above admits to: `still loading`, `no logs
+yet` and `none right now` were **erased**, not shortened, because they were
+never drawn at all — the block's own layout claimed every row the tab had
+and left nothing for them. The block was then **itself cut with no mark**,
+its last words gone mid-quote, and the pane carried no scroll offset, so
+the rest was not merely off-screen, it was unreachable. `still loading` and
+`none right now` are then the same frame but for which tab is marked
+open — the very failure
+[PRIOR-ART § C2](../PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)
+is tagged **covered** in this repo for having avoided.
+
+**The fix reuses what this product already has, in the shape it already
+has it.** [`floor`](../src/ui.rs) is one line — `area.height.saturating_sub(FLOOR)`
+— and `banner` already spends it reserving room *below* a fixed message;
+the block gets the identical cap spent the other way, reserving room
+*below itself*: **at most `body.height − FLOOR` rows for the block**, the
+rest given to whatever comes after it. A block that fits does not notice —
+the OOM example throughout this section is 5 rows against 13, nowhere near
+the cap. A block that does not fit is **not silently clipped**: it carries
+the same `Scrollbar` [every other overflowing pane already
+draws](widgets.md#2-element--widget), and `app.scroll` — [the same offset
+every free-text pane on these four tabs already
+has](widgets.md#4-scrolling) — reaches every line the block holds, block
+included, exactly as it already reaches the rest of a long log stream.
+Nothing is discarded to make the block fit; it is deferred behind a scroll
+a reader can see is there.
+
+**The sentence stops being centred the moment a block leads it, and takes
+the `FLOOR` rows the cap guarantees it instead.** Centring text inside a
+region whose top edge moves every time a block grows or shrinks is not a
+position this file can compute honestly; the fixed alternative is what
+erased the sentence in the first place. So `no logs yet`, `none right now`
+and `reading the cluster…` draw as ordinary left-aligned lines directly
+under the block — the same shape a real log line or a `describe` field
+already takes there — never further than `FLOOR` rows below whatever of
+the block is showing. **This is what keeps loading and empty two frames
+and not one**: the cap guarantees the sentence is never more than a
+short, bounded scroll away, and it is drawn — in full, its own words, never
+paraphrased into the block's — every single time, which is the property
+that was missing, not merely a taller pane. (Denied was never the pair
+these two collapsed into, and stays a third, for the separate reason two
+paragraphs down.) Where there is no block at all
+— a healthy pod opened straight from the browser, nothing filed against it
+— the sentence is not capped against anything and centres exactly as
+[states.md](states.md) already draws it; this section changes nothing
+there.
+
+**Denied is not this shape, and this round changes nothing about it.** A
+refused or failed pane's own sentence is a fixed banner, drawn *before* any
+block or content, off the exact `floor(area)` helper above — `logs`'
+`Pane::Denied` arm already reserves the banner's own room first and hands
+only what is left to the block and the stream beneath it. A pinned finding
+explains why the object was worth opening; it does not know why *this*
+read failed, and the read's own reason — the verb, the resource, the next
+step — draws whole and first, never behind a scroll a block could push it
+past. Nothing here reopens that.
+
+### A pod's own findings, not the whole card's
+
+**A tab pins the findings whose own `object` is the pod it is open on, plus
+any card finding that names no pod at all — never the whole card.**
+`Finding::object` is what the rule looked at, and most rules name the pod
+they found something wrong with; a W1/W2-shaped finding names the owner
+itself instead, with no pod in it to prefer, and that kind pins on every
+pod's own tab because there is no more specific object for it to be about.
+A DaemonSet card built from 38 crashlooping pods holds at least 38 findings
+— one `Finding::object` per pod, one shared `Finding::owner`, folded by
+`views::cards` into the single card D3 exists to keep short
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)) — and
+opening pod #7's own Detail pins the finding **about pod #7**, not the other
+37. Nothing about that tab claims to speak for the group; [the which-pods
+step](#picking-a-pod-before-detail-has-one) it was opened from already did,
+and its own rows are where the other 37 pods' reasons are — each one's own
+trailing fact.
+
+**One finding pins one block — the ordinary case, and every mockup on this
+page before this section drew it that way without saying so.** Where a
+card's own `N more problems — ⏎ to see`
+([alerts.md § A card with more than one finding](alerts.md#a-card-with-more-than-one-finding))
+fired because *this same pod* carries a second finding — the same pod, a
+different reason — both pin on that pod's own tab, in that same section's
+own order: worst severity first, the most recent breaking a tie between
+equals, never only the one the card face led with. Where the extra findings
+are about *other* pods in the group instead, they do not: a card can read `N
+more problems` for any `N` and a reader who opens one pod's Detail still
+sees exactly the findings that pod earned, however large `N` is. **This is
+the condition [§ A group of one pod, or none at all](#a-group-of-one-pod-or-none-at-all--there-is-no-step)
+already relies on, stated in full**: at `affected ≤ 1` there is no *other*
+pod for a finding to be about, so every finding the card holds and every
+finding about that one pod are the same set — that section's own sentence
+stays true word for word. They stop being the same set at `affected ≥ 2`,
+and a tab pins the narrower one.
+
+That marker is still what promises this: *"⏎ leads somewhere real"* is
+that page's own phrase for it, and a Detail tab that dropped every finding
+that pod earned but the one drawn would be pointing the marker at nothing —
+the promise was always about the object the marker leads to, not about the
+group it was found in.
 
 ## The logs tab
 
@@ -105,12 +698,12 @@ whichever bound gets there first), not the Rust shape underneath it.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  ‹ logs › describe   yaml   events            │
-│   workloads        │  ───────                                      │
+│  RESOURCES         │  ‹ logs ›   describe   yaml   events          │
+│   workloads        │  ──────                                       │
 │   network          │  container: app ▾          previous log: off  │
 │   storage          │                                               │
 │   config           │  142 lines were dropped from the top to keep  │
-│ ANALYSIS           │  this pane bounded.                           │
+│  ANALYSIS          │  this pane bounded.                           │
 │   capacity      1 ▲│                                               │
 │   certificates  30d│  14:23:41  connected to postgres              │
 │   drain safety     │  14:23:44  allocating 240MB cache             │
@@ -121,7 +714,7 @@ whichever bound gets there first), not the Rust shape underneath it.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app -f                     │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  f follow  c container  ⇧p previous  / search  esc back   │
+│ [ ] tabs  f follow  c container  esc back  ? all keys  q quit      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -145,6 +738,15 @@ whichever bound gets there first), not the Rust shape underneath it.
   open — dropping can still happen off-screen and the counter still climbs;
   turning follow back on does not "catch up" the dropped lines, because they
   are gone.
+- **A resize is a separate event from a drop, and does not touch this
+  line.** Losing lines to the 2 MB ceiling changes what the buffer *holds*;
+  resizing the terminal changes only where a paused, scrolled-back reader is
+  *looking* — [the rule that a resize resets a scrolled pane to its own
+  top](widgets.md#4-scrolling) applies to this tab exactly as it does to the
+  other three, and neither event moves the other's count. A reader
+  mid-scroll who resizes the window still sees the exact dropped-lines line
+  they had before, unchanged, with the log content itself back at whatever
+  is now the top of the retained buffer.
 
 ### A line longer than the cap, and a line longer than the pane — not the same thing
 
@@ -182,18 +784,18 @@ what it saw.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│   ┌ payments/web-7d9f4 — pick a container ─────────────────────┐   │
-│   │                                                            │   │
-│   │  ▸ app                   running                           │   │
-│   │    sidecar-envoy         running        3 restarts         │   │
-│   │    init-migrate          done                              │   │
-│   │                                                            │   │
-│   │  sidecar-envoy restarted 3 times. ⇧p on it shows           │   │
-│   │  the log from just before its last crash.                  │   │
-│   │                                                            │   │
-│   │         [ ⏎ pick ]       [ esc cancel ]                    │   │
-│   │                                                            │   │
-│   └────────────────────────────────────────────────────────────┘   │
+│   ┌ payments/web-7d9f4 — pick a container ──────────────────────┐  │
+│   │                                                             │  │
+│   │ ▸ app                                  running              │  │
+│   │   sidecar-envoy                        running   3 restarts │  │
+│   │   init-migrate                         done                 │  │
+│   │                                                             │  │
+│   │  sidecar-envoy restarted 3 times. ⇧p shows the log from     │  │
+│   │  before that restart, if the kubelet still has it.          │  │
+│   │                                                             │  │
+│   │               [ ⏎ pick ]       [ esc cancel ]               │  │
+│   │                                                             │  │
+│   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app                        │
@@ -202,11 +804,20 @@ what it saw.
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-Same list-picker shape as [the cluster picker](context.md#the-picker) —
-`▸` for the row that would open, one line per entry, a state word instead of
-a tag column. **Restart count is shown next to a container that has one**,
-because that is exactly the signal that makes `⇧p` worth pressing, and the
-line under the list spells out which key does it and on which container.
+**Drawn to the renderer's own layout, not the shape this section used to
+draw** — measured off the built box
+(`reports/2026-09-18-filter-and-container-picker.md` §§ 1–3): the name is
+flexible and takes whatever the row has left; the state word and the
+restart count are fixed-width columns, each sized to the *widest* value
+either one holds anywhere in the list, pinned toward the right edge. This is
+[the cluster picker](context.md#the-picker)'s own tag-column shape, read
+literally rather than by analogy — "the row is three slots, left to right,
+and only the first one is flexible" is true of this box too, `▸` and the
+name where the picker has a bare name, the state word and the restart count
+together where it has one fixed-width tag. **Restart count is shown next to
+a container that has one**, because that is exactly the signal that makes
+`⇧p` worth pressing, and the line under the list spells out which key does
+it and on which container.
 
 **A single-container pod has nothing to pick, so the picker is not offered
 at all** — invariant: a key that does nothing is a bug already shipped once
@@ -218,6 +829,188 @@ here.
 | Footer | `… c container …` | `c container` is gone from the footer |
 | `c` | opens the picker above | not bound; there is only ever one answer |
 
+**Restart hints never claim a crash, and never promise the log is still
+there.** A restart is not always a crash — `exitCode: 0` under
+`restartPolicy: Always` restarts a container that asked to stop on purpose —
+and `kubectl logs --previous` can 404 once the kubelet has rotated the old
+log out from under it. *"…shows the log from before that restart, if the
+kubelet still has it"* is the wording every mockup on this page now uses
+for that key, in place of the old *"the log from just before its last
+crash"*, which claimed both things this paragraph just ruled out. This is
+the one wording change on this page R4.4 asks for; the same false claim
+still stands in [help.md](help.md)'s own key map (*"logs, with the log from
+before a crash"*) and in this file's own logs-tab mockup, above — both are
+the same defect in a different place and belong to a box that can touch
+those files, not this one.
+
+**More containers than the box shows scroll under `↑`/`↓`, but this box does
+not grow with the terminal the way the cluster picker's does — it is capped
+the way `Confirm`, `Refused` and `Gone` already are**
+([widgets.md § 5](widgets.md#5-the-modal-layer)), because it is drawn the
+same way they are: a small nested box centred over the frame, not
+`ContextPick`'s own full-width shape that "grows with the terminal rather
+than stopping at a fixed dialog height"
+([context.md § More contexts than fit](context.md#more-contexts-than-fit)) —
+that sentence describes a different box and does not transfer here just
+because both are pickers. **24 is the ceiling either way**
+([widgets.md § 5](widgets.md#5-the-modal-layer)), so the number to count is
+how many rows this box's own fixed chrome leaves under it, not whether a
+taller terminal buys more — nothing is taller than the floor this page
+draws at, which is the contradiction a fifth-container "on a narrower
+terminal" parenthesis used to hide.
+
+Counted off the mockup above, line by line and never the three that are the
+list itself: the header; the outer frame's top and bottom border; the blank
+row inside the outer frame before the nested box and the one after it; the
+nested box's own top and bottom border; the blank row inside the nested box
+before the list; the blank row between the list and the restart hint; the
+hint's own two lines; the blank row between the hint and the buttons; the
+button row; the blank row after the buttons; the log strip's two separators
+and its one command line; and the footer. **Eighteen rows that are never
+the list** — leaves **six** for it before the 24-row ceiling is reached.
+Three, as the mockup above draws, is comfortable.
+
+**A seventh container is what puts a `Scrollbar` on the list's right
+edge — and, measured, that column used to be the widest row's own last
+one, not a reserved one of its own**
+(`reports/2026-09-18-filter-and-container-picker.md` § 3): `10 restarts`
+drew as `10 restart`, its final character silently the scrollbar's own
+paint. **The list now reserves that column before the state word and the
+restart count are measured, whenever it is going to scroll at all** — one
+column narrower to work with, so nothing the row draws can ever sit where
+the scrollbar is about to be, the same reasoning
+[widgets.md § 2](widgets.md#2-element--widget) already gives for drawing a
+`Scrollbar` only once content exceeds the viewport, extended to the column
+budget the row math itself uses rather than only to whether the widget
+appears at all. Six containers with restarts, one scrolled out of view:
+
+```
+   ┌ payments/web-7d9f4 — pick a container ──────────────────────┐
+   │                                                            ║│
+   │ ▸ app                            not started               ║│
+   │   migrate                        failed        10 restarts ║│
+   │   sidecar-0                      failed         4 restarts ║│
+   │   sidecar-1                      failed         4 restarts ║│
+   │   sidecar-2                      failed         4 restarts ║│
+   │   sidecar-3                      failed         4 restarts ║│
+   │                                                            ║│
+   │ migrate restarted 10 times. ⇧p shows the log from before   ║│
+   │ that restart, if the kubelet still has it.                 ║│
+   │                                                            ║│
+   │              [ ⏎ pick ]       [ esc cancel ]               ║│
+   │                                                            ║│
+   └─────────────────────────────────────────────────────────────┘
+```
+
+Six or seven containers on one pod is not the ordinary case — three or four
+already is — but it is a real one (a sidecar per concern is how a service
+mesh, a log shipper and a metrics exporter add up), and the number above is
+what a review checks any width against rather than a drawing.
+
+**A container name too long for its column is a second call site of the
+cluster picker's own name-slot cut, not a new one** — front-cut 6, one `…`,
+no word to walk back to, because a name is one token
+([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)):
+`istio-proxy` and `istio-proxy-metrics` would otherwise draw identically at a
+narrow enough column, the same collision two ARN-named contexts already
+motivate that rule for. **This is the name's own column giving way to a
+name too long for it; the next section is the opposite direction — a state
+word long enough to try to take the name's column instead.**
+
+### When a container's own state is what does not fit
+
+`views::container_state` returns *"needs a ConfigMap or Secret that does
+not exist"* for `CreateContainerConfigError` — 47 columns, measured
+against a real capture
+(`reports/2026-09-18-filter-and-container-picker.md` § 1). Handed to the
+row math as written, the state word is what `word` is computed from, so a
+single container in this state pushed `slot` — the name's own column —
+negative, clamped to **one** column, and drew two containers with no
+readable name at all: `▸     running` and `      needs a ConfigMap or
+Secret that does not exist`, neither `trigger` nor `bystander` anywhere on
+the row.
+
+**The name never gives way — a picker exists to name things — so the state
+word does instead, and it is the state that was already going to run long
+before this box ever meets a screen this narrow.** The name column is
+guaranteed a floor of **20 columns** regardless of how long any state word
+in the list is — comfortable for the names already on this page
+(`sidecar-envoy` is 13, `istio-proxy-metrics` is 19) and a name that still
+does not fit it front-cuts the same as always, above. Once that floor is
+spent, whatever room the restart-count column and the two gaps leave is
+what the state word gets, and a state word wider than that gives way —
+back-cut at a word boundary, one `…`, the same shape
+[widgets.md § 7](widgets.md#7-text-that-came-from-the-api) already gives
+the Alerts card's own evidence line, because both are a sentence a reader
+loses nothing from losing the tail of: the object's own `describe` tab has
+the whole reason, one `esc` and one `d` away, the same way a card's full
+evidence is one `⏎` away.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│   ┌ payments/web-7d9f4 — pick a container ──────────────────────┐  │
+│   │                                                             │  │
+│   │ ▸ trigger                running                 3 restarts │  │
+│   │   bystander              needs a ConfigMap or…   3 restarts │  │
+│   │                                                             │  │
+│   │  trigger restarted 3 times. ⇧p shows the log from before    │  │
+│   │  that restart, if the kubelet still has it.                 │  │
+│   │                                                             │  │
+│   │               [ ⏎ pick ]       [ esc cancel ]               │  │
+│   │                                                             │  │
+│   └─────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl logs web-7d9f4 -n payments -c trigger                    │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move   ⏎ pick   esc cancel                                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Both names read in full. `bystander`'s own reason is cut, not guessed at or
+dropped — `needs a ConfigMap or…` is still enough of the sentence that a
+reader who has met the plain-language translation once already recognises
+it, and the whole of it is one keypress away.
+
+### The pod disappears while the picker is open
+
+The same watch that lets [dialogs.md § The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open)
+catch a deleted pod under a Confirm dialog is already running under this
+picker too — it is a `Modal` like any other, and the pod it is about can stop
+existing while it is up. This is **not** a second `Gone` variant: picking a
+container is not a pending mutation, so the reassurance a Confirm's `Gone`
+carries — *"Nothing was changed"* — has nothing to reassure about here, and a
+modal that said it anyway would raise a question ("changed what?") nobody
+asked. The picker instead closes itself and hands back to exactly the state
+[§ No logs yet, no previous run, and the pod disappearing mid-stream](#no-logs-yet-no-previous-run-and-the-pod-disappearing-mid-stream)
+below already draws for the same fact reaching the logs tab directly: the
+`--- stream ended: pod deleted ---` marker in the pane, the same one-sentence
+explanation, and the same pointer to the replacement through `esc` then
+`⏎`. One fact, reached two ways, is one screen, not two — a picker-shaped
+"already gone" box would be a second sentence for something this page
+already says correctly.
+
+### The logs tab, before the container list is known
+
+The Resources browser's `Table` and the permanent Pod watch behind
+`rules::PodSnapshot` are two different streams — a Table row names a pod the
+moment discovery's own `LIST` returns it; the matching `PodSnapshot`,
+containers included, lands whenever the permanent watch's own event for that
+pod is processed, which is not the same instant. A row can be on screen,
+selectable, and opened before the store holds a snapshot for it.
+
+Detail treats that gap exactly like the single-container row it already
+draws: `c container` is not offered and the header carries no `▾`, because
+k8rs does not yet know there is more than one container to pick from any
+more than it would for a pod that only ever has one. The container name
+itself is blank rather than guessed — the same rule the header's own vitals
+already follow ([widgets.md § 1a](widgets.md#1a-the-header-row)) — until
+`PodSnapshot` answers, at which point the ordinary rules take over: one
+container keeps the header exactly as it was, more than one gains `▾` and
+`c` and the picker above becomes reachable.
+
 ### No logs yet, no previous run, and the pod disappearing mid-stream
 
 **A container that has produced nothing** is a state, not a hang
@@ -228,12 +1021,12 @@ a `Pending` pod, or a container that just started:
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/queue-worker-xk2p9                  │
-│ RESOURCES          │  ‹ logs › describe   yaml   events            │
-│   workloads        │  ───────                                      │
+│  RESOURCES         │  ‹ logs ›   describe   yaml   events          │
+│   workloads        │  ──────                                       │
 │   network          │  container: worker ▾       previous log: off  │
 │   storage          │                                               │
 │   config           │               ○  no logs yet                  │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│        Nothing has been written to this       │
 │   certificates  30d│        container's log yet.                   │
 │   drain safety     │                                               │
@@ -244,7 +1037,7 @@ a `Pending` pod, or a container that just started:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs queue-worker-xk2p9 -n payments -c worker -f         │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  f follow  c container  ⇧p previous  / search  esc back   │
+│ [ ] tabs  f follow  c container  esc back  ? all keys  q quit      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -273,12 +1066,12 @@ this exact screen and a second one would be a second thing to learn:
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  ‹ logs › describe   yaml   events            │
-│   workloads        │  ───────                                      │
+│  RESOURCES         │  ‹ logs ›   describe   yaml   events          │
+│   workloads        │  ──────                                       │
 │   network          │  container: app ▾          previous log: off  │
 │   storage          │  14:24:58  writing checkpoint                 │
 │   config           │  14:25:02  shutting down                      │
-│ ANALYSIS           │  14:25:03  --- stream ended: pod deleted ---  │
+│  ANALYSIS          │  14:25:03  --- stream ended: pod deleted ---  │
 │   capacity      1 ▲│                                               │
 │   certificates  30d│  Not a dropped connection — the pod itself    │
 │   drain safety     │  is gone, so there's nothing left to stream.  │
@@ -289,7 +1082,7 @@ this exact screen and a second one would be a second thing to learn:
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app -f                     │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  f follow  c container  ⇧p previous  / search  esc back   │
+│ [ ] tabs  f follow  c container  esc back  ? all keys  q quit      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -350,28 +1143,19 @@ $ kubectl logs web-7d9f4 -n payments -c app -f
 14:25:03  --- stream ended: pod deleted ---
 ```
 
-Rules for this screen:
-
-- **Log streams are attacker-controlled text: an open pane retains at most
-  2 MB, oldest lines dropped first — up to 5,000 lines in the common case,
-  fewer if they run long; a single line is cut at 4,096 bytes and marked.**
-  Control characters are stripped before any of the three bounds is applied.
-  [§ The logs tab](#the-logs-tab) has the arithmetic and the wording; this
-  line used to promise a bound with no number, which is how a bound stays
-  unbuilt.
-- The finding that brought you here stays visible at the top — you never lose
-  the reason you opened the object.
-- **That block draws the finding's evidence in full**, and it is the only place
-  that does. The Alerts card caps it at three wrapped lines with `…`, because a
-  controller's verbatim message runs past any card
-  ([alerts.md § the height](alerts.md#the-height)); this is where the rest of it
-  is, and the cut is only honest because this screen exists. The block wraps to
-  the pane and **scrolls with it** rather than being pinned — a nine-line quote
-  pinned above a log pane leaves no log pane.
-- On a grouped finding, `⏎` first lists *which* pods of the group are affected,
-  then opens the one you pick. **The finding block is on that step too**, for
-  the same reason: the full message must never be two keypresses away, or the
-  card's `…` is pointing at nothing the reader can find.
+**Log streams are attacker-controlled text: an open pane retains at most
+2 MB, oldest lines dropped first — up to 5,000 lines in the common case,
+fewer if they run long; a single line is cut at 4,096 bytes and marked.**
+Control characters are stripped before any of the three bounds is applied.
+[§ The buffer](#the-buffer-2-mb-retained-5000-lines-4096-bytes-per-line) above
+has the arithmetic and the wording; this used to promise a bound with no
+number, which is how a bound stays unbuilt. The pinned finding block every
+tab draws, and the step that picks a pod before any tab opens at all, are
+designed in their own sections now —
+[§ Picking a pod, before Detail has one](#picking-a-pod-before-detail-has-one)
+and [§ Every finding about this object pinned at the top of every tab](#every-finding-about-this-object-pinned-at-the-top-of-every-tab) —
+rather than as a coda to this one tab, which is what left the question of
+which tabs draw them, and which findings, unanswered in the first place.
 
 ## The describe tab
 
@@ -395,34 +1179,34 @@ defect this repo pays most for (invariant 11's own reasoning, one layer up).
 One function, two callers, one order — newest first — settled once here.
 
 **What describe needs of events, and what it deliberately does not build.**
-The events *tab*'s own drawn layout — its own scrolling, its own columns, the
-full reason-to-sentence table — is Phase 11's, out of scope for this file
-today. What describe needs is smaller: the same list, oldest to newest
-reversed, each line short enough to sit under a container block without
-turning the pane into the tab it is not trying to be.
+The events *tab*'s own drawn layout — its own scrolling and its own columns —
+is [Phase 11's](#the-events-tab), out of scope for this file today. What
+describe needs is smaller: the same list, oldest to newest reversed, each
+line short enough to sit under a container block without turning the pane
+into the tab it is not trying to be.
 
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  Pod · running · created 3 days ago           │
 │   storage          │  containers                                   │
 │   config           │    app             failed                     │
 │   cluster          │      container exceeded its memory limit —    │
-│ ANALYSIS           │      exit 137, 4 restarts                     │
+│  ANALYSIS          │      exit 137, 4 restarts                     │
 │   capacity      1 ▲│    sidecar-envoy   keeps crashing and         │
 │   certificates  30d│      restarting, 12 restarts                  │
 │   drain safety     │    init-migrate    done                       │
-│   posture          │  events (newest first)                        │
-│   restarts         │  3 min ago  the container is being stopped    │
-│   waste            │  (Killing) Stopping container app             │
-│   versions         │                                               │
+│   posture          │                                               │
+│   restarts         │  events (newest first)                        │
+│   waste            │  3 min ago  the container is being stopped    │
+│   versions         │  (Killing) Stopping container app             │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web-7d9f4 -n payments                       │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -505,13 +1289,13 @@ week later, in the one case a reader has no other way to check.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web                                 │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  Pod · running · created 8 days ago           │
 │   storage          │                                               │
 │   config           │  containers                                   │
 │   cluster          │    app             running                    │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│  events                                       │
 │   certificates  30d│  ○  none right now                            │
 │   drain safety     │                                               │
@@ -522,7 +1306,7 @@ week later, in the one case a reader has no other way to check.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web -n payments                             │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -548,14 +1332,14 @@ days ago.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  Pod · running · created 5 days ago           │
 │   storage          │  containers                                   │
 │   config           │    app             running                    │
 │   cluster          │                                               │
-│ ANALYSIS           │  events (newest first)                        │
-│   capacity      1 ▲│  3 min ago  the health check failed           │
+│  ANALYSIS          │  events (newest first)                        │
+│   capacity      1 ▲│  3 min ago    the health check failed         │
 │   certificates  30d│  (Unhealthy) Readiness probe failed:          │
 │   drain safety     │  HTTP probe failed with statuscode: 503       │
 │   posture          │  happened 2,383 times since 4 days ago        │
@@ -565,7 +1349,7 @@ days ago.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web-7d9f4 -n payments                       │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -602,24 +1386,24 @@ new key.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  4 hours ago  the container started pulling   │
 │   storage          │  its image                                    │
 │   config           │  (Pulling) Pulling image "payments/web:2.3.1" │
 │   cluster          │                                               │
-│ ANALYSIS           │  6 hours ago  kubernetes placed this pod on a │
+│  ANALYSIS          │  6 hours ago  kubernetes placed this pod on a │
 │   capacity      1 ▲│  node                                         │
 │   certificates  30d│  (Scheduled) Successfully assigned            │
 │   drain safety     │  payments/web-7d9f4 to node-3                 │
 │   posture          │                                               │
-│   restarts         │  9 hours ago  BackOff                         │
-│   waste            │  Back-off restarting failed container app     │
-│   versions         │                                               │
+│   restarts         │  9 hours ago                                  │
+│   waste            │  (BackOff) Back-off restarting failed         │
+│   versions         │  container app                                │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod web-7d9f4 -n payments                       │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -630,8 +1414,9 @@ the containers block — the tab row and the underline under it stay pinned
 wraps to the pane exactly as a log line does
 ([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)) — *"the container
 started pulling its image"* above is the ordinary case, not a special one.
-`BackOff` is the fall-through case drawn for real: no phrase, the raw word
-and the message it came with, nothing invented.
+`BackOff` is the fall-through case drawn for real: no phrase, so the age sits
+alone on its own line, and `(BackOff)` and the message it came with follow
+under it, nothing invented.
 
 ### The pod's own reason, when it has one
 
@@ -649,13 +1434,13 @@ what ran out."* This is that pod.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/worker-4kd2p                        │
-│ RESOURCES          │  logs   ‹ describe ›   yaml   events          │
+│  RESOURCES         │  logs   ‹ describe ›   yaml   events          │
 │   workloads        │         ──────────                            │
 │   network          │  Pod · failed · created 8 days ago            │
 │   storage          │  removed by the node to take back room        │
 │   config           │  (Evicted) The node was low on resource:      │
 │   cluster          │  ephemeral-storage.                           │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 │   capacity      1 ▲│  containers                                   │
 │   certificates  30d│    worker          not started                │
 │   drain safety     │                                               │
@@ -666,7 +1451,7 @@ what ran out."* This is that pod.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl describe pod worker-4kd2p -n payments                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                 │
+│ [ ] tabs  esc back  ? all keys  q quit                             │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -805,6 +1590,425 @@ left the flag's exact spelling to them. This file specifies what each verb
 shows once chosen, not the precedence between three that all narrow to one
 object.
 
+## The events tab
+
+**The same fetch describe already reads — reused, not reopened.** `events`
+shows exactly what [describe's own events read](#the-describe-tab) already
+fetches: the `involvedObject` field-selector GET, newest first, the one
+function two callers share so there is never a second version of "this
+object's events" to keep in agreement with the first — "One function, two
+callers, one order — newest first — settled once here," in describe's own
+words. Nothing new goes to the cluster; what is new is the pane. Describe
+fits a handful of these rows under a container block. Here the whole content
+pane is the list.
+
+**What the tab draws that describe's own block does not: nothing.** Same
+rows, more of them, no header. `events (newest first)` — the line describe
+prints above its own block, because it needs to say what the block below it
+is — is dropped here: the tab label already says that, the same way the
+yaml pane carries no `yaml:` heading of its own repeating what the tab
+underneath it already says. The reason→phrase table is
+[describe's own six rows](#the-describe-tab), unchanged and not grown here —
+a reason the table does not recognise still falls through to its raw word
+beside the message, nothing invented. The `(RawReason) message` line, the
+`happened N times since <span> ago` line (only when `count` is more than
+one), and [the one age ladder](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen)
+are the identical rules, reached from the identical function. A second
+grammar for the same fact would be exactly the two-places-disagreeing defect
+this repo pays most for — invariant 11's own reasoning, restated once by
+describe, cited rather than repeated here.
+
+Several events, newest first, on a pane with nothing above it but the
+object's name and the tab row — the ordinary case, and it happens to be the
+same pod [describe's own repeated-event example](#a-repeated-event--one-line-for-something-that-happened-2383-times)
+already measured, so the count-more-than-one row and a plain, once-only row
+sit side by side without inventing a second fixture:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │  3 min ago    the health check failed         │
+│   storage          │  (Unhealthy) Readiness probe failed:          │
+│   config           │  HTTP probe failed with statuscode: 503       │
+│   cluster          │  happened 2,383 times since 4 days ago        │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│  4 hours ago  the image is ready              │
+│   certificates  30d│  (Pulled) Successfully pulled image           │
+│   drain safety     │  "payments/web:2.3.1"                         │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back  ? all keys  q quit                             │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The `(Unhealthy)`/count-2,383 row and the plain `(Pulled)` row are the
+  same two events [describe's own repeated-event section](#a-repeated-event--one-line-for-something-that-happened-2383-times)
+  measured on a real cluster.** Reused rather than re-fixtured, for the same
+  reason the events read itself is reused rather than refetched.
+- **The second row's `(Pulled) Successfully pulled image
+  "payments/web:2.3.1"` line is drawn here that describe's own mockup did
+  not have room for.** Describe's block sits under a container list and
+  cropped it for space; the rule above it — every event reason is a phrase
+  *beside* the controller's own message, never instead of it — carves out no
+  exception for a `count` of one, and this pane has the room to show it
+  correctly. This is the one place this section adds a line describe's
+  mockup omitted; everything else here is transcribed, not invented.
+- **An event can reach this pane with no age at all** — `Happening::at` is
+  `Option<Time>`, and a real event can carry none of the four fields that
+  fill it, which draws no age rather than one this file invented, [the same
+  "no number we cannot produce" rule](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen)
+  every age on this product already keeps. The age column still pads to the
+  widest age actually on the pane, and describe's own rule for the row that
+  has neither an age nor a phrase applies unchanged here, one function away:
+  the first line is dropped rather than left as a row of blank padding, so
+  a phrase-less, age-less `BackOff` reads as its two lines, not three:
+  ```
+  (BackOff) Back-off restarting failed container app
+  ```
+  — no leading blank line above it.
+
+### No events at all — the same words, filling the pane instead of a block in it
+
+[Describe's own reasoning](#no-events-at-all--a-healthy-pod-is-not-a-broken-fetch)
+is unchanged: *nothing left* and *nothing happened* are different facts, and
+only the second paragraph tells them apart. The words do not change when the
+pane is the whole screen rather than a block under a container list — reusing
+them is the same "written once" discipline as everywhere else on this page.
+What changes is only the layout: with nothing else sharing the pane, this is
+now a whole-screen calm state like
+[the ordinary Nothing is broken screen](states.md#nothing-is-broken), so it is
+centred the same way that one is, rather than left-flush under a heading that
+no longer exists here.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web                                 │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │               ○  none right now               │
+│   cluster          │                                               │
+│  ANALYSIS          │    Kubernetes only keeps events for a         │
+│   capacity      1 ▲│    while, and this pod has run long enough    │
+│   certificates  30d│    that none are left.                        │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web -n payments                         │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back  ? all keys  q quit                             │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+`○` is still the product's own calm symbol
+([states.md § Nothing is broken](states.md#nothing-is-broken)), reused rather
+than invented a third time.
+
+### More events than the pane — the whole pane scrolls now, not a block in it
+
+[Describe's own rule](#more-events-than-the-pane--it-scrolls-the-same-as-everything-else)
+holds unchanged: no cap, no "N more" line, a `Paragraph` with a scroll offset
+like every other overflowing pane on this product
+([widgets.md § 4](widgets.md#4-scrolling)). The object's name, the tab row
+and its underline stay pinned — drawn above the scrolling `Paragraph`, not
+inside it — three rows here and, once a read has been cut,
+[a fourth](#more-events-than-k8rs-was-given--a-different-claim-from-more-than-the-pane-holds)
+alongside them; nothing is reserved for that fourth row until there is
+something to put in it. Otherwise exactly as
+[describe's own scrolled mockup](#more-events-than-the-pane--it-scrolls-the-same-as-everything-else)
+already shows — and only the event list itself moves. This is the identical
+three events from that section, scrolled to the same point, because the pane
+holding them is the same widget with the same content:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │  4 hours ago  the container started pulling   │
+│   storage          │  its image                                    │
+│   config           │  (Pulling) Pulling image "payments/web:2.3.1" │
+│   cluster          │                                               │
+│  ANALYSIS          │  6 hours ago  kubernetes placed this pod on a │
+│   capacity      1 ▲│  node                                         │
+│   certificates  30d│  (Scheduled) Successfully assigned            │
+│   drain safety     │  payments/web-7d9f4 to node-3                 │
+│   posture          │                                               │
+│   restarts         │  9 hours ago                                  │
+│   waste            │  (BackOff) Back-off restarting failed         │
+│   versions         │  container app                                │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back  ? all keys  q quit                             │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+`BackOff` is still the fall-through case drawn for real: no phrase, so the
+age sits alone on its own line and `(BackOff)` and the message it came with
+follow under it. A message too long for one line still wraps exactly as a
+log line does
+([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)).
+
+### More events than k8rs was given — a different claim from more than the pane holds
+
+**Not the same state as the one above.** "More than the pane" is this
+product's own display choice — it scrolls, and nothing on screen needs to
+say so because scrolling is how every overflowing pane on this product
+already answers it. This one is the server's choice, not this product's:
+the fetch is capped at `EVENTS_KEPT` — 500 today — and once the cluster has
+more than that for one object, the read stops there. There is no scrolling
+to what was never fetched. That costs this pane its own opening claim: a
+`limit` returns the cluster's own storage order, not the newest, so *newest
+first* — the thing every other mockup in this section is quietly true of —
+is false the moment the fetch is cut, and the words that promised it are the
+words that have to be withdrawn.
+
+**The heading carries the withdrawal, because the heading is the only place
+the claim was made.** This pane draws no heading in the ordinary case — [the
+opening section above](#the-events-tab) rules that the tab label already
+says what the pane is — so a cut list is the one case that heading comes
+back, and it comes back saying the opposite of what it would otherwise imply
+by its absence: not "these are the newest," but that no such promise can be
+made. The words are exactly what describe's own headless print already
+says when its own events read is cut — this file had not written them down
+before now, but the product already had, and they are reused rather than
+reworded a second time here. Only the number is a fact about this build,
+not a fact about the object, so it is named plainly rather than rounded or
+hidden:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │  events (the first 500 k8rs was given — there │
+│   storage          │  are more, and these are not the newest):     │
+│   config           │                                               │
+│   cluster          │  9 hours ago                                  │
+│  ANALYSIS          │  (BackOff) Back-off restarting failed         │
+│   capacity      1 ▲│  container app                                │
+│   certificates  30d│                                               │
+│   drain safety     │  3 min ago    the container is being stopped  │
+│   posture          │  (Killing) Stopping container app             │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back  ? all keys  q quit                             │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The 3-minute-old `Killing` row sits below the 9-hour-old `BackOff`
+  row on purpose.** This is not a scrolled view — it is the top of the
+  pane — and the order is the cluster's storage order, not time. Drawing it
+  chronologically would quietly rely on the one thing the heading just
+  said not to trust.
+- **`500` is read off `k8s::EVENTS_KEPT`, not typed twice.** If that
+  constant ever changes, this heading's number
+  changes with it in the running product; it is written here because a
+  mockup shows what actually renders, the same way `2,383` above is a real
+  measured count and not a smaller stand-in.
+- **The heading pins, and only the event list scrolls under it.** A cut
+  list can also be longer than the pane — 500 events is far more than the
+  ten rows left once the heading takes its own two — so [the pane-overflow
+  rule](#more-events-than-the-pane--the-whole-pane-scrolls-now-not-a-block-in-it)
+  still applies, but the heading is not part of what it scrolls: it draws
+  pinned above the scrolling `Paragraph`, beside the object's name, the tab
+  row and the underline — a fourth pinned row, and one this pane carries
+  only because this is the one state that has something to pin there.
+  **Nothing is reserved for it otherwise** — an ordinary, uncut list keeps
+  the same three pinned rows every other mockup on this page draws, no
+  blank line held open for a heading that never withdrew anything. Scrolled
+  well past the list's own first two rows, the heading is still the first
+  thing on the pane:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │  events (the first 500 k8rs was given — there │
+│   storage          │  are more, and these are not the newest):     │
+│   config           │  3 min ago    the health check failed         │
+│   cluster          │  (Unhealthy) Readiness probe failed:          │
+│  ANALYSIS          │  HTTP probe failed with statuscode: 503       │
+│   capacity      1 ▲│  happened 2,383 times since 4 days ago        │
+│   certificates  30d│                                               │
+│   drain safety     │  4 hours ago  the image is ready              │
+│   posture          │  (Pulled) Successfully pulled image           │
+│   restarts         │  "payments/web:2.3.1"                         │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back  ? all keys  q quit                             │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+This is the same `Unhealthy`/`Pulled` pair [the ordinary case
+above](#the-events-tab) already measured — reused, not re-fixtured — now
+standing in for two rows from deeper in the (much longer, capped-at-500)
+list. `BackOff` and `Killing`, the two rows the mockup above draws right
+under the heading, have scrolled out of view above them; the heading has
+not, because it was never part of what scrolled. Nor is the blank row the
+mockup above draws between the heading and `BackOff`: that row is the top of
+the *scrollable* body, not the pinned area, so scrolling past it removes it
+the same as any other row — which is why no gap is left here between the
+heading and the event now sitting at the top of the visible list.
+
+### The events fetch could not be completed
+
+Two different facts share this heading, and they are not the same failure
+wearing two names.
+
+**A permission gap degrades this one tab and nothing else.** Nothing has
+happened to the object — only to what k8rs may read about it — so this stays
+a message inside the pane, the same shape
+[the namespace-scoping banner](states.md#you-can-only-see-some-namespaces)
+already uses for a 403 elsewhere, and it names the missing verb and resource
+the same way every other refusal on this product does
+([states.md § Rules that hold across every state on this page](states.md#rules-that-hold-across-every-state-on-this-page):
+*"A 403 degrades exactly the feature that needed the permission and names the
+missing verb and resource. It never crashes and never retries in a loop."*):
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
+│  RESOURCES         │  logs   describe   yaml   ‹ events ›          │
+│   workloads        │                           ────────            │
+│   network          │                                               │
+│   storage          │  k8rs can't read this pod's events.           │
+│   config           │                                               │
+│   cluster          │  Missing permission: list events in payments. │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│  The other tabs on this object still work —   │
+│   certificates  30d│  only this permission is missing.             │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl events --for pod/web-7d9f4 -n payments   → refused       │
+├────────────────────────────────────────────────────────────────────┤
+│ [ ] tabs  esc back  ? all keys  q quit                             │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+No `⚠` — that glyph is reserved for a connection or trust problem
+([states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser)),
+and a scoped-down role is neither;
+[the namespace-scoping banner](states.md#you-can-only-see-some-namespaces) it
+is modelled on carries none either.
+
+**The object being gone entirely is a different fact, and takes a different
+shape.** This tab cannot be opened on an object that does not exist — `⏎`
+only ever opens a row currently in the watched store, the same guard
+[describe's own version of this state](#an-object-that-does-not-exist)
+already names — so the only way to reach it here is the object being removed
+by something else while this view is already open on it. That is exactly
+[dialogs.md § The object went away while the dialog was open](dialogs.md#the-object-went-away-while-the-dialog-was-open),
+which describe already ruled applies unchanged to "describe/yaml opening on a
+since-deleted object," for the same reason it applies here: the read behind
+this tab is downstream of the identical `k8s::pod()` call. No new pane, no
+new mockup — the existing "Already gone" shape covers it, minus its "Nothing
+was changed" line, which is a sentence about a mutation this tab, a read,
+never attempted.
+
+### Free text that carried control characters — the same rule as describe's, not a second reading of it
+
+Identical to describe's own rule, not a second reading of it: an event's
+`message` is a **cell**, not a document — one line in a list, wrapped by
+width, never carrying a hard line break of its own — and
+[D198's own distinction](../NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)
+is what decides that, the same way it decides it for
+[describe's own version of this section](#free-text-that-carried-control-characters).
+`\n` does not survive here any more than it does there — this pane is exactly
+the shape D198 carved the exception *away* from, not the one it carved it
+into. Every character `unprintable` refuses on describe it refuses here too.
+
+### No headless surface for this tab
+
+Every other tab on this page has a "Printed instead of drawn" section
+because `--logs` / `--describe` / `--yaml` already exist in the temporary
+driver
+([D194](../NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
+There is no `--events`, and this section does not add one: invariant 10
+fixes the flag list at fifteen, and a sixteenth is a recorded decision this
+box does not make. This tab is drawn only, reachable through `⏎` then
+`[`/`]`, never through a flag — and nothing is lost by that:
+[describe already prints this object's events headlessly](#printed-instead-of-drawn--describe-on-the-headless-surface),
+newest-to-oldest reversed under its own `events (newest first):` heading,
+which is the one place a script gets this same fact today.
+
+### The command log, and the footer
+
+**The command log shows `kubectl events --for pod/web-7d9f4 -n payments`,
+not `kubectl describe`.** Describe's own pane earns `kubectl describe` as its
+equivalent because its pane shows two reads folded into one — the object
+*and* its events — and `kubectl describe` is genuinely what a user would type
+to get both. This pane shows only the second half, so the line it teaches is
+the command that produces only that half: `kubectl events --for TYPE/NAME` is
+a real, current subcommand (stable since kubectl 1.28) built for exactly this
+question — "what happened to this one object" — and it is a truer equivalent
+of what is on screen than `kubectl describe` would be, which shows spec and
+status this pane does not. The refused mockup above appends `→ refused`, the
+same convention [the login-expired header](states.md#your-login-expired)
+already uses for a command that was sent and answered no.
+
+**Typing the line does not reproduce the order this pane promises, and that
+is worth saying rather than leaving for a reader to find out at 3am.**
+`kubectl events --for` sorts its own output oldest first — read off
+kubectl's own `pkg/cmd/events/events.go`, `sort.Sort(SortableEvents(...))`
+ascending on `eventTime` — the reverse of the newest-first order this pane
+draws and the fetch behind it returns. There is no `--sort-by` on `kubectl
+events` to add to the line, so the difference is not one this file can fix
+by teaching a longer command; it can only name it: the command log teaches
+the *equivalent* a user would type, per invariant 4, and an equivalent that
+hands back the reverse of what the pane just showed is exactly the surprise
+invariant 4 exists to prevent, not one it excuses.
+
+**It also matches on one field this pane's own fetch does not stop at.**
+`kubectl events --for` selects by kind, apiVersion and name; the pane's
+`involvedObject` selector adds `uid`, so a replacement object under the same
+name is a different match to the pane and the same match to the typed line.
+That is why the `uid` term is in the selector at all, not a decoration on
+it: without it, a StatefulSet pod deleted and recreated under the same name
+inside the event TTL would have the typed command hand back its
+predecessor's events where the pane shows none — a consequence read off the
+selector, not yet measured against a cluster.
+
+**The footer reads `[ ] tabs  esc back  ? all keys  q quit`, the same as
+describe's.** Nothing else applies: there is no follow (this is a fetch, not
+a stream — invariant 6 keeps events off the permanent watch, so there is
+nothing to tail), no container picker (an event is not scoped to one
+container), no `⇧p previous` (an event has no earlier version to ask for),
+and no reveal (nothing on this pane is a secret). Offering any of them would
+be exactly the promised-key-that-does-nothing bug
+[the README's key rules](README.md#the-five-rules-every-screen-obeys)
+already forbids.
+
 ## The yaml tab
 
 **A fresh, unpruned GET — never the watch store.** The store is pruned to the
@@ -835,13 +2039,13 @@ what 80×24 already draws, shown at its own size instead of a narrower one.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                                     │
-│ RESOURCES          │  logs   describe   ‹ yaml ›   events                    │
+│  RESOURCES         │  logs   describe   ‹ yaml ›   events                    │
 │   workloads        │                    ──────                               │
 │   network          │apiVersion: v1                                           │
 │   storage          │kind: Pod                                                │
 │   config           │metadata:                                                │
 │   cluster          │  name: web-7d9f4                                        │
-│ ANALYSIS           │  namespace: payments                                    │
+│  ANALYSIS          │  namespace: payments                                    │
 │   capacity      1 ▲│  labels:                                                │
 │   certificates  30d│    app: web                                             │
 │   drain safety     │  managedFields:                                         │
@@ -854,7 +2058,7 @@ what 80×24 already draws, shown at its own size instead of a narrower one.
 ├────────────────────┴─────────────────────────────────────────────────────────┤
 │ $ kubectl get pod web-7d9f4 -n payments -o yaml --show-managed-fields        │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                           │
+│ [ ] tabs  esc back  ? all keys  q quit                                       │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -926,13 +2130,13 @@ so is every value under `metadata.annotations`, by the same rule:
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/db-credentials                                │
-│ RESOURCES          │  logs   describe   ‹ yaml ›   events                    │
+│  RESOURCES         │  logs   describe   ‹ yaml ›   events                    │
 │   workloads        │                    ──────                               │
 │   network          │apiVersion: v1                                           │
 │   storage          │kind: Secret                                             │
 │   config           │metadata:                                                │
 │   cluster          │  name: db-credentials                                   │
-│ ANALYSIS           │  namespace: payments                                    │
+│  ANALYSIS          │  namespace: payments                                    │
 │   capacity      1 ▲│  annotations:                                           │
 │   certificates  30d│    kubectl.kubernetes.io/last-applied-configuration:    │
 │   drain safety     │    <hidden — 612 bytes>                                 │
@@ -943,11 +2147,30 @@ so is every value under `metadata.annotations`, by the same rule:
 │                    │  password: <hidden — 16 bytes>                          │
 │                    │  tls.crt: <hidden — 1,172 bytes>                        │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│ $ kubectl get secret db-credentials -n payments -o yaml --show-managed-fields│
+│ $ kubectl get secret db-credentials -n payments -o yaml...                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  v reveal  esc back                                                 │
+│ [ ] tabs  v reveal  esc back  ? all keys  q quit                             │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**This is the first line on the page that does not fit, and it is cut, not
+clipped.** `--show-managed-fields` makes the full teaching command 77
+characters; the strip has 76 to give it — pane width minus the outer border
+minus the one-column margin `indented()` reserves on each side
+([widgets.md § 1](widgets.md#1-the-frame)) — even at the true 80-column floor
+this section already draws at. The cut walks back to the last space rather
+than stopping mid-flag, the rule [the evidence line already
+follows](widgets.md#7-text-that-came-from-the-api): a flag with its last
+character sheared off would still look like a flag, and `--show-managed-fiel`
+is not one a reader would notice was wrong. Dropping the whole flag instead
+leaves `...` right after `yaml` — the strip's own three-period mark, never
+the single `…` glyph, because on this one strip `…` already means something
+else, the running mark ([widgets.md § 7, back-cut
+3](widgets.md#7-text-that-came-from-the-api)) — and if a reader deletes just
+the `...`, what is left is a real command: the one `kubectl get -o yaml`
+already runs by default, without `managedFields`. A wider terminal never
+needs this cut; 80×24 is the floor, and the content pane only grows from
+here.
 
 **Why an annotation on a Secret gets treated as a copy of the Secret rather
 than as metadata about it.** `kubectl apply -f secret.yaml` — the ordinary
@@ -1021,7 +2244,7 @@ container picker already is.
 │   └────────────────────────────────────────────────────────────┘   │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get secret db-credentials -n payments -o yaml            │
+│ $ kubectl get secret db-credentials -n payments -o yaml...         │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc close                                                          │
 └────────────────────────────────────────────────────────────────────┘
@@ -1053,13 +2276,13 @@ container picker already is.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  payments/pending-secret                                │
-│ RESOURCES          │  logs   describe   ‹ yaml ›   events                    │
+│  RESOURCES         │  logs   describe   ‹ yaml ›   events                    │
 │   workloads        │                    ──────                               │
 │   network          │apiVersion: v1                                           │
 │   storage          │kind: Secret                                             │
 │   config           │metadata:                                                │
 │   cluster          │  name: pending-secret                                   │
-│ ANALYSIS           │  namespace: payments                                    │
+│  ANALYSIS          │  namespace: payments                                    │
 │   capacity      1 ▲│  managedFields: …                                       │
 │   certificates  30d│type: Opaque                                             │
 │   drain safety     │data: {}                                                 │
@@ -1070,11 +2293,16 @@ container picker already is.
 │                    │                                                         │
 │                    │                                                         │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│ $ kubectl get secret pending-secret -n payments -o yaml --show-managed-fields│
+│ $ kubectl get secret pending-secret -n payments -o yaml...                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [ ] tabs  esc back                                                           │
+│ [ ] tabs  esc back  ? all keys  q quit                                       │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Same cut, same reason.** `pending-secret` is the same length as
+`db-credentials`, so with `--show-managed-fields` on it this line is the same
+77 characters against the same 76-column floor — cut in the same place, for
+the reason spelled out at [the mockup above](#a-secret-values-hidden-behind-an-explicit-reveal).
 
 No `metadata.annotations` here — this Secret has none yet, and an empty
 section is not drawn any more than an empty `data` map invents keys that

@@ -58,4 +58,8 @@ feel complex is its panel layering; the discipline here is lazygit's.
    The slash therefore means one thing everywhere, so its absence says
    "cluster-wide" with no caption needed — and the *sentence* under the name
    is what tells the reader which kind of thing it is (*"This node refuses new
-   pods"*), because the identity line is a name, not a description.
+   pods"*), because the identity line is a name, not a description. One screen
+   narrows this rule further: a browser row already inside a namespace-scoped
+   view drops the namespace too, because the pane's title names it instead —
+   [resources.md § Browsing every namespace](resources.md#browsing-every-namespace)
+   is the exception, this rule is the general case.

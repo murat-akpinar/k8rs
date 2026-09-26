@@ -32,5 +32,17 @@
       "Bash(rm -rf:*)",
       "Bash(kind delete:*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/session-check.sh\""
+          }
+        ]
+      }
+    ]
   }
 }

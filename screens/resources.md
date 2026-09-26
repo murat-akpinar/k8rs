@@ -7,8 +7,8 @@ own `Table` printing — the exact columns `kubectl get` would show.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  deployments          ns: payments            │
-│ RESOURCES          │                                               │
+│  ALERTS     3 ● 7 ▲│  deployments          ns: payments            │
+│  RESOURCES         │                                               │
 │▸  workloads        │    NAME      READY  UP-TO-DATE  AVAILABLE  AGE│
 │     deployments  12│▸ ● web       3/5    5           3          12d│
 │     statefulsets  3│    api       6/6    6           6          40d│
@@ -19,11 +19,11 @@ own `Table` printing — the exact columns `kubectl get` would show.
 │   storage          │                                               │
 │   config           │                                               │
 │   cluster          │                                               │
-│ ANALYSIS           │                                               │
+│  ANALYSIS          │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get deployments -n payments                              │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  ctrl-d delete  / filter       │
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,6 +81,34 @@ own `Table` printing — the exact columns `kubectl get` would show.
 
 ## Rules
 
+- **The footer's exact set — and why `ctrl-d delete` is not in it even though
+  the key still works — is [widgets.md § The footer](widgets.md#2a-the-footer)**,
+  the same rule [alerts.md](alerts.md) draws from. `q quit` and `? all keys`
+  are the two keys that never give way; `ctrl-d delete` gives way to them here
+  the same way `d describe` and `y view as YAML` already did, on every list
+  view, before this footer was ever audited for width.
+- **What `/` and `n` do while they are being typed, and what a filter that
+  hides every row looks like, are not this file's own rules** —
+  [widgets.md § 2b](widgets.md#2b-typing-into-a-filter) and
+  [states.md § The filter hides every row](states.md#the-filter-hides-every-row)
+  are shared with [alerts.md](alerts.md), the same way the footer itself is.
+- **`r` on the selected row is marked the same way as on Alerts, and no
+  differently for being over a table instead of a card** — `r no restart`,
+  from the same `may_i_in` result Alerts reads
+  ([widgets.md § The footer](widgets.md#2a-the-footer),
+  [help.md § When a key is refused](help.md#when-a-key-is-refused)). One
+  mechanism, one place it is spelled out, cited from both list screens rather
+  than drawn twice. `s` never reaches this line at all — withheld from every
+  kind, login and run (help.md's own Rules list) — so there is no `s no
+  scale` to mark here either.
+- **This is the screen where a kind lacking `r` entirely is the common
+  case, not the exception** — most rows this browser can reach (a
+  ConfigMap, a Service, a PersistentVolume, a Node, a bare ReplicaSet, a
+  CRD) do not support it. The row does not mark a `no` on a key it was never
+  asked about; it drops the key, the same way it drops for a
+  single-container pod's `c container` on Detail. Every combination and its
+  column count are [widgets.md § The footer](widgets.md#2a-the-footer)'s,
+  not redrawn here.
 - **Alerts bleed through.** A row whose object has a finding is marked (`●`),
   so the browser never disagrees with the Alerts view.
 - **The `ns:` label follows the kind and disappears for the cluster-wide
@@ -106,6 +134,92 @@ own `Table` printing — the exact columns `kubectl get` would show.
   Forty permanent streams is the problem this architecture exists to avoid.
 - Operations live here, on the selected object — see [dialogs.md](dialogs.md).
   Nothing is ever applied to a selection of more than one object.
+- **A kind with zero rows is not a finding.** It draws its own dim, centred
+  sentence — deliberately not the Alerts `○ nothing is broken` claim, because
+  an empty list of one kind carries no severity — covering all three ways the
+  pane can be empty: scoped, unscoped, and when the kind that was selected has
+  dropped out of the sidebar's own list
+  ([states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser)).
+
+## The line under the table
+
+One line, drawn under the table about the **selected** row only, when that
+row's object owns an Alerts card — never one line per marked row in the pane,
+which would be a second list competing with the table above it.
+
+**Which sentence draws is [`Card::count`](../src/views.rs), not a layout
+choice.** A card with a real pod count gets the first; a card with none —
+every node card, and a card whose owner **is** the pod — gets the second.
+Both are literal strings, and there is no third:
+
+```
+● web has 3 pods with problems — ⏎ to see
+● node-3 has problems — ⏎ to see
+```
+
+- `3 pods` is [`Card::affected`](../src/views.rs) — the same number
+  `alerts.md`'s `· n of m pods` counts, off the same card, about the same
+  object.
+- The second form is **not** `0 pods with problems` and **not** a pod counted
+  against its own card — both were considered and rejected. A node's card has
+  `affected == 0` — that count counts pods, and a node card is about one
+  machine
+  ([NOTES § D39](../NOTES.md#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)).
+  A bare pod's card has `owner.kind == Pod` — nothing owns it, so a fraction
+  of one pod out of itself is not a fact
+  ([NOTES § D246 ruling 2](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)).
+  Both reach [`Card::count`](../src/views.rs)'s same `None`, and `has problems`
+  is the one sentence that is true of either without claiming to know which.
+
+### When it does not fit, the name gives way — and now it says so
+
+The line is a fixed prefix (the row marker's own column, the severity glyph)
+and a fixed tail — the sentence after the name, in full, one of the two
+strings above minus the name — with the name in between. **`⏎ to see` never
+gives way.** It is the half of the line that says what to do next, and the
+order that already ships is right: a line with a shortened name still tells
+the reader who it is about; a line with a shortened instruction tells them
+nothing — the same ordering `· n of m pods` already gives way to the name for,
+one level up
+([alerts.md § the age, and what it costs the name](alerts.md#the-age-and-what-it-costs-the-name)).
+
+The rule, so a reviewer can check any width against it rather than a drawing:
+
+1. `room` is the pane's width, less the prefix, less the tail — the same
+   measurement already made off the spans about to be drawn, not a sum
+   restated separately.
+2. The name fits in `room` → it draws whole. No mark.
+3. It does not → it is cut to `room − 1` columns, on a character boundary and
+   never inside one — the same rule every other clip on this page already
+   follows — and **one `…`** is appended, glued to the last character kept,
+   no space before it. Same mark, same rule as the one other place this
+   product cuts a string on purpose
+   ([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)).
+4. `room` is `0` → nothing is drawn where the name would go. Not reached at
+   the 80×24 floor by any tail this rule set produces today, and not designed
+   past that.
+
+**This is that section's exception extended to a second place, not a second
+convention** — [widgets.md § 7](widgets.md#7-text-that-came-from-the-api) now
+names both. What makes the cut legitimate here is the same thing that makes
+it legitimate there: the whole name is one `⏎` away, on the object's own
+detail screen ([detail.md](detail.md)), which was already true of every row
+on this pane before this rule existed.
+
+Illustrative, not a captured run — the exact column the cut lands on is the
+renderer's own measurement, not this page's:
+
+```
+│  ● payments/checkout-worker-servi… has 3 pods with problems — ⏎ to see│
+```
+
+The real case this rule exists for is narrower, and already run:
+`cargo test the_browser -- --nocapture` draws `kube-system/cored` with no
+mark at all today, on a 57-column pane — `kube-system/coredns`, a Deployment
+name, with its last two characters silently gone. Nothing about that string
+tells a reader it is not `kube-system/cored`, an object that does not exist.
+The fix is the rule above; the exact marked string it produces is
+`cargo test`'s to show next, not this file's to predict.
 
 ## Browsing every namespace
 

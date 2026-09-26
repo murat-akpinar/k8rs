@@ -38,6 +38,13 @@ Measured: fourteen minutes of hand re-runs found nothing.
 **Run the thing, not just the suite** — the binary against a fixture or kind —
 and say what it printed.
 
+**Cleanup lives in a trap and restores from a snapshot you took, never to
+`HEAD`** ([D185](../../NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)) —
+and *I killed it* is a claim until you have looked. A `pkill` on a wrapper once
+orphaned a `rustc` that went on compiling for thirteen minutes beside another
+agent's build, and a retry wrapper's exit code was read for an `rm`'s
+([D270](../../NOTES.md#d270--the-which-pods-box-a-block-is-about-the-object-the-surface-is-about-a-stack-that-erased-the-panes-own-sentence-and-a-row-order-that-would-not-hold-still-2026-09-18)).
+
 Report: what you attacked and what survived, the mutation result, `just check`'s
 output, what you could *not* prove and why, and any box in `todo.md`
 that is checked but not actually true. If a test in someone else's file must

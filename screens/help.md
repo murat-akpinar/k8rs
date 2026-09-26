@@ -11,23 +11,40 @@ tool for beginners may not hide its verbs behind memory.
 │    tab          next panel      esc   back / close                 │
 │    X            switch cluster                                     │
 │    [ ]          detail tabs     / n   filter · namespace           │
-│                                                                    │
 │  Looking at things (always available)                              │
 │    l  logs, with the log from before a crash                       │
-│       in the log tab:  f follow · c container · ⇧p previous        │
+│       log tab:  f follow · not built yet: c container, ⇧p previous │
 │    d  describe — the object and what happened to it                │
-│    y  view as YAML                                                 │
-│                                                                    │
+│    y  view as YAML            ctrl-z  back to your shell — type fg │
 │  Changing things (each one asks first, and shows the command)      │
-│    s       run more or fewer copies       (scale)                  │
+│    s       not built yet — there is no way yet to type a copy count│
+│            works on a deployment, a statefulset and a replicaset   │
 │    r       restart, at its own pace       (rollout restart)        │
+│            works on a deployment, a statefulset and a daemonset    │
 │    ctrl-d  delete — you type the name to confirm                   │
 ├────────────────────────────────────────────────────────────────────┤
-│                                                                    │
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
 ├────────────────────────────────────────────────────────────────────┤
 │ ? or esc to close                                          q quit  │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+**The command log strip is not covered, and it is not cleared.** Opening
+`?` runs no command of its own, so the two-line block keeps showing whatever
+was already there — here, the two permanent watches Alerts starts on top of
+the primary pod watch, because this mockup opens help from the default Alerts
+screen. The body above (16 lines, exactly [§1's own
+budget](widgets.md#1-the-frame)), the log strip (4 rows — border, two lines,
+border, [`LOG_LINES`](widgets.md#2-element--widget) never a mockup's
+choice) and the footer (1 row) are the same three regions every other screen
+draws in the same order; only the footer's own content and the body's own
+frame — one bordered block titled `Keys`, the full body width, no sidebar —
+differ from an ordinary screen ([widgets.md § 5](widgets.md#5-the-modal-layer)).
+Header (1) + top border (1) + body (16) + log block (4) + footer (1) + bottom
+border (1) is 24, the floor, not 23 — a fact about this screen's own fixed
+content, since nothing here depends on cluster state the way a card list or a
+sidebar count does.
 
 Rules:
 
@@ -40,9 +57,576 @@ Rules:
   right now, the same place every other screen puts it.
 - Grouped by **what you are doing**, not by keycode order, and the jargon is
   in brackets — a newcomer reads the sentence, and learns the term for free.
-- Only keys that exist in this build appear. Under `--read-only` the
-  *Changing things* block is replaced by one line: *"read-only mode — nothing
-  can be changed from here"*.
+- **`s` and `r` each carry a second line naming what they work on, verbatim
+  off `ops.rs`'s own refusal sentences.** A reader who watched `s` vanish
+  from the footer because the selected kind does not support it — a Node,
+  a bare Pod — has nowhere else on screen to ask *why*; the row it used to
+  sit on is gone, so `?` is the only place left, and until now `?` said
+  only `(scale)`, no kind, no answer. The line is `works on ` followed by
+  `ops.rs`'s own private `SCALABLE` / `RESTARTABLE` constant — *"a
+  deployment, a statefulset and a replicaset"* and *"a deployment, a
+  statefulset and a daemonset"* — copied whole, not paraphrased, so it
+  stays comparable to the string `ui.rs` will hold once Phase 12 wires it:
+  a sentence that rephrases the constant cannot be checked against it, only
+  one that repeats it verbatim can. **`ctrl-d` gets no such line.**
+  `ops.rs`'s own `DELETABLE` names all six kinds this product ships — a
+  deployment, a statefulset, a daemonset, a replicaset, a pod and a node —
+  so delete is never withheld for a kind's own sake the way `s`/`r` are;
+  there is no *why did this vanish* for a key that never does.
+  **Fitting two more lines cost the two blank rows between the three
+  groups** — *Moving around*, *Looking at things* and *Changing things* now
+  run straight into one another with no gap, because the sixteen-row body
+  has no sixteenth-plus row to spend and a verbatim sentence cannot be
+  shortened to fit one. This is denser, not tidier, and that is a real
+  trade — named here rather than left for a reviewer to notice the missing
+  blank lines and wonder if they were dropped by accident. It touches every
+  full mockup on this page that draws the whole body: [§ Under a
+  dead-writes run](#under-a-dead-writes-run)'s own two blanks are gone the
+  same way, and its *Changing things* block — which has nothing to put on
+  the six rows the group now always gets — carries four blank rows where it
+  used to carry two, rather than the body shrinking back to fourteen.
+- Only keys that exist in this build appear. **Once writes are dead for this
+  run — `--read-only`, or an audit log that would not open, the same one
+  signal either way — the *Changing things* heading is rewritten to say so,
+  its `s` row carries the cause's own sentence, and `r`/`ctrl-d` go blank**
+  ([D259 ruling 5](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10),
+  [D263 ruling 2](../NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12),
+  [D265 ruling 5](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+  Drawn whole at [§ Under a dead-writes
+  run](#under-a-dead-writes-run).
+- **`s` is one of those missing keys today, for a reason no run-level state
+  covers: entering a target count has no screen of its own yet.** Nothing
+  in `screens/` draws the step between pressing `s` and Scale's confirm box,
+  and `views::Typing` has no state to hold a number — so `s` is withheld
+  from `Offer::Act` the same way a kind that cannot scale already withholds
+  it, and never reaches the footer for any kind, any login, any run. `?`
+  cannot repeat `(scale)` as if the key did something, so its row reads the
+  fixed sentence below in every state this file draws, refused or not, kind
+  or not, until a later box gives it somewhere to type into (the step itself
+  is sketched in [dialogs.md § Choosing how many, before the confirm
+  box](dialogs.md#choosing-how-many-before-the-confirm-box), marked there as
+  specified and not built):
+  ```
+      s       not built yet — there is no way yet to type a copy count
+  ```
+  `r` and `ctrl-d` are unaffected — each already opens a working confirm
+  box, so neither loses its row or its `works on …` line. `s`'s own
+  `works on …` line is unaffected too, for the same reason the sentence
+  above stays fixed regardless of what is selected: it still answers a
+  future *what kind*, not *is this built*.
+- **`c` and `⇧p` are not built either, and the row names both anyway.**
+  Neither is bound in any state and no product code constructs a container
+  picker, so a row that read `c container · ⇧p previous` beside a working
+  `f follow` promised two keys that do nothing
+  ([D289 ruling 3](../NOTES.md#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26)). **Both labels stay** rather than collapsing to
+  bare keys: `l`'s row above still offers *"the log from before a crash"*, and
+  `⇧p previous` is the only thing on this screen that ties that offer to the
+  key it waits on — drop the label and the promise stays on screen with
+  nothing left pointing at why it is not kept. **Neither key gets a *why* of
+  its own, and that is the column budget and not a change of voice**: `not
+  built yet` plus both labels plus this row's own `in the log tab:` is 74
+  columns, against the 68 a body row has here, so `in the` gave way rather
+  than the phrase `s`'s row already uses — one wording for one fact,
+  the same reason [§ When a key is refused](#when-a-key-is-refused) gives for
+  not softening *"Missing permission"*. The row is 67.
+- **`ctrl-z` is answered above the filter and above an open modal, with two
+  exceptions — and each is the right one.** The router checks it before
+  a filter has focus and before a modal's own keys are read, because a shell
+  the reader cannot get back to is not a state a modal should be able to hold
+  them in ([NOTES § D24](../NOTES.md#d24--ctrl-z)). **Two things do hold it,
+  and they differ in kind, not just in cause.** One is bounded: a Confirm
+  dialog's own check still on the wire
+  ([`Dialog::waiting`](../src/views.rs),
+  [dialogs.md § While the check is still on the wire](dialogs.md#while-the-check-is-still-on-the-wire),
+  [NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04),
+  [§ D273](../NOTES.md#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20)).
+  The reason is the reader's, not the code's: stepping away mid-check and
+  coming back later would have k8rs report a cluster problem that never
+  happened — *"k8rs waited 35 seconds … and heard nothing back,"* pointing at
+  a slow or unreachable API server for a delay the reader caused by leaving.
+  `ctrl-z` goes silently inert for that one window, exactly as `esc` already
+  does — no new row, no refusal line, no message — and the check itself is
+  bounded at 35 seconds regardless, so nobody is held in a shell they cannot
+  reach for long; both keys work again the instant it answers.
+  **The other lasts the whole run, and it has nothing to do with a wait:**
+  `ctrl-z` only stops the process if the console could arm the signal it
+  comes back through — without `SIGCONT` armed, nothing can ever take the
+  terminal back from the shell (`Console::resumable`,
+  [`may_stop`](../src/main.rs),
+  [NOTES § D277 ruling 7](../NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)).
+  A key that hands the reader's terminal to the shell and can never get it
+  back is worse than a key that does nothing, so an unarmed console makes
+  `ctrl-z` silently do nothing for the rest of the run — the row still reads
+  `back to your shell — type fg`, unmarked, because that state has no mockup
+  of its own: it cannot be produced from a test and is unreachable on a
+  working host, so a help screen nobody can see would be surface spent for
+  nothing (invariant 13). If it is ever seen in the wild,
+  [D259](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+  ruling 5's *swap the block for a sentence* is where it belongs, not a new
+  state here. It has no footer row to give up either: it was never offered
+  from one, the way
+  `ctrl-d` was before
+  [D259](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+  took it off both list footers, and this page is the only place it is
+  written down at all. Its row carries no `works on …` line — nothing this
+  login may or may not do changes what it does — and no line in the command
+  log strip, because it is not a mutation and runs no command of its own to
+  show (invariants 1, 4). The word is *not* `suspend`: the row says what
+  actually happens instead — the shell comes back — and names the way back,
+  the same shape invariant 14 already asks of every other row here.
+- **The row lands beside `y`, not beside `X`.** Both rows have blank columns
+  to spare today, but `X`'s are not idle in every state this file draws:
+  [§ While the call is running](#while-the-call-is-running) rewrites that
+  exact row to append `(paused while a change is running)` after `switch
+  cluster`, and the row is 66 characters once it does — of the row's
+  68-column content width ([§1's own budget](widgets.md#1-the-frame)) — with
+  no room left for a second key. `y`'s row is never rewritten anywhere on
+  this page, so it is the one home a later state cannot collide with.
+  **Recount, not adjustment: still sixteen rows, seventy and eighty
+  columns.** `y`'s row had 49 blank columns after `view as YAML`. `ctrl-z`
+  and its label use 36 of them: six for the key, a two-column gap — the same
+  gap `ctrl-d` already takes for its own six-character key, above, rather
+  than the wider gap a shorter key like `esc` leaves — and 28 for `back to
+  your shell — type fg`, one short of the 29 that remain once that gap is
+  spent. Its label still opens under the same column every other right-hand
+  label on this page already opens under; only the key's own field starts
+  two columns earlier than theirs, because the key itself is longer, not
+  because the label moved. Twelve blank columns stay between `view as YAML`
+  and `ctrl-z`, and one stays blank after the label, before the border — the
+  49 columns this row had to spend are still fully accounted for. The
+  80-column mockup under [§ Under a dead-writes
+  run](#under-a-dead-writes-run) carries the identical text with ten more
+  blank columns before its own border, never a longer sentence — the two
+  mockups draw one fixed script at two widths, not two different ones. Every
+  row in both mockups is still exactly 70 and 80 columns
+  (`scripts/screens-check.py`), the body is still the sixteen rows
+  [§1's own budget](widgets.md#1-the-frame) already fixed, and the 24-row
+  floor above is unchanged.
 - v0.2+ operations join this screen as they land (cordon, drain, rollout undo,
   then exec and port-forward, then edit) — see
   [NOTES § Operations](../NOTES.md#operations--the-full-admin-surface).
+
+## Under a dead-writes run
+
+Two different causes land here — `--read-only`, or `ops::audit_log` failing
+to open — and the header reads `read-only` for both
+([D265 ruling 3](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+**The *Changing things* heading stays, and says the state; the row under it
+says why and what brings it back** — one fixed sentence per cause, neither
+interpolating the audit banner's own sentence
+([D265 ruling 5](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+Nothing else about the screen changes — the same sixteen-row body, the same
+command log strip, the same `?`/`q` footer this file draws everywhere else.
+
+```
+ nodes 3/3                            k8rs       ctx: prod-eu · live · read-only
+┌ Keys ────────────────────────────────────────────────────────────────────────┐
+│  Moving around                                                               │
+│    ↑ ↓ / j k    move            ⏎     open the selected thing                │
+│    tab          next panel      esc   back / close                           │
+│    X            switch cluster                                               │
+│    [ ]          detail tabs     / n   filter · namespace                     │
+│  Looking at things (always available)                                        │
+│    l  logs, with the log from before a crash                                 │
+│       log tab:  f follow · not built yet: c container, ⇧p previous           │
+│    d  describe — the object and what happened to it                          │
+│    y  view as YAML            ctrl-z  back to your shell — type fg           │
+│  Changing things (off for this whole run)                                    │
+│    k8rs was started with --read-only — quit and start it again without it    │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                                        │
+│ $ kubectl get daemonsets -A --watch                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ? or esc to close                                                     q quit │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+`Writes::Unaudited` draws the same frame, over the same two rows:
+
+```
+  Changing things (off for this whole run)
+    k8rs could not open its audit log — fix that, then start k8rs again
+```
+
+- **Drawn at the real 80-column floor, not this file's usual 70-column
+  page** — the same move [§ When a key is refused](#when-a-key-is-refused)
+  already makes. `read-only` is four columns longer than `admin`, and
+  `ui::header`'s own centring — not this page's own hand-drawn one — shows
+  what that costs: at 70 columns `k8rs` centres at column 33 regardless of
+  the right zone, so `admin`'s six columns of gap before it narrows to two
+  for `read-only`. Two blank columns is not a collision, but it is not
+  room either, so this mockup draws the floor instead of dropping the
+  centred name.
+- **The heading is rewritten, not removed — anchored on `  Changing
+  things`, the same leading text [`key_map`] already finds it by.** Its
+  `s` row carries the cause's own sentence, at the same four-column indent
+  every mutating row uses; `r` and `ctrl-d` go blank, and so do the two rows
+  that hold `s`'s and `r`'s own `works on …` line the rest of the time. No
+  row is added or removed here either: the block keeps the six rows it has
+  everywhere else on this screen, four of them blank instead of the usual
+  two.
+- **Neither row is marked refused.** Invariant 2's *unreachable, not
+  merely unbound* is about **mutation**, not `ops.rs` as a whole — `may_i`
+  writes nothing and touches no audit log, so neither `--read-only`
+  ([D230 ruling 3](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05))
+  nor `Unaudited` refuses it — the absence here is structural, not a
+  verdict a probe gave.
+- **The row names the cause and the way back; the path and the error are
+  the banner's, when it has room to draw them** — the audit sentence is
+  the first to give way under
+  [D263 ruling 5](../NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)'s
+  rank, so a queued clock or namespace banner can leave it undrawn even
+  once Help closes, and this row must hold true either way.
+- **`s`, `r` and `ctrl-d` appear nowhere as mutating keys under either
+  cause** — the row that was `s` is prose, `r` and `ctrl-d` are blank, and
+  none of the three gains a refused clause: see the last bullet of
+  [§ When a key is refused](#when-a-key-is-refused).
+
+## While the call is running
+
+Help is drawn over an ordinary screen everywhere else in this file, but
+[a mutation in flight](dialogs.md#while-the-call-is-running) is not a
+`Modal` — the screen behind it keeps working, so `?` still opens Help on top
+of it. There, unlike anywhere else Help opens, something is still pending: a
+second mutation, a cluster switch and `q` are all refused until the call
+returns — and the body used to say nothing of that. It promised `X switch
+cluster`, `s run more or fewer copies`, `r restart, at its own pace` and
+`ctrl-d delete` exactly as if all four worked, on the one screen a reader
+opens to find out what they may press; pressing any of them did nothing, with
+no line anywhere saying why.
+
+**The body still has sixteen rows — nothing is added or removed — but two of
+them are rewritten while a call is on the wire, anchored on their own leading
+text and never by counting, the same mechanism [§ When a key is
+refused](#when-a-key-is-refused) already uses for a permission this login
+lacks:**
+
+In **Moving around**, the `X` row:
+
+```
+    X            switch cluster (paused while a change is running)
+```
+
+In **Changing things**, the heading and its five rows, unchanged beneath it:
+
+```
+  Changing things (paused while a change is running)
+    s       not built yet — there is no way yet to type a copy count
+            works on a deployment, a statefulset and a replicaset
+    r       restart, at its own pace       (rollout restart)
+            works on a deployment, a statefulset and a daemonset
+    ctrl-d  delete — you type the name to confirm
+```
+
+- **The `X` row keeps its own label and gains a clause** — `switch cluster`
+  is unchanged, only what follows it is new — the same append the
+  permission-refused rows below already make to their own jargon
+  parenthesis. It is anchored on `    X `, its own unique leading text, the
+  same way `    s `, `    r ` and `    ctrl-d ` already are.
+- **The *Changing things* heading is rewritten instead of its rows, because
+  the reason is one fact for all three keys, not three separate ones.** A
+  call in flight refuses `s`, `r` and `ctrl-d` uniformly — a missing
+  permission never does; one key can be refused while the other two are not.
+  Rewriting the key rows to say the same six words three times over would
+  be the second copy of a fact this codebase already has one home for; the
+  heading governs the group and says it once, anchored on `  Changing
+  things`, its own unique leading text. The two `works on …` lines are
+  untouched for the same reason [§ When a key is
+  refused](#when-a-key-is-refused)'s own excerpt leaves them untouched: they
+  answer *what kind*, not *can this login act right now*, and neither cause
+  changes what kind a key works on.
+- **This state and a permission refusal are never reconciled on the same
+  row.** While a call is in flight, `s`, `r` and `ctrl-d` are inactionable
+  for the wait's reason alone, whatever a permission probe would otherwise
+  say about any one of them — the rewritten heading is what draws, and the
+  ordinary key map or [§ When a key is refused](#when-a-key-is-refused)'s own
+  per-key clauses take over again the moment the call returns.
+- **Neither clause names the object**, and neither needs to: "a change is
+  running" is true regardless of which one, and the object it names is one
+  `?` away — dismiss Help and the ordinary screen underneath, including the
+  in-flight footer, is exactly where it was.
+- **This is not the `no` this screen's own *When a key is refused* section
+  reserves for a missing permission** — a call finishing is a wait, not a
+  permission this login lacks, and `paused` is the word for a wait
+  everywhere else this product uses it (`screens/dialogs.md`'s own paused
+  Deployment). The moment the call returns, both rows read exactly as they
+  did before it started, or as [§ When a key is
+  refused](#when-a-key-is-refused) draws them if a permission is what is
+  actually missing.
+- **What this costs, once, rather than left for a reader to notice on their
+  own:** while a call is in flight, this section's rewritten rows draw for
+  every login the same way, whether or not a permission probe would also
+  refuse `s`, `r` or `ctrl-d` on its own account. A login that in fact may
+  never scale reads `paused`, the same as one that may scale but is waiting
+  out someone else's restart — not the harder truth, *"and you may never do
+  this either way."* It self-corrects the moment the call returns: the
+  ordinary key map comes back, or [§ When a key is
+  refused](#when-a-key-is-refused)'s own `s no scale` does, whichever this
+  login was always going to see. One state suppresses a fact the other
+  already shows correctly, on purpose, rather than the two states agreeing
+  to show two different guesses at it.
+
+The footer's right zone still empties the same way this state already did:
+
+```
+? or esc to close
+```
+
+`q quit` is gone, not marked `q no quit`, for the same reason as before.
+**The footer does not also spell out why** — the two rewritten rows above
+already do, so a reader who presses `?` to find out why `s` went quiet now
+reads the answer in the one place every other key's reason already lives on
+this screen, rather than a second sentence squeezed into a footer that has
+never carried one.
+
+## While the link is down, still connecting, the login has expired, or the clock is off
+
+Four more run-level reasons `offered` withholds `s` and `r` for
+(`views::Offer::Move`) — `Screen::link` off `Live`, in any of its three other
+values, and a clock this page cannot trust — and Help drew none of them: the
+ordinary *Changing things* block, live keys and all, over a run where none of
+the four could actually be pressed
+([D265 ruling 4](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+**`Link::Connecting` is the new one, added after ruling 4 shipped** — and
+the read is `k8s-admin`'s: while k8rs does not yet know what the cluster
+looks like, the conservative answer to *"may I scale the thing under the
+cursor"* is no, the same answer a lost link or an expired login already give
+for the same reason — k8rs cannot ask a cluster it has not yet heard back
+from any more than it can ask one it has stopped hearing from
+(todo.md § Phase 12).
+
+**Same mechanism as [§ While the call is
+running](#while-the-call-is-running)'s own — the heading rewritten, its
+five rows unchanged beneath it, one reason drawn — not restated here**
+([D262](../NOTES.md#d262--the-in-flight-screen-the-state-that-had-to-name-its-object-the-cut-that-gave-way-at-the-wrong-end-and-the-screen-that-answers-what-may-i-press-promising-four-keys-it-refuses-2026-09-12)).
+**The `X` row is not rewritten for any of the four** — nothing about a
+still-connecting link, a lost link, an expired login or the clocks
+disagreeing stops a cluster switch, so only *Changing things* changes:
+
+```
+  Changing things (paused while k8rs reads the cluster)
+```
+
+```
+  Changing things (paused while disconnected, retrying)
+```
+
+```
+  Changing things (paused — renew your login, then press X)
+```
+
+```
+  Changing things (paused — the clocks disagree; quit and start k8rs again)
+```
+
+- **Order, when more than one applies: dead writes first, then a call in
+  flight, then the link, then the clock** ([D265 ruling
+  4](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+  Dead writes never coincide with a call in flight — no call can start to
+  be *in flight* once writes are dead — but they can coincide with the
+  link or the clock, and outrank both there:
+  [states.md § And when the login has also
+  expired](states.md#and-when-the-login-has-also-expired) draws exactly
+  this, a dead audit log under an expired login, and Help's heading still
+  reads the dead-writes state. A call in flight *can* coincide with a lost
+  link or an expired login — the watch can drop, or a token can expire,
+  while a `PATCH` is still on the wire — and there its clause wins,
+  because it is the one of the four that also pauses `X` ([§ While the
+  call is running](#while-the-call-is-running)); a call cannot be in
+  flight while still connecting, because nothing is selected yet for it to
+  run against. `Link::Connecting`, `Link::Lost` and `Link::Expired` are
+  three values of the one field `Screen::link`, never more than one true
+  at once, so there is nothing to rank between them. The clock ranks last
+  because `ui::clock` reads `None` whenever the link is not `Live`, so a
+  stale reading never gets to compete with a link reason at all —
+  connecting included.
+- **The words are the header's and the banners' own, not reinvented
+  here.** "reads the cluster" is [states.md § Still
+  loading](states.md#still-loading)'s own body sentence — *"reading the
+  cluster… 2,140 pods"* — worn down to what fits this row; `disconnected,
+  retrying` is [states.md § The connection
+  dropped](states.md#the-connection-dropped)'s own header pointer;
+  "renew your login" and "press X" are [states.md § Your login
+  expired](states.md#your-login-expired)'s own words — *"Renew it, then
+  press X and pick this cluster again"*; "the clocks disagree" matches
+  [states.md § Your computer's clock is
+  off](states.md#your-computers-clock-is-off)'s own refusal to name which
+  clock is wrong. **The fix named is not `X`.** The skew is read once at
+  connect, so nothing on screen re-reads it on its own — but `X` does not
+  reconnect either: measured, `X` then `⏎` on the picker's own live
+  current row only closes the picker
+  (`views::Picker::chosen` → `Chosen::Close`), so a reader who pressed it
+  hoping to re-check the clock would see nothing happen
+  ([D265 ruling
+  4](../NOTES.md#d265--the-read-only-mark-the-header-joins-the-permission-word-itself-and-help-swaps-for-either-cause-2026-09-13)).
+  `quit and start k8rs again` is [D264 ruling
+  23](../NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)'s
+  own phrasing for a reader already inside the TUI, and today it is the
+  only thing that actually re-reads the clock.
+- **A permission-refused clause never lands on top of one of these four**,
+  the same reconciliation [§ While the call is
+  running](#while-the-call-is-running) already states for itself: whichever
+  reason's heading is drawn is what a reader presses against, and
+  [§ When a key is refused](#when-a-key-is-refused)'s own per-key clauses
+  return the moment none of the four reasons above it holds.
+
+## When a key is refused
+
+The mockup above is the case this login can use every key it lists, or
+nothing is selected yet — the ordinary case, and unchanged. When an object
+*is* selected and `may_i_in` comes back `Verdict::No` for `r` or `ctrl-d`,
+that key's own row in *Changing things* gains one clause; no other row and
+no other block on this screen changes
+([D23](../NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards),
+[D229](../NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)).
+**`s` never reaches this state at all.** It is withheld before `may_i_in` is
+ever asked (the Rules list above), so its row here reads the same fixed
+sentence the mockup at the top of this file carries, whatever this login may
+do. `r` and `ctrl-d` are independent of each other — one refused, or both —
+and each row only ever answers for itself; the worst case, drawn below, is
+both at once, with `payments/web` selected (the running example everywhere
+else in this product) and this login able to `list` and `watch` it but
+nothing more:
+
+**Drawn at the real 80-column floor, not this file's usual 70-column page —
+each row is one line in the real UI and is shown as one line here, the same
+move [states.md](states.md#your-clock-and-a-scoped-namespace-together) makes
+for its own over-70 row:**
+
+```
+  Changing things (each one asks first, and shows the command)
+    s       not built yet — there is no way yet to type a copy count
+            works on a deployment, a statefulset and a replicaset
+    r       restart, at its own pace   (rollout restart — patch deployments)
+            works on a deployment, a statefulset and a daemonset
+    ctrl-d  delete — you type the name to confirm (delete deployments)
+```
+
+**The two `works on …` lines are unchanged by a refusal and are shown here
+for that reason** — they answer *what kind*, refusal answers *this login*,
+and a row that does not move when its neighbour does is still worth seeing
+in place rather than left to be inferred.
+
+Counted, not estimated:
+
+| Row | Columns (`deployments`) | Columns (`statefulsets`) |
+|---|---|---|
+| `s`, not built | 68 | 68 |
+| `r`, refused | 76 | 77 |
+| `ctrl-d`, refused | 70 | 71 |
+
+`s`'s row never varies by kind — the sentence is fixed, the same 68 columns
+whatever is selected — so it never enters the ceiling comparison below at
+all. `statefulsets` is the longest plural `restart` names (`daemonsets`, 10,
+is shorter) — so it is `r`'s own refused row that decides the ceiling, not
+the one this file's running example happens to draw. All four remaining
+counts fit inside the 78-column ceiling a body row has at the floor
+(`src/ui_tests.rs::mockup`'s own `MIN_WIDTH - 2` assertion, measured at HEAD).
+**No row is added and none is removed**: the sixteen-row body this screen is
+tested against is unchanged in count, only in the text of up to two of its
+lines.
+
+- **The clause extends the existing jargon parenthesis for `r`, and opens a
+  new one for `ctrl-d`.** `(rollout restart)` already taught the kubectl
+  term this key stands for; adding *why not* inside the same parenthesis
+  keeps one bracket meaning *the technical detail*, rather than a second
+  bracket beside the first that a reader has to learn means something else.
+  `ctrl-d`'s row has no such parenthesis to extend — its own em dash already
+  separates the key from *"you type the name to confirm"* — so its reason
+  opens a fresh one instead of reusing that dash for a second job. `s` gains
+  no clause here at all: its row already carries the fixed *not built yet*
+  sentence everywhere on this screen, so there is nothing for a refusal to
+  append to.
+- **The opening `(` moves from the row's 44th character to its 40th on `r`'s
+  refused row.** Positions here are 1-based, the way an editor's own column
+  indicator counts — everywhere else in this section "columns" measures a
+  length, not a position, and the two are not interchangeable. The baseline
+  has `r` opening `(` at the 44th character (`(rollout restart)`). Holding it
+  there pushes the refused row past the 78-column ceiling — `(rollout
+  restart — patch statefulsets)` alone reaches 81 at that position — so it
+  gives up four characters of alignment with the baseline and opens at the
+  40th instead; the counts are in the table above. `ctrl-d`'s new
+  parenthesis needs no such shift, because it has no baseline position to
+  hold onto in the first place.
+- **The resource named is the selected object's own kind, not a fixed
+  string, and this whole section presumes the kind supports the operation at
+  all — a key the kind does not support is out of its scope.**
+  `deployments/scale` and `deployments` are what `payments/web` reads as a
+  Deployment; a StatefulSet reads `statefulsets/scale` and `statefulsets`.
+  Measured at HEAD (`src/ops.rs`), the two operations do not cover the same
+  kinds in either direction: `scale` reaches a Deployment, a StatefulSet or a
+  bare ReplicaSet, never a DaemonSet; `restart` reaches a Deployment, a
+  StatefulSet or a DaemonSet, never a bare ReplicaSet — and neither reaches a
+  Pod, a ConfigMap or a Node. Where the selected kind does not support the
+  key at all, `may_i_in` is never asked, `Verdict::No` never arrives, and the
+  key does not read as *refused* by this section — it is *withheld*, the same
+  fact and the same word [states.md](states.md) already uses for a key with
+  nothing to act on. The footer that withholds it, and its column counts, are
+  [widgets.md § The footer](widgets.md#2a-the-footer)'s, not repeated here. A
+  screen that asked the permission question anyway and drew `s no scale` on
+  a DaemonSet would tell the reader they lack a permission that does not
+  exist to hold.
+- **This screen still lists the row, unmarked, on a kind that cannot use
+  it — and now names which kinds it does work on, in the same wording
+  `ops.rs` refuses the rest with.** `?` is the exhaustive map of the whole
+  product, not a menu scoped to whatever is selected right now — `s` works
+  on a Deployment even while a Node is on screen, and a reader who opens
+  Help to learn what the product can do is entitled to the whole list. This
+  is the same choice already made for `c container`: a single-container pod
+  drops it from the *footer*
+  ([detail.md § Choosing a container](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose))
+  but this screen's own key map names `c container` all the same, container
+  count aside. `s` and `r` follow it: each keeps its own `works on …` line
+  from the mockup at the top of this file, unchanged by what is selected.
+  For `r`, only a `Verdict::No` on the object actually selected ever changes
+  the row above its `works on …` line; `s`'s own row above it never changes
+  at all, because nothing this login could do makes `may_i_in` get asked for
+  it (the Rules list above).
+- **The verb and resource are named because [states.md](states.md) already
+  set the pattern for a missing permission on this product** — *"Missing
+  permission: list nodes"*
+  ([states.md § You can only see some namespaces](states.md#you-can-only-see-some-namespaces))
+  — and a second, softer phrasing for the same fact on writes would be a
+  second convention for one idea. `get`, `patch` and `delete` are not
+  translated: invariant 14 asks that jargon be explained, not left
+  unexplained, not that it never appear — the sentence a beginner reads first
+  is already the plain one (*"run more or fewer copies"*), and the bracket
+  beside it is where the exact term has always lived, on every row, refused
+  or not.
+- **The slash reads two different ways depending which tool sees it, and this
+  section keeps the Role's own spelling rather than a `can-i` query's**
+  ([D230 ruling 1](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)).
+  `deployments/scale` is exactly what a `Role.rules[].resources` entry looks
+  like, and that is the string an operator hands to whoever owns the cluster —
+  the same next action
+  [states.md](states.md#you-can-only-see-some-namespaces)'s "Missing
+  permission: list nodes" already sends a reader to. It is *not* what either
+  `kubectl auth can-i` or k8rs's own `ops may-i` takes after that resource: in
+  both, a `/` there names the *object*, and the subresource is a separate
+  `--subresource=` flag — so pasting this clause straight into either command
+  answers a different question than the one this screen is asking, and
+  answers it wrong the loud way: `kubectl auth can-i patch
+  deployments/scale -n default` reads `scale` as an object name and says
+  *yes*, and so does k8rs's own tool — measured, `k8rs ops may-i patch
+  deployments.apps/scale -n default` says *yes* for the very login this
+  screen draws `s no scale` for. Either tool's real question is
+  `--subresource=scale`, never the slash. The clause keeps the Role's
+  spelling because that is what the reader's next action needs, not because
+  it is safe to run as typed.
+- **Dead writes win outright, so this section's clauses are never drawn
+  under them.** Once writes are unreachable for the run — `--read-only`, or
+  an audit log that would not open — the *Changing things* heading is
+  rewritten to name it and the `s` row becomes the cause's own sentence;
+  neither starts with the anchor text a refused clause looks for, and
+  `r`/`ctrl-d` are blank, so there is no row left for one to land on,
+  whatever a permission probe would have answered
+  ([D259 ruling 5](../NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10),
+  [D263 ruling 2](../NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)).
+  [§ While the call is running](#while-the-call-is-running)'s own rewritten
+  heading has the same nothing to rewrite, under the same run — one gap,
+  not two, and neither section says it twice. Drawn whole at [§ Under a
+  dead-writes run](#under-a-dead-writes-run).

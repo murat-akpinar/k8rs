@@ -540,7 +540,9 @@ pub enum Outcome {
     NotSent {
         /// What the failure was.
         fault: Fault,
-        /// What the server said about it, where it said anything.
+        /// **What the server said about it, where it said anything** — and, in the one case where
+        /// the failure is that it said nothing, what k8rs did instead ([`checked_within`],
+        /// NOTES § D273).
         said: Option<String>,
     },
     /// **The real call failed.** Whether the change happened is [`Fault`]'s to say: for a fault
@@ -564,7 +566,9 @@ impl Outcome {
     /// there are six — has to decide whether it carries words rather than defaulting to silence.
     ///
     /// The string is [`crate::k8s::said`]'s and is not cleaned again here — [`Record::of`]'s own
-    /// doc says why.
+    /// doc says why. **The one exception is the check that ran out of time**, whose sentence is
+    /// k8rs's own — built by [`heard_nothing`] from k8rs's own deadline, with nothing of the
+    /// cluster's in it ([`checked_within`], NOTES § D273).
     fn said(&self) -> Option<&str> {
         match self {
             Self::NotSent { said, .. } | Self::Failed { said, .. } => said.as_deref(),
@@ -847,7 +851,128 @@ const DRY_RUN: Pass = Pass(true);
 /// Handed to the same closure for the call that actually changes something.
 const FOR_REAL: Pass = Pass(false);
 
-/// The verdict when the cluster ran the check and accepted it — `screens/dialogs.md`'s own line.
+/// **How long the `dryRun=All` gets before the dialog waiting on it is one nobody can close** —
+/// thirty-five seconds
+/// (NOTES § D273 *The review round* 1, `reports/2026-09-20-the-dry-run-deadline.md`).
+///
+/// **It bounds a hang and not a slow answer**, which is [`crate::k8s::REPORT_FETCH`]'s own
+/// *diagnosis* one layer down — its **number** is rejected three paragraphs below, and the two are
+/// not the same borrowing: `Config::read_timeout` is `None` in all three kube constructors, so
+/// nothing under [`perform`]'s call bounds it and an apiserver that accepts the connection and
+/// answers nothing holds it forever. **What is different here is who waits.**
+/// `screens/dialogs.md` § While the check is still on the wire draws that frame with **no live key
+/// at all** — `esc` is inert until a verdict exists (NOTES § D214), and `q` and `?` are not
+/// offered — so an unbounded check is not a slow screen, it is a terminal the reader has to kill.
+///
+/// **The number is measured off the admission chain and not matched to another constant.** A
+/// `dryRun=All` runs that chain, and against a black-holed webhook at `failurePolicy: Ignore` —
+/// every row an *accepted* dry-run, `rc=0` — one cluster answered in: **93 ms** with no webhooks;
+/// **10 078 ms** with one validating webhook at the default `timeoutSeconds: 10`; **30 090 ms**
+/// with one at 30; **30 078 ms** with three mutating at 10 each, because the mutating phase
+/// accumulates; **10 086 ms** with three validating at 10 each, because that phase does not. Two
+/// mutating plus one validating hit the apiserver's own ceiling at **34 s** and came back
+/// `Timeout: request did not complete within requested timeout`.
+///
+/// **Ten seconds would have landed on the same millisecond as the commonest healthy answer** —
+/// one webhook at its own default — and [`restart`] pays the handshake out of the same budget.
+/// Thirty-five is above the ceiling that cluster enforced, so expiry means the apiserver has
+/// stopped keeping its own request budget: a genuine wedge, which is the only thing this bound was
+/// ever for. **34 s is one cluster's ceiling and not a guarantee** — `--request-timeout` is an
+/// apiserver flag no client can read — and the shape that removes the class rather than re-tuning
+/// it is sending the deadline *to* the server, which `PatchParams` cannot spell and which is
+/// `backlog.md`'s.
+///
+/// **It is deliberately not [`crate::k8s::REPORT_FETCH`]'s ten**, and the first draft's argument
+/// from that constant was matching on the wrong axis: that one bounds an optional read whose
+/// expiry costs one row — *"this call owes the reader nothing"*, its own doc — and this one aborts
+/// an operator's confirmed mutation. Same shape, opposite cost of being wrong.
+///
+/// **`pub(crate)` for one reader and one reason: `ui.rs` builds the pending dialog's *up to N
+/// seconds* clause from it** (`screens/dialogs.md` § While the check is still on the wire, which
+/// names the ceiling up front so a reader who watches it run out lands on a sentence that fits).
+/// The number would otherwise be typed a second time in the file that draws it, and two places
+/// holding one fact is what this repo's most expensive defects have all been — this one moved once
+/// already, in the review round above. **Nothing else reads it**, and [`READ_DEADLINE`] beside it
+/// stays private for exactly that reason: a `pub(crate)` surface that grows for constants nobody
+/// draws is one nobody can audit.
+pub(crate) const CHECK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(35);
+
+/// **How long a read an operation makes *before* the contract gets one** — ten seconds
+/// (NOTES § D273 *The review round* 3).
+///
+/// **[`scale`] reads the running count to say what the change would do**, and that `GET` runs
+/// ahead of the attempt line and ahead of `show`. Unbounded, the exact failure [`CHECK_DEADLINE`]
+/// closes left `scale` hanging with no dialog and **no audit record at all** — strictly worse than
+/// the case beside it, because there is nothing afterwards to read.
+///
+/// **Ten and not [`CHECK_DEADLINE`]'s thirty-five, because a `GET` runs no admission chain**: the
+/// whole of that number is the webhook measurement above, and none of it applies to a read. Ten is
+/// what [`crate::k8s::REPORT_FETCH`] and `main.rs`'s `OBJECT_READ` already give a plain read, and
+/// it is **named here rather than aliased** for two reasons, and the first is this author's
+/// reading of the review rather than a ruling in it: [`CHECK_DEADLINE`] was sent back for
+/// borrowing that constant's *argument*, and an alias would borrow it again one line down, where
+/// the axis — what expiry costs — is the write path's and not a report's. The second is flatter:
+/// that constant's doc counts its call sites, and `k8s.rs` is frozen.
+///
+/// **Expiry here refuses before anything is attempted**, so nothing is sent, nothing is recorded,
+/// and running the command again costs nothing — which is why a read may take the tighter number
+/// and the check may not.
+const READ_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// **How long k8rs waited and that nothing came back, in one sentence** — the words both deadlines
+/// end in (NOTES § D273 *The review round*).
+///
+/// **Not `Elapsed`'s own words** — invariant 14, and *"deadline has elapsed"* is what those would
+/// have put in front of somebody at 3am. It says the two things that are true, and deliberately
+/// not a third: whether the request *reached* the cluster is unknown on both routes, because each
+/// deadline covers the connect as well as the wait.
+///
+/// **One function and not one literal per caller** (NOTES § D103): the two differ by what k8rs was
+/// waiting for and by nothing else, and `main.rs`'s own *"this cluster has not answered for …
+/// after N seconds"* is deliberately *not* unified with it — that reader needs no *nothing was
+/// sent* and that line is scaffolding (NOTES § D273 *The review round*).
+fn heard_nothing(deadline: std::time::Duration, waiting_for: &str) -> String {
+    format!(
+        "k8rs waited {} seconds for the cluster to {waiting_for} and heard nothing back",
+        deadline.as_secs()
+    )
+}
+
+/// **The check, bounded** — the cluster's answer, or the two facts an unanswered one leaves
+/// behind (NOTES § D273).
+///
+/// **The deadline is a parameter and the number is the caller's**, which is
+/// [`crate::k8s::REPORT_FETCH`]'s own reason said again one file over: a bound nothing can wait
+/// out is a bound nothing tests.
+///
+/// **Expiry is the answer a refused check already gets** — nothing was sent to change anything —
+/// so it returns the pair [`Outcome::NotSent`] is built from and grows no variant of its own.
+///
+/// **[`Fault::Unanswered`] is a choice between two that map identically, not a reading off a
+/// list** (NOTES § D273 *The review round* 4). [`Fault::Unfinished`] fits the definition better —
+/// it is documented as *k8rs's own deadline said the waiting is over*, which is exactly this — but
+/// its doc also claims it arrives only through `Watch::unfinished`, so taking it means editing a
+/// frozen `k8s.rs` to make a doc true again for no observable gain: [`in_words`], [`answered`] and
+/// [`Record::check`] answer the two the same. The timeouts on `Unanswered`'s own list are ones the
+/// *client* reported as an error, and this route produces no error at all; that is the argument
+/// that was wrong, not the variant.
+///
+/// The sentence beside it is k8rs's, because there is no cluster sentence to have
+/// ([`heard_nothing`], [`Outcome::said`], [`and_said`]).
+async fn checked_within<Response>(
+    deadline: std::time::Duration,
+    check: impl Future<Output = Result<Response, kube::Error>>,
+) -> Result<Response, (Fault, Option<String>)> {
+    match tokio::time::timeout(deadline, check).await {
+        Ok(Ok(returned)) => Ok(returned),
+        Ok(Err(error)) => Err((fault(&error), said(&error))),
+        Err(_) => Err((
+            Fault::Unanswered,
+            Some(heard_nothing(deadline, "check this change")),
+        )),
+    }
+}
+
 const ACCEPTED: &str = "the cluster checked it first and accepted it";
 
 /// **The verdict when k8rs sent no check before the change** — [`Mutation::checkable`] `false`.
@@ -867,6 +992,12 @@ const UNCHECKABLE: &str = "k8rs did not check this one with the cluster first";
 /// with the same body: once with [`DRY_RUN`], once with [`FOR_REAL`]. One closure rather than
 /// two is what stops the dry-run validating something other than what is sent; the [`Pass`] it
 /// is handed — rather than a `bool` — is what stops the first call being sent for real.
+///
+/// **The check is bounded here and the real call is not** ([`CHECK_DEADLINE`], NOTES § D273): a
+/// cluster that never answers the `dryRun=All` ends as [`Outcome::NotSent`] with a result line
+/// under its attempt line, because the dialog waiting on that answer offers no key to leave it
+/// with. `call(FOR_REAL)` hangs against a closed dialog and a different screen, and is
+/// `backlog.md`'s.
 ///
 /// `show` is synchronous by design — see the region's doc.
 ///
@@ -934,17 +1065,18 @@ where
     // does nothing.
     show(&record.shown());
 
+    // **The one place a check is waited on, so the bound is the one place too**
+    // ([`CHECK_DEADLINE`], NOTES § D273).
     let checked = if record.checkable {
-        call(DRY_RUN).await.map(Some)
+        checked_within(CHECK_DEADLINE, call(DRY_RUN))
+            .await
+            .map(Some)
     } else {
         Ok(None)
     };
 
     let outcome = match checked {
-        Err(error) => Outcome::NotSent {
-            fault: fault(&error),
-            said: said(&error),
-        },
+        Err((fault, said)) => Outcome::NotSent { fault, said },
         Ok(returned) => {
             match ask(Checked {
                 verdict: record.accepted(),
@@ -1179,6 +1311,12 @@ impl Record {
     /// honest third that a [`Fault`] alone cannot resolve, since a connection dying after the
     /// request went out and one that never opened arrive as the same [`Fault::Unanswered`].
     ///
+    /// **A fifth thing reaches that `Err` since 2026-09-20 and it lands on that same third
+    /// answer** ([`CHECK_DEADLINE`], NOTES § D273): the check ran out of time, so k8rs stopped
+    /// waiting — and whether the request had reached the cluster is precisely what it does not
+    /// know. The line above is no longer literally *the `Err` of `call(DRY_RUN)`*; it is
+    /// [`checked_within`]'s, which is that `Err` and the deadline around it.
+    ///
     /// **Exhaustive and no `_` arm**, for [`Outcome::said`]'s reason: a twelfth [`Fault`] has to
     /// choose which of the three it is, rather than inherit the loudest of them.
     fn check(&self, outcome: &Outcome) -> &'static str {
@@ -1211,6 +1349,13 @@ impl Record {
 /// 2026-09-04): two of these spelled the join and the operator's own surface threw the message
 /// away, so a `403` and a `422` on the same call printed one identical line. A colon, because
 /// that is the shape the other two already had and the shape a server message already arrives in.
+///
+/// **One thing k8rs *writes* on the right of that colon is not the cluster's** — the sentence a
+/// wait that ran out carries, where there were no cluster words to join ([`heard_nothing`],
+/// NOTES § D273). **It is the only one k8rs writes and not the only one that can appear there**:
+/// `tester` forged a `500` whose `Status.message` *is* that sentence and the audit line came out
+/// byte-identical. This log is read beside the apiserver's own (NOTES § D224), so what is true is
+/// the narrower claim.
 fn and_said(line: String, said: Option<&str>) -> String {
     match said {
         Some(said) => format!("{line}: {said}"),
@@ -1261,6 +1406,55 @@ fn gap(value: Option<&str>, absent: &str, prefix: &str) -> String {
         Some(value) if !value.is_empty() => format!("{prefix}{value}"),
         _ => absent.to_string(),
     }
+}
+
+/// **One word of a taught `kubectl` line, safe to paste** — bare where every character reads as
+/// itself in a POSIX shell, single-quoted otherwise, with `'\''` for a `'` the quotes cannot hold.
+///
+/// **An allowlist and not an escape list**, which is invariant 1's shape one file over: what is
+/// left bare is enumerated and everything else — known or not — is quoted. `kind-k8rs`,
+/// `gke_project_zone_cluster` and an EKS ARN are all bare, so the ordinary line is the one
+/// `screens/context.md` draws.
+///
+/// **It is `pub` and it lives here because the pyramid runs `ops.rs` → `main.rs`** (invariant 11,
+/// CLAUDE.md § Single point of change): both taught surfaces quote by this one rule, and a second
+/// copy is where two of them drift apart.
+///
+/// k8rs executes nothing — the security gate's *the command log is display text* row is
+/// untouched. What a taught line may not do is differ from the command k8rs ran
+/// (invariant 4, NOTES § D8, § D278 ruling 5).
+pub fn pasteable(word: &str) -> String {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.:/@+=".contains(c))
+    {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', r"'\''"))
+}
+
+/// **The `--context <name>` every taught `kubectl` line carries** (NOTES § D278 ruling 5), placed
+/// by each of [`scale`], [`restart`] and [`delete`] immediately after `kubectl` and before the
+/// verb — the position `screens/context.md` § What the command log shows draws, and the one
+/// `kubectl` reads as a global flag rather than as the verb's own.
+///
+/// **An unnamed context drops the segment whole**, never `--context` with nothing after it — the
+/// gap [`Record::attempt_line`] records as *not named* ([`gap`]) has no honest flag form, and a
+/// bare `kubectl` line is still the command k8rs ran.
+///
+/// **Stripped before the gap is decided, and that is why it is not left to [`Record::of`]'s strip
+/// of the finished line** (invariant 9). Measured: a context named `U+202E` went through
+/// [`pasteable`] raw, was quoted for the character it carried, and came out of the line strip as
+/// `--context ''` — the empty-valued flag the paragraph above refuses, reached by a name that is
+/// not empty until it is cleaned. It is [`IDENTIFIER`], the cap [`Record::of`] gives the context
+/// field, so the flag's value and the record's own `context` cannot come out differently.
+fn context_segment(context: &str) -> String {
+    let context = cleaned(context, IDENTIFIER);
+    if context.is_empty() {
+        return String::new();
+    }
+    format!(" --context {}", pasteable(&context))
 }
 
 /// **What happened to the mutation, in one sentence per [`Outcome`]** (invariant 14).
@@ -1391,7 +1585,22 @@ fn in_words(fault: Fault) -> &'static str {
         Fault::Kubeconfig | Fault::NoContext | Fault::BadEntry | Fault::NoCredential => {
             "k8rs could not build a connection from this kubeconfig"
         }
-        Fault::Unanswered | Fault::Unfinished => "k8rs could not reach the cluster",
+        // **It may not say *k8rs could not reach the cluster*, and that was a pre-existing
+        // over-claim before a deadline arrived on this arm** (NOTES § D273 *The review round* 2,
+        // found independently by both reviewers). Printed beside [`Record::check`]'s *k8rs does
+        // not know whether the check reached the cluster*, the two clauses contradicted each
+        // other inside one audit line, and only the second can be the careful one: a deadline
+        // covers the connect as well as the wait, and so does a dead socket kube could not tell
+        // apart. `k8s.rs`'s own doc over `answer` names the class — *the fallback is a claim about
+        // the cluster, so every code without an arm silently accuses the network*.
+        //
+        // **`views.rs`'s wording and not a third one.** That file already says this for the same
+        // fault, and `ui.rs`'s modal says the careful thing in the check's own words — which this
+        // helper cannot copy, because it does not always follow a check. Counted off the file
+        // rather than recalled (`grep -n 'in_words(' src/ops.rs`): **six** call sites — three arms
+        // of [`verdict`], two into [`unread`] and one into [`unasked`] — and this is the wording
+        // that reads true after every one of them.
+        Fault::Unanswered | Fault::Unfinished => "nothing usable came back",
     }
 }
 
@@ -1655,14 +1864,29 @@ where
         ));
     }
     let api: Api<DynamicObject> = Api::namespaced_with(client.clone(), namespace, &resource);
-    let read = api.get_scale(scaling.name).await.map_err(|failed| {
-        unread(
-            &object,
-            namespace,
-            in_words(fault(&failed)),
-            said(&failed).as_deref(),
-        )
-    })?;
+    // **Bounded, because this `GET` runs ahead of the attempt line and ahead of `show`**
+    // ([`READ_DEADLINE`], NOTES § D273 *The review round* 3). Unbounded it hung with no dialog and
+    // no audit record at all — worse than the case [`CHECK_DEADLINE`] closes, one line below it —
+    // and a read changes nothing, so bounding it raises none of D225 ruling 1's *k8rs does not
+    // know whether the change was made*.
+    let read = match tokio::time::timeout(READ_DEADLINE, api.get_scale(scaling.name)).await {
+        Ok(answered) => answered.map_err(|failed| {
+            unread(
+                &object,
+                namespace,
+                in_words(fault(&failed)),
+                said(&failed).as_deref(),
+            )
+        })?,
+        Err(_) => {
+            return Err(unread(
+                &object,
+                namespace,
+                in_words(Fault::Unanswered),
+                Some(&heard_nothing(READ_DEADLINE, "answer")),
+            ));
+        }
+    };
     let Some(running) = read.spec.and_then(|spec| spec.replicas) else {
         return Err(unread(
             &object,
@@ -1676,7 +1900,8 @@ where
     // § Scale). `deploy` is real kubectl shorthand and buys nothing invariant 4 needs; this line's
     // whole job is teaching a newcomer a command they can read (invariant 14).
     let kubectl = format!(
-        "kubectl scale {object} --replicas={} -n {namespace}",
+        "kubectl{} scale {object} --replicas={} -n {namespace}",
+        context_segment(scaling.context),
         scaling.count
     );
     // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
@@ -2187,7 +2412,10 @@ where
     // **The kind is spelled out — `deployment/web`, never `deploy/web`** (`screens/dialogs.md`
     // § Scale), and there is no dry-run flag on it because `kubectl rollout restart` has none
     // (NOTES § D223 ruling 4).
-    let kubectl = format!("kubectl rollout restart {object} -n {namespace}");
+    let kubectl = format!(
+        "kubectl{} rollout restart {object} -n {namespace}",
+        context_segment(restarting.context)
+    );
     // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
     // name a path the request did not take: `Api::patch` is `Request::patch`, which is this base
     // and the name — no subresource, which is what makes this the first operation to reach it
@@ -2552,9 +2780,10 @@ where
     // § Scale) — and the line carries no flag at all: `propagationPolicy: Background` is what
     // `kubectl delete` sends when none is given, so what k8rs sends is what this line does
     // ([`Pass::delete`], NOTES § D225 ruling 5). No `--dry-run` either, because none was run.
+    let context = context_segment(deleting.context);
     let kubectl = match deleting.namespace {
-        Some(namespace) => format!("kubectl delete {object} -n {namespace}"),
-        None => format!("kubectl delete {object}"),
+        Some(namespace) => format!("kubectl{context} delete {object} -n {namespace}"),
+        None => format!("kubectl{context} delete {object}"),
     };
     // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
     // name a path the request did not take: `Api::delete` is `Request::delete`, which is this base

@@ -665,8 +665,7 @@ fn the_sentence_the_operator_reads_names_the_fault_and_what_the_cluster_said() {
                 said: None,
             },
             true,
-            "k8rs does not know whether the change was made — k8rs could not reach the cluster"
-                .to_string(),
+            "k8rs does not know whether the change was made — nothing usable came back".to_string(),
         ),
         (
             Outcome::Failed {
@@ -703,7 +702,11 @@ async fn a_failure_this_side_of_the_wire_is_not_recorded_as_the_server_refusing(
         (
             dead_socket("connection reset by peer"),
             Fault::Unanswered,
-            "k8rs could not reach the cluster",
+            // **Not *k8rs could not reach the cluster*, which this arm said until 2026-09-20**
+            // (NOTES § D273 *The review round* 2). A dead socket cannot tell a connection that
+            // never opened from one that died after the request went out, so the sentence may
+            // not claim either.
+            "nothing usable came back",
         ),
         (
             refusal("Unauthorized", "Unauthorized", 401),
@@ -754,6 +757,257 @@ fn clone_of(error: &kube::Error) -> kube::Error {
         kube::Error::Api(status) => kube::Error::Api(status.clone()),
         _ => dead_socket("connection reset by peer"),
     }
+}
+
+/// **The two numbers, pinned exactly, because a sentence built from one rounds it**
+/// (NOTES § D273 *The review round* 6).
+///
+/// **`from_millis(10_900)` passed both tests below**: `heard_nothing` prints `as_secs()`, so every
+/// deadline inside a second of the right one spells the same words. A number this repo measured on
+/// a cluster should not be movable by a hundred milliseconds without a test saying so. The two
+/// tests below assert what the deadlines *do* — that each wait is exactly the one its own caller
+/// owns; this is the only place that says what either number **is**.
+#[test]
+fn the_two_deadlines_are_the_numbers_that_were_measured_and_not_near_them() {
+    assert_eq!(
+        CHECK_DEADLINE,
+        std::time::Duration::from_secs(35),
+        "the check's deadline moved off the one measured against a real admission chain \
+         (reports/2026-09-20-the-dry-run-deadline.md): 34 s was that apiserver's own ceiling and \
+         this has to sit above it"
+    );
+    assert_eq!(
+        READ_DEADLINE,
+        std::time::Duration::from_secs(10),
+        "the pre-read's deadline moved off the ten a plain read gets — it runs no admission \
+         chain, so it may not inherit the check's number"
+    );
+}
+
+/// **Both sides of one deadline, and the shipped one** — a check that is already answered comes
+/// back whole, a check that already failed keeps the cluster's words, and a check that never
+/// answers becomes the bound (NOTES § D273).
+///
+/// **The clock moves, the suite does not wait.** `tokio`'s paused time auto-advances to the next
+/// timer whenever nothing else can run, so every case here runs on the number that ships and the
+/// test costs microseconds — which is the whole of why `test-util` is a dev-dependency
+/// (NOTES § D273 *The review round* 6). The first two cases need no timer at all: `timeout` polls
+/// the future before its own timer, so an answer that is already there never reaches the deadline,
+/// and `elapsed` proves it by staying at zero until the third.
+#[tokio::test(start_paused = true)]
+async fn a_check_that_answers_is_its_answer_and_one_that_does_not_is_the_bound() {
+    assert_eq!(
+        checked_within(CHECK_DEADLINE, std::future::ready(Ok::<u8, kube::Error>(7))).await,
+        Ok(7),
+        "an answer that had already arrived was thrown away by a deadline it never reached"
+    );
+
+    let denial = "deployments.apps \"web\" is forbidden";
+    assert_eq!(
+        checked_within(
+            CHECK_DEADLINE,
+            std::future::ready(Err::<u8, _>(refusal(denial, "Forbidden", 403)))
+        )
+        .await,
+        Err((Fault::Refused, Some(denial.to_string()))),
+        "the bound swallowed a failure the cluster had already explained"
+    );
+    assert_eq!(
+        tokio::time::Instant::now().elapsed(),
+        std::time::Duration::ZERO,
+        "an answer that was already there still spent time on the clock"
+    );
+
+    let started = tokio::time::Instant::now();
+    let expired = checked_within(
+        CHECK_DEADLINE,
+        std::future::pending::<Result<u8, kube::Error>>(),
+    )
+    .await;
+    let waited = started.elapsed();
+    println!("{waited:?} → {expired:?}");
+    assert_eq!(
+        waited, CHECK_DEADLINE,
+        "the check came back at a moment its own deadline does not name"
+    );
+    assert_eq!(
+        expired,
+        Err((
+            Fault::Unanswered,
+            Some(
+                "k8rs waited 35 seconds for the cluster to check this change and heard nothing \
+                 back"
+                    .to_string()
+            )
+        )),
+        "a check nothing answers either is not bounded at all, or ends in words nobody at 3am \
+         can act on"
+    );
+}
+
+/// **The absolute stop every test here uses instead of a multiple of the thing under test.**
+///
+/// **A stop derived from the constant cannot catch a wrong constant** (NOTES § D273 *The review
+/// round* 6): the first draft used `CHECK_DEADLINE * 3`, so a planted `from_secs(3600)` would have
+/// been a three-hour hang rather than a failure. A day of *paused* time costs nothing and is the
+/// same number whatever the deadline becomes.
+const NO_HANG: std::time::Duration = std::time::Duration::from_secs(86_400);
+
+/// **A check the cluster never answers ends the mutation, and the log holds both of its lines**
+/// (NOTES § D273, invariant 4).
+///
+/// **This is the test that says [`perform`] bounds the check at all**, which
+/// [`a_check_that_answers_is_its_answer_and_one_that_does_not_is_the_bound`] cannot: that one
+/// drives [`checked_within`] directly, and a `perform` that stopped calling it went on passing.
+/// Planted and watched (`dev-core`, 2026-09-20).
+///
+/// **The outer [`NO_HANG`] is the test's own stop and not the bound**: without it, a `perform`
+/// that bounds nothing parks the paused runtime — there is no timer left for it to advance to —
+/// and hangs the suite instead of failing it.
+#[tokio::test(start_paused = true)]
+async fn a_check_the_cluster_never_answers_ends_with_a_result_line_under_its_attempt() {
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let started = tokio::time::Instant::now();
+    let stopped = tokio::time::timeout(
+        NO_HANG,
+        performed(
+            &scaling(),
+            stamp,
+            &mut sink,
+            shows(&trace),
+            confirms(&trace),
+            |pass| {
+                trace.borrow_mut().steps.push(step(pass));
+                std::future::pending::<Result<(), kube::Error>>()
+            },
+        ),
+    )
+    .await
+    .expect(
+        "`perform` did not come back inside a day of virtual time, so it bounds the dry-run with \
+         nothing and the confirm box it opened has no key that closes it",
+    );
+
+    assert_eq!(
+        started.elapsed(),
+        CHECK_DEADLINE,
+        "`perform` waited something other than the deadline it owns"
+    );
+    assert_eq!(
+        stopped.outcome,
+        Some(Outcome::NotSent {
+            fault: Fault::Unanswered,
+            said: Some(
+                "k8rs waited 35 seconds for the cluster to check this change and heard nothing \
+                 back"
+                    .to_string()
+            ),
+        }),
+        "a check nobody answered was not recorded as a change that never went"
+    );
+    assert!(
+        stopped.recorded,
+        "the audit log is holding an attempt line with nothing after it — the one reading D225 \
+         ruling 1 refused to ship"
+    );
+
+    assert_eq!(
+        transcript(&trace),
+        vec![
+            ATTEMPT.to_string(),
+            "shown".to_string(),
+            "dry-run".to_string(),
+            format!(
+                "{RESULT} · dry-run: k8rs does not know whether the check reached the cluster · \
+                 the change was never sent — nothing usable came back: k8rs waited 35 seconds \
+                 for the cluster to check this change and heard nothing back\n"
+            ),
+        ],
+        "a check that ran out of time asked for a confirmation, went on to the real call, or \
+         left the record one line short"
+    );
+}
+
+/// **A loopback port that accepts the connection and then says nothing** — [`stub`]'s shape with
+/// the answer removed, and the one failure neither [`stub`] nor [`dead_port`] can produce.
+///
+/// **The address is built and not written**, [`stub`]'s own reason: the port is whatever `:0` gave
+/// us, so there is no hardcoded loopback URL in this tree for `scripts/security-guard.py` to be
+/// right about. The listener is kept alive by the spawned task, and the accepted sockets are held
+/// rather than dropped — a dropped socket is a `FIN`, which is an answer.
+async fn silent_port() -> Client {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            held.push(socket);
+        }
+    });
+    Client::try_from(kube::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing")
+}
+
+/// **A read the cluster never answers refuses the scale, and refuses it before anything exists to
+/// read afterwards** (NOTES § D273 *The review round* 3).
+///
+/// **This one is worse than the case the contract's own bound closes, which is why it is here.**
+/// `scale`'s `get_scale` runs ahead of the attempt line and ahead of `show`, so unbounded it hung
+/// with no dialog, no `$ kubectl` line and **no audit record at all** — nothing for an operator to
+/// find afterwards, where a bounded check at least leaves two lines.
+///
+/// **It takes [`READ_DEADLINE`] and not [`CHECK_DEADLINE`]**, asserted on the clock as well as in
+/// the sentence, because a `GET` runs no admission chain and the thirty-five seconds is entirely
+/// that chain's measurement.
+#[tokio::test(start_paused = true)]
+async fn a_read_the_cluster_never_answers_refuses_the_scale_with_nothing_recorded() {
+    let client = silent_port().await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let started = tokio::time::Instant::now();
+    let refusal = tokio::time::timeout(
+        NO_HANG,
+        scale(
+            &client,
+            &asking(3),
+            stamp,
+            &mut sink,
+            shows(&trace),
+            confirms(&trace),
+        ),
+    )
+    .await
+    .expect("`scale` did not come back inside a day of virtual time, so its read bounds nothing")
+    .expect_err("a cluster that never answered the read cannot have said how many are running");
+
+    let waited = started.elapsed();
+    println!("{waited:?}\n{refusal}");
+    assert_eq!(
+        waited, READ_DEADLINE,
+        "the read waited something other than the deadline it owns — the check's, most likely"
+    );
+    assert_eq!(
+        refusal,
+        "k8rs could not read how many copies of deployment/web in payments are running right \
+         now — nothing usable came back: k8rs waited 10 seconds for the cluster to answer and \
+         heard nothing back",
+        "the refusal for a read that never answered is not the one a reader can act on"
+    );
+    assert_eq!(
+        transcript(&trace),
+        Vec::<String>::new(),
+        "a scale that never got its read opened a dialog or wrote an audit line — the attempt \
+         line is written inside `perform`, which this never reached"
+    );
 }
 
 /// **A call that fails after a good check is a different fact from a refused check**: something
@@ -884,7 +1138,7 @@ async fn a_broken_pipe_after_the_request_went_out_says_k8rs_does_not_know() {
         transcript(&trace).last().cloned(),
         Some(format!(
             "{RESULT} · {CHECKED_FIRST} · k8rs does not know whether the change was made — \
-             k8rs could not reach the cluster\n"
+             nothing usable came back\n"
         )),
         "the record asserts the change did not happen, which is the one thing k8rs cannot see \
          from here"
@@ -1554,6 +1808,239 @@ async fn a_cluster_scoped_call_with_nothing_to_put_in_three_fields_names_every_g
             "{crafted:?} left a dangling label where the uid goes: {line:?}"
         );
     }
+}
+
+/// **Every taught `kubectl` line carries `--context <name>`, immediately after `kubectl`**
+/// (NOTES § D278 ruling 5, `screens/context.md` § What the command log shows, invariant 4).
+///
+/// **Both sides of the gap.** A named context produces the segment; an unnamed one produces
+/// nothing at all — `--context` with an empty value after it is a line that does not run, and
+/// the record's own word for that gap is *not named* ([`gap`]).
+///
+/// **Position is the claim and not an incidental**: `--context` is a global flag, so `kubectl`
+/// takes it before the verb. After the verb it is the verb's flag and `scale` has no such one.
+#[test]
+fn a_taught_line_carries_the_context_before_the_verb_and_drops_it_whole_when_unnamed() {
+    assert_eq!(context_segment("kind-k8rs"), " --context kind-k8rs");
+    assert_eq!(
+        context_segment(""),
+        "",
+        "an unnamed context produced a flag with nothing after it"
+    );
+    // **The shape the hazard actually wears**, measured by `dev-ui` against the real binary
+    // before this landed: a context renamed `prod eu; echo pwned` put a second command on a line
+    // the command log exists to have pasted.
+    assert_eq!(
+        context_segment("prod eu; echo pwned"),
+        " --context 'prod eu; echo pwned'",
+        "a context name carrying shell syntax was pasted as syntax"
+    );
+}
+
+/// **One word of a taught line, bare where a shell reads it whole and quoted otherwise**
+/// (NOTES § D278 ruling 5).
+///
+/// **It is `pub` because `main.rs` is to call this one** — the pyramid runs `ops.rs` → `main.rs`,
+/// so the shared copy can only live here. Two spellings of a quoting rule is where the two taught
+/// surfaces drift apart, which is why the rows below are the rule itself and not one caller's
+/// use of it.
+///
+/// **An allowlist, so the refused half is asserted by shape and not by enumeration**: the claim
+/// is that anything outside the bare set is quoted, which a list of known-dangerous characters
+/// cannot make.
+#[test]
+fn a_word_of_a_taught_line_is_bare_only_where_every_shell_reads_it_whole() {
+    // **The ordinary names stay bare**, so the line is still the one `screens/context.md` draws.
+    for plain in [
+        "kind-k8rs",
+        "staging",
+        "gke_my-project_europe-west1_prod",
+        "arn:aws:eks:eu-west-1:123456789012:cluster/production-eu",
+        "admin@example.com",
+        "a+b=c",
+    ] {
+        assert_eq!(
+            pasteable(plain),
+            plain,
+            "an ordinary context name was quoted, so the taught line stopped being the drawn one"
+        );
+    }
+    // A `'` is the one character single quotes cannot hold; this is the standard closing,
+    // escaping and reopening.
+    assert_eq!(pasteable("it's prod"), r"'it'\''s prod'");
+    // **The empty word is quoted and not left bare** — its caller drops the segment before it
+    // gets here ([`context_segment`]), and `main.rs`'s does too, so this is the guard that holds
+    // when a third caller does not.
+    assert_eq!(pasteable(""), "''");
+    for hostile in " ;|&$`>(*\\\"#!~\n\u{202e}".chars() {
+        let hostile = format!("a{hostile}b");
+        let word = pasteable(&hostile);
+        assert!(
+            word.starts_with('\'') && word.ends_with('\''),
+            "{hostile:?} was left bare in a line meant to be pasted: {word:?}"
+        );
+    }
+}
+
+/// **The other side of the bound, through the three real operations** — a helper test and a
+/// wired-up test with a named context partition the space so that neither stands on the defect
+/// between them: a call site that built the segment itself would keep both of them green
+/// (CLAUDE.md § Tests must not lie).
+///
+/// **An unnamed context is a shape the driver reaches**: `k8s::Session::context` is an `Option`
+/// with three ways to be `None` (NOTES § D202), and what that hands an operation is the empty
+/// string — the same gap [`Record::attempt_line`] writes as *not named*. `--context ` with
+/// nothing after it would be a taught line that does not run, on the one surface invariant 4
+/// says may not lie.
+#[tokio::test]
+async fn an_unnamed_context_leaves_every_taught_line_bare_rather_than_flagged() {
+    let scaled = trace();
+    let mut sink = Sink(scaled.clone());
+    let (client, _) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+    let done = scale(
+        &client,
+        &Scaling {
+            context: "",
+            ..asking(3)
+        },
+        stamp,
+        &mut sink,
+        shows(&scaled),
+        confirms(&scaled),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+    taught_bare(
+        &scaled,
+        "kubectl scale deployment/web --replicas=3 -n payments",
+    );
+
+    let restarted = trace();
+    let mut sink = Sink(restarted.clone());
+    let (client, _) = stub(|_| ("200 OK".to_string(), patched())).await;
+    let done = restart(
+        &client,
+        &Restarting {
+            context: "",
+            ..restarting()
+        },
+        stamp,
+        &mut sink,
+        shows(&restarted),
+        confirms(&restarted),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+    taught_bare(
+        &restarted,
+        "kubectl rollout restart deployment/web -n payments",
+    );
+
+    let deleted = trace();
+    let mut sink = Sink(deleted.clone());
+    let (client, _) = stub(|_| ("200 OK".to_string(), gone())).await;
+    let done = delete(
+        &client,
+        &Deleting {
+            context: "",
+            ..deleting()
+        },
+        stamp,
+        &mut sink,
+        shows(&deleted),
+        types(&deleted, "web-7d9f4"),
+    )
+    .await
+    .expect("a pod in a namespace, with a cluster that answers");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+    taught_bare(&deleted, "kubectl delete pod/web-7d9f4 -n payments");
+
+    // **A name that is not empty until it is stripped is the same gap** (invariant 9, NOTES
+    // § D202's third `None`). Measured before the strip moved ahead of the gap check: `U+202E`
+    // was quoted for the character it carried and the line strip then emptied the quotes, so the
+    // dialog taught `kubectl --context '' scale …` — the empty-valued flag this test is about,
+    // reached the long way round.
+    for crafted in ["\u{202e}", "\u{7}", "\u{200b}\u{feff}"] {
+        let probe = trace();
+        let mut sink = Sink(probe.clone());
+        let (client, _) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+        let done = scale(
+            &client,
+            &Scaling {
+                context: crafted,
+                ..asking(3)
+            },
+            stamp,
+            &mut sink,
+            shows(&probe),
+            confirms(&probe),
+        )
+        .await
+        .expect("a deployment in a namespace, with a cluster that answers");
+        assert_eq!(done.outcome, Some(Outcome::Done));
+        println!("{crafted:?} → {:?}", probe.borrow().dialog);
+        taught_bare(
+            &probe,
+            "kubectl scale deployment/web --replicas=3 -n payments",
+        );
+    }
+
+    // **And a name that only *partly* strips keeps the flag, quoted** — the gap is what a strip
+    // empties, not what it touches, and the value is the one [`Record::of`] puts in the record's
+    // own `context` field.
+    let partly = trace();
+    let mut sink = Sink(partly.clone());
+    let (client, _) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+    let done = scale(
+        &client,
+        &Scaling {
+            context: "kind\u{1b}[2Jk8rs",
+            ..asking(3)
+        },
+        stamp,
+        &mut sink,
+        shows(&partly),
+        confirms(&partly),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+    assert_eq!(
+        partly
+            .borrow()
+            .dialog
+            .as_ref()
+            .map(|shown| shown.kubectl.clone()),
+        Some(
+            "kubectl --context 'kind[2Jk8rs' scale deployment/web --replicas=3 -n payments"
+                .to_string()
+        ),
+        "a stripped context name reached the taught line unquoted or misspelt"
+    );
+}
+
+/// What [`an_unnamed_context_leaves_every_taught_line_bare_rather_than_flagged`] asserts of each
+/// operation: the line the dialog was shown is the bare one, the audit line quotes that same
+/// line, and the record's own context field is the gap word rather than a flag.
+fn taught_bare(trace: &Shared, expected: &str) {
+    let shown = trace
+        .borrow()
+        .dialog
+        .as_ref()
+        .map(|dialog| dialog.kubectl.clone())
+        .expect("the dialog was opened before anything was sent");
+    assert_eq!(shown, expected, "an unnamed context reached a taught line");
+    let attempt = transcript(trace)
+        .into_iter()
+        .find(|line| line.contains("attempt ·"))
+        .expect("the attempt line is written before anything is sent");
+    assert!(
+        attempt.contains(&format!("· kubectl: {expected} ·"))
+            && attempt.contains("· context not named ·"),
+        "the audit line and the taught line disagree about the context: {attempt:?}"
+    );
 }
 
 /// **An empty value records the way an absent one does** (PM ruling, 2026-09-04).
@@ -2441,7 +2928,8 @@ async fn what_a_scale_records_is_the_object_it_read_and_the_call_it_made() {
                 .to_string(),
             // **`deployment/web`, never `deploy/web`** (`screens/dialogs.md` § Scale): this line's
             // whole job is teaching a newcomer a command they can read.
-            kubectl: "kubectl scale deployment/web --replicas=3 -n payments".to_string(),
+            kubectl: "kubectl --context kind-k8rs scale deployment/web --replicas=3 -n payments"
+                .to_string(),
         }),
         "the dialog was not given the object, the count it read, or a runnable kubectl line"
     );
@@ -2464,7 +2952,7 @@ async fn what_a_scale_records_is_the_object_it_read_and_the_call_it_made() {
         "audit: 2026-09-03T12:34:56Z attempt · deployment/web · context kind-k8rs · server \
          https://k8rs-tests.invalid:41751 · namespace payments · \
          uid 18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11 (what k8rs read, not what it changed) · \
-          kubectl: kubectl scale deployment/web \
+          kubectl: kubectl --context kind-k8rs scale deployment/web \
          --replicas=3 -n payments · call: PATCH \
          /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion not sent\n",
         "the attempt line does not name the call that was actually made"
@@ -3509,7 +3997,8 @@ async fn what_a_restart_records_is_the_call_it_made_and_the_two_things_it_never_
             // **`deployment/web`, never `deploy/web`** (`screens/dialogs.md` § Scale), and no
             // `--dry-run`: `kubectl rollout restart` has no such flag (NOTES § D223 ruling 4), so
             // the taught line cannot claim the preflight k8rs ran.
-            kubectl: "kubectl rollout restart deployment/web -n payments".to_string(),
+            kubectl: "kubectl --context kind-k8rs rollout restart deployment/web -n payments"
+                .to_string(),
         }),
         "the dialog was not given the object, what a restart does to it, or a runnable kubectl line"
     );
@@ -3541,7 +4030,7 @@ async fn what_a_restart_records_is_the_call_it_made_and_the_two_things_it_never_
         attempt,
         "audit: 2026-09-03T12:34:56Z attempt · deployment/web · context kind-k8rs · server \
          https://k8rs-tests.invalid:41751 · namespace payments · no uid was read · kubectl: \
-          kubectl \
+          kubectl --context kind-k8rs \
          rollout restart deployment/web -n payments · call: PATCH \
          /apis/apps/v1/namespaces/payments/deployments/web · resourceVersion not sent\n",
         "the attempt line does not name the call that was actually made"
@@ -4228,10 +4717,13 @@ async fn neither_operation_claims_a_check_was_sent_when_nothing_usable_answered(
             line.contains(UNKNOWN),
             "{verb}: the line does not say k8rs cannot tell whether the check arrived: {line:?}"
         );
-        // **The next field says the cluster could not be reached**, and the two were on one line
-        // contradicting each other. Both are asserted so the pair cannot drift apart again.
+        // **The next field used to say the cluster could not be reached**, and the two were on
+        // one line contradicting each other — this pair is what pinned that wording, and both
+        // reviewers found the contradiction it was holding in place (NOTES § D273 *The review
+        // round* 2). Both halves are still asserted so the pair cannot drift apart again; what
+        // changed is that neither of them now claims more than k8rs knows.
         assert!(
-            line.contains("the change was never sent — k8rs could not reach the cluster"),
+            line.contains("the change was never sent — nothing usable came back"),
             "{verb}: the outcome stopped naming the fault beside the check: {line:?}"
         );
     }
@@ -4705,7 +5197,7 @@ async fn what_a_delete_records_is_the_call_it_made_and_the_check_it_never_ran() 
             // **`pod/web-7d9f4`, and no flag at all** — no `--dry-run`, because none was run, and
             // no `--cascade`, because `Background` is what `kubectl delete` sends when none is
             // given (NOTES § D225 ruling 5).
-            kubectl: "kubectl delete pod/web-7d9f4 -n payments".to_string(),
+            kubectl: "kubectl --context kind-k8rs delete pod/web-7d9f4 -n payments".to_string(),
         }),
         "the dialog was not given the object, what a delete does to it, or a runnable kubectl line"
     );
@@ -4731,7 +5223,7 @@ async fn what_a_delete_records_is_the_call_it_made_and_the_check_it_never_ran() 
         attempt,
         "audit: 2026-09-03T12:34:56Z attempt · pod/web-7d9f4 · context kind-k8rs · server \
          https://k8rs-tests.invalid:41751 · namespace payments · no uid was read · kubectl: \
-          kubectl \
+          kubectl --context kind-k8rs \
          delete pod/web-7d9f4 -n payments · call: DELETE \
          /api/v1/namespaces/payments/pods/web-7d9f4 · resourceVersion not sent\n",
         "the attempt line does not name the call that was actually made"
@@ -4893,7 +5385,7 @@ async fn a_node_is_deleted_cluster_wide_and_every_record_of_it_names_no_namespac
                           act first. Left alone, its pods are deleted and the machine keeps \
                           running until its kubelet restarts."
                 .to_string(),
-            kubectl: "kubectl delete node/node-3".to_string(),
+            kubectl: "kubectl --context kind-k8rs delete node/node-3".to_string(),
         }),
         "a node's dialog carried a namespace, a `-n`, or somebody else's consequence"
     );
@@ -6661,8 +7153,8 @@ async fn a_cluster_that_never_answered_is_could_not_tell_and_says_so() {
         panic!("a cluster that never answered is not could-not-tell: {verdict:?}");
     };
     assert!(
-        why.contains("k8rs could not reach the cluster"),
-        "the sentence blames the cluster's answer for a call that never got one: {why}"
+        why.contains("nothing usable came back"),
+        "the sentence claims something about a call that never got an answer: {why}"
     );
 }
 

@@ -6,13 +6,13 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│                                               │
-│ RESOURCES          │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│  RESOURCES         │▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
 │   workloads        │    Containers exceeded their memory limit and │
 │   network          │    were killed by the kernel (OOMKilled)      │
 │   storage          │    limit 256Mi · exit 137 · 47 restarts       │
 │   config           │    → raise limits.memory, or find the leak    │
 │   cluster          │                                               │
-│ ANALYSIS           │  ▲ shop/api  ·  2 of 6 pods       12 min ago  │
+│  ANALYSIS          │  ▲ shop/api  ·  2 of 6 pods       12 min ago  │
 │   capacity      1 ▲│    Running, but not receiving traffic — the   │
 │   certificates  30d│    readiness check is failing                 │
 │   drain safety     │    → check the app's /healthz endpoint        │
@@ -22,10 +22,10 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 │   versions         │    2 pods here would still have to move       │
 │                    │    → allow new pods once the work is done     │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch                                      │
-│ $ kubectl get nodes --watch                                        │
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit    │
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -43,6 +43,38 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 
 ## The rules this screen obeys
 
+- **The footer's exact set, and why `l logs` is not in it, is
+  [widgets.md § The footer](widgets.md#2a-the-footer)** — one rule shared with
+  [resources.md](resources.md), not redrawn here. `/ filter` narrows a list
+  that owner-grouping already shortened once ([D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)); it
+  is offered for the same reason `/` is offered on every other list in this
+  product, not because this list is expected to be long.
+- **What `/` and `n` do while they are being typed, and what a filter that
+  hides every card looks like, are not this file's own rules** —
+  [widgets.md § 2b](widgets.md#2b-typing-into-a-filter) and
+  [states.md § The filter hides every row](states.md#the-filter-hides-every-row)
+  are shared with [resources.md](resources.md), the same way the footer
+  itself is.
+- **An `r` this login may not use on the selected card is marked on this
+  footer, not hidden** — `r no restart`, whichever `may_i_in`
+  answers `Verdict::No` for. `s` never reaches this line at all — it is
+  withheld from every kind, every login and every run (help.md's own Rules
+  list), so there is no `s no scale` to draw today. The wording, the column
+  arithmetic and the fuller reason behind `?` are
+  [widgets.md § The footer](widgets.md#2a-the-footer)'s and
+  [help.md § When a key is refused](help.md#when-a-key-is-refused)'s, not
+  repeated here — this list is the only other place `r` is drawn.
+- **A card's own kind decides whether `r` is on its footer at all, and a
+  kind that cannot restart drops the key instead of marking it** —
+  a Node, a bare Pod, a bare ReplicaSet or a ConfigMap all draw neither key
+  now, the same as each other: nothing was refused, there was never
+  anything to restart, and `s` was never there to draw either way. A
+  DaemonSet still draws `r` on its own, unaffected — it never carried `s`
+  in the first place. **Every card on this screen is subject to this, the
+  tallest-card mockup below included** — a bare-pod card such as
+  `default/healthy-sidecar` draws no key at all. The column counts for each
+  combination are [widgets.md § The footer](widgets.md#2a-the-footer)'s, not
+  redrawn here.
 - **One card per owner, never per pod.** `payments/web · 3 of 5 pods`, not
   three cards. A DaemonSet on forty nodes is still one card
   ([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)).
@@ -124,8 +156,72 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
   unknown time cannot claim to be more recent than a known one, and a reader
   who sees the blanks grouped reads them as a kind of card rather than as
   missing data.
+- **A run of ageless cards is the single-card rule applied more than once, not
+  a second layout.** [The age, and what it costs the name](#the-age-and-what-it-costs-the-name)
+  never looks at a neighbouring card: an ageless card gets the full 51-column
+  identity line and its name ends wherever the name ends, so two or three in a
+  row read as a block of differently-long names — never as a column that tried
+  to line up and failed. That is what "deliberate" looks like here: nothing
+  pads a name out to a false alignment it does not have a partner for. **This
+  is the common case now, not the rare one** — a clock five minutes ahead of
+  the reader's blanks every recent card's age at once, not one
+  ([NOTES § D246](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+  ruling 4), so a reader with a stale clock meets this block on an ordinary
+  screen, not an edge case nobody will see.
 - Every string here passes the glossary test: a newcomer reads it without
   looking anything up.
+
+### The selected card
+
+**A reversal.** `screens/widgets.md` § 2 used to say *"No card carries a
+selection marker"* — `theme::SELECTION` was the sidebar's alone, and every
+mockup on this page drew a card the same way selected or not, on purpose:
+before Phase 12's event loop, nothing read the cursor to act on it, so a
+marker would have taught a fact with no consequence. `⏎`, `s`, `r` and
+`ctrl-d` now all act on whichever card `ListState` is actually sitting on,
+which means a reader who cannot see that card is one keypress from
+confirming a restart or a delete on an object they only guessed at — a
+worse failure than the one the old rule was written to avoid. **Silence
+about the selection is no longer the safer choice.**
+
+The marker is `▸`, the same glyph and the same word `theme::SELECTION`
+already carries in the sidebar and in [resources.md](resources.md)'s own
+table rows ([widgets.md § 2](widgets.md#2-element--widget)) — not a sixth
+symbol invented for this one pane. It draws on the card's own **identity
+line only** — the heading a reader's eye already goes to first, exactly
+where a Resources row puts it — never repeated down the evidence or remedy
+lines beneath it; a cursor is one fact, and marking every line of a
+twelve-line card would read as several.
+
+**It costs no width this page has not already spent.** Every card is
+rendered inside `ui::padded`'s existing two-column left margin
+(`src/ui.rs`'s `PAD`), blank on every card today — the same two columns
+`theme::SELECTION`'s own `▸ ` already needs in the sidebar. The marker fills
+that margin on the selected card's identity line instead of leaving it
+blank; every column budget in [§ How wide a card is, and how
+tall](#how-wide-a-card-is-and-how-tall) is unchanged; both this file's own
+70-column mockups and the real 80-column floor draw exactly as wide as they
+already did.
+
+**No `views.rs` type changes.** `ui::alerts` already receives the selected
+index through the `ListState` it builds for scrolling
+([widgets.md § 2](widgets.md#2-element--widget)); drawing `▸` on the row
+that index names is a rendering decision inside `ui.rs`, the same shape
+`resources.md`'s own row already uses. This is a `ui.rs` change, not a
+`views.rs` one.
+
+**Every mockup on this page that draws more than zero cards now carries it
+on the first one — the same default `ListState` opens on — and a mockup
+with none has nothing to carry it, which is stated on the page rather than
+left silent** ([states.md § Rules that hold across every state on this
+page](states.md#rules-that-hold-across-every-state-on-this-page)). Three
+other files echo this page's own card text and are deliberately unmarked,
+each for a different reason and not an oversight: `once.md` prints it to
+stdout, a surface with no cursor at all to mark; `detail.md` shows the one
+object a card's own `⏎` already opened, never a second list of cards to
+choose among; and `analysis.md`'s report rows are a different widget —
+single-line, not this page's three-to-twelve-line `ListItem` — so whether
+they need their own marker is a question this page does not answer.
 
 ## How wide a card is, and how tall
 
@@ -151,8 +247,34 @@ budget is stated here in terminal columns and nowhere in a drawing.
 
 The age is laid out first, at the width the ladder gives it
 ([widgets.md § 1b](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen)),
-right-aligned so its last column is the card region's. The name gets the rest,
-minus a two-column gap, and clips there.
+right-aligned so its last column is the card region's. The name gets the
+rest, minus a two-column gap, and — where it does not fit —
+[the identity cut](widgets.md#7-text-that-came-from-the-api) gives way there,
+never a silent clip.
+
+**A silent clip used to be what "gives way" meant here, and it made two
+different objects draw one card.** `team-alpha-payments-platform/checkout-worker-service-canary`
+and its `-stable` sibling both clipped to
+`team-alpha-payments-platform/checkout-wo`, and `openshift-cluster-node-tuning-operator/tuned`
+and `…/node-tuning-operator` in the same namespace both clipped to
+`openshift-cluster-node-tuning-operator`, dropping the `/` and the whole
+object name with it
+([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+The name now front-cuts the same way every other identity on this product
+does — namespace first, `/` and name kept whole wherever the room allows —
+marked with a leading `…`:
+
+```
+● …platform/checkout-worker-service-canary  4 min ago
+● …platform/checkout-worker-service-stable  4 min ago
+● …ft-cluster-node-tuning-operator/tuned  2 hours ago
+● …-tuning-operator/node-tuning-operator  2 hours ago
+```
+
+Measured at the 80×24 floor: 40 columns of room after a `4 min ago` age, 38
+after `2 hours ago` — the two Deployments above now differ on the card as
+well as in the cluster, and `tuned` and `node-tuning-operator` no longer
+share one line with no `/` on it.
 
 | The card's age | Age columns | Columns left for the name |
 |---|---|---|
@@ -374,13 +496,13 @@ captures, and reaches all four caps at once:
  nodes 3/3                          k8rs         ctx: prod-eu · live · admin
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│  ▲ default/healthy-sidecar                   5 min ago  │
-│ RESOURCES          │    Container has been restarted 3 times — it is         │
+│  RESOURCES         │    Container has been restarted 3 times — it is         │
 │   workloads        │    serving now, and the last run on record finished     │
 │   network          │    cleanly                                              │
 │   storage          │    sidecar container proxy (it runs beside the app the  │
 │   config           │    whole time) · exit 0 (the run ended without an       │
 │   cluster          │    error) · docker.io/library/busybox:latest            │
-│ ANALYSIS           │    → exit 0 says the run ended, not who stopped it —    │
+│  ANALYSIS          │    → exit 0 says the run ended, not who stopped it —    │
 │   capacity      1 ▲│      check the pod's events for a Killing line and the  │
 │   certificates  30d│      node for a memory killer. If nothing stopped it    │
 │   drain safety     │      the program ends itself, and this one must run as  │
@@ -390,10 +512,10 @@ captures, and reaches all four caps at once:
 │   versions         │    Running, but not receiving traffic — the readiness   │
 │                    │    check is failing                                     │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch                                                │
-│ $ kubectl get nodes --watch                                                  │
+│ $ kubectl get statefulsets -A --watch                                        │
+│ $ kubectl get daemonsets -A --watch                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open  s scale  r restart  l logs  ? all keys  q quit              │
+│ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                                │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -542,6 +664,166 @@ own voice, 9 rows:
   runtime error and no instruction; the new one hands over a complete
   instruction and a cut runtime error. Only one of those two is a thing the
   reader cannot get anywhere else on this screen, and it is not the quote.
+
+## A card with more than one finding
+
+D3 groups every finding by owner, not by pod — a Deployment whose containers
+are OOMKilled *and* whose readiness check is failing is one card, not two
+([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)). Nothing
+above drew that card. [What each part is](#what-each-part-is) budgets one
+finding's four parts and every mockup on this page draws exactly one; this
+section is the fifth part a card gains the moment it holds a second finding,
+and the rule for which finding the other four parts are drawn from.
+
+- **Which finding is drawn is the screen's own sort, one level down, not
+  `analyze()`'s.** [Ordering, above](#the-rules-this-screen-obeys) already
+  settles how *cards* are ordered — severity, then recency — and the same two
+  keys settle which *finding on one card* is drawn: the finding at the card's
+  own severity ([`Card::severity`](../src/views.rs), the worst present), and
+  where more than one finding shares it, the most recent
+  ([`Finding::age`](../src/rules.rs) answering, the same test
+  [`Card::newest`](../src/views.rs) already applies — NOTES §
+  [D246](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+  ruling 4). Where recency does not resolve it either — neither has a drawable
+  age, or both share one — this file makes no promise about which of the two
+  is shown, the same honesty the whole list's own stable sort already keeps
+  for a tie neither severity nor recency breaks. What this replaces is
+  *first in `analyze`'s order*: true of the code before this section and
+  invisible to a reader, because nothing about which rule number fired first
+  is a fact anyone reading the screen can reconstruct.
+- **The right edge can belong to a different finding than the one drawn, and
+  that is not new here — it is what [`Card::age`](../src/views.rs) already
+  does.** It reports the most recent *drawable* event anywhere on the card,
+  severity-blind, because the age answers *"when did something last happen to
+  this owner"*, not *"when did the sentence below start"* — the same reading
+  [the cordon card](#the-cordon-card-with-and-without-its-clock) already gives
+  it (*"nothing on this card reasons from the age"*). A card can therefore
+  show a Critical title next to an age that belongs to a more recent Warning
+  one `⏎` away — correct, not a bug, and worth saying once here rather than
+  leaving a reader to notice the two do not obviously match.
+- **A hidden finding can never be worse than the one drawn.** The drawn
+  finding is always at the card's own severity, which is the worst present —
+  so the glyph never understates what is on this card, only ever what is
+  behind it. The marker below does not need to carry a severity of its own for
+  that reason, and does not.
+- **The fifth part: one line, plain count, no glyph.** When a card holds more
+  than one finding, the action is followed by:
+
+  ```
+  1 more problem — ⏎ to see
+  ```
+
+  or, for two or more hidden findings, `N more problems — ⏎ to see` —
+  `problem` takes its plural the same way `pod` and `hour` already do on this
+  page. Unlike the evidence line, which is left out rather than drawn blank
+  when a finding has none ([What each part is](#what-each-part-is)), this
+  fifth part has no empty form: it is either absent — a single-finding card,
+  the ordinary case — or exactly one line, never a blank placeholder either
+  way. `N` is `card.findings.len() - 1`: every finding on the card except the
+  one just drawn, regardless of its own severity. The wording is not invented
+  for this page — it is [resources.md](resources.md)'s own
+  `● web has 3 pods with problems — ⏎ to see`, reused rather than restated,
+  because `⏎` already means *open this* everywhere on this screen and a second
+  phrasing for the same key would be a second thing to learn. **No glyph
+  precedes it** — `widgets.md`'s own badge rule already draws this shape:
+  *"a plain count with no band draws neither"* ([widgets.md § 2](widgets.md#2-element--widget)) —
+  and a glyph here would raise the question of whose severity it carries, when
+  the answer is already on the line above and cannot be worse. It indents two
+  columns under `● `, the same as the title and evidence lines, and is styled
+  the same dim weight as the evidence — a pointer, not an instruction, so it
+  does not compete with the arrow for the reader's eye.
+- **Every card shape gets the same rule, unconditionally.** A node card and a
+  bare pod draw no `· n of m pods` at all
+  ([NOTES § D246](../NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06)
+  ruling 2), and a workload card's identity line can already be down to its
+  last free column at the widest age ([the age, and what it costs the
+  name](#the-age-and-what-it-costs-the-name)) — none of that changes whether
+  the fifth part appears. It is driven by one fact, `findings.len() > 1`, and
+  nothing about the card's shape, its evidence, or whether it has an age at
+  all enters into it.
+
+Two worked cards — composed, not off one committed capture, because no
+capture pairs these two findings under one owner today; each finding's own
+text is real, off the drawings already on this page. Drawn at the card
+region's real width, the same convention [the cards the budget was measured
+against](#the-cards-the-budget-was-measured-against) uses:
+
+```
+● payments/web  ·  3 of 5 pods              4 min ago
+  Containers exceeded their memory limit and
+  were killed by the kernel (OOMKilled)
+  limit 256Mi · exit 137 · 47 restarts
+  → raise limits.memory, or find the leak
+  1 more problem — ⏎ to see
+```
+
+The hidden finding is `shop/api`'s own readiness text, reattributed here to
+`payments/web` for the example — no real capture pairs the two under one
+owner. What the drawing demonstrates is severity settling this outright: the
+memory kill is Critical, the readiness failure is a Warning, and a Critical
+finding wins the glyph regardless of either one's age — no recency test was
+needed here at all. That test is what the next card shows.
+
+The severity tie the bullet above describes, drawn — a node carrying both N2
+and N3, both `▲`:
+
+```
+▲ node-3                                   18 min ago
+  This node is running low on memory — Kubernetes
+  may start evicting pods to free it up
+  → free up memory on this node, or move some
+    pods elsewhere
+  1 more problem — ⏎ to see
+```
+
+Both findings here are real strings, off [the cordon card](#the-cordon-card-with-and-without-its-clock)
+and [N3](#n3--a-node-running-low-on-something) respectively, retimed for this
+example: the memory-pressure condition turned `True` 18 minutes ago, the
+cordon two hours ago. **Recency is what puts memory pressure on the face and
+the cordon behind `⏎`, not rule order** — N2 is declared before N3 in
+`rules.rs`, so *first in `analyze`'s order* would have drawn the cordon here,
+the older and, on this node, the less urgent of the two. No `· n of m pods`
+appears on either line, the node-card rule unchanged
+([the rules this screen obeys](#the-rules-this-screen-obeys)).
+
+**The height cost, counted rather than assumed away.** [The
+height](#the-height)'s twelve-line cap is a single finding's four parts added
+up — 1 + 3 + 3 + 5. The fifth part adds exactly one more line at its own
+worst case, so a card holding two findings, the first of which reaches every
+existing cap at once, is **13** lines — one taller than the tallest single-
+finding card this file has measured. No committed capture reaches this; it is
+a bound in the same sense the 14-column age is
+([widgets.md § 1b](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen)):
+the widest thing the shape can produce, not a claim that it has been seen. The
+pane's own arithmetic still balances, it just balances one row tighter: 16 =
+13 (card) + 1 (separator) + **2** left for the next card, instead of the
+ordinary 16 = 12 + 1 + 3. The next card's name is still on screen at the worst
+case; one line of its title is not, where the ordinary worst case keeps two.
+`ListState` still keeps the selected card in view and `↓` still reaches it,
+the same escape hatch [the cap already relies on](#how-wide-a-card-is-and-how-tall)
+for the banner case — this is a narrower version of a bound the file already
+accepts, not a new one.
+
+**The ordering rule is one rule, reused everywhere detail.md needs it — not
+a promise that the whole group ends up pinned in one place.** Worst
+severity first, most recent breaking a tie between equals is what decides
+which finding this card draws on its own face, and the identical rule
+decides which finding [detail.md § Picking a pod, before Detail has
+one](detail.md#picking-a-pod-before-detail-has-one) pins as the group's own
+deciding finding, and the order a pod's own findings pin in once
+[detail.md § Every finding about this object pinned at the top of every
+tab](detail.md#every-finding-about-this-object-pinned-at-the-top-of-every-tab)
+opens on it. **A pod's own tab pins that pod's own findings, never the
+whole card's** — a DaemonSet card built from 38 crashlooping pods is 38
+findings, and opening pod #7 pins pod #7's, not the other 37; those 37 are
+what the which-pods step's own rows are for, each carrying its own pod's
+worst finding's title. Both sections' own arithmetic is worked out there,
+and what it delivers is not a row count either — neither finds a fixed
+number of rows to promise a stack against, and says so on purpose, the same
+honesty this page's own stable sort keeps for a tie neither severity nor
+recency breaks. This page's marker was always a promise that `⏎` leads
+somewhere real, never a promise about how many rows that costs or how much
+of the group arrives pinned with it.
 
 ## The cordon card, with and without its clock
 

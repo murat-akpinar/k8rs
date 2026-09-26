@@ -1,10 +1,17 @@
 # k8rs Architecture
 
-> Status: partly built. The bottom of the pyramid — `rules.rs`, `analysis.rs`,
-> `k8s.rs` — exists and runs behind a temporary driver; the three views and the
-> write path are still design. Decisions and their rationale live in
-> `../NOTES.md`; the technology choices (language, crates, toolchain) in
-> `tech-stack.md`; this is the buildable summary.
+> Status: **built, not yet published.** The whole pyramid exists and runs —
+> `rules.rs`, `analysis.rs`, `k8s.rs`, `ops.rs`, and since Phase 12's close
+> (2026-09-26) the console on top of them: one binary with the event loop, the
+> Alerts view, the seven analysis panes, the dialogs, the write path and the
+> cluster picker wired. **Four reads are not**, each drawing an honest waiting
+> state rather than a wrong one: the browser's server-side `Table`, the four detail
+> tabs, the log stream, and the `may_i_in` permission probe.
+> `ui.rs` and `views.rs` are frozen. What is left is shipping it — Phase 13 — and
+> the ten driver flags coming out before it ships
+> ([NOTES § D288](../NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)).
+> Decisions and their rationale live in `../NOTES.md`; the technology choices
+> (language, crates, toolchain) in `tech-stack.md`; this is the buildable summary.
 
 ## Overview
 
@@ -37,17 +44,29 @@ this small ([tech-stack § Deliberately absent](tech-stack.md#deliberately-absen
 What this build accepts:
 
 ```
-usage: k8rs [--analysis] <file.json>...   |   k8rs --once|--live [--analysis] [--context <name>] [--namespace <name>]
+usage: k8rs [--read-only] [--context <name>] [--namespace <name>]
+       k8rs [--analysis] <file.json>...
+       k8rs --once|--live [--analysis] [--context <name>] [--namespace <name>]
+       k8rs --logs --object <[namespace/]pod> [--container <name>] [--previous] [--follow] [--context <name>] [--namespace <name>]
+       k8rs --describe|--yaml --object <[namespace/]name> [--kind <kind>] [--context <name>] [--namespace <name>]
+       k8rs [--read-only] ops <operation> <kind>/<name> [<value>] --namespace <name>
+       k8rs ops may-i <verb> <resource>.<group>[/<name>] [--subresource <name>] [--namespace <name>]
 ```
+
+The binary prints these seven as **one** line separated by `   |   `; they are
+split here only to be read. `screens/states.md` § *The command line's own
+synopsis* is the authority for the text — this table quotes it and has to match
+it. **The console form leads because it needs the least**: every other
+alternative asks for a path, a mode word, `--object` or a subcommand first.
 
 | Flag | What it does |
 |---|---|
-| `<file.json>...` | Read Kubernetes objects from disk — one object per file, or a `kind: List`. Without `--once` or `--live` this build reads files only — it cannot reach a cluster. |
+| `<file.json>...` | Read Kubernetes objects from disk — one object per file, or a `kind: List`. **A path on the line is always the file-driven form, and nothing else**; without one, a run at a keyboard opens the console instead. |
 | `--analysis` | Draw the seven `analysis.rs` panes under the findings. One meaning in both modes ([NOTES § D169](../NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)). |
 | `--once` | Connect, print one report, exit — `0` when it ran and reported, `2` when it could not run. **The released surface**: this is what v0.0.1 ships ([NOTES § D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). The whole run is bounded — it does not wait forever on a cluster that never answers. |
 | `--live` | Watch the cluster and redraw whenever the answer changes, forever. **The temporary driver's**, not a shipped flag: a watch that reconnects on its own is provable no other way. |
-| `--read-only` | Accepted and does nothing. There is no write path in this build to disable — `ops.rs` exists as of Phase 7's first box but holds no code, only the attribute that will contain one — so the guarantee holds by there being nothing to guard. **Phase 7 must make it load-bearing**; a flag that silently means nothing once there is something to guard is the failure this is one phase away from. |
-| `--context <name>` | Which context `--once`/`--live` connects to. **Scaffolding** — the shipped flag is Phase 12's; the spelling matches so the muscle memory transfers. A `--context` with nothing usable after it is **refused**, not silently answered with the current context ([D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). |
+| `--read-only` | Refuses every operation, on every surface. **Load-bearing since Phase 7** ([D234](../NOTES.md#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05)): the guard sits at `ops_line`, the single door from argv into a mutation. Phase 12's flags box carried it onto the console — `ui::Writes::ReadOnly`, every mutating key withheld, the header reading `read-only` — and such a run **opens no audit log at all**, because a run that can write nothing owes no record. Asking is still allowed: `k8rs --read-only ops may-i …` ([D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) ruling 3). |
+| `--context <name>` | Which context k8rs connects to — the console as well as `--once`/`--live`. **Released, not scaffolding**, since Phase 12's flags box. A `--context` with nothing usable after it is **refused**, not silently answered with the current context ([D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). Repeated, the **last** one wins, the way `kubectl` resolves it. |
 | `--namespace <name>`, `-n <name>` | Narrow the watches to one namespace. **This one is not scaffolding**: the scope it sets is a field on the snapshot that rules and reports were written to read. |
 
 `--namespace` and `-n` each take their value attached with `=` or as the next
@@ -66,10 +85,10 @@ empty tool. Either way the header states the scope that is in effect, because a
 report that does not say what it covered cannot be trusted once it is pasted
 into a ticket.
 
-**`--once` is built and `--read-only` is accepted as a no-op**; both were
-*"specified but not yet built"* until 2026-08-30. `--read-only` is described in
-[security.md § Write safety](security.md#write-safety-model) and becomes
-load-bearing with the write path in Phase 7.
+**`--once` and `--read-only` are both built.** `--read-only` was a no-op only
+while there was no write path to disable; Phase 7 gave it one and Phase 12's
+flags box carried it onto the console beside the headless line. It is described
+in [security.md § Write safety](security.md#write-safety-model).
 
 **The panes are not the default under `--once`, and they are one word away.**
 The default is the findings; seven whole-cluster reports stacked under three cards
@@ -141,12 +160,13 @@ that cost once, then receives only deltas.
 
 ```
 src/
-  main.rs      event loop, terminal setup/teardown, view routing
+  main.rs      event loop, key routing, terminal setup and teardown
   k8s.rs       connect(context), discovery, watches, prune -> store (reads only)
   ops.rs       every write. The ONLY file that may mutate the cluster
   rules.rs     analyze(&Snapshot) -> Vec<Finding>     ← the product lives here
   analysis.rs  cluster-wide reports
-  views.rs     per-view state: selection, filters, tabs, scroll
+  views.rs     per-view state: selection, filters, tabs, scroll —
+               and the wording a detail tab draws, shared with main.rs
   ui.rs        ratatui drawing
   theme.rs     Catppuccin constants (10 of them)
 tests/
@@ -284,15 +304,53 @@ runs without a selected object.
 
 ### Async model
 
-One `tokio::select!` loop in `main.rs` over three sources:
+One `tokio::select!` loop in `main.rs`, `biased`, over four arms:
 
-1. the watcher stream (cluster changes)
-2. crossterm `EventStream` (keyboard)
-3. Ctrl-C
+1. the frame the coalescer owes
+2. the key channel
+3. the mutation on the wire, when there is one
+4. the merged watch streams (cluster changes)
 
-Drawing happens only when one of these fires. No separate UI thread, no
-channel layer, no actors. Terminal restore is guaranteed via a `Drop` guard
-plus a panic hook — a TUI must never leave the terminal in raw mode.
+Drawing happens only when one of these fires, and the loop blocks when none of
+them can (invariant 7). No actors, and **nothing draws off the loop's own task** —
+the single other thread in the process reads keys and forwards them, because
+`crossterm::event::read()` blocks and a blocking read may not sit on the runtime.
+It holds no state and touches no frame.
+
+**Keys arrive over a channel rather than a stream, and that is a fact about this
+dependency tree rather than a preference.** crossterm's `event-stream` feature is
+**off** here — measured with `cargo tree -e features -i crossterm`, which resolves
+0.29.0 with `bracketed-paste`, `derive-more`, `events`, `underline-color` and
+`windows` — so `crossterm::event::EventStream` does not exist in this build. A
+`std::thread` reads `event::read()` and sends into a `tokio::sync::mpsc`, which the
+loop selects on. It buys two things beyond compiling: no second crossterm version
+in the manifest, and a loop that is a function over a channel, which is the only
+reason the coalescing test can feed a storm with no terminal attached
+([NOTES § D274](../NOTES.md#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24)).
+
+**Ctrl-C is a key, not a signal.** Raw mode clears `ISIG`, so the terminal never
+raises `SIGINT` while the console is up; the router treats `ctrl-c` exactly as `q`,
+refusals included. **Ctrl-Z is a key for the same reason — and a signal as well,
+because a stop can also arrive from outside.** `SIGTSTP` and `SIGCONT` are watched
+and forwarded into the same channel the keys use, so a ctrl-z, an external
+`kill -TSTP` and an uncatchable `kill -STOP` all resume through one path; without
+the `SIGCONT` arm a resumed console has a cooked terminal and a dead keyboard
+([NOTES § D277](../NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)).
+
+**The coalescer is a throttle, not a debounce.** The ~100 ms deadline is set by the
+*first* event of a burst and is never pushed out, so a frame lands at most that far
+behind and the last event of a burst is inside it by construction. A debounce that
+resets its deadline per event is the manoeuvre k9s merged and reverted a month
+later, and it shows stale data for ever
+([PRIOR-ART § A5](../PRIOR-ART.md#a5--the-perf-fix-that-got-reverted)).
+
+Terminal restore is a `Drop` guard placed **before** `ratatui::try_init()` — which
+does not fail atomically — plus a panic hook that **chains** ratatui's rather than
+replacing it, so the terminal is handed back on an early return, a panic and a
+suspend alike. The leave/enter pair is one function used by all three, and it is
+the pair v0.4's `e` hands to `$EDITOR`
+([NOTES § D24](../NOTES.md#d24--ctrl-z) ·
+[§ D277](../NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)).
 
 ## Build order — forward-only (pyramid)
 
@@ -306,8 +364,8 @@ analysis.rs  → frozen after the reports step        (pure, like rules)
 k8s.rs       → frozen after the read paths are complete (watch, discovery, logs)
 ops.rs       → frozen after the operations step, proven headlessly against kind
 theme.rs     → frozen after the theme step (incl. COLORTERM fallback)
-views.rs     → frozen after the view-state step
-ui.rs        → the screens
+views.rs     → frozen with ui.rs, after the wiring step (its only consumer)
+ui.rs        → the screens, frozen after the wiring step
 main.rs      → top of the pyramid; the only file still being wired at the end
 ```
 
