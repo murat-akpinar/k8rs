@@ -7705,15 +7705,35 @@ enum Did {
     Quit,
     /// A mutating key on the selected object.
     Mutate(Wanted),
-    /// **The reader answered an open confirmation** — `Some` is *go ahead*, carrying whatever was
-    /// typed into it; `None` is a cancellation.
-    Answered(Option<String>),
+    /// **The reader answered an open confirmation** ([`Reply`]).
+    Answered(Reply),
     /// **`ctrl-z`** — the one key whose consequence is not on the screen but under it, so it is
     /// answered where the `Terminal` is ([`stopped`], NOTES § D24).
     Suspend,
     /// **`⏎` on a picker row that is not the live one** — answered where the session is, which is
     /// [`console`]'s own frame ([`Halt::Switch`]).
     Switch(Switching),
+}
+
+/// **What crossed the confirmation, on its way to the `ops::Checked` that is waiting for it** —
+/// the reader's own answer, and the store's.
+///
+/// **`Gone` is not the reader's** ([`vanished`], NOTES § D22): the reader said yes and the object
+/// they selected is no longer in the store, so what reaches `ops.rs` is a refusal rather than the
+/// `ops::Agreed` a press would have built. It rides here and not on a field of its own because
+/// `ops::perform` takes exactly one answer per mutation.
+///
+/// **There is no `Changed`, and that is a ruling and not an omission** (NOTES § D289 ruling 2):
+/// *present but moved* is what NOTES § D228 says must not stop a `restart`, so nothing constructs
+/// `ops::Answer::Changed` and nothing here can either.
+#[derive(Debug, PartialEq, Eq)]
+enum Reply {
+    /// Go ahead, carrying whatever was typed into the box — `""` for a box that asks for no name.
+    Yes(String),
+    /// They said no, or the loop stopped asking.
+    No,
+    /// **The object stopped existing while the box was open** ([`vanished`]).
+    Gone,
 }
 
 /// **The audit log this run opens, or `None` because [`READ_ONLY`] means it never opens one** —
@@ -8811,7 +8831,7 @@ struct Running<'a, 'f> {
     /// never leaves `ops.rs`'s own callback, which is invariant 2's *a confirmation cannot be
     /// forged* made structural (`views::Dialog`'s own doc) — all that crosses this channel is what
     /// the reader did.
-    answering: tokio::sync::mpsc::UnboundedSender<Option<String>>,
+    answering: tokio::sync::mpsc::UnboundedSender<Reply>,
 }
 
 /// **What `ops::perform`'s two callbacks put on the screen.**
@@ -9351,9 +9371,13 @@ fn notes(
 /// `ui::detailing` computes for the renderer, out of the state the router keeps.
 ///
 /// **`containers: 0` is *there is nothing to pick*, and it is the honest answer today**: the read
-/// that would know how many a pod has is not wired, so `c` opens nothing rather than a picker over
-/// a list nobody has (`screens/detail.md` § Choosing a container, and when there is nothing to
-/// choose).
+/// that would know how many a pod has is not wired, so there is no list to open a picker over
+/// (`screens/detail.md` § Choosing a container, and when there is nothing to choose).
+///
+/// **What makes `c` reach nothing is that [`pressed`] has no `c` arm, and not this zero**
+/// (NOTES § D289 ruling 3, which found the clause here claiming the second). The day the pod read
+/// lands, this answers a real count, the logs footer starts drawing `c container` — and `c` is
+/// still bound nowhere. Both halves are that box's.
 fn detailing(console: &Console<'_>) -> views::Detailing {
     match &console.opened {
         None => views::Detailing::Closed,
@@ -9388,7 +9412,7 @@ fn keyed(
             console.app.rewound();
             Did::Changed
         }
-        Event::Key(key) if key.kind == KeyEventKind::Press => pressed(console, key, &cards),
+        Event::Key(key) if key.kind == KeyEventKind::Press => pressed(console, key, &cards, store),
         // **Mouse capture is off** (`screens/widgets.md` § 6), so nothing else is a command — and a
         // frame nothing changed is a frame not owed.
         _ => Did::Nothing,
@@ -9402,6 +9426,7 @@ fn pressed(
     console: &mut Console<'_>,
     key: ratatui::crossterm::event::KeyEvent,
     cards: &[views::Card],
+    store: &k8s::Store,
 ) -> Did {
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
     let open = detailing(console);
@@ -9463,7 +9488,7 @@ fn pressed(
         };
     }
     if console.app.modal.is_some() {
-        return over_modal(console, key, open);
+        return over_modal(console, key, open, cards, store);
     }
     // **`ctrl-c` is a key and not a signal**, because raw mode clears `ISIG` — so it is `q`,
     // refusals included (`views::App::may_quit`: a write on the wire refuses both, or the audit log
@@ -9543,11 +9568,24 @@ fn pressed(
             console.app.following = !console.app.following;
             Did::Changed
         }
-        KeyCode::Char('/') => {
+        // **Both carry the detail guard their three neighbours above carry**
+        // (`screens/widgets.md` § A filter is kept over anything drawn on top of the list it
+        // narrows: *"Detail … has no `/ filter` or `n namespace` on its own closed footer, but none
+        // of them touch `App::filters` to get there"*; NOTES § D289 ruling 4). Ungated they edited
+        // the filter that narrows the list the detail is drawn **over** — so an `esc` the reader
+        // reads as closing a pane cleared a committed filter instead, and a `/` typed to search a
+        // log narrowed Alerts to *No problems match "panic"* with `narrowed()` drawn on neither
+        // surface to say so.
+        //
+        // **Refusing is the whole of the correct behaviour today.** `screens/detail.md` § The logs
+        // tab gives `/` a text search over the pane, and no such search exists — a key that reaches
+        // nothing is what `screens/help.md` § When a key is refused is for, and building the search
+        // here is its own box.
+        KeyCode::Char('/') if open == views::Detailing::Closed => {
             console.app.typing = Some(views::Typing::Text);
             Did::Changed
         }
-        KeyCode::Char('n') => {
+        KeyCode::Char('n') if open == views::Detailing::Closed => {
             console.app.typing = Some(views::Typing::Namespace);
             Did::Changed
         }
@@ -9568,6 +9606,8 @@ fn over_modal(
     console: &mut Console<'_>,
     key: ratatui::crossterm::event::KeyEvent,
     open: views::Detailing,
+    cards: &[views::Card],
+    store: &k8s::Store,
 ) -> Did {
     use ratatui::crossterm::event::KeyCode;
     // The rows the picker's keys walk are the caller's, exactly as they are for the frame
@@ -9581,21 +9621,42 @@ fn over_modal(
             KeyCode::Enter if dialog.armed() => {
                 let typed = dialog.typed.text().to_owned();
                 let object = dialog.object.clone();
-                // **The strip gains the command here and nowhere earlier** (`screens/dialogs.md`
-                // rule 7, NOTES § D233 ruling 1): the reader has agreed, so the real call is what
-                // happens next, and `views::Log::sent`'s running mark is true of it from this
-                // instant. A box that closes without a yes appends nothing at all — `esc` below
-                // reaches [`settled`] with no line waiting, which is what *Cancelled appends
-                // nothing* means.
+                let line = format!("$ {}", dialog.kubectl.as_str());
+                // **D22's guard, asked here because this is where the yes becomes an answer**
+                // ([`vanished`], NOTES § D289 ruling 1). Nothing constructed `ops::Answer::Gone`
+                // before this line existed, and `ops::restart` is an `Api::patch` with no
+                // `preconditions` to carry the uid instead (`ops::Mutation::uid_sent`).
                 //
-                // **`Gone` and `Changed` keep their line** (PM ruling, 2026-09-24): both are
-                // decided inside `ops` *after* this point, so something was sent by then and the
-                // line carries its outcome — for `delete`, whose 409 arrives through its own real
-                // call, that is the same send any other mutation makes.
-                console.log.sent(format!("$ {}", dialog.kubectl.as_str()));
+                // **Asked *before* the strip gains the line, because the screen file says so in
+                // those words** (`screens/dialogs.md` § The object went away while the dialog was
+                // open: *"`Gone`, like `Cancelled` and `Changed`, is reached before that ever
+                // happens, so the strip appends nothing here at all. What it shows instead is
+                // whatever was already there"* — and that page's own mockup draws a `get pods` line
+                // under the box). A `Gone` decided here sends no real call — `delete` sends nothing
+                // whatsoever — so a line appended anyway would read `$ kubectl … → already gone`
+                // over a command that never left, which is invariant 4 with a record lying about a
+                // call.
+                //
+                // **The PM ruling of 2026-09-24 stood in this comment saying `Gone` keeps its line,
+                // and it reads the other way to the screen.** It was unobservable for as long as
+                // D22's guard had no caller: every `Gone` was `ops`'s, decided after something went
+                // out. Giving the guard a caller makes it observable, and `screens/` is the
+                // specification (CLAUDE.md § Architecture workflow).
+                let reply = if vanished(store, &object) {
+                    Reply::Gone
+                } else {
+                    // **The strip gains the command here and nowhere earlier**
+                    // (`screens/dialogs.md` rule 7, NOTES § D233 ruling 1): the reader has agreed,
+                    // so the real call is what happens next, and `views::Log::sent`'s running mark
+                    // is true of it from this instant. A box that closes without a yes appends
+                    // nothing at all — `esc` below reaches [`settled`] with no line waiting, which
+                    // is what *Cancelled appends nothing* means.
+                    console.log.sent(line);
+                    Reply::Yes(typed)
+                };
                 console.app.modal = None;
                 console.app.changing = Some(object);
-                Did::Answered(Some(typed))
+                Did::Answered(reply)
             }
             KeyCode::Backspace if dialog.asks.is_some() => {
                 dialog.typed.pop();
@@ -9612,7 +9673,7 @@ fn over_modal(
                 if console.app.escape(open) {
                     return Did::Quit;
                 }
-                Did::Answered(None)
+                Did::Answered(Reply::No)
             }
             _ => Did::Nothing,
         },
@@ -9668,8 +9729,26 @@ fn over_modal(
             KeyCode::Char('q') if console.app.may_quit() => Did::Quit,
             _ => Did::Nothing,
         },
-        // Every other box is dismiss-only (`views::Modal::Refused`, `Gone`, `Unconnected`, and the
-        // container picker, which has nothing to pick until the pod read is wired).
+        // **The refusal box is the one terminal box that offers a second key, and `⏎` is it**
+        // (`views.rs`'s `Modal::Refused` footer arm — `esc dismiss  ⏎ open` — specified in
+        // `screens/dialogs.md` states 0 and 1c and `screens/widgets.md` § A modal's footer;
+        // NOTES § D289 ruling 3). The write it reports on is over, so the object it was about is
+        // still selected underneath, and `⏎` does there exactly what `⏎` does on the card.
+        //
+        // **`Gone` is the one that cannot offer it** — its object stopped existing — which is why
+        // that box's own footer is the bare `esc dismiss`.
+        Some(views::Modal::Refused { .. }) if key.code == KeyCode::Enter => {
+            console.app.modal = None;
+            // **[`Did::Changed`] whatever [`entered`] answers, because the box closed either way.**
+            // `⏎` on a card already inside a detail tab opens nothing — there is nothing left to
+            // open — and returning `Nothing` there would owe no frame and leave the dismissed box
+            // on the screen.
+            let _ = entered(console, cards, open);
+            Did::Changed
+        }
+        // Every other box is dismiss-only (`views::Modal::Gone`, `Unconnected`, and the container
+        // picker, which has nothing to pick until the pod read is wired) — and so is `Refused` on
+        // every key but the `⏎` its own footer names, above.
         Some(_) => match key.code {
             KeyCode::Esc => {
                 if console.app.escape(open) {
@@ -9684,6 +9763,74 @@ fn over_modal(
     };
     console.contexts = contexts;
     did
+}
+
+/// **Has the object the dialog was opened on stopped existing** — D22's guard, and the only
+/// identity guard `ops::restart` has (NOTES § D22, § D289 ruling 1: `PatchParams` carries no
+/// `preconditions`, so there is nothing to put a uid on the wire with).
+///
+/// **One question and one answer: is that `uid` still in the store.** *Present but moved* is not
+/// asked, so nothing here can produce `ops::Answer::Changed` — NOTES § D228 refused blocking a
+/// mutation on a field that moves when nothing changed, and `scale` and `restart` are absolute
+/// intent (NOTES § D289 ruling 2).
+///
+/// **The `uid` and never the name.** A name that has gone is exactly when it belongs to somebody
+/// else, which is the defect D22 exists for (`views::Object::uid`'s own words).
+///
+/// **`false` wherever k8rs cannot tell, and every one of the three is *cannot tell* rather than
+/// *still there*:**
+///
+/// - **no `uid` on the selection** — `views::Object::new` refuses `Some("")` and rule C1's
+///   kubeconfig carries none, and `views::Object::uid` already states that both of D22's guards are
+///   off for such a selection;
+/// - **a store that has not finished its first LIST** (`k8s::Store::snapshot` answers `None`) or a
+///   clock that cannot be read — the same two `None`s [`carded`] draws no cards for;
+/// - **a kind no watch is answering for.** Invariant 6 watches Pods, Nodes and
+///   Deployments/StatefulSets/DaemonSets; a ReplicaSet is fetched on demand and reaches the
+///   snapshot only while some pod still names it as its controller. So its absence there is
+///   *nobody asked*, and reading it as *it is gone* would refuse a legitimate `ctrl-d` on the one
+///   selection `views::Object::uid` already says cannot raise a `Modal::Gone`. An allowlist and not
+///   a `!= "replicaset"`, so a seventh kind cannot inherit a guard no watch backs;
+/// - **a kind whose watch is *in trouble*** ([`k8s::Store::troubles`]). This one is the reason a
+///   *watched* kind is not enough on its own: a refused watch counts as **settled**, so
+///   `k8s::Store::snapshot` publishes with that kind's list empty and every object of it would read
+///   as gone (`k8s::Store::still_listing`'s own *or is never going to*). Measured live — a refused
+///   `deployments` watch draws cards and a header while the list is empty
+///   (`reports/2026-09-26-the-error-state-pass.md` § 1), and without this arm every `r` on that
+///   cluster would answer *Already gone* about a Deployment that is running.
+///   [`crate::ui::addressed`] is what maps the trouble's `ObjectKind` onto this word, so there
+///   is no second kind table here.
+fn vanished(store: &k8s::Store, object: &views::Object) -> bool {
+    let watched = matches!(
+        object.kind,
+        "pod" | "node" | "deployment" | "statefulset" | "daemonset"
+    );
+    let Some(uid) = object.uid().filter(|_| watched) else {
+        return false;
+    };
+    if store
+        .troubles()
+        .iter()
+        .any(|trouble| ui::addressed(&trouble.kind).1 == object.kind)
+    {
+        return false;
+    }
+    let Ok(now) = wall_clock() else {
+        return false;
+    };
+    let Some(snapshot) = store.snapshot(now) else {
+        return false;
+    };
+    // **The three lists the snapshot has, by their own `id`** — a pod's `owner` is deliberately not
+    // read: it is the workload the reader deployed, which answers *is that workload there* and not
+    // *is this pod there*.
+    !snapshot
+        .pods
+        .iter()
+        .map(|pod| &pod.id)
+        .chain(snapshot.nodes.iter().map(|node| &node.id))
+        .chain(snapshot.workloads.iter().map(|workload| &workload.id))
+        .any(|id| id.uid.as_deref() == Some(uid))
 }
 
 /// **`↑` / `↓` — a free-text pane scrolls and every list moves a cursor**
@@ -9964,7 +10111,7 @@ async fn mutating(
     now: &Time,
     audit: &mut std::fs::File,
     shown: &std::cell::RefCell<Vec<Published>>,
-    mut answered: tokio::sync::mpsc::UnboundedReceiver<Option<String>>,
+    mut answered: tokio::sync::mpsc::UnboundedReceiver<Reply>,
 ) -> Result<ops::Performed, String> {
     let clock = || wall_clock().unwrap_or_else(|_| now.clone()).0;
     let verb = asked.verb;
@@ -10009,13 +10156,17 @@ async fn mutating(
             // into an `ops::Answer` by the value that is the only thing allowed to build one
             // (invariant 2, `ops::Agreed`).
             match answered.recv().await {
-                Some(Some(typed)) => match checked.asks() {
+                Some(Reply::Yes(typed)) => match checked.asks() {
                     Some(_) => checked.typed(&typed),
                     None => checked.pressed(),
                 },
+                // **D22's guard, decided against the store by [`over_modal`]'s confirm arm and
+                // carried here** — `Api::patch` has no `preconditions` to put it on
+                // (`ops::Mutation::uid_sent`), so this variant is `restart`'s only identity guard.
+                Some(Reply::Gone) => ops::Answer::Gone,
                 // **A closed channel is a cancellation** — the loop stopped asking, which happens
                 // when the run is ending, and a mutation nobody can answer is one nobody agreed to.
-                Some(None) | None => ops::Answer::Cancelled,
+                Some(Reply::No) | None => ops::Answer::Cancelled,
             }
         }
     };

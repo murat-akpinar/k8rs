@@ -1029,8 +1029,10 @@ pub enum Modal {
         not(test),
         expect(
             dead_code,
-            reason = "`c` opens it off the pod read, and **no box fetches the four detail tabs \
-                      yet** — Phase 12 has none; the tabs draw `Loading` until one exists"
+            reason = "no product constructor exists, and there are two reasons rather than one: \
+                      **no box fetches the four detail tabs yet** — Phase 12 has none, so the \
+                      tabs draw `Loading` — and `c`, the key that would build one off that read, \
+                      **is bound in no state either** (NOTES § D289 ruling 3)"
         )
     )]
     ContainerPick(Cursor),
@@ -1437,14 +1439,11 @@ impl Object {
     }
 
     /// The cluster's own name for this instance, or `None` where there is none to trust.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the caller that re-reads an object and compares this before confirming is \
-                      v0.4's `edit`; nothing in v0.1 reads it back (NOTES § D22)"
-        )
-    )]
+    ///
+    /// **Read by `main.rs`'s `vanished` since Phase 12's close** (NOTES § D289 ruling 1) — the
+    /// `expect(dead_code)` that stood here was true of a console with no caller for D22's guard,
+    /// and the guard now has one. What is still *not* read back is the **re-read and compare** the
+    /// reason named: that is v0.4's `edit`, and it is what `Answer::Changed` waits for.
     pub fn uid(&self) -> Option<&str> {
         self.uid.as_deref()
     }
@@ -2849,8 +2848,14 @@ impl App {
     ///
     /// **A footer is a curated subset and never an exhaustive one** — `? all keys` is what
     /// completes it (`screens/README.md` rule 2). `l logs` and `ctrl-d delete` are bound on both
-    /// lists and named by neither footer; `⇧p previous` and `/ search` are bound in the logs tab
-    /// and its footer names neither. **The pair `? all keys  q quit` is drawn last and never gives
+    /// lists and named by neither footer.
+    ///
+    /// **`⇧p previous` and `/ search` stood beside them as a second example and are not one**
+    /// (NOTES § D289 rulings 3 and 4): neither is bound anywhere — `/` inside a detail pane is
+    /// *refused* by `main.rs`'s own guard — so they are keys the product does not have rather than
+    /// a curated footer's omission, which is why `?`'s own row names them *not built yet*.
+    ///
+    /// **The pair `? all keys  q quit` is drawn last and never gives
     /// way — with the one named exception `screens/widgets.md` § 2a now carries in the rule
     /// itself**: while a call is running, every footer it reaches loses `q quit` at least, and
     /// Alerts and Resources lose the whole line, pair included. Both halves of that exception are
@@ -2915,7 +2920,8 @@ impl App {
     /// else on a detail tab's or Analysis's line is made false by a call on the wire, and the
     /// first draft of this box replaced them too — drawing `⏎ open` over a logs pane with nothing
     /// to select, dropping the `esc back` that is the only way out of the tab, and leaving
-    /// `[ ] tabs`, `f follow` and `c container` bound and unnamed (`k8s-admin`, 2026-09-12).
+    /// `[ ] tabs` and `f follow` bound and unnamed (`k8s-admin`, 2026-09-12). **`c container`
+    /// stood in that list and is bound in no state** (NOTES § D289 ruling 3).
     ///
     /// **One word is structural here, not a promise.** The drop is a [`str::strip_suffix`] of
     /// that word and its own two-space separator off a `&'static str`, so a mode cannot lose a

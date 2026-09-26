@@ -1414,6 +1414,16 @@ fn listed(pods: Vec<Pod>) -> k8s::Store {
     store
 }
 
+/// **A store whose first LIST has not landed** — `k8s::Store::snapshot` answers `None` for one, so
+/// [`vanished`] answers *k8rs cannot tell* and D22's guard is off (NOTES § D289 ruling 1).
+///
+/// **Every key-press test that is not about that guard is handed this one**, which is what keeps
+/// them about the key they press. The tests that *are* about it build a listed store with
+/// [`listed`], where an absent `uid` means absent.
+fn before_the_list() -> k8s::Store {
+    k8s::Store::default()
+}
+
 /// The four watches these tests carry no objects on, each opened and closed. Written out rather
 /// than looped: one `Store` method per API type is four different `fn` items, and that is
 /// exactly the per-watch identity NOTES § D162 bought.
@@ -14760,6 +14770,8 @@ fn a_box_that_asks_only_for_a_press_spends_no_frame_on_backspace() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Backspace),
         views::Detailing::Closed,
+        &[],
+        &before_the_list(),
     );
     assert!(
         matches!(answered, Did::Nothing),
@@ -14772,7 +14784,7 @@ fn a_box_that_asks_only_for_a_press_spends_no_frame_on_backspace() {
     installed(
         &mut asked,
         Published::Checked {
-            verdict: "Type the name to confirm.",
+            verdict: "k8rs did not check this one with the cluster first",
             asks: Some("web".to_owned()),
         },
     );
@@ -14781,12 +14793,16 @@ fn a_box_that_asks_only_for_a_press_spends_no_frame_on_backspace() {
             &mut asked,
             pressing(ratatui::crossterm::event::KeyCode::Char(letter)),
             views::Detailing::Closed,
+            &[],
+            &before_the_list(),
         );
     }
     let shortened = over_modal(
         &mut asked,
         pressing(ratatui::crossterm::event::KeyCode::Backspace),
         views::Detailing::Closed,
+        &[],
+        &before_the_list(),
     );
     assert!(
         matches!(shortened, Did::Changed),
@@ -15844,13 +15860,22 @@ fn the_dialog_opens_dead_and_the_verdict_arms_the_box_that_is_already_open() {
     );
 
     // **The yes is what appends it, with the running mark** — and the command is the box's own.
-    let store = a_cluster_with_cards();
+    // **A store with nothing to say about this dialog's object, and it is the fixture rather than
+    // a convenience.** [`over_modal`]'s confirm arm now asks the store whether the selected object
+    // is still there ([`vanished`], NOTES § D22, § D289 ruling 1), and
+    // [`a_cluster_with_cards`] is a healthy listed store holding four pods and **no Deployment** —
+    // so it answers *gone* about [`an_open_dialog`]'s `payments/web`, correctly, about a console
+    // that cannot exist: a card filed under a Deployment owner needs that Deployment on its own
+    // watch. This test is about the box's key map and not about a cluster, so the store it presses
+    // against is one that has not listed. The guard's own five shapes are
+    // [`a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command`].
+    let store = before_the_list();
     let answered = keyed(
         &mut console,
         key(ratatui::crossterm::event::KeyCode::Enter),
         &store,
     );
-    assert!(matches!(answered, Did::Answered(Some(_))));
+    assert!(matches!(answered, Did::Answered(Reply::Yes(_))));
     let line = console
         .log
         .lines()
@@ -15883,7 +15908,16 @@ fn an_armed_dialog() -> views::Dialog {
 /// and `ops` comes back with this outcome. Returns the console so a test can read what the strip
 /// and the modal hold at the end.
 fn answered_with(outcome: Option<ops::Outcome>) -> Console<'static> {
-    let store = a_cluster_with_cards();
+    // **A store with nothing to say about this dialog's object, and it is the fixture rather than
+    // a convenience.** [`over_modal`]'s confirm arm now asks the store whether the selected object
+    // is still there ([`vanished`], NOTES § D22, § D289 ruling 1), and
+    // [`a_cluster_with_cards`] is a healthy listed store holding four pods and **no Deployment** —
+    // so it answers *gone* about [`an_open_dialog`]'s `payments/web`, correctly, about a console
+    // that cannot exist: a card filed under a Deployment owner needs that Deployment on its own
+    // watch. This test is about the box's key map and not about a cluster, so the store it presses
+    // against is one that has not listed. The guard's own five shapes are
+    // [`a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command`].
+    let store = before_the_list();
     let mut console = bare_console();
     installed(&mut console, Published::Opening(an_armed_dialog()));
     let answered = keyed(
@@ -15892,7 +15926,7 @@ fn answered_with(outcome: Option<ops::Outcome>) -> Console<'static> {
         &store,
     );
     assert!(
-        matches!(answered, Did::Answered(Some(_))),
+        matches!(answered, Did::Answered(Reply::Yes(_))),
         "the armed box did not confirm"
     );
     settled(
@@ -16040,7 +16074,7 @@ fn every_ending_replaces_the_confirmation_and_says_what_happened() {
         key(ratatui::crossterm::event::KeyCode::Esc),
         &store,
     );
-    assert!(matches!(dismissed, Did::Answered(None)));
+    assert!(matches!(dismissed, Did::Answered(Reply::No)));
     settled(
         &mut cancelled,
         Ok(ops::Performed {
@@ -16593,7 +16627,16 @@ fn esc_out_of_a_tab_goes_back_to_whatever_opened_it() {
 /// `esc` is inert for exactly as long, and a press-only box takes no typing at all.
 #[test]
 fn a_confirmation_refuses_every_key_its_footer_does_not_name() {
-    let store = a_cluster_with_cards();
+    // **A store with nothing to say about this dialog's object, and it is the fixture rather than
+    // a convenience.** [`over_modal`]'s confirm arm now asks the store whether the selected object
+    // is still there ([`vanished`], NOTES § D22, § D289 ruling 1), and
+    // [`a_cluster_with_cards`] is a healthy listed store holding four pods and **no Deployment** —
+    // so it answers *gone* about [`an_open_dialog`]'s `payments/web`, correctly, about a console
+    // that cannot exist: a card filed under a Deployment owner needs that Deployment on its own
+    // watch. This test is about the box's key map and not about a cluster, so the store it presses
+    // against is one that has not listed. The guard's own five shapes are
+    // [`a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command`].
+    let store = before_the_list();
     let mut console = bare_console();
     installed(&mut console, Published::Opening(an_open_dialog()));
 
@@ -16661,7 +16704,7 @@ fn a_confirmation_refuses_every_key_its_footer_does_not_name() {
         &store,
     );
     assert!(
-        matches!(answered, Did::Answered(Some(_))),
+        matches!(answered, Did::Answered(Reply::Yes(_))),
         "`⏎` on an armed box did not confirm"
     );
     assert_eq!(console.app.modal, None, "the box stayed open on the yes");
@@ -16726,6 +16769,7 @@ fn a_group_opens_the_step_and_the_step_opens_the_pod_that_was_picked() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Enter),
         &cards,
+        &before_the_list(),
     );
     assert!(matches!(opened, Did::Changed));
     match &console.opened {
@@ -16739,11 +16783,13 @@ fn a_group_opens_the_step_and_the_step_opens_the_pod_that_was_picked() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Down),
         &cards,
+        &before_the_list(),
     );
     let _ = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Enter),
         &cards,
+        &before_the_list(),
     );
     match &console.opened {
         Some(Opened::Tabs { object, from_step }) => {
@@ -16766,6 +16812,7 @@ fn a_group_opens_the_step_and_the_step_opens_the_pod_that_was_picked() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Esc),
         &cards,
+        &before_the_list(),
     );
     assert!(matches!(console.opened, Some(Opened::Pods(_))));
 }
@@ -16866,12 +16913,14 @@ fn the_pickers_own_keys_move_narrow_and_close_it() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Down),
         &[],
+        &before_the_list(),
     );
     assert_eq!(at(&console), Some(1), "`↓` did not move the picker");
     let _ = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Up),
         &[],
+        &before_the_list(),
     );
     assert_eq!(at(&console), Some(0), "`↑` did not move it back");
 
@@ -16881,6 +16930,7 @@ fn the_pickers_own_keys_move_narrow_and_close_it() {
             &mut console,
             pressing(ratatui::crossterm::event::KeyCode::Char(character)),
             &[],
+            &before_the_list(),
         );
     }
     assert_eq!(
@@ -16892,21 +16942,25 @@ fn the_pickers_own_keys_move_narrow_and_close_it() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Backspace),
         &[],
+        &before_the_list(),
     );
     let _ = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Backspace),
         &[],
+        &before_the_list(),
     );
     let _ = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Backspace),
         &[],
+        &before_the_list(),
     );
     let _ = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Backspace),
         &[],
+        &before_the_list(),
     );
     assert_eq!(at(&console), Some(0), "`⌫` did not widen the list again");
 
@@ -16915,6 +16969,7 @@ fn the_pickers_own_keys_move_narrow_and_close_it() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Enter),
         &[],
+        &before_the_list(),
     );
     assert_eq!(
         console.app.modal, None,
@@ -16927,11 +16982,13 @@ fn the_pickers_own_keys_move_narrow_and_close_it() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Down),
         &[],
+        &before_the_list(),
     );
     let answered = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Enter),
         &[],
+        &before_the_list(),
     );
     match answered {
         Did::Switch(asked) => {
@@ -16952,6 +17009,7 @@ fn the_pickers_own_keys_move_narrow_and_close_it() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Esc),
         &[],
+        &before_the_list(),
     );
     assert_eq!(console.app.modal, None, "`esc` did not close the picker");
 }
@@ -16968,7 +17026,7 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
     dialog.kubectl = views::Stripped::of("kubectl delete pod/web-1 -n payments");
     // `delete` sends no check, so its verdict is `Some` from the moment the box opens (NOTES § D225
     // ruling 1) — what is left to wait for is the name.
-    dialog.verdict = Some("k8rs cannot check this one first.");
+    dialog.verdict = Some("k8rs did not check this one with the cluster first");
     dialog.asks = Some(views::Stripped::of("web-1"));
     installed(&mut console, Published::Opening(dialog));
 
@@ -16977,6 +17035,7 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
             &mut console,
             pressing(ratatui::crossterm::event::KeyCode::Char(character)),
             &[],
+            &before_the_list(),
         );
     }
     let Some(views::Modal::Confirm(held)) = &console.app.modal else {
@@ -16988,6 +17047,7 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Enter),
         &[],
+        &before_the_list(),
     );
     assert!(
         matches!(dead, Did::Nothing),
@@ -16998,6 +17058,7 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Char('1')),
         &[],
+        &before_the_list(),
     );
     let Some(views::Modal::Confirm(held)) = &console.app.modal else {
         panic!("the box went")
@@ -17007,6 +17068,7 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Enter),
         &[],
+        &before_the_list(),
     );
     assert_eq!(
         answered_name(answered).as_deref(),
@@ -17017,18 +17079,20 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
     // `⌫` takes the name apart again on a box that is still open.
     let mut console = bare_console();
     let mut dialog = an_open_dialog();
-    dialog.verdict = Some("k8rs cannot check this one first.");
+    dialog.verdict = Some("k8rs did not check this one with the cluster first");
     dialog.asks = Some(views::Stripped::of("web-1"));
     installed(&mut console, Published::Opening(dialog));
     let _ = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Char('w')),
         &[],
+        &before_the_list(),
     );
     let _ = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Backspace),
         &[],
+        &before_the_list(),
     );
     let Some(views::Modal::Confirm(held)) = &console.app.modal else {
         panic!("the box went")
@@ -17040,9 +17104,10 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Esc),
         &[],
+        &before_the_list(),
     );
     assert!(
-        matches!(dismissed, Did::Answered(None)),
+        matches!(dismissed, Did::Answered(Reply::No)),
         "`esc` did not cancel"
     );
     assert_eq!(console.app.modal, None);
@@ -17051,8 +17116,253 @@ fn a_typed_name_dialog_takes_the_name_and_arms_on_nothing_less() {
 /// What a confirmation answered with, or `None` for anything else.
 fn answered_name(did: Did) -> Option<String> {
     match did {
-        Did::Answered(typed) => typed,
+        Did::Answered(Reply::Yes(typed)) => Some(typed),
         _ => None,
+    }
+}
+
+/// **A listed store holding the Deployment capture** — the kind `r restart` is written for, and the
+/// one D22's guard is asked about here. `listed` fills the pod watch; this adds the workload one.
+fn listed_deployments() -> k8s::Store {
+    let mut store = listed(Vec::new());
+    for deployment in objects::<Deployment>("deployments.json") {
+        store.deployment(&now(), Event::Apply(deployment));
+    }
+    store
+}
+
+/// **A listed store whose Deployment watch never answered** — every other watch listed, then
+/// `k8s::Store::stop_waiting` settles the one that did not, which is what makes
+/// `k8s::Store::snapshot` publish with an empty workload list while `k8s::Store::troubles`
+/// names the kind (`k8s::Store::still_listing` § *A watch that is not coming back is not
+/// listing*).
+///
+/// **The live shape is a watch the cluster refuses**, drawn in
+/// `reports/2026-09-26-the-error-state-pass.md` § 1: cards and a header over an empty list. Nothing
+/// here can set a `kube::Error` on a watch from outside `k8s.rs`, and `unfinished` reaches
+/// `troubles` through the same filter a failure does.
+fn a_deployment_watch_that_never_answered() -> k8s::Store {
+    let mut store = k8s::Store::default();
+    store.pod(&now(), Event::Init);
+    store.pod(&now(), Event::InitDone);
+    store.node(&now(), Event::Init);
+    store.node(&now(), Event::InitDone);
+    store.stateful_set(&now(), Event::Init);
+    store.stateful_set(&now(), Event::InitDone);
+    store.daemon_set(&now(), Event::Init);
+    store.daemon_set(&now(), Event::InitDone);
+    store.stop_waiting();
+    store
+}
+
+/// **The object went away while the box was open, so the yes becomes a refusal and no command is
+/// sent** (NOTES § D22, § D289 ruling 1; `screens/dialogs.md` § The object went away while the
+/// dialog was open).
+///
+/// **This is `restart`'s only identity guard.** `ops::restart` is an `Api::patch` and `PatchParams`
+/// carries no `preconditions` field (`ops::Mutation::uid_sent`), so nothing on the wire can refuse
+/// the write — the failure `ops.rs` records as measured is a Deployment deleted and recreated
+/// between the dry-run and the yes, leaving the audit line naming a `uid` nothing changed beside a
+/// `PATCH` that landed on a different instance.
+///
+/// **Six shapes, because a guard is proven only for the shapes it was fed** (NOTES § D29): one
+/// where the object is *there*, one where it is *gone*, and **four where k8rs cannot tell**,
+/// none of which may read as gone — a ReplicaSet, which invariant 6 fetches on demand and never
+/// watches; a selection carrying no `uid`; a store whose first LIST has not landed; and a listed
+/// store whose Deployment watch never answered, which is what a refused watch looks like from
+/// here.
+///
+/// **The `kind` is what varies in the ReplicaSet case and the name does not**, because the guard
+/// compares the `uid` and nothing else — so the case that has to differ is the one the allowlist
+/// reads.
+///
+/// **What each case asserts is the reply and the strip together** (`screens/dialogs.md` rule 7: the
+/// strip carries a mutation's line *"the instant the real call actually goes out"*). A `Gone`
+/// decided here sends nothing at all, so a line appended anyway would annotate a command that never
+/// left — invariant 4's *neither record may lie*.
+#[test]
+fn a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command() {
+    let live = listed_deployments();
+    let waiting = before_the_list();
+    let refusing = a_deployment_watch_that_never_answered();
+    let held = live
+        .snapshot(now())
+        .expect("the Deployment capture's five LISTs landed")
+        .workloads
+        .first()
+        .expect("the capture holds a Deployment")
+        .id
+        .clone();
+    // **A `uid` no capture can hold**, so *absent* is a fact about the store and not a spelling
+    // accident. The present one above is read off the capture rather than written down here: a
+    // re-capture moves every `uid` in `deployments.json`, and a literal would make the first case
+    // pass by agreeing with itself.
+    let absent = Some("6f1f2a94-0000-0000-0000-000000000000".to_owned());
+
+    for (what, kind, uid, store, gone) in [
+        (
+            "the uid the store holds",
+            "deployment",
+            held.uid.clone(),
+            &live,
+            false,
+        ),
+        (
+            "a uid the store does not hold",
+            "deployment",
+            absent.clone(),
+            &live,
+            true,
+        ),
+        (
+            "a ReplicaSet, which no watch answers for",
+            "replicaset",
+            absent.clone(),
+            &live,
+            false,
+        ),
+        (
+            "a selection carrying no uid at all",
+            "deployment",
+            None,
+            &live,
+            false,
+        ),
+        (
+            "a store whose first LIST has not landed",
+            "deployment",
+            absent.clone(),
+            &waiting,
+            false,
+        ),
+        (
+            "a listed store whose Deployment watch never answered",
+            "deployment",
+            absent.clone(),
+            &refusing,
+            false,
+        ),
+    ] {
+        let mut console = bare_console();
+        let mut dialog = an_open_dialog();
+        dialog.object = views::Object::new(kind, held.namespace.clone(), held.name.clone(), uid);
+        installed(&mut console, Published::Opening(dialog));
+        installed(
+            &mut console,
+            Published::Checked {
+                verdict: "the cluster checked it first and accepted it",
+                asks: None,
+            },
+        );
+        let answered = pressed(
+            &mut console,
+            pressing(ratatui::crossterm::event::KeyCode::Enter),
+            &[],
+            store,
+        );
+        assert_eq!(
+            matches!(answered, Did::Answered(Reply::Gone)),
+            gone,
+            "{what}: the guard answered the wrong way"
+        );
+        assert!(
+            !gone == matches!(answered, Did::Answered(Reply::Yes(_))),
+            "{what}: a yes that is neither a confirmation nor a `Gone`"
+        );
+        // **The box closes either way and the object travels on `changing`** — `settled` reads it
+        // from there to open the *Already gone* box (`views::App::changing`).
+        assert_eq!(console.app.modal, None, "{what}: the box stayed open");
+        assert!(
+            console.app.changing.is_some(),
+            "{what}: nothing carried the object across the moment the box closed"
+        );
+        // **`contains` and not equality, because `views::Log::sent` appends its own running
+        // mark** — what is asserted is whether the command reached the strip at all.
+        let strip: Vec<&str> = console
+            .log
+            .lines()
+            .iter()
+            .map(views::Stripped::as_str)
+            .collect();
+        assert_eq!(
+            strip
+                .iter()
+                .any(|line| line.contains("rollout restart deployment/web")),
+            !gone,
+            "{what}: the strip and the call disagree about whether one went out: {strip:?}"
+        );
+    }
+}
+
+/// **`/` and `n` reach nothing while a detail pane is drawn over the list they narrow**
+/// (`screens/widgets.md` § A filter is kept over anything drawn on top of the list it narrows:
+/// *"Detail … has no `/ filter` or `n namespace` on its own closed footer, but none of them touch
+/// `App::filters` to get there"*; NOTES § D289 ruling 4).
+///
+/// **Asserted in both states, because a guard that refuses everywhere passes the refusal half
+/// on its own**: with the slot closed both keys take focus, with it open neither does, and a
+/// filter already committed is still there afterwards.
+///
+/// **`screens/detail.md` § The logs tab does give `/` a text search over the pane, and no such
+/// search exists** — refusing the key is today's correct behaviour, and building the search is its
+/// own box.
+#[test]
+fn the_two_filter_keys_are_refused_while_a_detail_pane_is_over_the_list() {
+    let cards = vec![a_group_of_two()];
+    for (key, typing) in [
+        (
+            ratatui::crossterm::event::KeyCode::Char('/'),
+            views::Typing::Text,
+        ),
+        (
+            ratatui::crossterm::event::KeyCode::Char('n'),
+            views::Typing::Namespace,
+        ),
+    ] {
+        // **Closed: the key is on the footer and it takes focus** — the half that proves the guard
+        // did not simply kill both keys.
+        let mut console = bare_console();
+        let did = pressed(&mut console, pressing(key), &cards, &before_the_list());
+        assert!(
+            matches!(did, Did::Changed),
+            "{key:?} reached nothing with the list on screen"
+        );
+        assert_eq!(
+            console.app.typing,
+            Some(typing),
+            "{key:?} did not open its own filter with the list on screen"
+        );
+
+        // **Open — the which-pods step and then the tabs, which are the two `Detailing`s that are
+        // not `Closed`.** A filter committed before the pane opened is what the reader loses if the
+        // key gets through: it is kept over the pane and cleared by nothing here.
+        for opened in [
+            Opened::Pods(cards[0].owner.clone()),
+            Opened::Tabs {
+                object: cards[0].owner.clone(),
+                from_step: false,
+            },
+        ] {
+            let mut console = bare_console();
+            for character in "pay".chars() {
+                console.app.filters.text.push(character);
+            }
+            console.opened = Some(opened);
+            let did = pressed(&mut console, pressing(key), &cards, &before_the_list());
+            assert!(
+                matches!(did, Did::Nothing),
+                "{key:?} acted from over the list it narrows"
+            );
+            assert_eq!(
+                console.app.typing, None,
+                "{key:?} took focus from over a detail pane"
+            );
+            assert_eq!(
+                console.app.filters.text.text(),
+                "pay",
+                "{key:?} reached the filter that narrows the list the pane is drawn over"
+            );
+        }
     }
 }
 
@@ -17073,7 +17383,8 @@ fn a_write_on_the_wire_refuses_the_switcher_and_quitting_from_anywhere() {
             pressed(
                 &mut console,
                 pressing(ratatui::crossterm::event::KeyCode::Char('X')),
-                &[]
+                &[],
+                &before_the_list(),
             ),
             Did::Nothing
         ),
@@ -17088,7 +17399,8 @@ fn a_write_on_the_wire_refuses_the_switcher_and_quitting_from_anywhere() {
             pressed(
                 &mut console,
                 pressing(ratatui::crossterm::event::KeyCode::Char('q')),
-                &[]
+                &[],
+                &before_the_list(),
             ),
             Did::Nothing
         ),
@@ -17096,34 +17408,110 @@ fn a_write_on_the_wire_refuses_the_switcher_and_quitting_from_anywhere() {
     );
 }
 
-/// **A dismiss-only box closes on `esc` and on nothing else** (`views::Modal::Refused`, `Gone`:
-/// terminal boxes that never arm — `screens/dialogs.md` § The cluster said no).
+/// **`esc` dismisses either terminal box, and `⏎` belongs to the refusal box alone** — its footer
+/// draws `esc dismiss  ⏎ open`, because the write it reports on is over and the object it was about
+/// is still selected underneath; `Gone`'s draws the bare `esc dismiss`, because its object stopped
+/// existing (`views::App::footer`'s two arms, `screens/dialogs.md` states 0 and 1c,
+/// `screens/widgets.md` § A modal's footer).
+///
+/// **The `⏎` half is what this test was missing, and `⏎` is the only key either footer names**
+/// (NOTES § D289 ruling 3). It looped `['q', '?', 'r', 'X']` — not one of them on a footer — and
+/// its doc said the box *"offers only `esc dismiss`"*, which `views.rs` has never drawn:
+/// Phase 12's behaviour written down as though it were the specification.
 #[test]
-fn a_terminal_box_closes_on_esc_and_ignores_every_other_key() {
-    let mut console = bare_console();
-    console.app.modal = Some(views::Modal::Refused {
+fn a_terminal_box_closes_on_esc_and_only_the_refusal_opens_on_enter() {
+    let cards = vec![a_group_of_two()];
+    let refused = || views::Modal::Refused {
         sent: true,
         fault: k8s::Fault::Refused,
         said: Some("forbidden".to_owned()),
-    });
-    for ignored in ['q', '?', 'r', 'X'] {
-        let did = pressed(
+    };
+    let gone = || views::Modal::Gone {
+        object: views::Object::new(
+            "deployment",
+            Some("payments".to_owned()),
+            "web".to_owned(),
+            Some("d-1".to_owned()),
+        ),
+        recreated: false,
+    };
+
+    for (what, modal) in [("the refusal box", refused()), ("the gone box", gone())] {
+        let mut console = bare_console();
+        console.app.modal = Some(modal);
+        // **Not one of these is on either footer** — a modal's footer is a closed, complete list
+        // (`screens/widgets.md` § A modal's footer), so each has to reach nothing and leave the box
+        // where it is.
+        for ignored in ['q', '?', 'r', 'X'] {
+            let did = pressed(
+                &mut console,
+                pressing(ratatui::crossterm::event::KeyCode::Char(ignored)),
+                &cards,
+                &before_the_list(),
+            );
+            assert!(
+                matches!(did, Did::Nothing),
+                "`{ignored}` acted from under {what}"
+            );
+            assert!(console.app.modal.is_some(), "`{ignored}` dismissed {what}");
+        }
+        let _ = pressed(
             &mut console,
-            pressing(ratatui::crossterm::event::KeyCode::Char(ignored)),
-            &[],
+            pressing(ratatui::crossterm::event::KeyCode::Esc),
+            &cards,
+            &before_the_list(),
         );
-        assert!(
-            matches!(did, Did::Nothing),
-            "`{ignored}` acted from under a box that offers only `esc dismiss`"
+        assert_eq!(
+            console.app.modal, None,
+            "`esc dismiss` did not dismiss {what}"
         );
-        assert!(console.app.modal.is_some(), "`{ignored}` dismissed the box");
     }
-    let _ = pressed(
+
+    // **`⏎ open` opens the object the refusal was about** — a group of two opens the which-pods
+    // step, which is exactly what `⏎` on that card does with no box in the way.
+    let mut console = bare_console();
+    console.app.modal = Some(refused());
+    let opened = pressed(
         &mut console,
-        pressing(ratatui::crossterm::event::KeyCode::Esc),
-        &[],
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &cards,
+        &before_the_list(),
     );
-    assert_eq!(console.app.modal, None, "`esc dismiss` did not dismiss");
+    assert!(
+        matches!(opened, Did::Changed),
+        "`⏎ open` owed no frame, so the dismissed refusal box would stay on the screen"
+    );
+    assert_eq!(
+        console.app.modal, None,
+        "`⏎ open` left the refusal box on the screen"
+    );
+    match &console.opened {
+        Some(Opened::Pods(owner)) => assert_eq!(*owner, cards[0].owner),
+        _ => panic!("`⏎ open` did not open the object the refusal was about"),
+    }
+
+    // **And the same key reaches nothing under the gone box**, whose footer names no second key
+    // because there is no object left to open.
+    let mut console = bare_console();
+    console.app.modal = Some(gone());
+    let did = pressed(
+        &mut console,
+        pressing(ratatui::crossterm::event::KeyCode::Enter),
+        &cards,
+        &before_the_list(),
+    );
+    assert!(
+        matches!(did, Did::Nothing),
+        "`⏎` acted from under the gone box"
+    );
+    assert!(
+        console.app.modal.is_some(),
+        "`⏎` dismissed the gone box, whose footer names only `esc`"
+    );
+    assert!(
+        console.opened.is_none(),
+        "`⏎` opened an object from under the gone box"
+    );
 }
 
 /// **`↑` / `↓` reach nothing on a view whose rows this wiring does not have** — the content cursor
@@ -17140,7 +17528,10 @@ fn the_arrows_reach_nothing_on_a_view_this_wiring_cannot_draw_rows_for() {
         ratatui::crossterm::event::KeyCode::Up,
     ] {
         assert!(
-            matches!(pressed(&mut console, pressing(arrow), &cards), Did::Nothing),
+            matches!(
+                pressed(&mut console, pressing(arrow), &cards, &before_the_list()),
+                Did::Nothing
+            ),
             "{arrow:?} moved a cursor over the Alerts list while the browser was open"
         );
     }
@@ -17216,6 +17607,69 @@ async fn each_verb_shows_its_own_command_and_nothing_is_sent_without_an_answer()
             Err(refusal) => panic!("{verb} was refused before it could ask: {refusal}"),
         }
     }
+}
+
+/// **A `Gone` on the answer channel reaches `ops` as `ops::Answer::Gone`, so nothing is sent
+/// and the audit log says so** — the second half of D22's guard, and the half `over_modal`'s
+/// own test cannot see (NOTES § D22, § D289 ruling 1). `main.rs` decides *is the uid still in
+/// the store* and `mutating`'s `ask` closure is what turns that answer into the value
+/// `ops::perform` acts on; a `Cancelled` there would look identical on screen and be a different
+/// line in the record (invariant 4).
+///
+/// **`delete` is the verb, because it is the only one that sends no check** (NOTES § D225
+/// ruling 1) — so `ask` is reached against a client that can reach nothing at all. A `restart` ends
+/// as `Outcome::NotSent` on its own dry-run before the answer is ever read, which proves the
+/// dry-run and not this.
+#[tokio::test]
+async fn a_gone_on_the_answer_channel_stops_the_write_inside_ops() {
+    let scratch = Scratch::named("console-gone");
+    let client = refusing().await;
+    let mut audit = scratch.file("audit");
+    let wanted = Wanted {
+        verb: DELETE,
+        kind: "deployment",
+        name: "web".to_owned(),
+        namespace: Some("payments".to_owned()),
+        uid: Some("u-1".to_owned()),
+    };
+    let shown = std::cell::RefCell::new(Vec::new());
+    let (answering, answered) = tokio::sync::mpsc::unbounded_channel();
+    // Queued before the call, so `ask` reads it the moment it is reached — the receiver is alive
+    // for as long as `mutating`'s future is.
+    answering.send(Reply::Gone).expect("the channel is open");
+    let performed = mutating(
+        &client,
+        "https://prod-eu.invalid:6443",
+        "prod-eu",
+        &wanted,
+        &now(),
+        &mut audit,
+        &shown,
+        answered,
+    )
+    .await;
+    assert_eq!(
+        performed,
+        Ok(ops::Performed {
+            outcome: Some(ops::Outcome::Gone),
+            recorded: true,
+        }),
+        "a `Gone` answer did not stop the write inside `ops`"
+    );
+    // **The refusal is in the record too** — the security gate's *every attempt, success,
+    // failure or refusal, reaches the audit log*. The words are `ops::Record::result_line`'s and
+    // this only asserts that the line is the `Gone` one and names the object.
+    let written =
+        std::fs::read_to_string(scratch.0.join("audit")).expect("the audit log this run opened");
+    println!("{written}");
+    assert!(
+        written.contains("deployment/web"),
+        "the audit log does not name the object the guard refused:\n{written}"
+    );
+    assert!(
+        written.lines().count() >= 2,
+        "the attempt and its result are not both in the record:\n{written}"
+    );
 }
 
 /// **What `k8s::text` appends where it cut** — retyped, because `k8s::SHORTENED` is private to that
@@ -17382,7 +17836,7 @@ fn a_crafted_name_the_wiring_hands_a_dialog_reaches_no_cell() {
         installed(
             &mut console,
             Published::Checked {
-                verdict: "k8rs cannot check this one first.",
+                verdict: "k8rs did not check this one with the cluster first",
                 asks: asks.clone(),
             },
         );
@@ -17783,7 +18237,16 @@ fn the_panes_nothing_fetches_yet_say_they_are_still_reading() {
 /// and this is the measurement that holds it.
 #[test]
 fn the_strip_keeps_the_object_the_line_is_about_for_every_ending() {
-    let store = a_cluster_with_cards();
+    // **A store with nothing to say about this dialog's object, and it is the fixture rather than
+    // a convenience.** [`over_modal`]'s confirm arm now asks the store whether the selected object
+    // is still there ([`vanished`], NOTES § D22, § D289 ruling 1), and
+    // [`a_cluster_with_cards`] is a healthy listed store holding four pods and **no Deployment** —
+    // so it answers *gone* about [`an_open_dialog`]'s `payments/web`, correctly, about a console
+    // that cannot exist: a card filed under a Deployment owner needs that Deployment on its own
+    // watch. This test is about the box's key map and not about a cluster, so the store it presses
+    // against is one that has not listed. The guard's own five shapes are
+    // [`a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command`].
+    let store = before_the_list();
     let endings = [
         None,
         Some(ops::Outcome::Done),
@@ -17822,7 +18285,7 @@ fn the_strip_keeps_the_object_the_line_is_about_for_every_ending() {
             key(ratatui::crossterm::event::KeyCode::Enter),
             &store,
         );
-        assert!(matches!(answered, Did::Answered(Some(_))));
+        assert!(matches!(answered, Did::Answered(Reply::Yes(_))));
         settled(
             &mut console,
             Ok(ops::Performed {
@@ -18358,6 +18821,7 @@ fn x_opens_the_picker_the_header_just_described() {
             &mut console,
             pressing(ratatui::crossterm::event::KeyCode::Enter),
             &[],
+            &before_the_list(),
         );
         match (connects, answered) {
             // A live cluster's own row is *yes, stay here*, and the box closes.
@@ -18509,11 +18973,13 @@ fn a_crafted_context_name_connects_by_its_key_and_is_drawn_stripped() {
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Down),
         &[],
+        &before_the_list(),
     );
     let answered = pressed(
         &mut console,
         pressing(ratatui::crossterm::event::KeyCode::Enter),
         &[],
+        &before_the_list(),
     );
     let Did::Switch(asked) = answered else {
         panic!("`⏎` on the crafted row reached nothing")
@@ -18585,7 +19051,8 @@ fn esc_quits_the_startup_picker_and_only_cancels_the_other_one() {
             pressed(
                 &mut starting,
                 pressing(ratatui::crossterm::event::KeyCode::Esc),
-                &[]
+                &[],
+                &before_the_list(),
             ),
             Did::Quit
         ),
@@ -18603,7 +19070,8 @@ fn esc_quits_the_startup_picker_and_only_cancels_the_other_one() {
             pressed(
                 &mut switching,
                 pressing(ratatui::crossterm::event::KeyCode::Esc),
-                &[]
+                &[],
+                &before_the_list(),
             ),
             Did::Changed
         ),

@@ -41,11 +41,18 @@ them changes**
 ([dialogs.md § Detail tabs and Analysis keep their own footer, not this line](dialogs.md#detail-tabs-and-analysis-keep-their-own-footer-not-this-line)).
 
 **The logs tab's footer carries `f follow` and `c container`, not `⇧p
-previous` or `/ search`.** Both keys still work — `⇧p` and `/` are bound
-exactly as [NOTES § D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted)
-says — they are just not two of the six things this one line has room to
-name before `? all keys  q quit`, the pair that never gives way outside its
-own one named exception, above
+previous` or `/ search`.** **Neither of the two it leaves off does anything in
+this pane yet**, and
+[NOTES § D12](../NOTES.md#d12--the-key-map-and-two-keys-deleted) is a map of
+what each key *means* — `/` searches this pane, `⇧p` shows the previous
+container's log — not a record of what is wired. Measured at HEAD, `⇧p` has no
+arm at all, and `/` is answered only while the detail is closed, where it
+filters the list this pane is drawn over (`../src/main.rs` says so in as many
+words, and refusing it here is the whole of the correct behaviour until the
+search is built). `?` marks both *not built yet* rather than promising them
+([help.md](help.md)). What this line is for holds either way: they are not two
+of the six things it has room to name before `? all keys  q quit`, the pair
+that never gives way outside its own one named exception, above
 ([widgets.md § The footer](widgets.md#2a-the-footer)). Follow and the
 container picker are what a reader reaches for on nearly every open log pane;
 `⇧p` only matters once a container has actually crashed, and a text search is

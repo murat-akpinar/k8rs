@@ -403,12 +403,21 @@ question, so `may_i_in` is never asked and the key is never marked `no` —
 `r no restart` on a bare ReplicaSet would claim a verdict nobody was asked
 to give
 ([D261 ruling 8](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
-**`c container` is this rule's own precedent, already shipped**: it drops
-from the footer entirely on a single-container pod rather than sitting
-there unusable
-([detail.md § Choosing a container](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose)) —
-a key that cannot work is a key that is not drawn, never a key drawn dim or
-marked, and `r` on a kind that does not support it follows the same rule.
+**A key that cannot work is a key that is not drawn, never a key drawn dim or
+marked**, and `r` on a kind that does not support it follows that rule.
+**`c container` is its kind-scoped case, and that case is specified rather
+than shipped**: on a single-container pod it drops from the footer entirely
+rather than sitting there unusable
+([detail.md § Choosing a container](detail.md#choosing-a-container-and-when-there-is-nothing-to-choose)),
+but nothing has drawn it yet — the arm is there (`../src/views.rs`) and needs
+more than one container, and `main.rs::detailing` answers `containers: 0` until
+the pod read lands, so no run has ever drawn `c container` for a
+single-container pod to take away. **What is shipped is the half this rule
+leans on hardest — dropped, never marked**: `q quit` leaves every footer on
+this page while a call is on the wire and is never drawn as `q no quit` (later
+in this section, and Help's own footer). Its cause is a wait rather than a
+kind, so the treatment is the same one reached a different way; the
+kind-scoped example is still ahead of the rule.
 `s` never reaches this line at all today, for a different, build-level
 reason with nothing to do with kind (help.md's own Rules list) — it is
 withheld the same way, but it is not this bullet's own case, since there is

@@ -13,7 +13,7 @@ tool for beginners may not hide its verbs behind memory.
 │    [ ]          detail tabs     / n   filter · namespace           │
 │  Looking at things (always available)                              │
 │    l  logs, with the log from before a crash                       │
-│       in the log tab:  f follow · c container · ⇧p previous        │
+│       log tab:  f follow · not built yet: c container, ⇧p previous │
 │    d  describe — the object and what happened to it                │
 │    y  view as YAML            ctrl-z  back to your shell — type fg │
 │  Changing things (each one asks first, and shows the command)      │
@@ -114,6 +114,21 @@ Rules:
   `works on …` line is unaffected too, for the same reason the sentence
   above stays fixed regardless of what is selected: it still answers a
   future *what kind*, not *is this built*.
+- **`c` and `⇧p` are not built either, and the row names both anyway.**
+  Neither is bound in any state and no product code constructs a container
+  picker, so a row that read `c container · ⇧p previous` beside a working
+  `f follow` promised two keys that do nothing
+  ([D289 ruling 3](../NOTES.md#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26)). **Both labels stay** rather than collapsing to
+  bare keys: `l`'s row above still offers *"the log from before a crash"*, and
+  `⇧p previous` is the only thing on this screen that ties that offer to the
+  key it waits on — drop the label and the promise stays on screen with
+  nothing left pointing at why it is not kept. **Neither key gets a *why* of
+  its own, and that is the column budget and not a change of voice**: `not
+  built yet` plus both labels plus this row's own `in the log tab:` is 74
+  columns, against the 68 a body row has here, so `in the` gave way rather
+  than the phrase `s`'s row already uses — one wording for one fact,
+  the same reason [§ When a key is refused](#when-a-key-is-refused) gives for
+  not softening *"Missing permission"*. The row is 67.
 - **`ctrl-z` is answered above the filter and above an open modal, with two
   exceptions — and each is the right one.** The router checks it before
   a filter has focus and before a modal's own keys are read, because a shell
@@ -213,7 +228,7 @@ command log strip, the same `?`/`q` footer this file draws everywhere else.
 │    [ ]          detail tabs     / n   filter · namespace                     │
 │  Looking at things (always available)                                        │
 │    l  logs, with the log from before a crash                                 │
-│       in the log tab:  f follow · c container · ⇧p previous                  │
+│       log tab:  f follow · not built yet: c container, ⇧p previous           │
 │    d  describe — the object and what happened to it                          │
 │    y  view as YAML            ctrl-z  back to your shell — type fg           │
 │  Changing things (off for this whole run)                                    │

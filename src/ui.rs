@@ -415,7 +415,7 @@ const HELP: &str = "  Moving around
     [ ]          detail tabs     / n   filter · namespace
   Looking at things (always available)
     l  logs, with the log from before a crash
-       in the log tab:  f follow · c container · ⇧p previous
+       log tab:  f follow · not built yet: c container, ⇧p previous
     d  describe — the object and what happened to it
     y  view as YAML            ctrl-z  back to your shell — type fg
   Changing things (each one asks first, and shows the command)

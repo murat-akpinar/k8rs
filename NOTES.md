@@ -308,6 +308,10 @@ its line moving with it.
 - [D284](#d284--the-dialog-strip-review-round-a-door-that-was-not-one-a-renderer-that-panics-on-the-strips-own-fixed-point-and-two-comments-that-were-lies-2026-09-26) — the dialog-strip review round: a door that was not one, a renderer that panics on the strip's own fixed point, and two comments that were lies
 - [D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26) — the error-state pass: one blip made the header lie for the life of the process, and the fix is a predicate rather than a clock
 - [D286](#d286--the-console-at-rest-idle-is-two-readings-the-poll-the-console-never-stops-and-a-budget-missed-by-the-same-margin-as-the-driver-2026-09-26) — the console at rest: idle is two readings, the poll the console never stops, and a budget missed by the same margin as the driver
+- [D287](#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26) — Phase 11's half-finished close is absorbed into Phase 12's, because the artifacts it owed a review on no longer exist
+- [D288](#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26) — the close found ten scaffolding flags that outlived the phase that was meant to remove them
+- [D289](#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26) — the Phase 12 close review: a write guard with no caller, two screens that name a key that does nothing, and the ruling that `Changed` stays unproduced
+- [D290](#d290--the-closes-blocker-fixes-the-guard-that-decides-before-the-send-the-fixture-that-could-not-exist-and-a-store-that-must-not-answer-for-a-refused-watch-2026-09-26) — the close's blocker fixes: the guard that decides before the send, the fixture that could not exist, and a store that must not answer for a refused watch
 
 ## Why it exists — where the gap is
 
@@ -25474,3 +25478,282 @@ instrumented handler.
 14:50, no clean shutdown record — which took `/tmp` with it and with it the
 per-sample CSVs and the pty tapes. The report was already written and is the only
 copy; nothing of the measurement ran during or after.
+
+### D287 — Phase 11's half-finished close is absorbed into Phase 12's, because the artifacts it owed a review on no longer exist (2026-09-26)
+
+Phase 11's head note in [`todo.md`](todo.md) has said since 2026-09-13 that *every
+box below is checked and the phase is NOT closed* — its close ritual stopped
+half-way for a `/clear`
+([D266](#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13))
+— and it lists what is owed: `tester` and `k8s-admin` on the six-blocker commit,
+the host run, the phase security gate, the whole-phase second pass, the CHANGELOG,
+the PR, and moving that note and Phase 5's pointer. **`main` has not advanced since
+2026-09-03 and `development` is 148 commits ahead of it**, so Phases 7 through 12
+have all been sitting on one unmerged branch.
+
+**The ruling: Phase 12's close discharges the list, and Phase 11 closes with it.**
+Not because the items are unimportant — because five of the seven have no subject
+left.
+
+**1. The six-blocker commit contains no code, and what it does contain has been
+rewritten.** `7553d3e` — *stop six screens drawing something false before phase 11
+closes* — touches `NOTES.md`, `backlog.md`, `docs/` and `screens/` and **no `.rs`
+file at all**, despite its `fix(ui)` scope. So the owed `tester`/`k8s-admin` round
+is a round over screen specs. Every one of the eight screen files it touched was
+then rewritten during Phase 12 — **+3 362 / −500 lines across 11 commits** — and
+each of those commits is a Phase 12 box that carried its own `tui-designer` and
+`k8s-admin` rounds, because D266 ruling 3 created them for exactly that purpose.
+Reviewing the 2026-09-13 state of `screens/dialogs.md` today is reviewing text no
+file holds.
+
+**2. The host run was owed for a reason that has expired.** The note says
+*`ssh ubuntu` had no route on 2026-09-13, and nothing in the binary calls `ui.rs`
+yet — say so*. Both halves are gone: `ui::draw` has had a caller since the event
+loop landed 2026-09-24, and the run happened today — a 4-node kind cluster with
+`scripts/broken.yaml` applied, the console drawing 13 critical and 10 warnings and
+explaining `CrashLoopBackOff` and `exit 1` in plain language, 0 CPU ticks over a
+quiet 2 s, `q` exiting 0.
+
+**3. Phase 11's own security gate is met, and it is met by evidence rather than by
+assertion.** Its three items: a fixture carrying ANSI escapes, a right-to-left
+override and a 10 000-character single-line name must leave the screen unchanged;
+a confirmation dialog shows the object identity the action will hit; nothing
+revealed from a Secret is redrawn after the reveal is dismissed. The RTL override
+is fed in five test files; escapes are stripped at ingest (invariant 9); and the
+over-long value is **bounded before it can reach a cell** — `k8s::IDENTIFIER` cuts
+a name at 512 bytes and `k8s::FREE_TEXT` a sentence at 4096, with
+`views_tests.rs:2430` feeding 4 859 bytes past that bound on D217's
+whole-object-returned shape. **A 10 000-character name cannot arrive from a
+conforming API server at all** — Kubernetes caps object names at 253 characters —
+so the figure in that gate line was never a reachable input, and the bound is what
+the gate was protecting.
+
+**4. The remaining three are this close's own steps.** The whole-phase second pass,
+the CHANGELOG and the PR to `main` are Phase 12 close steps 7, 9 and 10, and the
+PR carries both phases because there has only ever been one branch
+([D32](#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12)).
+`ui.rs` and `views.rs` freeze at this close (D266 ruling 2), so the freeze review
+that matters is the one reading them **as built**, not as they stood before Phase
+12 rewrote 3 622 lines of them.
+
+**What this does not excuse.** A close that stops half-way leaves a note nobody is
+routed to, and this one survived five sessions and four phase closes unread — the
+same failure mode as the stale phase pointer two lines below it in the same file.
+The lesson is not *absorb it later*: it is that **the close's last step is the one
+that makes the previous steps findable**, and a `/clear` taken between step 6 and
+step 10 loses the thread.
+
+### D288 — the close found ten scaffolding flags that outlived the phase that was meant to remove them (2026-09-26)
+
+[CLAUDE.md](CLAUDE.md) invariant 10 has said since
+[D198](#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)
+that ten of the fifteen flags are the temporary driver's and **gone at Phase 12**.
+Phase 12 closed and all fifteen are still defined — counted off the source the way
+that invariant itself orders, not recalled:
+
+```
+$ grep -oE '^(pub )?const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs src/views.rs
+--analysis --container --context --describe --follow --kind --live --logs
+--namespace --object --once --previous --read-only --subresource --yaml
+```
+
+**No box ever ordered the removal.** Phase 12's flags box named the four the
+console needs — `--read-only`, `--context`, `--namespace`, `--once` — and nothing
+in [`todo.md`](todo.md) asks for the other ten to come out. The invariant stated an
+outcome that no step owned, which is the same shape as a gate nobody can pass.
+
+**Ruled: not a close blocker, and a Phase 13 box.** By the close ritual's own
+triage it is none of the three blocking classes — no wrong output, no crash,
+nothing the security pass rules exploitable; the flags work and the console does
+not use them. But they cannot ship. `--object`, `--kind`, `--yaml` and the rest are
+undocumented surface on a binary a stranger installs with `cargo install`, they
+appear in no `USAGE` line, and every one of them is a second way into a read path
+the console already owns. So the removal belongs to the phase that ships v0.1, and
+the invariant now says that instead of claiming it already happened.
+
+**Why no earlier pass caught it.** Every per-box review saw the flags its own box
+named, and each was right about those. *Which flags still exist* is a question only
+the whole phase asks — the class the close's second pass exists for, and evidence
+for keeping that step even when every upstream gate is green. It is also the
+fourth time this flag list has gone stale in the file that warns, two lines below
+it, that the list goes stale and must be counted rather than recalled.
+
+### D289 — the Phase 12 close review: a write guard with no caller, two screens that name a key that does nothing, and the ruling that `Changed` stays unproduced (2026-09-26)
+
+The close's cross-box review
+([reports/2026-09-26-phase-12-close-cross-box-review.md](reports/2026-09-26-phase-12-close-cross-box-review.md))
+read five seams against each other rather than re-reading 20 019 lines, because
+every box in the phase already had its own operator round. Seven findings, and the
+two that block are both the class a per-box round cannot see.
+
+**1. `r restart` has no identity guard at all, and this is a close blocker.**
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)
+put the *object went away while the dialog was open* guard on the watch behind the
+modal; `ops::Answer::Gone` and `Answer::Changed` are how it reaches `perform`.
+**Nothing in the product constructs either** — `ops.rs:1090-1091` consumes them and
+the only constructions in the tree are six in `ops_tests.rs`. The console's `ask`
+closure answers `Confirmed` or `Cancelled` and never looks at the store.
+`ops::restart` is `Api::patch`, and `PatchParams` **has no `preconditions` field** —
+`ops.rs:198` says so in as many words — so the client-side guard was its only
+protection. `ops.rs:186-191` already records the measurement: a Deployment deleted
+and recreated between the dry-run and the yes left the audit line naming a `uid`
+nothing changed, beside a `PATCH` that landed on a different instance. That breaks
+invariant 2's *an explicitly selected object*.
+
+**And it is not a reversal of
+[D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05),
+which is the first thing to check before touching this.** D228 refused a
+**resourceVersion** precondition on every mutation, because `scale --replicas=N` is
+absolute intent and that field moves when nothing changed. This guard is **uid
+identity** — *is this still the object the operator selected* — which is a different
+question, and `ops::delete` already sends it as `preconditions.uid`
+([D235](#d235--the-delete-that-removed-a-pod-nobody-had-seen-and-why-the-fix-costs-no-read-2026-09-05)).
+
+**2. The ruling the review got the other way round: only `Gone` is produced, so
+`Changed` stays unreachable.** The review classed the `Outcome::Changed` →
+`Modal::Gone` fold at `main.rs:10177` as *becomes live the moment finding 1 is
+fixed* — drawing *Already gone* over an object that still exists. It does not,
+because the fix answers one question: **is the uid still in the store.** Absent is
+`Gone`; present-but-moved is exactly what D228 says must not stop a `scale` or a
+`restart`, so nothing produces `Changed`. `Answer::Changed`'s own doc calls it *the
+`409` mechanic*, and the security gate's 409 row is explicit that *applies* means a
+read-modify-write, **which today is only v0.4's `edit`**. So the second box is
+`edit`'s to bring, and `views.rs` reopening for it then is the ordinary recorded
+reversal two Phase 12 boxes already used
+([D273](#d273--the-wiring-box-has-no-call-closure-so-the-bound-d272-ordered-goes-inside-the-contract-and-opsrs-reopens-for-one-change-2026-09-20),
+[D278](#d278--the-flags-box-what-had-to-be-ruled-before-it-could-be-briefed-a-record-that-named-the-wrong-cluster-and-opsrs-reopens-for-a-taught-command-2026-09-24)
+ruling 5) — not a box built now for a caller that does not exist.
+
+**And the reachable `409` was never missing a box, which corrects the review's
+`screens/` half as well as my own first draft of this ruling.** A server `409`
+does not travel as `Outcome::Changed` at all: it arrives as a `Fault::Conflict`
+inside `Outcome::NotSent`/`Failed`, becomes a `Modal::Refused`, and `ui::refused`
+(`ui.rs:2431`) branches `(Fault::Conflict, _)` to the title *The object changed
+first* and the body *Nothing was changed.* — which is exactly what the error-state
+pass observed off a real `409`. So `screens/widgets.md:505` and
+`screens/dialogs.md` § state 0 **do not contradict each other**: the bare
+`esc dismiss` row is about `Modal::Gone`, and state 0's `esc dismiss  ⏎ open` is a
+`Refused` footer, which is the row widgets.md gives `Refused`. The review read the
+two as one box and called widgets.md's row wrong; it is not, and **nothing in
+`screens/` is owed here.** What this does sharpen is item 3 below: the box whose
+`⏎` reaches nothing is the same box a real `409` opens.
+
+**3. Two surfaces name a key that reaches nothing, and that is D266's class.** The
+refusal box draws `esc dismiss  ⏎ open` (`views.rs:3015`, specified in
+`screens/dialogs.md` states 0 and 1c and `screens/widgets.md:505`) while
+`main.rs:9673` answers every key but `Esc` with `Did::Nothing` — live on a shipped
+journey, since a real 403, 401 and 409 all reached `Modal::Refused` in the
+error-state pass. And `ui.rs:418`'s `?` promises `c container` and `⇧p previous`,
+**neither of which is bound in any state**, with no product constructor for
+`Modal::ContainerPick` at all. The test that reads as covering the first
+(`main_tests.rs:17099`, *ignores every other key*) loops `['q','?','r','X']` and
+never presses the one key the footer names — a Phase 12 test writing down Phase
+12's behaviour as though it were the spec.
+
+**4. `/` and `n` are bound with no detail guard**, while `[`, `]` and `f` beside
+them all carry `if open != views::Detailing::Closed`. They write `App::filters`,
+which narrows the list the detail is drawn *over*, so a committed filter can be
+cleared by an `esc` the reader believes is closing a pane — and `narrowed()`, the
+row that would show it, is only drawn on the Alerts and browser arms.
+`screens/widgets.md:743` states the invariant this breaks.
+
+**5. What is boxed rather than fixed**, per the close ritual's triage: D282's
+behavioural pin on which branch produced `ACCEPTED`/`UNCHECKABLE` through the
+*console* transport, and `scripts/copy-guard.py` not reading `src/main_tests.rs` —
+where a **third spelling** of `UNCHECKABLE` had grown. The three fixture strings are
+corrected now because they are three literals; the guard row is `tester`'s and is
+Phase 13's.
+
+**Why the close is what found all of it.** Every per-box round saw the keys, the
+screens and the guards its own box named, and was right about each. *Which guard has
+a caller*, *which key is bound anywhere* and *which sentence has four spellings* are
+questions only the whole phase asks.
+
+### D290 — the close's blocker fixes: the guard that decides before the send, the fixture that could not exist, and a store that must not answer for a refused watch (2026-09-26)
+
+[D289](#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26)'s
+three blockers are closed. **Both are proven against the live four-node `k8rs`
+cluster and not only in tests**, which matters because each was a claim about
+what happens between a dry-run and a keypress:
+
+- **Journey 1, the guard.** The `Restart default/broken-owned` dialog open with
+  the dry-run accepted; `kubectl delete deploy broken-owned` run from another
+  shell *while it was open*; then `⏎`. The box became `┌ Already gone ─` — *"This
+  deployment is already gone — something else removed it while this was open"* —
+  the command log gained **no** `rollout restart` line at all, and the audit log
+  read `attempt · deployment/broken-owned · … · resourceVersion not sent` beside
+  `result · … dry-run: the cluster checked it first and accepted it · the object
+  was already gone, so nothing was changed`, mode `600`. Before the fix that `⏎`
+  sent a `PATCH`.
+- **Journey 2, the dead key.** A `ValidatingAdmissionPolicy` denying `UPDATE` on
+  deployments, applied and removed afterwards, refused the **dry-run**, so the box
+  was `┌ The cluster refused this ─` with the cluster's own sentence quoted and the
+  footer `esc dismiss  ⏎ open`. `⏎` closed it and opened the detail tabs on the
+  pod. Before the fix that key did nothing, twice, three times.
+
+**1. The strip ruling, and both halves stand.** The confirm arm carried *"`Gone`
+and `Changed` keep their line (PM ruling, 2026-09-24)"*, and
+`screens/dialogs.md:1697` says the opposite in as many words: *"`Gone`, like
+`Cancelled` and `Changed`, is reached before that ever happens, so the strip
+appends nothing here at all."* `dev-ui` followed the screen and flagged it for me,
+which was right. **They do not actually conflict, because the 2026-09-24 ruling's
+own stated reason limits it**: *both are decided inside `ops` **after** this point,
+so something was sent by then.* That was true while D22's guard had no caller —
+every `Gone` was the server's. A client-side `Gone` is decided **before** the send,
+so the ruling never covered it. As built: `vanished(store, &object)` returns
+`Reply::Gone` and appends nothing; every other answer appends the line and then
+sends. So `delete`'s server-side `Gone` still keeps its line, and invariant 4 is
+satisfied both ways — journey 1's command log is empty *because nothing was sent*,
+while the audit log still records the attempt, which is the security gate's *every
+attempt, success, failure or refusal*.
+
+**2. Four existing tests went red and the fixture was the thing that was wrong.**
+`a_confirmation_refuses_every_key_its_footer_does_not_name` and three others press
+`⏎` on a Deployment dialog for `payments/web` against `a_cluster_with_cards()` — a
+healthy, fully-listed store holding four pods and **no Deployment**. The guard
+answered *gone*, correctly: **that console cannot exist**, because a card filed
+under a Deployment owner needs that Deployment on its own watch. The guard was not
+weakened; those four moved to `before_the_list()`, a store with nothing to say,
+which is the honest fixture for a test whose subject is a key map rather than a
+cluster.
+
+**3. The addition beyond the brief, and it is the one I would have missed.**
+`vanished` refuses to answer for a kind whose **watch is in trouble**.
+`still_listing`'s own doc says a *refused* watch counts as settled, so `snapshot()`
+publishes with that kind's list empty — and a cluster whose `deployments` watch is
+refused is not hypothetical, it is drawn live in
+[reports/2026-09-26-the-error-state-pass.md](reports/2026-09-26-the-error-state-pass.md) § 1.
+Without that arm the guard would answer *Already gone* for every `r` on a running
+Deployment the moment RBAC took that one watch away — a guard turning into a denial
+of the whole verb. It reuses `store.troubles()` and `ui::addressed` rather than
+growing a second kind table.
+
+**4. The allowlist is the five watched kinds, not `!= "replicaset"`.**
+`views::Object::uid`'s own doc had already ruled that a ReplicaSet selection cannot
+raise `Gone` — nothing watches one, and it reaches the snapshot only while some pod
+names it as controller. An allowlist so a seventh kind cannot inherit a guard no
+watch backs.
+
+**Other choices, recorded because the brief did not decide them**: `Did::Answered`
+carries a new `Reply { Yes(String), No, Gone }` instead of `Option<String>`;
+`entered` is reused for the refusal box's `⏎` so there is no second open path, and
+it returns `Did::Changed` unconditionally, because `Did::Nothing` owes no frame and
+would leave the dismissed box on screen; `views::Object::uid`'s
+`expect(dead_code)` had to come off, since `-D warnings` fails an unfulfilled
+`expect` once the product calls it; and one test was **written by hand because the
+sweep cannot see that arm** — cargo-mutants' only `mutating` mutant is the
+whole-function return, which is unviable, so `Reply::Gone → Answer::Gone` has no
+mutant and a hand-written test against the existing `refusing()` client is the only
+thing that pins it.
+
+**`just mutants-diff`: 22 mutants, 18 caught, 4 unviable, 0 missed** — both new key
+guards, the refusal-box arm, `vanished -> true` and `vanished`'s `==` among the
+caught, and all four unviable naming a missing `Default`. An earlier sweep was
+**discarded rather than reported** because a test was edited at ~13/22 while it ran,
+which is [D180](#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)'s
+shape caught by the author.
+
+**What the fixes did not close.** `?` still promises `c container` and `⇧p
+previous`, because `src/ui_tests.rs::mockup()` reads `screens/help.md` at test time
+and asserts `ui::HELP == mockup()`, so the wording has to change in `screens/`
+first — `tui-designer`'s, and the reason that fix is two dispatches rather than one.
