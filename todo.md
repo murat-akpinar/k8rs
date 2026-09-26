@@ -3265,8 +3265,10 @@ public release.
       **This is the first unchecked box in the file and it is not the next one to
       work.** Nothing here can move until the user runs `cargo publish` and until
       Phase 13 writes the README. **The next box is the first unchecked one in the
-      lowest open phase below this one — Phase 12 today** (Phase 11 closed
-      2026-09-13), and that phase's head note says why a
+      lowest open phase below this one — Phase 13 today** (Phase 12 closed
+      2026-09-26, and Phase 11 with it —
+      [D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26)),
+      and that phase's head note says why a
       later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
       [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)).
       **This line names a phase and so it goes stale at every close** — it has now
@@ -3276,7 +3278,11 @@ public release.
       the PR had merged. **The fifth was caught by neither** — Phase 10 closed
       2026-09-06 and both copies still named Phase 10 when the next session
       opened the file to pick a box, which is the first time this pair has been
-      found by the reader it misdirects rather than by a ritual. **The head note above the open phase and this line are two
+      found by the reader it misdirects rather than by a ritual. **The sixth
+      was moved inside the close that made it stale**, which is where it belongs;
+      the note it pairs with had by then gone unread for five sessions and four
+      closes, which is its own half of
+      [D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26). **The head note above the open phase and this line are two
       copies of one fact, which is why one of them keeps going stale** — moving
       both is part of the close ritual, not a thing to notice later
 
@@ -4253,36 +4259,14 @@ state before its renderer exists is what manufactures a frozen-file violation.
 
 ## Phase 11 — The console
 
-> **Every box below is checked and the phase is NOT closed — do not start Phase 12.**
-> Its close ritual stopped half-way on 2026-09-13 for a `/clear`
-> ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
-> Done: `just check` green; the family read; the six blockers fixed and committed
-> **but not yet reviewed**; mutation shards `0/4` (220 tested, 0 missed) and `1/4`
-> (220 tested, 0 missed); docs sync. **Shards `2/4` and `3/4` are not owed**: the
-> sweep mutates only `rules.rs` and `analysis.rs`, neither has changed since
-> 2026-08-30, and [D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)
-> owes it only at a close that touches them. **Owed, in order**: `tester` and
-> `k8s-admin` on the six-blocker commit (steps 5–6, loop to a fix if they find
-> one) · the host run (`ssh ubuntu` had no route on 2026-09-13, and nothing in the binary calls `ui.rs` yet — say so) · the phase
-> security gate · the whole-phase second pass · CHANGELOG · PR `development` →
-> `main` and merge · move this note and Phase 5's pointer to Phase 12.
-
-> **Phase 5's release box is still unchecked, and it is still not next** — it
-> needs the maintainer's crates.io credential and a `README.md` that belongs to
-> Phase 13
-> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
-> It is the first unchecked box in this file, so a cold session lands on it. This
-> note moves forward with whichever phase is open and **has now moved five
-> times** — from Phase 6, Phase 7, Phase 8, Phase 9, and Phase 10, the last two
-> of which closed 2026-09-06. Running a later phase over a deliberately open
-> earlier one is
-> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
-> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
-> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
-> runs whole when that box closes**
-> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
-> The next box is the first unchecked one below.
-
+> **Closed 2026-09-26, with Phase 12** — its own ritual stopped half-way on
+> 2026-09-13 for a `/clear` ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)),
+> and the list it was left owing is discharged by Phase 12's close rather than
+> re-run: the six-blocker commit touched no `.rs` file and all eight screen files
+> it did touch were rewritten during Phase 12, the host run it deferred happened
+> against kind, and its security gate is met by the `IDENTIFIER`/`FREE_TEXT`
+> bounds and the five test files that feed a right-to-left override
+> ([D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26)).
 *Also read: [PRIOR-ART § C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens) (loading, empty and denied are three screens) and [§ D3](PRIOR-ART.md#d3--wrapping-and-resizing-must-be-pure-functions) (a wrap that leaks into the data).*
 
 Goal: the screens in [`screens/`](screens/README.md) — the lazygit-shaped
@@ -4563,6 +4547,33 @@ Secret is redrawn after the reveal is dismissed.
 **Frozen after:** nothing — **`ui.rs` and `views.rs` freeze at Phase 12's close**, the first phase with a caller for either ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 2, [D246](NOTES.md#d246--the-viewsrs-review-round-a-fraction-whose-halves-count-different-things-a-card-that-draws-a-count-the-screen-ends-without-and-the-freeze-that-was-set-one-phase-too-early-2026-09-06) ruling 3's rule one layer up).
 
 ## Phase 12 — Final wiring · **milestone M3**
+
+> **Every box is checked and the close is all but finished — what it still owes is
+> here, because a close that stops half-way leaves a note nobody is routed to, and
+> that is exactly what happened to Phase 11
+> ([D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26)).**
+> **Done**: `just check` green at `a5bf413`; both owed pty gates (`just suspend`
+> 30 checks, `just picker` 101 checks); the host run against a 4-node kind with
+> `broken.yaml` applied; `just e2e`; the phase's own security gate — a real panic on
+> a real pty leaving the terminal restored and no credential in a 51-frame
+> backtrace, detector positive-controlled; the cross-box family review
+> ([reports/2026-09-26-phase-12-close-cross-box-review.md](reports/2026-09-26-phase-12-close-cross-box-review.md));
+> its three blockers fixed and **both proven on the live cluster**
+> ([D289](NOTES.md#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26) ·
+> [D290](NOTES.md#d290--the-closes-blocker-fixes-the-guard-that-decides-before-the-send-the-fixture-that-could-not-exist-and-a-store-that-must-not-answer-for-a-refused-watch-2026-09-26));
+> docs sync; the whole-phase second pass, which tightened two `docs/` claims that
+> said the three views were wired when four reads are not.
+> **No full mutation sweep is owed** — `git diff --stat 770ae0b..HEAD -- src/rules.rs
+> src/analysis.rs src/rules_tests* src/analysis_tests*` is empty and both files are
+> frozen ([D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
+> **Owed, in order**: `tester` on the blocker-fix diff — the full `just check` **over
+> this tree** (the `cargo` half, `width-guard`, `check-docs`, `copy-guard` and
+> `screens-check` are green as run by their authors and by the PM, but `cargo deny`,
+> `cross` and `guards.sh` whole have not reported since `a5bf413`) plus an attack on
+> `vanished`'s five fail-safe returns, the trouble arm's three-reader kind
+> comparison, and the four fixtures moved to `before_the_list()` · then PR
+> `development` → `main` and merge, **which carries Phases 7-12** because `main` has
+> not advanced since 2026-09-03.
 
 *Also read: [PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted) — k9s's own "skip the cycle when nothing changed" was merged and reverted a month later, and invariant 7 is the same manoeuvre. Also [§ D4](PRIOR-ART.md#d4--the-terminal-after-a-subprocess): leaving raw mode and re-entering it is one function, not one per path.*
 
@@ -4861,6 +4872,23 @@ behaves as specified.
 
 *Also read: [PRIOR-ART § J](PRIOR-ART.md#j-distribution) (every packaging channel is a support queue) and [§ L1](PRIOR-ART.md#l-two-observations-about-the-tracker-itself) (most reports are about the environment — the README answers kubeconfig and RBAC plainly, or the tracker becomes a support desk).*
 
+> **Phase 5's release box is still unchecked, and it is still not next** — it
+> needs the maintainer's crates.io credential and a `README.md` that belongs to
+> Phase 13
+> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
+> It is the first unchecked box in this file, so a cold session lands on it. This
+> note moves forward with whichever phase is open and **has now moved six
+> times** — from Phase 6, Phase 7, Phase 8, Phase 9, Phase 10 and Phase 11, the
+> last of which closed 2026-09-26 alongside Phase 12
+> ([D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26)). Running a later phase over a deliberately open
+> earlier one is
+> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
+> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
+> runs whole when that box closes**
+> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
+> The next box is the first unchecked one below.
+
 > **The five boxes below came out of Phase 12's error-state pass, not out of
 > shipping.** They are here because a box is never added to the phase that is
 > running ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)),
@@ -4970,6 +4998,18 @@ behaves as specified.
       in the drop, the 410 and the 401 journeys alike. A nit against a written
       screen, and the smallest of the five
 
+- [ ] **Take the ten scaffolding flags out before anything is published** —
+      `--live` `--logs` `--describe` `--yaml` `--object` `--kind` `--container`
+      `--previous` `--follow` `--subresource`. CLAUDE.md invariant 10 said they
+      were *gone at Phase 12* and no box ever ordered it, so all fifteen are still
+      defined; the console uses four. They appear in no `USAGE` line, and each is a
+      second way into a read path the console already owns, on a binary a stranger
+      installs with `cargo install`. Found by Phase 12's close, which is the only
+      pass that asks *which flags still exist*
+      ([D288](NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)).
+      **Done when** the `grep` in D288 answers with the five released flags and
+      nothing else, and `just check` is green with the driver's own tests either
+      removed or rewritten against the console
 - [ ] `README.md` (EN): what/why, screenshot or asciinema, install, **both**
       RBAC examples, the `--read-only` flag, "no telemetry" statement, and an
       honest paragraph on what k8rs can change in your cluster ·

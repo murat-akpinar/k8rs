@@ -1,13 +1,18 @@
 # k8rs — documentation
 
-> Status: **Phase 5 — live reads.** The rules and the seven analysis reports are
-> written and tested against real captures from a kind cluster you can stand up
-> yourself
+> Status: **Phase 12 closed — final wiring, milestone M3.** Every phase through 12
+> is complete bar one deliberately open box, the crates.io publish, which waits on
+> a README. The rules and the seven analysis reports are tested against real
+> captures from a kind cluster you can stand up yourself
 > ([tech-stack § The test cluster](tech-stack.md#the-test-cluster--reproducing-it-yourself)).
-> **It runs**: a temporary driver reads objects from disk, or watches a cluster
-> with `--live`, and prints the findings
-> ([architecture § The command line](architecture.md#the-command-line)). The TUI
-> itself is not built yet — that is Phases 8-12 · Last updated: 2026-08-30
+> **It runs**: `k8rs` opens the console against your current context — the Alerts
+> view, the seven analysis panes, the confirmation dialogs, the write path and the
+> cluster picker are wired into one binary, while the reads behind the resource
+> browser and the detail tabs are not yet fetched and say so on screen — and
+> `k8rs --once` prints the findings and exits
+> ([architecture § The command line](architecture.md#the-command-line)).
+> What is left is Phase 13: the README, the release workflow, and `cargo install
+> k8rs` · Last updated: 2026-09-26
 
 This directory is the **built** state: what is true of the shipped tool, written
 for humans outside this repo. The reasoning behind any of it lives one level up,

@@ -1,10 +1,17 @@
 # k8rs Architecture
 
-> Status: partly built. The bottom of the pyramid — `rules.rs`, `analysis.rs`,
-> `k8s.rs` — exists and runs behind a temporary driver; the three views and the
-> write path are still design. Decisions and their rationale live in
-> `../NOTES.md`; the technology choices (language, crates, toolchain) in
-> `tech-stack.md`; this is the buildable summary.
+> Status: **built, not yet published.** The whole pyramid exists and runs —
+> `rules.rs`, `analysis.rs`, `k8s.rs`, `ops.rs`, and since Phase 12's close
+> (2026-09-26) the console on top of them: one binary with the event loop, the
+> Alerts view, the seven analysis panes, the dialogs, the write path and the
+> cluster picker wired. **Four reads are not**, each drawing an honest waiting
+> state rather than a wrong one: the browser's server-side `Table`, the four detail
+> tabs, the log stream, and the `may_i_in` permission probe.
+> `ui.rs` and `views.rs` are frozen. What is left is shipping it — Phase 13 — and
+> the ten driver flags coming out before it ships
+> ([NOTES § D288](../NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)).
+> Decisions and their rationale live in `../NOTES.md`; the technology choices
+> (language, crates, toolchain) in `tech-stack.md`; this is the buildable summary.
 
 ## Overview
 
@@ -153,7 +160,7 @@ that cost once, then receives only deltas.
 
 ```
 src/
-  main.rs      event loop, key routing, terminal setup (teardown: Phase 12)
+  main.rs      event loop, key routing, terminal setup and teardown
   k8s.rs       connect(context), discovery, watches, prune -> store (reads only)
   ops.rs       every write. The ONLY file that may mutate the cluster
   rules.rs     analyze(&Snapshot) -> Vec<Finding>     ← the product lives here

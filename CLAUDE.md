@@ -206,7 +206,9 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     **released** — `--read-only` `--context` `--namespace` (also `-n`) `--once`
     `--analysis`
     ([D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30));
-    **temporary driver's, gone at Phase 12** — `--live` `--logs` `--describe`
+    **temporary driver's, and still here after Phase 12's close — boxed in Phase 13,
+    because a scaffolding flag on a published binary is surface nobody supports
+    ([D288](NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26))** — `--live` `--logs` `--describe`
     `--yaml` `--object` `--kind` `--container` `--previous` `--follow`
     `--subresource`
     ([D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
