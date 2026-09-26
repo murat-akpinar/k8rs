@@ -307,6 +307,7 @@ its line moving with it.
 - [D283](#d283--the-dialog-strip-box-its-premise-was-closed-four-boxes-ago-the-type-goes-on-dialog-and-the-door-goes-on-object-2026-09-26) — the dialog-strip box: its premise was closed four boxes ago, the type goes on `Dialog` and the door goes on `Object`
 - [D284](#d284--the-dialog-strip-review-round-a-door-that-was-not-one-a-renderer-that-panics-on-the-strips-own-fixed-point-and-two-comments-that-were-lies-2026-09-26) — the dialog-strip review round: a door that was not one, a renderer that panics on the strip's own fixed point, and two comments that were lies
 - [D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26) — the error-state pass: one blip made the header lie for the life of the process, and the fix is a predicate rather than a clock
+- [D286](#d286--the-console-at-rest-idle-is-two-readings-the-poll-the-console-never-stops-and-a-budget-missed-by-the-same-margin-as-the-driver-2026-09-26) — the console at rest: idle is two readings, the poll the console never stops, and a budget missed by the same margin as the driver
 
 ## Why it exists — where the gap is
 
@@ -25385,3 +25386,91 @@ proved rather than assumed: kube's `watcher()` is a `stream::unfold` returning
 `ended` marker never fires. A test on either would pin behaviour on a shape the
 running console has no route to. **The day a backoff gives up, the second one is
 what to re-read.**
+
+### D286 — the console at rest: idle is two readings, the poll the console never stops, and a budget missed by the same margin as the driver (2026-09-26)
+
+Phase 12's last box — *Idle CPU measured at 0%; memory measured at ~1000 pods* —
+measured against the **wired console** for the first time
+([reports/2026-09-26-the-console-at-rest-and-at-a-thousand-pods.md](reports/2026-09-26-the-console-at-rest-and-at-a-thousand-pods.md)).
+Both existing figures were the temporary driver's
+([D171](#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28),
+[D204](#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03)),
+and the only idle reading was 2 s against a *disconnected* console.
+
+**1. `0%` cannot be one number, and the brief had to rule that before it could be
+written.** `main.rs`'s loop contract is true — four wake sources and nothing in
+the `select!` ticks — but two things **below** it wake the process on a period and
+both reach the console: `k8s::METRICS_POLL` at 30 s, and kube's own
+`timeoutSeconds=290` watch re-establishment. So the box is two readings kept
+apart: **(a)** what the process spends over windows containing no wake, and
+**(b)** the cadence and cost of every wake that does happen. One window long
+enough to convince straddles a poll and measures the poll.
+
+Measured on a release binary on a 24×100 pty, with `schedstat` nanoseconds summed
+across every thread so a sub-tick wake cannot hide:
+
+- **(a)** 1 051 of 1 125 half-second windows at 0 ticks *and* 0 ns at 11 pods; 542
+  of 582 at 1 011. Longest unbroken quiet run **27.0 s** — and **no quiet run
+  reaches 30 s, because the poll ends every one.** The whole 600 s run cost
+  **7 ticks**.
+- **(b)** five wake families, each attributed by per-socket byte counters: the
+  poll (`96` bytes sent, 20× in 600.2 s, mean gap 29.991 s), the re-watch (five
+  connections at once, 290.26 s apart, no frame), the server's own watch traffic
+  (~60 s, receive-only, no frame), four real `kube-system` events, and a 21–60 µs
+  micro-wake nothing outside the process can name.
+- **Duty cycle after connect: 0.0076 % at 11 pods, 0.055 % at 1 011.**
+
+Invariant 7 holds. `0%` is the right claim about the `select!` blocking and the
+wrong claim about the process, which is why both halves are now on the record.
+
+**2. The console never stops polling metrics, and the driver does.** `main.rs:8270`
+pushes `node_usage_poll` unconditionally; the `--live` path gates it on
+`--analysis`/`ONCE` behind a four-row table whose own stated reason is that
+*`--live` with no Capacity pane on screen would ask every thirty seconds for a
+paragraph nothing draws*. The console does exactly that. **Costed rather than
+fixed:** 13.0 ms mean at 1 011 pods, **0.043 % of one core**, and the frame it owes
+writes **25 bytes** — colour resets and hide-cursor, an empty diff — with a full
+`snapshot` + `analyze` + seven report producers behind it. A fix is dynamic
+start/stop of a stream against 0.043 %, so it is a [`backlog.md`](backlog.md) line
+and not a box.
+
+**3. The budget is missed by the same margin as the driver, and D171's ruling is
+not reopened.** 60 720 KiB = 59.3 MiB = **62.2 MB** at 1 011 pods against
+`REQUIREMENTS.md:214`'s `< 50MB RSS`, whose own text already records the driver's
+58 752 KiB as not met. **The TUI is not the reason**: the same binary as `--live`,
+same host, same cluster, reads **60 956 KiB — 236 KiB *above* the console** — so
+Phase 12's `App`/`Screen`, the command log and ratatui's two buffers do not show
+against run-to-run variation at this resolution. Subtracting D171's figure yields
+`+1 968 KiB` and that is a different machine, not the TUI. The only thing that
+moved `VmRSS` in either run was **8 KiB at the first watch re-establishment**.
+
+**4. The reading is trustworthy because the host was not paging.** Swap used stood
+at 275 780 kB in **all 582 samples** and `MemAvailable` never fell below 2.3 GiB.
+A memory measurement on a 3.9 GiB host is exactly where
+[D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)'s
+shape reappears — a host under pressure makes `VmRSS` under-read, so the number
+comes out looking *better* than it is — so the brief ordered it reported, and it
+was.
+
+**What could not be named**, recorded rather than glossed: the micro-wake family
+(19 in 600 s, 0.65 ms of the 45.5 ms total; not the poll's timer, since it
+survives the no-poll control, not a request, not a draw) needs a symbol-level
+profile with `perf_event_paranoid` lowered. And every reading is a **resting**
+cluster — 1 000 of the 1 011 pods are inert by construction, carrying a
+`schedulerName` nothing answers to — so `COALESCE`'s bound on a storm is still
+unexercised.
+
+**Choices the measurement made that the brief did not**: the window lengths
+(600 s and 310 s, to contain 20 and 10 poll periods); both readings taken at
+**both** sizes, because the per-wake cost is what moves with size; two `--live`
+control runs, one to attribute the 30 s chain and one so the console is compared
+against the driver on *this* host rather than against D171's number; the pod
+generator cited from the 2026-08-28 report rather than re-pasted; and `ss -tnie`
+per-socket counters as the instrument, because `apiserver_request_total` cannot
+see the poll at all — a request to an unserved API group is answered before the
+instrumented handler.
+
+**The test host lost power 13 minutes after teardown** — two reboots, 14:49 and
+14:50, no clean shutdown record — which took `/tmp` with it and with it the
+per-sample CSVs and the pty tapes. The report was already written and is the only
+copy; nothing of the measurement ran during or after.

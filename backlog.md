@@ -3670,3 +3670,17 @@ Phase 12 close triage fixes them; the rest are notes.
   shorter one or a same-length reword goes quiet. No `copy-guard.py` row relates
   the four. The same shape as `ACCEPTED`/`UNCHECKABLE` above, and a visibility
   ruling on `k8s::SHORTENED` would remove all of them. `tester`, §9.
+- **The console polls metrics forever and the driver does not, and the frame it
+  owes paints nothing.** `main.rs:8270` pushes `k8s::node_usage_poll`
+  unconditionally, while the `--live` path gates it on `--analysis`/`ONCE` behind a
+  table whose own reason is that *`--live` with no Capacity pane on screen would ask
+  every thirty seconds for a paragraph nothing draws*. Measured at 1 011 pods: one
+  poll costs **13.0 ms mean**, every 30 s, for the life of the process — **0.043 %
+  of one core** — and all 12 periodic frames in the run wrote the identical
+  **25 bytes** of colour resets and hide-cursor, an empty diff, with a full
+  `snapshot` + `analyze` + seven report producers behind each. It is also the reason
+  no quiet window in the idle reading reaches 30 s. **Not boxed**: the fix is
+  starting and stopping a merged stream as panes open and close, which is real
+  machinery against 0.043 %, and the number is recorded here so nobody re-measures
+  it to find that out
+  ([D286](NOTES.md#d286--the-console-at-rest-idle-is-two-readings-the-poll-the-console-never-stops-and-a-budget-missed-by-the-same-margin-as-the-driver-2026-09-26) item 2).

@@ -4822,7 +4822,21 @@ at HEAD). Every other box in this phase stays one at a time.
       ([D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards) ·
       [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26) ruling 3). Five more findings are boxed in Phase 13 and three are
       `backlog.md` lines
-- [ ] Idle CPU measured at 0%; memory measured at ~1000 pods
+- [x] Idle CPU measured at 0%; memory measured at ~1000 pods — **measured against
+      the wired console, which nothing had done**: both existing figures were the
+      temporary driver's and the only idle reading was 2 s against a *disconnected*
+      console. `0%` is **two** readings, because the loop has no timer but two
+      things below it wake the process on a period — the 30 s metrics poll and
+      kube's 290 s re-watch. 1 051 of 1 125 quiet half-second windows at 0 ticks
+      *and* 0 ns, longest quiet run 27.0 s, **duty cycle 0.0076 %–0.055 %**; and
+      `VmRSS` **60 720 KiB (62.2 MB)** at 1 011 pods, **236 KiB *below* `--live`**
+      on the same host with the same binary, so the TUI is not where the memory is.
+      Misses `REQUIREMENTS.md:214`'s `< 50MB` by the margin its own text already
+      records for the driver, and
+      [D171](NOTES.md#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28)'s
+      ruling that the budget stays is not this box's to reopen
+      ([D286](NOTES.md#d286--the-console-at-rest-idle-is-two-readings-the-poll-the-console-never-stops-and-a-budget-missed-by-the-same-margin-as-the-driver-2026-09-26) ·
+      [reports/2026-09-26-the-console-at-rest-and-at-a-thousand-pods.md](reports/2026-09-26-the-console-at-rest-and-at-a-thousand-pods.md))
 
 **🔒 Security gate:** force a panic on purpose and check two things at once —
 the terminal is restored and the backtrace on stderr contains no credential.
