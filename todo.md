@@ -4548,37 +4548,32 @@ Secret is redrawn after the reveal is dismissed.
 
 ## Phase 12 — Final wiring · **milestone M3**
 
-> **Every box is checked and the close is all but finished — what it still owes is
-> here, because a close that stops half-way leaves a note nobody is routed to, and
-> that is exactly what happened to Phase 11
-> ([D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26)).**
-> **Done**: `just check` green at `a5bf413`; both owed pty gates (`just suspend`
-> 30 checks, `just picker` 101 checks); the host run against a 4-node kind with
-> `broken.yaml` applied; `just e2e`; the phase's own security gate — a real panic on
-> a real pty leaving the terminal restored and no credential in a 51-frame
-> backtrace, detector positive-controlled; the cross-box family review
+> **Closed 2026-09-26. Phase 11 closed with it**
+> ([D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26)),
+> and PR [#17](https://github.com/murat-akpinar/k8rs/pull/17) carried Phases 7-12 to
+> `main`, which had not advanced since 2026-09-03.
+> **What the close ran**: `just check` green (`EXIT=0` off the recipe, not a pipe)
+> and CI green with the four cross targets a local run skips; both owed pty gates
+> (`just suspend` 30 checks, `just picker` 101 checks); `just e2e`; the binary built
+> and run on the test host against a 4-node kind with `broken.yaml` applied, drawing
+> real cards and 0 CPU ticks over a quiet 2 s; the phase's own security gate — a real
+> panic on a real pty, terminal restored and no credential in a 51-frame backtrace,
+> the detector positive-controlled; the cross-box family review
 > ([reports/2026-09-26-phase-12-close-cross-box-review.md](reports/2026-09-26-phase-12-close-cross-box-review.md));
-> its three blockers fixed and **both proven on the live cluster**
+> and the whole-phase second pass, which tightened two `docs/` claims.
+> **No full mutation sweep was owed** — the phase touched neither `rules.rs` nor
+> `analysis.rs` and both are frozen
+> ([D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
+> **What it paid for**: three blockers, each found only by reading the phase whole —
+> a write-path identity guard with no caller, a refusal box naming a key that did
+> nothing, and two keys editing a list from a screen it was not on — fixed, and the
+> first two proven on the live cluster
 > ([D289](NOTES.md#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26) ·
 > [D290](NOTES.md#d290--the-closes-blocker-fixes-the-guard-that-decides-before-the-send-the-fixture-that-could-not-exist-and-a-store-that-must-not-answer-for-a-refused-watch-2026-09-26));
-> docs sync; the whole-phase second pass, which tightened two `docs/` claims that
-> said the three views were wired when four reads are not.
-> **No full mutation sweep is owed** — `git diff --stat 770ae0b..HEAD -- src/rules.rs
-> src/analysis.rs src/rules_tests* src/analysis_tests*` is empty and both files are
-> frozen ([D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
-> **`tester` has reported and the gate is green** — `just check` `EXIT=0` taken
-> directly rather than through a pipe, 1 575 + 40 tests, 19 guards, `cargo deny`;
-> CI green on `9925700` including the four cross targets the local run skips. It
-> also planted nine mutations cargo-mutants **cannot generate** and found **three
-> tests that cannot fail** on the new write-path guard
+> then three tests on that new guard that **could not fail**, found by planting nine
+> mutations cargo-mutants cannot generate, and pinned before the merge
 > ([D291](NOTES.md#d291--the-gate-was-green-and-three-tests-on-the-new-write-path-guard-could-not-fail-2026-09-26)).
-> **Owed, in order**: those three pins — a listed pod uid, a listed node uid, and a
-> store whose *other* kind's watch never answered — because the guard's `pods` and
-> `nodes` arms and four of its five allowlist words can be deleted with the suite
-> still green, and the trouble predicate can be widened to *any trouble at all*
-> without a test noticing · then **PR [#17](https://github.com/murat-akpinar/k8rs/pull/17)
-> merged**, which carries Phases 7-12 because `main` has not advanced since
-> 2026-09-03. The PR is open and its four cross checks pass.
+> Ten scaffolding flags and the untested confirmation arm are boxed in Phase 13.
 
 *Also read: [PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted) — k9s's own "skip the cycle when nothing changed" was merged and reverted a month later, and invariant 7 is the same manoeuvre. Also [§ D4](PRIOR-ART.md#d4--the-terminal-after-a-subprocess): leaving raw mode and re-entering it is one function, not one per path.*
 
