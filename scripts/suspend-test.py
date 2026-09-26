@@ -40,8 +40,10 @@ import pty
 import re
 import select
 import signal
+import socket
 import struct
 import sys
+import tempfile
 import termios
 import time
 from pathlib import Path
@@ -239,7 +241,42 @@ def visible(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", text)
 
 
-def observe(binary: Path) -> dict:
+def kubeconfig(directory: Path) -> Path:
+    """One context whose server nothing answers on — what the console needs to *start*.
+
+    **The child gets its own `KUBECONFIG` and never the host's** (`picker-test.py`'s own reason:
+    the developer's cluster is not inherited). Without this the run inherits whatever the machine
+    has, and on a host with none the console exits at the first frame with *this kubeconfig has no
+    such context* — measured 2026-09-26 on the test host, status 512, with none of the three stop
+    doors ever reached. Nothing here needs a cluster: `FRAME` is the label a still-loading console
+    draws, and `picker-test.py`'s `solo` journey measures one context connecting *straight through*
+    to that frame with no picker in the way.
+
+    **A bound-then-released port, not a made-up number**, so the address parses and the connect is
+    refused rather than answered by something else on this machine.
+
+    **A second, smaller copy of `picker-test.py`'s `written`/`reachable`/`entry` on purpose**: that
+    one is parameterised over nine journeys, this one is a single fixed file, and the import runs
+    picker → suspend so this script cannot borrow it. A copy that went stale here cannot go quiet —
+    the console would refuse to start and every row below would fail at once.
+    """
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        dead = held.getsockname()[1]
+    path = directory / "suspend.yaml"
+    path.write_text(
+        "apiVersion: v1\n"
+        "kind: Config\n"
+        "current-context: suspend-cluster\n"
+        f"clusters:\n- name: refused\n  cluster: {{server: 'https://127.0.0.1:{dead}'}}\n"
+        "contexts:\n- {name: suspend-cluster, context: {cluster: refused, user: nobody}}\n"
+        "users:\n- name: nobody\n  user: {}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def observe(binary: Path, config: Path) -> dict:
     """Run the binary under a pty, stop it three ways, and write down what the terminal did."""
     pid, fd = pty.fork()
     if pid == 0:
@@ -247,6 +284,7 @@ def observe(binary: Path) -> dict:
         # 0x0, and a console with no room is not what is under test.
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
         os.environ["TERM"] = "xterm-256color"
+        os.environ["KUBECONFIG"] = str(config)
         os.execv(str(binary), [str(binary)])
         os._exit(127)
 
@@ -314,7 +352,10 @@ def run(binary: Path) -> int:
         print(f"suspend-test: {binary} is not built — `cargo build` first, or `just suspend`, "
               f"which does it for you", file=sys.stderr)
         return 1
-    observed = observe(binary)
+    # The kubeconfig lives as long as the run and goes away with it — a `with` and not a last line
+    # (NOTES § D185).
+    with tempfile.TemporaryDirectory(prefix="k8rs-suspend-") as scratch:
+        observed = observe(binary, kubeconfig(Path(scratch)))
     read = verdicts(observed)
     failed = [what for what, ok in read if not ok]
     for what, ok in read:
