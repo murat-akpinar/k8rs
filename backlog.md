@@ -3547,3 +3547,26 @@ and the round-two report beside it. Neither is blocking; the round found no defe
   draws a different fault — so the cost is one wasted attempt. **This is an estimate, not a
   measurement**: nobody ran `kubectl version` against an unreachable server. The one-line run
   would settle it. Found by `k8s-admin`, round three.
+
+### From the copy-guard box (2026-09-26)
+
+Two further copies of `ops::ACCEPTED` / `ops::UNCHECKABLE` that the new rows do not pin, found
+by `tester` and reported rather than written — each sits in a tree it does not own. **Neither is
+a silent hole**, which is why neither blocked the box
+([D282](NOTES.md#d282--the-two-sentences-opsrs-keeps-to-itself-stay-copied-and-the-guard-that-already-exists-is-what-pins-them-2026-09-26)).
+
+- **`src/ui.rs:3181`** quotes `k8rs did not check this one with the cluster first` inside
+  `spoken`'s doc comment, to explain why the function exists — the sentence starts with `NAME`,
+  and *"K8rs"* is a word this product never spells. Illustrative prose, not a drawn copy, and the
+  *behaviour* it explains is now pinned anyway: the guard reimplements `spoken`'s no-raise rule
+  and checks it against the page. A reword leaves the doc stale and nothing else.
+
+- **`src/ops_tests.rs:179`** is `const CHECKED_FIRST: &str = "dry-run: the cluster checked it
+  first and accepted it"` — a sixth copy carrying a `dry-run: ` prefix, in `dev-core`'s tree.
+  Pinning it needs a prefix convention the box did not ask for. A reword of `ops::ACCEPTED`
+  makes it **red**, loudly, because the product then builds a string the test does not assert —
+  it fails in a confusing place rather than quietly.
+
+- **Two shapes the guard states it cannot see**, in its own docstrings rather than left implied:
+  a copy rewritten end to end leaves both fragment counts intact, and the node clause's two
+  fragments overlap on the word `k8rs,` so a reword of that one word is invisible.

@@ -157,7 +157,13 @@ python3 scripts/twin-guard.py
 # own quoted sentence, `ui.rs` against the page — so every red clears by
 # updating the neighbour and the far end is never read. `from_api` and
 # `addressed` are worse: filing `Job` under `apps`, or spelling `cronjob` as
-# `cronjobs`, leaves `cargo test --all-targets` fully green (NOTES § D51).
+# `cronjobs`, leaves `cargo test --all-targets` fully green (NOTES § D51). And
+# `ops::ACCEPTED` / `UNCHECKABLE` and `removal`'s hedges are the same seam once
+# more: `ui_tests.rs` retypes each so a `Dialog` fixture carries what `ops.rs`
+# really returns, and `screens/dialogs.md` draws each of them over and over, in
+# its mockups and in the prose that quotes them. The copy stays and there is no reversal (NOTES § D282) — a `pub(crate)`
+# const would unify the two Rust files and leave the page, the artifact the next
+# reader builds against, pinned by nothing.
 python3 scripts/copy-guard.py --self-test
 python3 scripts/copy-guard.py
 # `cargo fmt` reflows code and leaves comments alone, so the 100-column rule was

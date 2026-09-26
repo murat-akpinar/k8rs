@@ -45,13 +45,25 @@ and `("apps", "deployment")` differs from `("apps", "Deployment")` only by the
 `to_ascii_lowercase` its caller applies. That lowercasing is the single
 transformation this makes, and it is the product's own.
 
+**Pair 3 — the two verdict lines and the delete hedges.** `ops::ACCEPTED`,
+`ops::UNCHECKABLE` and the clauses `ops::removal` hedges a consequence with are
+private to the same frozen file, and `src/ui_tests.rs` retypes them so a
+`views::Dialog` fixture carries what `ops.rs` really returns. The copy stays
+and there is no reversal (NOTES § D282): the sentence lives in **three**
+artifacts, and a `pub(crate)` const would unify two of them and leave
+`screens/dialogs.md` — the artifact the next reader builds against — pinned by
+nothing. Here too each adjacent pair has a keeper and the ends have none:
+`ops_tests` compares `ops.rs` against its own quoted strings, and `ui_tests`'s
+box tests compare `ui_tests.rs` against the page. Nothing compares `ops.rs`
+with `ui_tests.rs`.
+
 **A spelling this cannot read is a copy it did not find, and that fails.** Every
 extraction below is counted and every count is asserted, because *the copies
 agree* and *I read no copies* print the same line otherwise (CLAUDE.md § A
 derived list asserts it found something).
 
 Usage:
-    copy-guard.py               # both pairs, against the tree
+    copy-guard.py               # every pair, against the tree
     copy-guard.py --self-test   # prove the guard fails when it should
 """
 import contextlib, io, re, sys
@@ -60,6 +72,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 OPS, UI, RULES, PAGE = "src/ops.rs", "src/ui.rs", "src/rules.rs", "screens/help.md"
+UI_TESTS, DIALOGS = "src/ui_tests.rs", "screens/dialogs.md"
 
 # --- PAIR 1 — THE KIND SENTENCES START ---
 
@@ -281,10 +294,235 @@ def addresses(rules_text, ui_text) -> int:
 
 # --- PAIR 2 — THE KIND-TO-GROUP TABLE END ---
 
+# --- PAIR 3 — THE VERDICT LINES AND THE DELETE HEDGES START ---
+
+# Each verdict, with two fragments of itself. **Only the page is counted**:
+# `screens/dialogs.md` draws each verdict over and over — in its mockups and in
+# the prose that quotes them — while `ops.rs` and `ui_tests.rs` declare it once
+# and `str_const` pins that one against the other, which a count would repeat.
+# The run prints how many the page holds, so the number is never in this file.
+VERDICTS = (
+    ("ACCEPTED", ("the cluster checked it first", "and accepted it")),
+    ("UNCHECKABLE", ("k8rs did not check this one", "with the cluster first")),
+)
+
+# Every clause `ops::removal` hedges a consequence with, each with two fragments
+# of itself. Three clauses, not one: the three workload kinds share a finalizer
+# hedge, the replicaset and the pod share the unread-`ownerReferences` one word
+# for word, and the node words the same fact its own way (`screens/dialogs.md`
+# § Delete, NOTES § D224). Both tails name their own clause — *may delay this or
+# act first* alone belongs to two of them and would count six copies of three.
+HEDGES = (
+    ("k8rs has not read what may be attached to it, and something there may delay this or "
+     "act first",
+     ("k8rs has not read what may be attached to it,",
+      "and something there may delay this or act first")),
+    ("Whatever created it will normally replace it — k8rs has not checked whether anything did",
+     ("whatever created it will normally replace it",
+      "k8rs has not checked whether anything did")),
+    ("Something attached to it, unread by k8rs, may delay this or act first",
+     ("something attached to it, unread by k8rs,", "k8rs, may delay this or act first")),
+)
+
+# The product's own name, and `ui::spoken`'s one exception to raising a letter.
+NAME = "k8rs"
+
+# Each arm of `removal`'s match opens on one of these, and the consequence it
+# builds is the text between this one and the next.
+ARM = "ApiResource::erase::<"
+
+# A box frame, a markdown emphasis, and Rust's end-of-line continuation — none of
+# them part of any sentence, all of them sitting inside one.
+FRAME = str.maketrans("│┌┐└┘─├┤*`\\", " " * 11)
+
+
+def packed(text):
+    """One text with its frame gone, its spaces **removed** and its case folded.
+
+    **Removed, not collapsed, and that is the whole reason this is not `drawn`
+    above.** The same sentence arrives here in four shapes: continued across Rust
+    source lines with a `\\`, wrapped at a bullet margin, broken across box rows
+    between `│`, and — in the mockups of 80-column terminal output — cut
+    **mid-word**, `k8rs has no` / `t checked whether anything did`. Only removal
+    puts all four back into one string. The fold is `ui::spoken`'s doing: the
+    page draws a verdict lower case headlessly and raised in a box, and both are
+    copies of the one constant."""
+    return "".join(text.translate(FRAME).split()).casefold()
+
+
+def rows(text):
+    """Every line of a drawn block, frame and padding gone, exactly as drawn.
+
+    The one place a verdict is compared as the page draws it — case and inner
+    spacing kept, because this is what asserts both shapes are there: a boxed row and a
+    headless one reduce to the same sentence, and a line is compared **whole** —
+    `k8rs did not check this one with the cluster first` is a prefix of the drawn
+    form, so a page that had stopped printing the headless shape would satisfy a
+    substring test with the drawn one."""
+    return [line.replace("│", " ").strip() for line in fenced(text).splitlines()]
+
+
+def spoken(line):
+    """`ui::spoken` — a verdict line as a dialog draws it.
+
+    First letter raised and a full stop added, except that a line opening on the
+    product's own name keeps it: *"K8rs"* is a word this product never spells
+    (`src/ui.rs`, NOTES § D260 item 6)."""
+    raised = line if line.startswith(NAME) else line[:1].upper() + line[1:]
+    return raised if raised.endswith(".") else raised + "."
+
+
+def copies(where, text, said, fragments):
+    """How many copies of one sentence a file holds — or `None`, having said why not.
+
+    **A fragment is counted against the whole, and that is what sees a stale
+    copy.** Presence alone cannot: four `ui_tests.rs` fixtures carry the workload
+    hedge and the page draws `ACCEPTED` six times, so rewording all but one
+    leaves the copies that did move answering for the one that did not. A copy
+    reworded anywhere keeps whichever fragment does not cover the reword, so the
+    two counts come apart.
+
+    **What it does not see, stated rather than implied.** A copy rewritten end to
+    end moves out of both counts together, and no comparison of text catches that
+    one. Neither does a reword inside a word both fragments cover — every pair
+    below is disjoint but the node clause's, whose two share `k8rs,`, and the
+    product's own name is not a word anyone rewords."""
+    whole = text.count(packed(said))
+    if not whole:
+        print(f"FAIL {where} does not say:")
+        print(f"  {said!r}")
+        print(f"this sentence is one text in three artifacts — `{OPS}` holds it, `{UI_TESTS}` "
+              f"retypes it into the fixture a box is drawn from, and `{DIALOGS}` is the one that "
+              f"owns the words (invariant 14, NOTES § D282). It is not in this one to pin, so "
+              f"this guard was about to vet nothing")
+        return None
+    for fragment in fragments:
+        if packed(fragment) not in packed(said):
+            print(f"FAIL this guard's own table pairs {fragment!r}")
+            print(f"with a sentence that does not contain it:")
+            print(f"  {said!r}")
+            print(f"the fragment counts nothing it claims to, so the row was about to vet nothing")
+            return None
+        near = text.count(packed(fragment))
+        if near != whole:
+            print(f"FAIL {where} holds {near} copy/copies of:")
+            print(f"  {fragment!r}")
+            print(f"and {whole} of the sentence it belongs to:")
+            print(f"  {said!r}")
+            print(f"one copy was reworded and its siblings were not, which is the drift a search "
+                  f"for the sentence cannot see — the copies that did move still answer it "
+                  f"(NOTES § D282)")
+            return None
+    return whole
+
+
+def verdicts(ops_text, tests_text, page_text) -> int:
+    """`ops.rs`'s verdict constant, `ui_tests.rs`'s retype, and every copy the page draws."""
+    want = {}
+    for name, fragments in VERDICTS:
+        found = str_const(ops_text, name)
+        if len(found) != 1:
+            print(f"FAIL {OPS} declares {name} {len(found)} time(s), expected 1 — renamed, "
+                  f"deleted, duplicated, or written with an escape this guard cannot read. It "
+                  f"was about to vet nothing")
+            return 1
+        mirror = str_const(tests_text, name)
+        if len(mirror) != 1:
+            print(f"FAIL {UI_TESTS} declares {name} {len(mirror)} time(s), expected 1 — renamed, "
+                  f"deleted, duplicated, or written with an escape this guard cannot read. It "
+                  f"was about to vet nothing")
+            return 1
+        print(f"copy-guard: {name} = {found[0]!r}")
+        if mirror[0] != found[0]:
+            print(f"FAIL {UI_TESTS}'s {name} is not {OPS}'s {name}:")
+            print(f"  {UI_TESTS:<15} {mirror[0]!r}")
+            print(f"  {OPS:<15} {found[0]!r}")
+            print(f"the fixture is built from a sentence `ops::Checked::verdict` does not return, "
+                  f"so the dialog is asserted against a string no code path produces "
+                  f"(NOTES § D260 item 6, § D282)")
+            return 1
+        want[found[0]] = (name, fragments)
+
+    # Two verdicts that had become one line would make every drawn row match
+    # whichever of them was looked up first, and a dialog could then say *checked*
+    # over an operation that sent no check.
+    if len(want) != len(VERDICTS):
+        print(f"FAIL the {len(VERDICTS)} verdict lines are not {len(VERDICTS)} distinct "
+              f"sentences — two of them are now the same text, so every drawn row matches "
+              f"either verdict and this guard was about to vet nothing")
+        return 1
+
+    # Both shapes, because the page draws both: the dialog's, reshaped by
+    # `ui::spoken`, and the headless one `main.rs` prints, which is the constant
+    # itself. Each is a whole row of a mockup.
+    drawn_rows, packed_page = rows(page_text), packed(page_text)
+    for value, (name, fragments) in want.items():
+        for shape, text in (("headless", value), ("drawn", spoken(value))):
+            if text not in drawn_rows:
+                print(f"FAIL {DIALOGS} draws no {shape} row for {name} "
+                      f"({len(drawn_rows)} mockup row(s) read in all):")
+                print(f"  expected  {text!r}")
+                print(f"the copy this guard pins is not there to pin, so it was about to vet "
+                      f"nothing. A verdict reworded on the page is the one drift no test sees "
+                      f"(NOTES § D282)")
+                return 1
+        # And every *other* copy on the page — the further mockups and the prose
+        # that quotes them — says the same thing as the two rows just found.
+        held = copies(DIALOGS, packed_page, value, fragments)
+        if held is None:
+            return 1
+        print(f"copy-guard: {DIALOGS} says {name} {held}× — headless, and as {spoken(value)!r}")
+    return 0
+
+
+def hedges(ops_text, tests_text, page_text) -> int:
+    """Every clause `removal` hedges with, in `ops.rs`, in `ui_tests.rs` and on the page."""
+    arms = body(ops_text, "fn removal(")
+    if arms is None:
+        print(f"FAIL {OPS} has no readable `removal` body — renamed, moved, or its braces no "
+              f"longer match. This guard was about to vet nothing")
+        return 1
+    arms = [packed(arm) for arm in arms.split(ARM)[1:]]
+    if not arms:
+        print(f"FAIL {OPS}'s `removal` body holds no `{ARM}` arm — the consequences are built "
+              f"some way this guard cannot read, so it was about to vet nothing")
+        return 1
+
+    # Joined on a space, which packed text never contains: a clause must be found
+    # inside one arm and not across the seam between two.
+    read = ((OPS, " ".join(arms)), (UI_TESTS, packed(tests_text)), (DIALOGS, packed(page_text)))
+    for hedge, fragments in HEDGES:
+        held = []
+        for where, text in read:
+            count = copies(where, text, hedge, fragments)
+            if count is None:
+                return 1
+            held.append(f"{where} {count}×")
+        print(f"copy-guard: {hedge[:46]!r}… — {', '.join(held)}")
+
+    # The other direction: a clause above may still be somewhere in `removal`
+    # while the arm that used to carry it has been reworded out of all of them.
+    homeless = [n for n, arm in enumerate(arms, 1)
+                if not any(packed(hedge) in arm for hedge, _ in HEDGES)]
+    if homeless:
+        for n in homeless:
+            print(f"FAIL {OPS}'s `removal` arm {n} hedges with none of them:")
+            print(f"  {arms[n - 1][:140]!r}…")
+        print(f"every consequence `delete` shows says what k8rs did not read before offering it "
+              f"(`{DIALOGS}` § Delete). An arm that hedges with nothing is a dialog promising "
+              f"more than the call behind it knows")
+        return 1
+    print(f"OK — {len(arms)} `removal` arm(s), each hedging with one of {len(HEDGES)} clause(s) "
+          f"all three artifacts spell the same way, every copy of every one of them")
+    return 0
+
+
+# --- PAIR 3 — THE VERDICT LINES AND THE DELETE HEDGES END ---
+
 
 def every() -> int:
     read = {}
-    for name in (OPS, UI, RULES, PAGE):
+    for name in (OPS, UI, RULES, PAGE, UI_TESTS, DIALOGS):
         path = ROOT / name
         if not path.exists():
             print(f"FAIL {name} does not exist — this guard was about to vet nothing")
@@ -293,6 +531,8 @@ def every() -> int:
     return max(
         sentences(read[OPS], read[UI], read[PAGE]),
         addresses(read[RULES], read[UI]),
+        verdicts(read[OPS], read[UI_TESTS], read[DIALOGS]),
+        hedges(read[OPS], read[UI_TESTS], read[DIALOGS]),
     )
 
 
@@ -311,6 +551,16 @@ def self_test():
         if says:
             assert says in out, f"{why}: {says!r} not in\n{out}"
         return out
+
+    # **Every row below is wired into `every`.** Each case in this function calls
+    # its checker directly, so a row written, self-tested and never called
+    # against the tree is the one failure the rest of this cannot see — and it
+    # is the failure that leaves the copies it names pinned by nothing. Found by
+    # attacking this self-test: deleting a call from `every` left it green.
+    called = Path(__file__).read_text(encoding="utf-8").split("def every() -> int:")[1]
+    called = called.split("\ndef ")[0]
+    for row in ("sentences(", "addresses(", "verdicts(", "hedges("):
+        assert row in called, f"`every` never calls `{row})`, so nothing runs it against the tree"
 
     # --- pair 1 ---
     ops = ('const SCALABLE: &str = "a deployment, a statefulset and a replicaset";\n'
@@ -452,6 +702,236 @@ def self_test():
     ):
         check(addresses, args, 1, why, says)
 
+    # --- pair 3 ---
+    # Written the way `ops.rs` writes them — across source lines, continued with
+    # a `\`, which is one of the four shapes `packed` exists for and the reason a
+    # plain substring search finds none of these.
+    verdict_consts = ('const ACCEPTED: &str = "the cluster checked it first and accepted it";\n'
+                      'const UNCHECKABLE: &str = "k8rs did not check this one with the cluster '
+                      'first";\n')
+    removal = (
+        'fn removal(kind: &str, name: &str) -> Result<(ApiResource, String, bool), String> {\n'
+        '    let (resource, consequence, namespaced) = match kind {\n'
+        '        "deployment" => (\n'
+        '            ApiResource::erase::<Deployment>(&()),\n'
+        '            "This asks the cluster to remove the deployment. \\\n'
+        '             k8rs has not read what may be attached to it, and something there may delay '
+        'this or \\\n'
+        '             act first — left alone, nothing is left running."\n'
+        '                .to_string(),\n'
+        '            true,\n'
+        '        ),\n'
+        '        "pod" => (\n'
+        '            ApiResource::erase::<Pod>(&()),\n'
+        '            "This removes the pod. Whatever created it will normally replace it — k8rs '
+        'has not \\\n'
+        '             checked whether anything did."\n'
+        '                .to_string(),\n'
+        '            true,\n'
+        '        ),\n'
+        '        "node" => (\n'
+        '            ApiResource::erase::<Node>(&()),\n'
+        '            format!(\n'
+        '                "This asks the cluster to remove its record of {name}, not the machine. '
+        '\\\n'
+        '                 Something attached to it, unread by k8rs, may delay this or act first. '
+        'Left \\\n'
+        '                 alone, its pods are deleted."\n'
+        '            ),\n'
+        '            false,\n'
+        '        ),\n'
+        '        other => return Err(format!("k8rs cannot delete {}", a_kind(other))),\n'
+        '    };\n'
+        '    Ok((resource, consequence, namespaced))\n'
+        '}\n'
+    )
+    ops3 = verdict_consts + removal
+    # Two copies of the pod clause, because one copy is the shape a count can
+    # never fail on and the real file carries three.
+    tests3 = (
+        verdict_consts
+        + '        consequence: "This removes the pod. Whatever created it will normally replace '
+          'it — k8rs \\\n'
+          '                      has not checked whether anything did."\n'
+          '            .to_owned(),\n'
+          '    let replicaset = "This removes the replicaset and every pod it manages. Whatever '
+          'created it \\\n'
+          '                      will normally replace it — k8rs has not checked whether anything '
+          'did.";\n'
+          '    let removed = "This asks the cluster to remove the deployment. k8rs has not read '
+          'what may \\\n'
+          '                   be attached to it, and something there may delay this or act first '
+          '— left \\\n'
+          '                   alone, nothing is left running.";\n'
+          '        consequence: "This asks the cluster to remove its record of node-3, not the '
+          'machine. \\\n'
+          '                      Something attached to it, unread by k8rs, may delay this or act '
+          'first. \\\n'
+          '                      Left alone, its pods are deleted."\n'
+          '            .to_owned(),\n'
+    )
+    # The page in every shape it really uses: two drawn boxes that wrap a
+    # sentence between `│`, a **bullet outside every fence** — § Delete specifies
+    # four of the six kinds that way and draws neither of them — and a headless
+    # mockup of 80-column output, which is the one that cuts a word in half.
+    scale_box = ("```\n"
+                 "│   │  This starts 1 more copy of your app.                      │  │\n"
+                 "│   │  The cluster checked it first and accepted it.             │  │\n"
+                 "```\n")
+    restart_box = ("```\n"
+                   "│   │  This replaces every copy of your app with a new one.      │  │\n"
+                   "│   │  The cluster checked it first and accepted it.             │  │\n"
+                   "```\n")
+    bullet = ("- **deployment** — \"This asks the cluster to remove the deployment.\n"
+              "  k8rs has not read what may be attached to it, and something there\n"
+              "  may delay this or act first — left alone, nothing is left running.\"\n")
+    headless = ("```\n"
+                "the cluster checked it first and accepted it\n"
+                "This removes the pod. Whatever created it will normally replace it — k8rs has no\n"
+                "t checked whether anything did.\n"
+                "k8rs did not check this one with the cluster first\n"
+                "```\n")
+    pod_box = ("```\n"
+               "│   │  This removes the pod. Whatever created it will normally    │  │\n"
+               "│   │  replace it — k8rs has not checked whether anything did.    │  │\n"
+               "│   │  k8rs did not check this one with the cluster first.        │  │\n"
+               "```\n")
+    node_box = ("```\n"
+                "│   │  This asks the cluster to remove its record of node-3, not  │  │\n"
+                "│   │  the machine. Something attached to it, unread by k8rs, may │  │\n"
+                "│   │  delay this or act first. Left alone, its pods are deleted. │  │\n"
+                "│   │  k8rs did not check this one with the cluster first.        │  │\n"
+                "```\n")
+    page3 = scale_box + "\n" + restart_box + "\n" + bullet + "\n" + headless + "\n" + \
+        pod_box + "\n" + node_box
+
+    out = check(verdicts, (ops3, tests3, page3), 0, "the tree's own three copies of each verdict")
+    assert "ACCEPTED 3×" in out and "UNCHECKABLE 3×" in out, ("the page copies were not counted",
+                                                              out)
+    out = check(hedges, (ops3, tests3, page3), 0, "the three hedges in all three artifacts")
+    assert "3 `removal` arm(s)" in out, ("the arms were not read one by one", out)
+    # **`packed` is load-bearing in all four of its shapes**, and each of these
+    # says so against the fixtures above: without it none of the three artifacts
+    # holds a clause at all and this guard would fail on a tree perfectly in step
+    # — the failure that gets a guard deleted rather than fixed.
+    workload, pod_clause, node_clause = (said for said, _ in HEDGES)
+    assert workload not in ops3 and packed(workload) in packed(ops3), \
+        "the ops.rs fixture does not exercise Rust's `\\` continuation"
+    assert pod_clause not in tests3 and packed(pod_clause) in packed(tests3), \
+        "the ui_tests.rs fixture does not exercise Rust's `\\` continuation"
+    assert node_clause not in page3 and packed(node_clause) in packed(node_box), \
+        "the page fixture does not exercise a sentence wrapped between box rows"
+    assert packed(pod_clause) in packed(headless), \
+        "the headless fixture does not exercise a word cut in half by the 80-column wrap"
+    assert packed(workload) not in packed(fenced(page3)), \
+        "the page fixture draws the workload clause in a fence, so it proves nothing about the "
+    # A framed row with less trailing pad is the frame, not drift.
+    check(verdicts, (ops3, tests3, page3.replace("accepted it.             │", "accepted it.  │")),
+          0, "a framed verdict row with less trailing pad")
+
+    # The rewording, in each artifact and in each shape each one draws.
+    check(verdicts, (ops3.replace("and accepted it", "and allowed it"), tests3, page3), 1,
+          "a reworded ops.rs verdict", "is not")
+    check(verdicts, (ops3, tests3.replace("with the cluster first", "with the cluster up front"),
+                     page3), 1, "a reworded ui_tests.rs verdict", "is not")
+    check(verdicts, (ops3, tests3, page3.replace("the cluster checked it first and accepted it\n",
+                                                 "the cluster checked it first, and accepted it\n")),
+          1, "a reworded headless row on the page", "draws no headless row for ACCEPTED")
+    # **One drawn row of several.** The shape check above still finds the other
+    # box, so this is the count and nothing else.
+    check(verdicts, (ops3, tests3, page3.replace(restart_box,
+                                                 restart_box.replace("checked it first",
+                                                                     "checked this first"))),
+          1, "one drawn verdict row of two reworded", "copy/copies of")
+    # **`ui::spoken` does not raise the product's own name**, and this is the case
+    # that says so: a page drawing *"K8rs did not check…"* is a page the product
+    # cannot produce.
+    check(verdicts, (ops3, tests3, page3.replace("│  k8rs did not check", "│  K8rs did not check")),
+          1, "a drawn row that raised the product's own name", "draws no drawn row for UNCHECKABLE")
+    # **The headless row is compared whole, not as a substring.** `UNCHECKABLE`'s
+    # constant is a prefix of its drawn form, so a page that had stopped printing
+    # the headless shape would satisfy a `contains` with the drawn one and this
+    # guard would vet one copy while claiming two.
+    check(verdicts, (ops3, tests3,
+                     page3.replace("k8rs did not check this one with the cluster first\n", "", 1)),
+          1, "a page that draws UNCHECKABLE only as a dialog does", "draws no headless row")
+
+    check(hedges, (ops3.replace("and something there may delay this or",
+                                "and anything there may delay this or"), tests3, page3), 1,
+          "the only ops.rs copy of a clause reworded", "src/ops.rs does not say")
+    check(hedges, (ops3, tests3.replace("has not checked whether anything did",
+                                        "has not checked whether one does", 1), page3), 1,
+          "one ui_tests.rs copy of two reworded", "copy/copies of")
+    check(hedges, (ops3, tests3, page3.replace(pod_box, pod_box.replace("normally    │",
+                                                                        "usually     │"))),
+          1, "one page copy of two reworded", "copy/copies of")
+    check(hedges, (ops3, tests3, page3.replace("unread by k8rs, may │",
+                                               "unread by k8rs, might │")), 1,
+          "the only page copy of a clause reworded", "screens/dialogs.md does not say")
+    check(hedges, (ops3, tests3, page3.replace(bullet, "")), 1,
+          "a page that stopped specifying the workload clause", "screens/dialogs.md does not say")
+    # **A fragment that is not part of its own sentence** — the table above
+    # mistyped — counts nothing it claims to and would be reported as the file's
+    # fault rather than this guard's.
+    check(copies, (UI_TESTS, packed(tests3), pod_clause, ("whatever built it",)), None,
+          "a fragment this guard's table pairs with the wrong sentence", "vet nothing")
+
+    # **The other direction.** A clause can stay in the file while the arm that
+    # carried it is reworded out of every hedge — here a fourth kind that hedges
+    # with nothing, which is a dialog promising more than its call knows.
+    unhedged = removal.replace(
+        '        "pod" => (\n',
+        '        "replicaset" => (\n'
+        '            ApiResource::erase::<ReplicaSet>(&()),\n'
+        '            "This removes the replicaset and every pod it manages.".to_string(),\n'
+        '            true,\n'
+        '        ),\n'
+        '        "pod" => (\n', 1)
+    check(hedges, (verdict_consts + unhedged, tests3, page3), 1,
+          "an arm that hedges with none of them", "hedges with none of them")
+
+    # Every way an extraction can come back empty, on each of the two new facts.
+    for why, args in {
+        "a renamed ops verdict": (ops3.replace("ACCEPTED", "AGREED", 1), tests3, page3),
+        "a deleted ops verdict": (ops3.replace(verdict_consts.splitlines()[0] + "\n", ""), tests3,
+                                  page3),
+        "a duplicated ops verdict": (ops3 + verdict_consts.splitlines()[0] + "\n", tests3, page3),
+        "a renamed ui_tests verdict": (ops3, tests3.replace("UNCHECKABLE", "UNCHECKED", 1), page3),
+        "a duplicated ui_tests verdict": (ops3, tests3 + verdict_consts.splitlines()[1] + "\n",
+                                          page3),
+        "an escape in a verdict": (ops3.replace("the cluster checked",
+                                                "the \\\"cluster\\\" checked", 1), tests3, page3),
+        "a page with no fences at all": (ops3, tests3, page3.replace("```", "~~~")),
+        "an empty ops.rs": ("", tests3, page3),
+        "an empty ui_tests.rs": (ops3, "", page3),
+        "an empty page": (ops3, tests3, ""),
+    }.items():
+        check(verdicts, args, 1, why, "vet nothing")
+    # Two verdicts that became one sentence: a dialog could then say *checked*
+    # over an operation that sent no check, and every drawn row would still match.
+    same = verdict_consts.replace("k8rs did not check this one with the cluster first",
+                                  "the cluster checked it first and accepted it")
+    # Asked for by its own sentence, not by the `vet nothing` every failure here
+    # ends on: this fixture also trips the fragment-table check one step later,
+    # so a looser `says` would pass with the distinctness test taken out.
+    check(verdicts, (same + removal, same, page3), 1,
+          "two verdicts that are now the same sentence", "distinct sentences")
+
+    for why, args, says in (
+        ("a renamed removal", (ops3.replace("fn removal(", "fn removed("), tests3, page3),
+         "vet nothing"),
+        ("a duplicated removal signature", (ops3 + removal, tests3, page3), "vet nothing"),
+        ("a removal whose braces do not match",
+         (ops3.replace("    };\n    Ok((resource", "    Ok((resource"), tests3, page3),
+         "vet nothing"),
+        ("a removal whose arms cannot be read",
+         (ops3.replace("ApiResource::erase::<", "erased::<"), tests3, page3), "body holds no"),
+        ("an empty ops.rs", ("", tests3, page3), "vet nothing"),
+        ("an empty ui_tests.rs", (ops3, "", page3), "does not say"),
+        ("an empty page", (ops3, tests3, ""), "does not say"),
+    ):
+        check(hedges, args, 1, why, says)
+
     print("copy-guard: self-test passed — a kind sentence reworded in ops.rs, in ui.rs or on the "
           "page is refused, and so is a kind added to one of the three alone, a constant whose "
           "indent moved and two sentences that became one; a framed mockup, a bare one, extra "
@@ -465,6 +945,25 @@ def self_test():
           "string literal does not run one body into the next, while a signature that appears "
           "twice is refused rather than read as its first occurrence, and `Other` reaches "
           "neither table")
+    print("copy-guard: self-test passed — on the verdicts: a line reworded in ops.rs, in "
+          "ui_tests.rs, in the headless mockup row or in one drawn box of two is refused, a "
+          "drawn row that raised the product's own name is refused, and a page that draws "
+          "UNCHECKABLE only as a dialog does is refused rather than satisfied by the prefix; "
+          "less trailing pad inside a frame is not a failure. On the hedges: all three clauses "
+          "are read out of removal's own arms, one reworded in ops.rs, in ui_tests.rs or on the "
+          "page is refused whether it is the only copy or one of several, and so is an arm that "
+          "hedges with none of them. The stale-sibling case is the one a search for the sentence "
+          "cannot see and it is caught by counting two non-overlapping fragments against the "
+          "whole — each of the two is asserted load-bearing on its own, and a fragment this "
+          "guard's own table pairs with a sentence that does not contain it is refused as "
+          "*vetted nothing* rather than blamed on the file. `packed` is asserted load-bearing in each of its four shapes — Rust's `\\` "
+          "continuation, a bullet wrapped at the margin, a sentence broken between box rows, and "
+          "a word cut in half by the 80-column mockup — and the page is asserted searched whole "
+          "rather than fence by fence, since § Delete specifies four of the six kinds in prose. "
+          "A renamed, deleted, duplicated or escape-carrying constant on either side, two "
+          "verdicts that became one sentence, a page with no fences, a renamed, duplicated, "
+          "brace-broken or unreadable removal, and an empty file each fail as *vetted nothing* "
+          "rather than as agreement")
 
 
 if "--self-test" in sys.argv:

@@ -303,6 +303,7 @@ its line moving with it.
 - [D279](#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24) — the context family: two boxes that cannot be landed apart, and the five rulings their brief needed
 - [D280](#d280--the-which-cluster-review-round-a-header-slot-with-no-vocabulary-a-mockup-that-cannot-be-drawn-and-four-tests-weaker-than-they-read-2026-09-26) — the which-cluster review round: a header slot with no vocabulary, a mockup that cannot be drawn, and four tests weaker than they read
 - [D281](#d281--round-two-the-fix-that-broke-the-quoting-rule-a-probe-that-was-not-one-and-a-frame-that-is-honest-as-built-and-misreading-as-drawn-2026-09-26) — round two: the fix that broke the quoting rule, a probe that was not one, and a frame that is honest as built and misreading as drawn
+- [D282](#d282--the-two-sentences-opsrs-keeps-to-itself-stay-copied-and-the-guard-that-already-exists-is-what-pins-them-2026-09-26) — the two sentences `ops.rs` keeps to itself stay copied, and the guard that already exists is what pins them
 
 ## Why it exists — where the gap is
 
@@ -24923,3 +24924,41 @@ finding got more expensive, since a next step *instructs* the reader to run what
 the command log merely showed; and `cut` bounds the box's paragraph with no idea
 it is cutting a command, where `command_cut` exists and is unreachable from
 there.
+
+### D282 — the two sentences `ops.rs` keeps to itself stay copied, and the guard that already exists is what pins them (2026-09-26)
+
+Phase 12's box asked for a ruling before a dialog is wired: `ops::ACCEPTED`,
+`ops::UNCHECKABLE` and `ops::removal`'s pod hedge are private to a file frozen
+since Phase 7, and `src/ui.rs` and `src/ui_tests.rs` retype them
+([D260](#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)
+item 6). The box named two ways out — pin the copy, or write the reversal first.
+
+**The copy stays and there is no reversal**, and the deciding fact is that the
+sentence lives in **three** artifacts, not two. `grep` puts *the cluster checked
+it first and accepted it* in `src/ops.rs:976` as a private const, in
+`src/ui_tests.rs:8851` as a retyped one whose own doc already calls the hole by
+name, and in `screens/dialogs.md` five times. **A `pub(crate)` const unifies two
+of the three and leaves the page unpinned** — and the page is the artifact a
+reader of this repo builds against, which is the whole lesson of
+[D281](#d281--round-two-the-fix-that-broke-the-quoting-rule-a-probe-that-was-not-one-and-a-frame-that-is-honest-as-built-and-misreading-as-drawn-2026-09-26)
+item 4, where the code was right and the mockup was what misled.
+
+**So it is `scripts/copy-guard.py`'s, which was built for exactly this pair
+shape and already carries it for two other sentences.** Its `SCALABLE` /
+`RESTARTABLE` rows pin a private `ops.rs` const against `ui.rs`'s retyped one
+*and* against `screens/help.md`'s prose, for the same reason and with a
+self-test that proves a reword in any of the three goes red. Widening it to
+`ACCEPTED`, `UNCHECKABLE` and `removal`'s hedge is a row, not a mechanism, and
+it catches what a `pub` const cannot: a reword on the **page**.
+
+**What this ruling does not cover, and which box owns it.** A guard pins the
+*words*; it cannot see which branch produced them. That a dialog shows
+`UNCHECKABLE` because the wiring really took the unchecked path — rather than
+showing the right sentence from the wrong branch — is a behavioural pin, and it
+belongs to the dialog-wiring box above this one, where a real `ops::Shown`
+exists to assert against. Naming it here so it is not read as covered.
+
+**And the precedent is stated once so the next reach for `pub` is answered:**
+the way an `ops.rs` sentence reaches `ui.rs` is retyped and guarded, because
+`ops.rs` froze at Phase 7 and the page needs pinning either way. That is not a
+workaround for the freeze — it is the only shape that covers all three copies.

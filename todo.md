@@ -4766,14 +4766,23 @@ at HEAD). Every other box in this phase stays one at a time.
       are whatever this wiring hands them ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12)). Feed a
       crafted name — ANSI escape, right-to-left override, 10k on one line —
       through the real path and watch the frame stay 80×24
-- [ ] **Rule, before wiring a dialog, what happens to the two sentences `ops.rs`
+- [x] **Rule, before wiring a dialog, what happens to the two sentences `ops.rs`
       keeps to itself** — `ops::ACCEPTED` / `ops::UNCHECKABLE` and `ops::removal`'s
       pod hedge are copied into `src/ui.rs` and `src/ui_tests.rs`, and the original
       is private to a file frozen since Phase 7, so *stop copying them* cannot be
       done without a reversal ([D260](NOTES.md#d260--the-dialog-family-the-taught-command-belongs-in-the-frame-and-not-on-a-strip-that-has-not-drawn-it-yet-a-refusal-that-followed-no-check-may-not-say-a-check-stopped-it-and-two-sentences-that-must-agree-live-in-a-file-this-one-cannot-reach-2026-09-12) item 6 ·
       [D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 3).
       Either the copy stays and a test pins it against what `ops.rs` really
-      returns through the wiring, or the reversal is written first
+      returns through the wiring, or the reversal is written first.
+      **Ruled 2026-09-26: the copy stays and there is no reversal**, because the
+      sentence lives in *three* artifacts and a `pub(crate)` const would leave
+      the page unpinned — so `scripts/copy-guard.py`, built for this pair shape
+      and already carrying two others, grows the rows
+      ([D282](NOTES.md#d282--the-two-sentences-opsrs-keeps-to-itself-stay-copied-and-the-guard-that-already-exists-is-what-pins-them-2026-09-26)).
+      The hedge turned out to be **three** clauses over six `removal` arms, and
+      the page draws four of the six only in prose. The behavioural pin — *which
+      branch* produced the sentence — is the wiring box above this one's, and
+      D282 says so rather than leaving it read as covered
 - [ ] Manual pass of the REQUIREMENTS error-state list (no kubeconfig, 403 on
       read, 403 on write, API down mid-run, watch drop, rejected admission,
       409 conflict)
