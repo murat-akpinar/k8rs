@@ -312,6 +312,7 @@ its line moving with it.
 - [D288](#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26) — the close found ten scaffolding flags that outlived the phase that was meant to remove them
 - [D289](#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26) — the Phase 12 close review: a write guard with no caller, two screens that name a key that does nothing, and the ruling that `Changed` stays unproduced
 - [D290](#d290--the-closes-blocker-fixes-the-guard-that-decides-before-the-send-the-fixture-that-could-not-exist-and-a-store-that-must-not-answer-for-a-refused-watch-2026-09-26) — the close's blocker fixes: the guard that decides before the send, the fixture that could not exist, and a store that must not answer for a refused watch
+- [D291](#d291--the-gate-was-green-and-three-tests-on-the-new-write-path-guard-could-not-fail-2026-09-26) — the gate was green and three tests on the new write-path guard could not fail
 
 ## Why it exists — where the gap is
 
@@ -25753,7 +25754,73 @@ caught, and all four unviable naming a missing `Default`. An earlier sweep was
 which is [D180](#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)'s
 shape caught by the author.
 
-**What the fixes did not close.** `?` still promises `c container` and `⇧p
-previous`, because `src/ui_tests.rs::mockup()` reads `screens/help.md` at test time
-and asserts `ui::HELP == mockup()`, so the wording has to change in `screens/`
-first — `tui-designer`'s, and the reason that fix is two dispatches rather than one.
+**Why that fix took two dispatches.** `src/ui_tests.rs::mockup()` reads
+`screens/help.md` at test time and asserts `ui::HELP == mockup()`, so the wording
+had to land in `screens/` before `ui.rs` could follow — `tui-designer`'s, then
+`dev-ui`'s. Both ends now read `not built yet: c container, ⇧p previous`, byte
+identical, and `tui-designer` kept the labels against the shorter wording for a
+reason worth recording: the row above offers *the log from before a crash*, which
+only `⇧p` delivers, so a bare `c`/`⇧p` would have moved the defect instead of
+closing it. **An earlier draft of this entry said the promise was still open; it was
+closed in the same turn, and `tester` caught the stale sentence.**
+
+### D291 — the gate was green and three tests on the new write-path guard could not fail (2026-09-26)
+
+`tester`'s step 5 over the close's blocker fixes
+([D290](#d290--the-closes-blocker-fixes-the-guard-that-decides-before-the-send-the-fixture-that-could-not-exist-and-a-store-that-must-not-answer-for-a-refused-watch-2026-09-26)).
+`just check` green — `EXIT=0` read from the recipe itself rather than through a
+pipe, which is [CLAUDE.md](CLAUDE.md)'s own rule because `fish` has no
+`PIPESTATUS` and a piped gate reports the pipe — 1 575 + 40 tests, 19 guards,
+`cargo deny`, and CI green on `9925700` with the four cross targets a local run
+skips. **The gate was not the finding.**
+
+**Nine mutations planted by hand, because cargo-mutants generates none of them.**
+It produces no mutant for an individual `return` inside a body, for a deleted
+`.chain()`, or for a word leaving a `matches!` list — so `just mutants-diff`
+reporting *0 missed* over this diff was true and uninformative about exactly the
+lines that mattered. Four of `vanished`'s five fail-safe returns died when flipped,
+which confirms the author's claim. **Three plants stayed green:**
+
+1. **Keep only `.workloads` in the chain — 1 575 still green.** Every test that
+   reaches it feeds a Deployment, so `snapshot.pods` and `snapshot.nodes` are dead
+   weight to the suite while being live in the product: the journey is
+   `wanting` → `addressed(&card.owner.kind).1` → `KINDS.singular` →
+   `Object::new("pod", …)` → the allowlist → `snapshot.pods`, traced rather than
+   assumed. Delete those halves and `ctrl-d` on a **running** pod answers *Already
+   gone* and the delete never happens — D22's guard becoming a denial of the whole
+   verb, on the most-used destructive key, against the object every Alerts card is
+   about.
+2. **`"pod"` leaving the allowlist — green.** Four of the five words are unpinned,
+   same root cause.
+3. **The trouble arm widened to `!store.troubles().is_empty()` — green.** `==` →
+   `!=` *is* caught, so the direction everyone worried about is covered; the
+   undefended direction is the predicate matching **too much**, where one refused
+   `nodes` watch switches the guard off for every kind, silently.
+
+**The drift nobody needed to worry about, measured.** The brief asked whether
+`addressed` and `vanished` could drift apart, now that `addressed` has three
+readers. They cannot quietly: `copy-guard.py` pins `addressed`'s eight words against
+frozen `rules::ObjectKind::from_api`, and a change to `vanished`'s own literals
+fails safe because the same literals gate the allowlist first.
+
+**Ruled: the same box, not a new one, and the merge waits.** CLAUDE.md admits
+exactly one exception to *a box is never added to an open phase* — a defect in the
+box currently being landed — and *a test that cannot fail is not a test* is a hard
+rule, not a preference. The code is correct as written; what is missing is the pin,
+and it is three more tuples in a loop that already exists. Holding a green PR for
+twenty lines is cheaper than shipping an identity guard on the write path whose pod
+arm no test can fail.
+
+**Two things this round also corrected, both records rather than code.** This
+entry's predecessor claimed `?` still promised two unbound keys; that had been
+closed in the same turn and the sentence was stale — caught by `tester`, not by the
+ritual. And the commit was taken **before** this report arrived, which is the leak
+CLAUDE.md names by name; the tree measured was byte-identical to `0363df8`, so
+nothing is invalidated, but the three pins now need a follow-up commit rather than
+an amend, and that is the cost of not waiting.
+
+**What no automated gate reaches, said plainly.** `scripts/e2e.sh` drives the
+headless `k8rs ops` driver and never enters `pressed`/`over_modal`, so **no gate in
+`just check` touches the confirm arm this diff changed.** The only end-to-end
+evidence for the guard and the refusal key is the two hand journeys in D290. That is
+structural and pre-existing, and it is a Phase 13 line rather than a blocker.

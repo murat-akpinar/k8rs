@@ -17121,12 +17121,27 @@ fn answered_name(did: Did) -> Option<String> {
     }
 }
 
-/// **A listed store holding the Deployment capture** — the kind `r restart` is written for, and the
-/// one D22's guard is asked about here. `listed` fills the pod watch; this adds the workload one.
-fn listed_deployments() -> k8s::Store {
-    let mut store = listed(Vec::new());
+/// **A listed store holding one real capture per kind the allowlist in [`vanished`] names** — all
+/// five of invariant 6's watches, so the guard can be asked a question it is able to answer about
+/// each of them, and every link of its snapshot chain has something in it.
+///
+/// **One capture per watch and not one for Deployments alone**, which is what let `snapshot.pods`
+/// and `snapshot.nodes` be dropped from that chain with the suite still green (`tester`,
+/// 2026-09-26): every case reaching it fed a Deployment, so two thirds of the chain was dead weight
+/// to the tests while `ctrl-d` on a running pod depended on it.
+fn a_listed_cluster() -> k8s::Store {
+    let mut store = listed(objects::<Pod>("kube-system-pods.json"));
+    for node in objects::<Node>("nodes.json") {
+        store.node(&now(), Event::Apply(node));
+    }
     for deployment in objects::<Deployment>("deployments.json") {
         store.deployment(&now(), Event::Apply(deployment));
+    }
+    for set in objects::<StatefulSet>("statefulsets.json") {
+        store.stateful_set(&now(), Event::Apply(set));
+    }
+    for set in objects::<DaemonSet>("daemonsets.json") {
+        store.daemon_set(&now(), Event::Apply(set));
     }
     store
 }
@@ -17155,6 +17170,27 @@ fn a_deployment_watch_that_never_answered() -> k8s::Store {
     store
 }
 
+/// **A listed store whose *Node* watch never answered, and which holds no Deployment** — so a
+/// question about a Deployment has a true answer (*absent*) while `k8s::Store::troubles` names a
+/// different kind entirely.
+///
+/// **This is the store a trouble predicate widened to `!store.troubles().is_empty()` gets wrong**
+/// (`tester`, 2026-09-26): that spelling passes `==` → `!=` mutation and every case above, and
+/// switches D22's guard off for all five kinds the moment one watch anywhere is in trouble.
+fn a_node_watch_that_never_answered() -> k8s::Store {
+    let mut store = k8s::Store::default();
+    store.pod(&now(), Event::Init);
+    store.pod(&now(), Event::InitDone);
+    store.deployment(&now(), Event::Init);
+    store.deployment(&now(), Event::InitDone);
+    store.stateful_set(&now(), Event::Init);
+    store.stateful_set(&now(), Event::InitDone);
+    store.daemon_set(&now(), Event::Init);
+    store.daemon_set(&now(), Event::InitDone);
+    store.stop_waiting();
+    store
+}
+
 /// **The object went away while the box was open, so the yes becomes a refusal and no command is
 /// sent** (NOTES § D22, § D289 ruling 1; `screens/dialogs.md` § The object went away while the
 /// dialog was open).
@@ -17165,16 +17201,27 @@ fn a_deployment_watch_that_never_answered() -> k8s::Store {
 /// between the dry-run and the yes, leaving the audit line naming a `uid` nothing changed beside a
 /// `PATCH` that landed on a different instance.
 ///
-/// **Six shapes, because a guard is proven only for the shapes it was fed** (NOTES § D29): one
-/// where the object is *there*, one where it is *gone*, and **four where k8rs cannot tell**,
-/// none of which may read as gone — a ReplicaSet, which invariant 6 fetches on demand and never
-/// watches; a selection carrying no `uid`; a store whose first LIST has not landed; and a listed
-/// store whose Deployment watch never answered, which is what a refused watch looks like from
-/// here.
+/// **Two groups, because a guard is proven only for the shapes it was fed** (NOTES § D29) and the
+/// two groups feed different halves of it.
 ///
-/// **The `kind` is what varies in the ReplicaSet case and the name does not**, because the guard
-/// compares the `uid` and nothing else — so the case that has to differ is the one the allowlist
-/// reads.
+/// **The seven store shapes**: one where the object is *there*, two where it is *gone* — the
+/// second of those a store whose trouble is on a **different** kind — and four where k8rs cannot
+/// tell, none of which may read as gone: a ReplicaSet, which invariant 6 fetches on demand and
+/// never watches; a selection carrying no `uid`; a store whose first LIST has not landed; and a
+/// listed store whose own watch for the kind never answered.
+///
+/// **Then every word the allowlist carries, both ways** — and *both* is what makes each of them a
+/// pin rather than a passenger (`tester`, 2026-09-26, three hand-planted mutations that stayed
+/// green). A *held* uid pins that kind's link in [`vanished`]'s snapshot chain: drop `.pods` and a
+/// held pod reads as gone. An *absent* uid pins the word in the `matches!` itself: take `"pod"` out
+/// and the kind stops being watched, so the guard answers *false* — which a held-uid case expects
+/// anyway and cannot see. Neither direction covers the other, and `ctrl-d` on a running pod is what
+/// the first one costs.
+///
+/// **Every uid is read off the capture and none is written down** — a re-capture moves all of them,
+/// and a literal would let a case pass by agreeing with itself. The lookup panics rather than
+/// skipping a kind it cannot find one for (CLAUDE.md § *a derived list asserts it found
+/// something*).
 ///
 /// **What each case asserts is the reply and the strip together** (`screens/dialogs.md` rule 7: the
 /// strip carries a mutation's line *"the instant the real call actually goes out"*). A `Gone`
@@ -17182,70 +17229,41 @@ fn a_deployment_watch_that_never_answered() -> k8s::Store {
 /// left — invariant 4's *neither record may lie*.
 #[test]
 fn a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command() {
-    let live = listed_deployments();
+    let live = a_listed_cluster();
     let waiting = before_the_list();
     let refusing = a_deployment_watch_that_never_answered();
-    let held = live
+    let elsewhere = a_node_watch_that_never_answered();
+    let snapshot = live
         .snapshot(now())
-        .expect("the Deployment capture's five LISTs landed")
-        .workloads
-        .first()
-        .expect("the capture holds a Deployment")
-        .id
-        .clone();
+        .expect("the five captures' LISTs all landed");
+    // **One object of each kind, found the way the guard itself maps a kind onto a word** —
+    // `ui::addressed`, so this lookup cannot disagree with the allowlist about what `"daemonset"`
+    // means. The panic is the *found something* assertion: a capture that stops holding a kind
+    // must fail the test rather than quietly drop a row from the loop below.
+    let held = |word: &str| {
+        snapshot
+            .pods
+            .iter()
+            .map(|pod| &pod.id)
+            .chain(snapshot.nodes.iter().map(|node| &node.id))
+            .chain(snapshot.workloads.iter().map(|workload| &workload.id))
+            .find(|id| ui::addressed(&id.kind).1 == word)
+            .unwrap_or_else(|| panic!("no capture holds a {word}, so its rows would prove nothing"))
+            .clone()
+    };
     // **A `uid` no capture can hold**, so *absent* is a fact about the store and not a spelling
-    // accident. The present one above is read off the capture rather than written down here: a
-    // re-capture moves every `uid` in `deployments.json`, and a literal would make the first case
-    // pass by agreeing with itself.
-    let absent = Some("6f1f2a94-0000-0000-0000-000000000000".to_owned());
+    // accident.
+    let absent = || Some("6f1f2a94-0000-0000-0000-000000000000".to_owned());
+    let object = |word: &'static str, id: &ObjectId, uid: Option<String>| {
+        views::Object::new(word, id.namespace.clone(), id.name.clone(), uid)
+    };
 
-    for (what, kind, uid, store, gone) in [
-        (
-            "the uid the store holds",
-            "deployment",
-            held.uid.clone(),
-            &live,
-            false,
-        ),
-        (
-            "a uid the store does not hold",
-            "deployment",
-            absent.clone(),
-            &live,
-            true,
-        ),
-        (
-            "a ReplicaSet, which no watch answers for",
-            "replicaset",
-            absent.clone(),
-            &live,
-            false,
-        ),
-        (
-            "a selection carrying no uid at all",
-            "deployment",
-            None,
-            &live,
-            false,
-        ),
-        (
-            "a store whose first LIST has not landed",
-            "deployment",
-            absent.clone(),
-            &waiting,
-            false,
-        ),
-        (
-            "a listed store whose Deployment watch never answered",
-            "deployment",
-            absent.clone(),
-            &refusing,
-            false,
-        ),
-    ] {
+    // **One press per shape, and the assertions are one closure** — the two groups below feed it
+    // different things and neither may grow a second copy of what *the guard answered right* means.
+    let check = |what: &str, asked: views::Object, store: &k8s::Store, gone: bool| {
         let mut console = bare_console();
         let mut dialog = an_open_dialog();
-        dialog.object = views::Object::new(kind, held.namespace.clone(), held.name.clone(), uid);
+        dialog.object = asked;
         installed(&mut console, Published::Opening(dialog));
         installed(
             &mut console,
@@ -17290,6 +17308,74 @@ fn a_yes_on_an_object_that_went_away_is_answered_gone_and_sends_no_command() {
                 .any(|line| line.contains("rollout restart deployment/web")),
             !gone,
             "{what}: the strip and the call disagree about whether one went out: {strip:?}"
+        );
+    };
+
+    // --- THE SEVEN STORE SHAPES ---
+    let deployment = held("deployment");
+    check(
+        "the uid the store holds",
+        object("deployment", &deployment, deployment.uid.clone()),
+        &live,
+        false,
+    );
+    check(
+        "a uid the store does not hold",
+        object("deployment", &deployment, absent()),
+        &live,
+        true,
+    );
+    check(
+        "a ReplicaSet, which no watch answers for",
+        object("replicaset", &deployment, absent()),
+        &live,
+        false,
+    );
+    check(
+        "a selection carrying no uid at all",
+        object("deployment", &deployment, None),
+        &live,
+        false,
+    );
+    check(
+        "a store whose first LIST has not landed",
+        object("deployment", &deployment, absent()),
+        &waiting,
+        false,
+    );
+    check(
+        "a listed store whose Deployment watch never answered",
+        object("deployment", &deployment, absent()),
+        &refusing,
+        false,
+    );
+    // **The trouble is on the Node watch and the question is about a Deployment**, whose own watch
+    // listed and holds no such uid — so *gone* is the true answer and a predicate that asks merely
+    // *is anything in trouble* gets it wrong (`a_node_watch_that_never_answered`).
+    check(
+        "a listed store where a different kind's watch never answered",
+        object("deployment", &deployment, absent()),
+        &elsewhere,
+        true,
+    );
+
+    // --- EVERY WORD THE ALLOWLIST CARRIES, BOTH WAYS ---
+    // Written out rather than read off `vanished`'s own `matches!`, which no test can reach: a word
+    // added there and not here is a kind with a guard nothing proves, and that is the hole these
+    // rows exist to keep shut.
+    for word in ["pod", "node", "deployment", "statefulset", "daemonset"] {
+        let id = held(word);
+        check(
+            &format!("a {word} uid the store holds"),
+            object(word, &id, id.uid.clone()),
+            &live,
+            false,
+        );
+        check(
+            &format!("a {word} uid the store does not hold"),
+            object(word, &id, absent()),
+            &live,
+            true,
         );
     }
 }

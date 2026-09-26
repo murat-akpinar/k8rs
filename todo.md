@@ -4566,14 +4566,19 @@ Secret is redrawn after the reveal is dismissed.
 > **No full mutation sweep is owed** — `git diff --stat 770ae0b..HEAD -- src/rules.rs
 > src/analysis.rs src/rules_tests* src/analysis_tests*` is empty and both files are
 > frozen ([D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
-> **Owed, in order**: `tester` on the blocker-fix diff — the full `just check` **over
-> this tree** (the `cargo` half, `width-guard`, `check-docs`, `copy-guard` and
-> `screens-check` are green as run by their authors and by the PM, but `cargo deny`,
-> `cross` and `guards.sh` whole have not reported since `a5bf413`) plus an attack on
-> `vanished`'s five fail-safe returns, the trouble arm's three-reader kind
-> comparison, and the four fixtures moved to `before_the_list()` · then PR
-> `development` → `main` and merge, **which carries Phases 7-12** because `main` has
-> not advanced since 2026-09-03.
+> **`tester` has reported and the gate is green** — `just check` `EXIT=0` taken
+> directly rather than through a pipe, 1 575 + 40 tests, 19 guards, `cargo deny`;
+> CI green on `9925700` including the four cross targets the local run skips. It
+> also planted nine mutations cargo-mutants **cannot generate** and found **three
+> tests that cannot fail** on the new write-path guard
+> ([D291](NOTES.md#d291--the-gate-was-green-and-three-tests-on-the-new-write-path-guard-could-not-fail-2026-09-26)).
+> **Owed, in order**: those three pins — a listed pod uid, a listed node uid, and a
+> store whose *other* kind's watch never answered — because the guard's `pods` and
+> `nodes` arms and four of its five allowlist words can be deleted with the suite
+> still green, and the trouble predicate can be widened to *any trouble at all*
+> without a test noticing · then **PR [#17](https://github.com/murat-akpinar/k8rs/pull/17)
+> merged**, which carries Phases 7-12 because `main` has not advanced since
+> 2026-09-03. The PR is open and its four cross checks pass.
 
 *Also read: [PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted) — k9s's own "skip the cycle when nothing changed" was merged and reverted a month later, and invariant 7 is the same manoeuvre. Also [§ D4](PRIOR-ART.md#d4--the-terminal-after-a-subprocess): leaving raw mode and re-entering it is one function, not one per path.*
 
@@ -4998,6 +5003,22 @@ behaves as specified.
       in the drop, the 410 and the 401 journeys alike. A nit against a written
       screen, and the smallest of the five
 
+- [ ] **No automated gate reaches the confirmation arm, so give one a route to it.**
+      `scripts/e2e.sh` drives the headless `k8rs ops` driver with a confirmation off
+      stdin and never enters `pressed`/`over_modal`, and `cargo test`'s own ends are
+      both pipes so `console()` is never entered from the suite
+      ([D279](NOTES.md#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24)
+      ruling 2). So the whole of `just check` says nothing about the arm that decides
+      whether a write goes out — the only end-to-end evidence for D22's guard and the
+      refusal key is two hand journeys a person ran once
+      ([D290](NOTES.md#d290--the-closes-blocker-fixes-the-guard-that-decides-before-the-send-the-fixture-that-could-not-exist-and-a-store-that-must-not-answer-for-a-refused-watch-2026-09-26) ·
+      [D291](NOTES.md#d291--the-gate-was-green-and-three-tests-on-the-new-write-path-guard-could-not-fail-2026-09-26)).
+      `scripts/picker-test.py` already drives the real binary on a real pty and is the
+      obvious home; the cluster half is the PM's to run. Found by `tester` at Phase
+      12's close, which is the pass that asks *what does no gate cover*.
+      **Done when** a pty gate presses `r`, answers the dialog, and asserts what the
+      screen and the audit log say — including the *gone* path, whose cluster write
+      the PM runs
 - [ ] **Take the ten scaffolding flags out before anything is published** —
       `--live` `--logs` `--describe` `--yaml` `--object` `--kind` `--container`
       `--previous` `--follow` `--subresource`. CLAUDE.md invariant 10 said they

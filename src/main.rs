@@ -9777,8 +9777,8 @@ fn over_modal(
 /// **The `uid` and never the name.** A name that has gone is exactly when it belongs to somebody
 /// else, which is the defect D22 exists for (`views::Object::uid`'s own words).
 ///
-/// **`false` wherever k8rs cannot tell, and every one of the three is *cannot tell* rather than
-/// *still there*:**
+/// **`false` wherever k8rs cannot tell, and every one of the five conditions below is *cannot
+/// tell* rather than *still there*:**
 ///
 /// - **no `uid` on the selection** — `views::Object::new` refuses `Some("")` and rule C1's
 ///   kubeconfig carries none, and `views::Object::uid` already states that both of D22's guards are
