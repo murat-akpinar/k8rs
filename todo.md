@@ -4972,7 +4972,7 @@ behaves as specified.
       silent in the console — a vocabulary ruling, recorded in
       [`backlog.md`](backlog.md), as is `unconnected`'s own copy of the same dead
       end, which cannot use either sentence because nothing holds its message
-- [ ] **At startup against an unreachable API the header and the body disagree,
+- [x] **At startup against an unreachable API the header and the body disagree,
       and the screen and the requirement disagree behind them.** Measured
       against a dead port: header `⚠ disconnected, retrying`, body *reading the
       cluster… 0 pods* and *Large clusters take a moment. Findings appear as
@@ -4985,7 +4985,29 @@ behaves as specified.
       **The defect is in the two documents, not in the code**, so this box is a
       ruling first: which sentence a first launch with no answer draws. Nothing
       here crashes and the header is already honest
-      ([D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27))
+      ([D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
+      **Done 2026-09-27**
+      ([D295](NOTES.md#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)).
+      `notes` now takes `ui::Link` rather than `connected: bool`, and `drawn`
+      hoists one `linked(…)` handed to both it and `Screen::link` — so the header
+      and the body come from one derivation and this box's own title is
+      structurally unreachable. A first launch with nothing answering draws
+      `⚠ Nothing is coming back from the cluster.` over *It keeps asking, on its
+      own — nothing for you to do. Press X for a different cluster.*, measured on
+      the real binary on a pty at 80×24 against a released port.
+      **Three documents were wrong, not one.** `screens/states.md`'s single
+      section was doing two jobs and is now split by `k8s::Fault::standing`; a
+      **fourth** state fell out of the review — `Expired` over an empty pane kept
+      drawing *reading the cluster… N pods* where `standing` means nothing can
+      ever arrive, and the box's own first test pinned it; and the section's
+      reachability prose named a route the binary contradicts, since a uniformly
+      dead token settles every watch and lands on `Pane::Denied` instead. `X`'s
+      promotion is now `Fault::standing` too, which retired the *least else on
+      screen* reasoning the designer found already false against a pre-existing
+      mockup. **What this box did not take**: `unreadable` tells a reader to wait
+      for a standing fault that waiting cannot clear, one surface over, and the
+      browser's own loading pane still draws the retired sentence — both in
+      [`backlog.md`](backlog.md)
 - [ ] **A refused `get /apis` is invisible on the screen the reader is looking
       at.** With discovery refused (`cannot get path "/apis"`) Alerts was
       complete and correct and CPU was 1 tick per 2 s — and the sidebar still

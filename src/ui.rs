@@ -995,10 +995,19 @@ pub enum Link {
     /// **The stream is gone and k8rs is retrying.** Stale data stays visible and stays labelled;
     /// what it costs is the two mutating keys, because k8rs cannot ask whether a write would be
     /// allowed and `s no scale` would claim a verdict nobody gave.
+    ///
+    /// **Where nothing at all has settled yet it also promotes `X switch cluster`** ([`offered`],
+    /// NOTES § D295) — *has not answered*, which is not the same as *is empty*: a kind that came
+    /// back with zero rows has answered and gets no `X`. Where something has settled, the retry may
+    /// clear this on its own and waiting costs nothing, so it promotes nothing
+    /// (`screens/states.md` § The connection dropped).
     Lost,
     /// **The kubeconfig's short-lived token ran out** — not a 403 and not a dropped socket. It
-    /// costs the same two keys and promotes `X switch cluster` onto the footer, because renewing
-    /// and reconnecting is *the* next step.
+    /// costs the same two keys, and on the footers that can carry `X switch cluster` at all it
+    /// promotes it — whatever the pane has already settled, because `k8s::Fault::standing` is true
+    /// of this fault and nothing on the run moves again until a human renews the login
+    /// ([`offered`]). **Not every footer can**: Analysis, a detail tab and Alerts' two
+    /// filter-hidden lines name no `X` at any link (`crate::views::Offer`).
     Expired,
     /// **Nothing is connected at all** — a mid-session switch that was refused, expired or
     /// otherwise failed, from the moment its box first draws through however long the reader
@@ -1556,12 +1565,39 @@ fn footer(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
 /// (`screens/context.md` § After `esc dismiss`, on a switch that failed with a cluster already
 /// live).
 ///
+/// **[`Link::Lost`] promotes it too, and `stranded` below is the one extra condition it carries**
+/// — the page's rule is `k8s::Fault::standing` and not *how much is on screen* (`screens/states.md`
+/// § Over a pane with nothing to show yet, `screens/widgets.md` § 2a's closed-mode rows). Under
+/// `Expired` nothing on the run will move again without a human, so `X` is promoted whatever has
+/// settled — which is why `switch` above needs no second condition, and why the fully settled
+/// sidebar of that page's `jobs` mockup still draws `X`. Under `Lost` the retry may clear it on its
+/// own, so `X` is promoted only where the reader has nothing settled to wait it out with; once
+/// something real is on screen — a stale card, or another kind already opened — waiting costs
+/// nothing and `X` goes back behind `?`.
+///
 /// **Analysis and an open detail tab return `Move { switch: false }`, and that value is not idle.**
 /// Their footers are drawn above it in `crate::views::App::footer` from their own closed lines, so
 /// no footer is built from it — but `may_mutate` is handed it, and it is what leaves no mutating
 /// key pressable behind a footer that names none (PRIOR-ART § G2).
 pub fn offered(app: &App, screen: &Screen) -> Offer {
     let switch = matches!(screen.link, Link::Expired | Link::Unconnected);
+    // **What *nothing has settled either* is, in the one value this file can read it off**
+    // (NOTES § D295): [`Screen::alerts`] is `Pane::Loading` exactly while the store has published
+    // no snapshot, and a snapshot is what every settled thing on the frame comes from — the sidebar
+    // badges, the header vitals, every kind's own count. It is read here rather than per view
+    // because the fact is the run's and not the open pane's: a Resources pane whose own kind has
+    // not answered is still a reader with settled badges to fall back on, which is the fourth shape
+    // `screens/states.md` rules out of the promotion.
+    let landed = !matches!(screen.alerts, Pane::Loading);
+    // **`Expired` promotes regardless, `Lost` only where nothing landed** — `k8s::Fault::standing`
+    // read as a footer rule. **Not folded into `switch`**, which every row below reads including
+    // the loaded ones: a drop over a pane that *did* load is `screens/states.md` § The connection
+    // dropped, whose footer draws no `X` beside its stale cards.
+    //
+    // **In the Alerts arm `landed` is false by construction** — that arm is reached on
+    // `Pane::Loading`, which is what `landed` reads — so this condition only ever decides the
+    // Resources arm, where the open kind and the run disagree about what has answered.
+    let stranded = switch || (screen.link == Link::Lost && !landed);
     // **A mode whose own footer names no mutating key may not leave one pressable behind it**
     // (PRIOR-ART § G2 — *read-only enforced per view is a hole per view*, and k9s #3858 is that
     // hole in its XRay view). Analysis and the detail tabs answer above this value in
@@ -1586,7 +1622,7 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
     let selected: Option<(&str, Cow<'_, str>)> = match app.view {
         View::Analysis(_) => return Offer::Move { switch: false },
         View::Alerts => match screen.alerts {
-            Pane::Loading => return Offer::Nothing { switch },
+            Pane::Loading => return Offer::Nothing { switch: stranded },
             // **Alerts' own empty pane keeps the cursor keys where the browser's loses them**, and
             // that is each section's own wording rather than a rule derived here: *the sidebar's
             // own rows are still there to move across and open* once its badges have settled
@@ -1621,7 +1657,7 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
             }
         },
         View::Resources(at) => match screen.browser {
-            Pane::Loading => return Offer::Nothing { switch },
+            Pane::Loading => return Offer::Nothing { switch: stranded },
             // **Zero rows is zero rows whichever answer holds them** — a 403 on `list jobs` that
             // came back with nothing promised `⏎ open` over fourteen blank rows until this arm
             // read both (`k8s-admin`, 2026-09-12).

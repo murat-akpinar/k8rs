@@ -316,6 +316,7 @@ its line moving with it.
 - [D292](#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26) — wiring the permission probe: the owner, the dead-writes gate, and the plural three existing tables refuse to give
 - [D293](#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27) — the permission probe review rounds: a clause drawn for a key the footer withholds, and the guard the dev's list could not see
 - [D294](#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27) — verbatim names where verbatim lives, because a 13-row box cannot hold 4096 bytes
+- [D295](#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27) — a first launch that never reached the cluster is a third state, not either of the two the code has
 
 ## Why it exists — where the gap is
 
@@ -26238,3 +26239,162 @@ argue with the policy, when the real answer is a temporary change freeze and the
 action is to wait or ask for an exception. At three it ends *"denied request: this…"*,
 which names the policy and is visibly incomplete. **A cut that changes the meaning of
 what it kept is worse than a shorter cut that admits it.**
+
+### D295 — a first launch that never reached the cluster is a third state, not either of the two the code has (2026-09-27)
+
+Phase 13's third box: against a dead port the header reads `⚠ disconnected,
+retrying` while the body reads *reading the cluster… 0 pods* and *Large clusters take
+a moment. Findings appear as they are found…*. The box says the defect is in two
+documents rather than in the code and asks for a ruling first — which sentence a
+first launch with no answer draws. Re-checked at HEAD, and the premise holds with one
+detail the box did not name.
+
+**Why the false sentence is the one that draws.** `connected` sets
+`console.unconnected = false`, and it runs even against a dead port, because a watch
+that cannot reach anything is not a failed *connect* — so `notes(connected: true, …)`
+falls to its `snapshot: None` arm, whose whole subject is *a LIST that is in
+progress*. Nothing is in progress. `unconnected` is set `true` in exactly two places,
+the startup picker's own frame and a **failed switch**, and a first launch that gets
+as far as a client passes through neither.
+
+**The detail the box did not name, and it is the same defect one level down.**
+`notes`'s `!connected` arm deliberately does *not* say why, and its comment gives the
+reason: *"the reader has just read it in the box they dismissed, and a second, shorter
+copy is the second vocabulary D264 ruling 1 refuses."* True of a failed switch, which
+is what that arm was written for
+([D264](#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)).
+**False of a first launch, where there was no box and nothing has been dismissed.** So
+neither existing arm fits: one claims progress that is not happening, the other
+withholds the cause on a premise that does not hold.
+
+**The ruling: it is a third state and it gets its own sentence.** What is true on a
+first launch against an unreachable API is that k8rs has not reached the cluster yet
+**and is still trying by itself** — which is
+[REQUIREMENTS § Error states](REQUIREMENTS.md#error-states-all-were-undefined-all-happen-on-first-launch)'s
+*a banner that says so, retried forever, never an exit*, and
+[D167](#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)'s
+measured behaviour. Both existing sentences are wrong about that in opposite
+directions:
+
+- ***reading the cluster… 0 pods*** claims a read is under way and offers a count that
+  will never move. It is `screens/states.md` § *Over a pane with nothing to show yet*,
+  written about a pane that lost its link **mid-read** — a pane that had in fact been
+  reading, where the count is real and the sentence is true.
+- ***Not connected to the cluster right now. Press X to try again, or pick a different
+  cluster.*** stops short and hands the reader the only way out, when k8rs is already
+  retrying on its own. `X` is a legitimate thing to offer; *try again* implies nothing
+  is trying.
+
+**What the sentence must carry, and the wording is `screens/`'s.** That nothing has
+answered yet rather than that a read is in progress; that k8rs keeps trying without
+being asked, so a reader who does nothing is not stuck; and the cause, because unlike
+the failed-switch arm there is no dismissed box behind it. It must not repeat the
+header — `⚠ disconnected, retrying` is already on screen and two copies of one fact is
+the second vocabulary D264 ruling 1 refuses.
+
+**One thing this ruling does not settle, and it is the designer's to raise.** The box
+records the header as *already honest*, and this entry does not reopen it — but
+`disconnected` is a word about something that was once connected, and on a first
+launch nothing ever was. Whether the header owes a first-launch wording of its own is
+a separate question from the body's, and if `screens/` finds it does, that is a box in
+a later phase and not this one
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+
+**Both documents move with the code.** `screens/states.md`'s section keeps its
+mid-read reading and gains the first-launch one beside it, so the next reader cannot
+take one for the other; `REQUIREMENTS.md`'s row is already right and is what this
+ruling is enforcing rather than narrowing.
+
+**The sentence, and the one ruling the designer had to make to write it.**
+`screens/states.md` § *Over a pane with nothing to show yet* is now two named
+subsections — *Mid-read* keeping its existing content unchanged, and *First launch*
+carrying the new state — so the next reader cannot take one for the other, which is
+what one section doing two jobs had already caused once. The sentence is
+*"⚠ k8rs asked, and nothing came back."* over *"It keeps asking, on its own — nothing
+for you to do. Press X for a different cluster."* It reuses the plain-language idiom
+`Fault::Unanswered` already has — *nothing usable came back* — generalised because here
+all five watches are unanswered at once, and it states the header's **consequence for
+the reader** rather than restating `disconnected` or `retrying`.
+
+**`X` is promoted onto this state's footer, and that is a widening of an existing
+rule rather than a new one.** The promotion had been scoped to login expiry, on the
+reasoning that it applies where there is least else on screen; a first launch has
+**nothing** on screen at all — no browser row, no settled badge — so the reasoning
+applies more strongly, not less. `↑↓ move` and `⏎ open` stay off, for Still Loading's
+own reason: there is nothing behind the sidebar rows yet.
+
+**The header keeps its wording, and the designer argued it rather than deferring.**
+Asked whether `⚠ disconnected, retrying` owes a first-launch variant, it concluded no:
+*disconnected* reads idiomatically as *you do not currently have a working connection*
+rather than strictly *this used to work*, and it is paired with *retrying*, which is
+accurate either way. Recorded because the box had called the header honest without
+saying why, and now there is a reason on the record instead of an assumption.
+
+**Correction, same day: the retired sentence survived one arm over, and this box owns
+that.** Both reviews found it independently. `(Link::Expired, None)` falls through to
+the progress arm and draws *reading the cluster… N pods* with *Findings appear as they
+are found — this list fills up, it does not wait*, under a header reading
+`⚠ login expired`. It is reachable on a first launch whose token is already dead:
+`connect_with` fails only on a kubeconfig that will not load or a client that will not
+build, so a live server with a dead credential passes it, every watch then takes a
+`401`, `linked` answers `Expired` before the `Lost` test, and no LIST has landed.
+
+**It is worse there than the case this entry retired.** `k8s::Fault::standing` is
+**true** of `Expired`, so nothing will arrive until a human runs a login command the
+pane does not name — `linked`'s own comment already says retrying cannot clear it.
+`Lost` at least genuinely is retrying. So the sentence that was removed for promising
+progress survives in the one arm where the promise is not merely premature but
+impossible.
+
+**And the box's own new test pinned it**, asserting `(Link::Expired, "reading the
+cluster… 2,140 pods")`. That is the assertion this repo's rules exist to prevent: it
+is derived from the page, the page is what is wrong, and a test that pins a false
+sentence is the thing that stops anyone looking again.
+
+**Which makes it this box's, not a later one's.** `screens/states.md` § *Mid-read*'s
+*"the pane draws exactly what it would have anyway"* is what authorises it — and that
+sentence was written **in this box, hours earlier**, when the pane had one body
+sentence to draw and the choice did not exist. It is not a standing ruling being
+reopened; it is this box's own, found wrong before it shipped, which is CLAUDE.md's one
+exception to *a box is never added to an open phase*. So `Expired` over an empty pane
+gets a fourth arm and its own sentence, and § *Mid-read* keeps only the case it was
+actually written about: a link lost over a pane that **had** been reading.
+
+**The sentence for `Lost` also changes tense, and that is `k8s-admin`'s finding rather
+than a preference.** `(Lost, None)` covers three shapes, not one: nothing ever arrived;
+a pods LIST that had decoded some objects before the socket died; and — the ordinary
+shape on a large cluster — four kinds fully listed with pods still listing when the
+link dropped. In the last two *"k8rs asked, and nothing came back"* is false about the
+past, and the page concedes as much when it rules that `so_far` need not be zero. Not
+naming the count is right; claiming nothing arrived is a stronger and different thing,
+and it costs an action — *nothing came back* points a reader at connectivity from
+scratch when the truth is *it was working and stopped*. The trigger stays *nothing is
+answering now*, which is the right question at 3am; the sentence moves to the tense the
+trigger actually knows: **`⚠ Nothing is coming back from the cluster.`**
+
+**What the binary said about the route, and it is not the route the page names.** Driven
+on a pty against three shapes, the `Expired`-over-empty arm is correct and **reachable**,
+but not the way § *Expired* describes it. A first launch whose token is dead uniformly —
+every watch taking a `401` — **does not reach this pane at all**: `Fault::Expired` is
+standing, so `Watch::settled` is true of every watch, so `Store::snapshot` publishes
+`Some(empty)` and the pane is `Pane::Denied`, drawing `unreadable()`'s banner under the
+ordinary footer. What reaches the arm is a **mixed** store — one watch standing on a
+`401` while another is still listing — measured drawing both new paragraphs with
+`⚠ login expired` and the promoted footer. The sentence and the arm stand; the
+reachability claim on the page is what was wrong, which is the third time this box has
+found a document rather than the code at fault.
+
+**And the same futility survives one surface further over, in a file this box may not
+touch.** On the uniform route the reader gets `unreadable()`'s *"It keeps asking, and
+until that works nothing here about them can be trusted"* — for a **standing** fault,
+where the asking cannot help, which is the exact defect
+[D295](#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)
+corrected in `notes`. That string is `k8s.rs`'s, which is `dev-core`'s and frozen to this
+box, so `dev-ui` stopped and reported rather than reaching for it — correctly. It is
+`backlog.md`'s.
+
+**One process note, because the rule exists and was still broken.** Two agents wrote
+scratch files to the scratchpad **root** and one overwrote the other's. CLAUDE.md § *The
+one hard rule of concurrency* already says each agent works in its own subdirectory of
+it; what it does not say is that the parallel step 5 / step 6 pair is exactly where two
+writers meet, and neither brief named a directory. The brief is the place to name one.

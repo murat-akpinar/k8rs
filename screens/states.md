@@ -615,41 +615,41 @@ confirmed, before the link went:
 
 ### Over a pane with nothing to show yet
 
-Reachable, and drawn rather than left for a caller to guess at: the token can
-run out while a kind's own first `LIST` is still on the wire, or has already
-come back with zero rows — a browser open on `jobs` for the first time, or
-any pane still on [Still loading](#still-loading), the moment `X` and the
-header's own `⚠ login expired` become true out from under it. **The pane
-draws exactly what it would have anyway.** There is nothing yet to relabel
-as stale — no card carries an age, no row exists to say *"from N ago"* about
-— so the content pane is not this section's to rewrite a second time; the
-token's death reaches the screen through the header, already true on every
-degraded page, and the footer, which is:
+Reachable, and drawn rather than left for a caller to guess at — by two
+triggers, `⚠ login expired` and `⚠ disconnected, retrying`, and the first of
+them draws two different sentences depending on what had already settled
+when it hit. Both triggers leave a pane with nothing loaded into it; until
+this round the write-up covered one shape of one trigger, with no name for
+either half, which is exactly how the code came to draw the wrong sentence
+whenever the shape it met was not the one this section had in mind
+([D295](../NOTES.md#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)).
 
-```
- nodes …                        ctx: prod-eu · ⚠ login expired · admin
-┌────────────────────┬───────────────────────────────────────────────┐
-│▸ ALERTS            │                                               │
-│  RESOURCES         │        reading the cluster… 2,140 pods        │
-│   workloads        │                                               │
-│   network          │        Large clusters take a moment. Findings │
-│   storage          │        appear as they are found — this list   │
-│   config           │        fills up, it does not wait.            │
-│   cluster          │                                               │
-│  ANALYSIS          │                                               │
-│   capacity         │                                               │
-│   certificates  30d│                                               │
-│   drain safety     │                                               │
-│   posture          │                                               │
-│   restarts         │                                               │
-│   waste            │                                               │
-│   versions         │                                               │
-├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A                                              │
-├────────────────────────────────────────────────────────────────────┤
-│ X switch cluster  ? all keys  q quit                               │
-└────────────────────────────────────────────────────────────────────┘
-```
+**Why the two triggers need different tenses, not just different causes.**
+[`k8s::Fault::standing`](../src/k8s.rs) is `false` for the fault behind
+`Lost` (`Fault::Unanswered`) and `true` for the fault behind `Expired`
+(`Fault::Expired`): retrying can still clear a lost link on its own, and
+cannot clear an expired login at all, ever, without a human renewing it. A
+sentence that treats the two alike is wrong about the one question a reader
+actually has here — *is this worth waiting through, or do I need to go do
+something* — regardless of which words either one uses.
+
+#### Expired: the login has run out
+
+The token can run out at any point mid-run: before a kind's own first
+`LIST` has even started, partway through one, or once it has already come
+back with a real answer. Which of those had happened when the token died is
+what decides which of the two sentences below draws, and it is the only
+thing that decides it.
+
+**The read had already settled — nothing here is a forward-looking promise,
+so nothing here was ever a lie.** A browser open on `jobs` for the first
+time, where the `LIST` for `jobs` specifically had already come back with
+zero rows before the login ran out. **The pane draws exactly what it would
+have anyway.** There is nothing yet to relabel as stale — no card carries an
+age, no row exists to say *"from N ago"* about — so the content pane is not
+this section's to rewrite a second time; the token's death reaches the
+screen through the header, already true on every degraded page, and the
+footer, which is:
 
 ```
  nodes 3/3                      ctx: prod-eu · ⚠ login expired · admin
@@ -674,27 +674,220 @@ degraded page, and the footer, which is:
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-**`X` is promoted onto both, and the rule is one sentence, not two: it goes
-wherever the login has expired, on Alerts and on the browser, whatever the
-pane under it is showing.** Detail tabs keep their own footer regardless —
-[widgets.md § 2a](widgets.md#2a-the-footer)'s closed mode list already draws
-the anchor there and nothing else, `X` never among it, and an expired login
-is not the thing that opens a fourth door into a footer that names none of
-the other mutating keys either. The reason it was promoted at all — *"so a
-reader does not have to
-hold `aws sso login` in their head while hunting the key map"* — argues
-hardest exactly here: these are the two frames with the least else on
-screen, and a reader watching a spinner that will never resolve is the one
-most likely to go looking for `?` next. Refusing the promotion because there
-is no list to act on would be answering a question about **mutation
-keys** (`s`, `r`, which withhold themselves for exactly that reason,
-[§ The connection dropped](#the-connection-dropped)) as if it applied to a
-**navigation** key it does not: `X` never acted on a selected row to begin
-with, so *"nothing is selected"* was never its condition for appearing.
-**Both keep their own pane's own shape otherwise** — Still loading still
-drops `↑↓ move` and `⏎ open` for its own reason, the empty kind still keeps
-`/ filter` for its own — an expired login changes one thing, the same one
-thing, everywhere it is true.
+**Nothing had settled yet — and this is the shape the section used to draw
+wrong.** `connect_with` fails only on a kubeconfig that will not load or a
+client that will not build, so a live server with an already-dead
+credential still passes it clean; the reader lands in the running console,
+not a pre-connect failure box, and watches start failing from there. But
+this exact pane is reached only while [`Store::snapshot`](../src/k8s.rs)
+still answers `None` — **a mixed store**: at least one watch has already
+settled on a standing `401` while at least one other is still genuinely
+inside its own first `LIST`, neither finished nor failed.
+
+**A uniformly dead token does not reach this pane at all, and that is the
+commoner shape of the case this paragraph is about.** `Fault::standing` is
+what [`Watch::settled`](../src/k8s.rs) reads, and it is `true` for
+`Fault::Expired` — so if every watch answers `401` before any of them
+lands, every one of them settles at once, `Store::snapshot` has nothing
+left to wait for, and it publishes `Some` (empty) rather than `None`. The
+pane the reader actually lands on there is `Pane::Denied` — the *ordinary*
+footer (`↑↓ move  ⏎ open  X switch cluster  / filter  …`), not this one,
+under `unreadable()`'s own banner. **That banner has the identical defect
+this box just corrected, one surface over**: it reads *"It keeps asking,
+and until that works nothing here about them can be trusted"* over a
+`401`, which cannot be asked into working. `unreadable()` is
+[`main.rs`](../src/main.rs)'s, not this file's to edit, and it is recorded
+in [`backlog.md`](../backlog.md) rather than drawn here as a mockup this
+page does not yet have the right to specify.
+
+**`Fault::standing` is doing two jobs at once here, and it is worth naming
+as one fact rather than rediscovering it twice.** The same property that
+makes the retry hopeless — nothing k8rs does on its own will ever complete
+this read — is what makes a watch stop blocking the snapshot the instant it
+fails, which is exactly why the mixed route reaches this pane and the
+uniform one escapes past it into `Denied` instead. It is also
+[§ Lost](#lost-nothing-is-currently-answering-and-the-retry-may-still-clear-it)'s
+`X`-promotion test, read from the other side: the property that makes
+waiting futile here is the same one that makes a watch settle rather than
+keep the gate shut.
+
+Until now the pane still drew *"reading the cluster… N pods"* on the mixed
+route above, because `notes()` had one body sentence to draw and, when this
+box started, the choice between it and something else did not exist yet.
+It is wrong in a stronger way than the same sentence is wrong under `Lost`,
+just below: the promise is not merely premature here, it is impossible
+([D295](../NOTES.md#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)).
+
+```
+ nodes …                        ctx: prod-eu · ⚠ login expired · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │                                               │
+│  RESOURCES         │        ⚠ The login token your kubeconfig      │
+│   workloads        │        creates has timed out.                 │
+│   network          │                                               │
+│   storage          │        Nothing more will come back until it is│
+│   config           │        renewed.                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+│   capacity         │                                               │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A                                              │
+├────────────────────────────────────────────────────────────────────┤
+│ X switch cluster  ? all keys  q quit                               │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **What it says, and why it says nothing about how to fix it.** *"The
+  login token your kubeconfig creates has timed out"* is this product's own
+  established words for the fact, lifted verbatim from [Your login
+  expired](#your-login-expired)'s own body — not a second phrasing invented
+  for this pane. *"Nothing more will come back until it is renewed"* is the
+  one fact the header cannot carry: `⚠ login expired` says the token is
+  dead, not that retrying is futile. **It does not say "renew it" or "press
+  X," and that is deliberate** — `?`'s own *Changing things* heading already
+  reads *"paused — renew your login, then press X"*
+  ([help.md § While the link is down…](help.md#while-the-link-is-down-still-connecting-the-login-has-expired-or-the-clock-is-off)),
+  so a second copy here would be the same repeated instruction this whole
+  page's `X`-promotion argument already refuses to draw twice
+  ([§ Your login expired](#your-login-expired)). The pane's job is the fact,
+  not the fix.
+- **No count is named, for the identical reason [§ Lost](#lost-nothing-is-currently-answering-and-the-retry-may-still-clear-it)
+  gives just below** — `so_far` need not be zero; the token can die after
+  real progress, not only before any. Whichever number it is, it is frozen,
+  and a frozen number dressed as a growing one is the lie this whole section
+  exists to retire.
+- **`↑↓ move` and `⏎ open` stay off, for [Still loading](#still-loading)'s
+  own reason** — the sidebar's rows have nothing settled behind them yet.
+- **`X` is promoted**, for the same reason [§ Lost](#lost-nothing-is-currently-answering-and-the-retry-may-still-clear-it)
+  is, below — this pane has nothing else on it either.
+
+#### Lost: nothing is currently answering, and the retry may still clear it
+
+`(Link::Lost, snapshot: None)` covers three shapes, not one: nothing has
+ever arrived; a pods `LIST` that had decoded some objects before the socket
+died; and — the ordinary shape on a large cluster — four kinds fully listed
+with pods still listing when the link dropped. *"k8rs asked, and nothing
+came back"* is what this section drew first, and it is false about the past
+in the second and third shapes: something plainly did come back, once. The
+sentence moves to the tense the trigger actually knows, which is the
+present, not the past:
+
+```
+ nodes …               ctx: prod-eu · ⚠ disconnected, retrying · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │                                               │
+│  RESOURCES         │   ⚠ Nothing is coming back from the cluster.  │
+│   workloads        │                                               │
+│   network          │        It keeps asking, on its own — nothing  │
+│   storage          │        for you to do. Press X for a different │
+│   config           │        cluster.                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+│   capacity         │                                               │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A                                              │
+├────────────────────────────────────────────────────────────────────┤
+│ X switch cluster  ? all keys  q quit                               │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **What it says, and why the tense changed.** *"Nothing is coming back from
+  the cluster"* is true in all three shapes, because it makes no claim about
+  what already arrived — only about now, which is the one thing `Fault::
+  Unanswered` actually reports. *"It keeps asking, on its own — nothing for
+  you to do"* is unchanged from the first draft: `Fault::standing` is `false`
+  here, so the retry loop really might clear this on its own, unlike
+  `Expired`'s just above, and the reassurance is honest either way.
+- **No count is named, not even a stale one.** A number that has stopped
+  moving and cannot be trusted to still be current is exactly the *"reading
+  the cluster… N pods"* lie this section exists to retire, whichever number
+  it is. The trigger is *nothing is currently answering*, not *nothing has
+  ever arrived*, so the sentence draws the same across all three shapes.
+- **`↑↓ move` and `⏎ open` stay off, for [Still loading](#still-loading)'s
+  own reason.** The sidebar's rows have nothing real behind them yet —
+  reaching `certificates 30d` and opening it would let a reader act on a
+  number that may never finish arriving if the address is wrong.
+- **The command log carries one line, unmarked** — `$ kubectl get pods -A`,
+  the same line [Still loading](#still-loading) draws for the same reason:
+  this is the `LIST` k8rs is still trying to run, never confirmed as a
+  watch, so it carries none of `(reconnecting)`'s suffix
+  ([The connection dropped](#the-connection-dropped)) — that suffix marks a
+  watch that *was* running and then dropped, which is not this trigger.
+- **A 403 cannot reach this pane.** It needs an answer from the cluster to
+  be classified at all, and a watch that has never heard back is neither
+  refused nor expired — it is unanswered, which is the one thing this
+  sentence says and the only one it is entitled to say.
+- **The Alerts pane's own equivalent is the only one drawn here, and that is
+  measured rather than assumed.** A reader cannot reach the Resources
+  browser from this pane at all: `tester` drove the binary and found `↑↓`,
+  `⏎` and `Tab` produce a byte-identical frame with the cursor never leaving
+  `▸ ALERTS`, which is [Still loading](#still-loading)'s own rule holding —
+  the sidebar has nothing settled to move onto. **A pane shaped like this
+  one is reachable on the Resources browser too, but only mid-session**: an
+  already-connected reader opens a kind they have never opened before, and
+  *then* the link drops. That pane's body is not `notes()`'s to draw — it is
+  `ui::note`'s own generic fallback, shared with every other loading pane on
+  the product — and whether it tells the identical lie under the identical
+  trigger is real and unmeasured by this box. Its footer is ruled just
+  below, because the footer is this page's to decide regardless of who owns
+  the body underneath it.
+
+**`X`'s promotion follows `Fault::standing`, the same test that split the
+two sentences above, not "how much else is on screen" — and stating it that
+way is what makes all four reachable shapes agree with each other rather
+than needing a fifth reason apiece.** Under `Expired` (`standing: true`),
+nothing on the whole run will move again without a human renewing the
+login, so `X` is promoted **regardless of what else has settled** — the
+`jobs` browser pane above keeps a fully settled sidebar (`nodes 3/3`,
+`ALERTS 3 ● 7 ▲`, every kind's own count) and still promotes `X`, because
+none of that will update either. Under `Lost` (`standing: false`), the
+retry loop genuinely might clear this on its own, so `X` is promoted only
+where the reader has **nothing else settled to wait it out with** — the
+empty Alerts pane above. The moment something real is already on screen —
+a stale card, as in [The connection dropped](#the-connection-dropped), or
+another, already-opened kind, just below — waiting costs nothing, and `X`
+goes back behind `?` like any other key. Detail tabs keep their own footer
+regardless — [widgets.md § 2a](widgets.md#2a-the-footer)'s closed mode list
+already draws the anchor there and nothing else, `X` never among it. The
+reason it was promoted at all — *"so a reader does not have to hold `aws
+sso login` in their head while hunting the key map"* — argued for the
+`jobs` case alone when it was written; read against `Fault::standing`
+instead of against that one mockup, it is why the rule now covers three
+shapes rather than growing a fourth reason for each.
+
+**A fourth shape follows the same test, and fails it — which is why it is
+not promoted.** An already-connected reader on the Resources browser opens a
+kind they have never opened before, and *then* the link drops
+(`Fault::Unanswered`, `Lost`). The sidebar's other badges are already
+settled and another, already-opened kind is one keypress away — exactly
+[The connection dropped](#the-connection-dropped)'s own position, which does
+not promote `X` either, for the identical reason: the retry might well
+clear this before the reader has even decided whether to leave. So that
+footer stays ordinary — no `X` — the same shape a mid-session drop already
+draws everywhere else. Which of Resources' own keys that footer draws
+otherwise is a question about a pane this box does not own the body of; it
+is not answered here. Its body's own falseness is left for whoever owns
+`ui::note` to rule, in a later box, not silently accepted as fine.
+
+**Each mockup still keeps its own pane's own shape otherwise.** Still
+loading drops `↑↓ move` and `⏎ open` for its own reason; the empty kind
+keeps `/ filter` for its own; both empty-pane sentences above borrow Still
+loading's shape rather than inventing a third, for the identical reason —
+nothing behind either key yet, either way. An expired login, or a link with
+nothing currently answering, changes one thing on whichever Alerts-pane
+mockup it lands on — the same one thing, everywhere either is true.
 
 ## Your computer's clock is off
 

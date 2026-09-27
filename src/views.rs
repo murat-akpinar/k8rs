@@ -2506,9 +2506,12 @@ fn refuses(answers: &[Option<&Verdict>]) -> bool {
 /// fifth shape** (`screens/states.md` § Your login expired). Which keys the *pane* offers and
 /// whether *switching cluster is the next step* are independent: the file draws their `Move`
 /// combination and states the reason — *"so a reader does not have to hold `aws sso login` in
-/// their head while hunting the key map"* — which is at its strongest on the two frames with
-/// nothing else on them at all, where an expired login used to lose the key outright
-/// (`k8s-admin`, 2026-09-12).
+/// their head while hunting the key map"* — which is at its strongest on the frames with nothing
+/// else on them at all, where an expired login used to lose the key outright (`k8s-admin`,
+/// 2026-09-12). **An expired login promotes it wherever these rows are drawn at all; a dropped link
+/// only onto a `Nothing` row the run has settled nothing behind** (NOTES § D295,
+/// [`crate::ui::offered`], which owns that test): a kind that came back with zero rows has
+/// answered, and so has a sidebar whose badges are final.
 ///
 /// **The `Nothing` and `Filter` rows it produces were this box's composition first and are the
 /// page's now** — § *Over a pane with nothing to show yet* draws both, with `X switch cluster`

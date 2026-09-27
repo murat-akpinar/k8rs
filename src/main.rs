@@ -9197,12 +9197,13 @@ fn drawn<B: ratatui::backend::Backend>(
     // for a pane whose caller handed it nothing, which is what `screens/detail.md` draws for a tab
     // whose read has not answered.
     let alerts_pane = console.app.view == views::View::Alerts && console.opened.is_none();
+    // **Derived once, above the pane, because the header and the paragraphs answer out of it
+    // both** — the defect this closes is a body that said *reading the cluster…* under a header
+    // reading `⚠ disconnected, retrying` (NOTES § D295), and a second derivation is a second
+    // answer to *is anything answering*.
+    let link = linked(!console.unconnected, snapshot.as_ref(), &troubles);
     let note = if alerts_pane {
-        notes(
-            !console.unconnected,
-            snapshot.as_ref(),
-            &store.still_listing(),
-        )
+        notes(link, snapshot.as_ref(), &store.still_listing())
     } else {
         Vec::new()
     };
@@ -9273,7 +9274,7 @@ fn drawn<B: ratatui::backend::Backend>(
         refused: views::Refused::default(),
         writes: console.writes,
         clock: console.clock.as_deref().map(views::Stripped::of),
-        link: linked(!console.unconnected, snapshot.as_ref(), &troubles),
+        link,
         detail,
         // **Handed over only while the picker is open**, which is that field's own contract —
         // *"empty when nothing is picking"* (`ui::Screen::contexts`). The list itself is held
@@ -9587,8 +9588,10 @@ const WATCHED: [ObjectKind; 5] = [
 /// **So a refusal is not a connection state**: the pane says what was refused and the link stays
 /// whatever it was. What moves the link is a cluster **no** watch is hearing from
 /// (`k8s::Fault::Unanswered` or `Unfinished` on one of them and no other watch delivering,
-/// NOTES § D285 ruling 1) and a login that has run out (`Expired`), which is the one that promotes
-/// `X switch cluster` onto the footer because renewing is *the* next step.
+/// NOTES § D285 ruling 1) and a login that has run out (`Expired`). **Which of the two a footer
+/// promotes `X switch cluster` onto is `ui::offered`'s question and not this one's** — it turns on
+/// `k8s::Fault::standing` and on what has settled, and the lines that never carry `X` at any link
+/// (Analysis, a detail tab, Alerts' two filter-hidden lines) are `crate::views::Offer`'s.
 ///
 /// **One watch in trouble was enough until 2026-09-26, and that read `disconnected` over a cluster
 /// whose other watches were delivering** for as long as the quiet one held its stale error — the
@@ -9649,37 +9652,78 @@ fn linked(
 }
 
 /// **The paragraphs a pane with nothing in it draws** (`screens/states.md` § Nothing is broken,
-/// § Still loading) — counted off the store, because what they say is a fact about the read and not
-/// about the screen.
+/// § Still loading, § Over a pane with nothing to show yet) — counted off the store where they
+/// carry a number, because that much is a fact about the read and not about the screen.
 ///
 /// **The *"Worth a look anyway"* pointer is not built here and the screen does without it**: the
 /// mockup's parenthesis is a sentence out of a report's own rows — *"1 node is promising more than
 /// it has"* — and nothing in `analysis.rs` hands one back. The two paragraphs that are derivable
 /// are drawn; a third that would have to be invented is not.
 fn notes(
-    connected: bool,
+    link: ui::Link,
     snapshot: Option<&ClusterSnapshot>,
     listing: &[k8s::Listing],
 ) -> Vec<views::Stripped> {
-    // **Nothing is being read, so *reading the cluster…* is a false sentence** — the two
-    // paragraphs `screens/context.md` § After `esc dismiss` draws instead, which say what the
-    // state is and what the one key out of it does. The reason is not repeated here: the reader
-    // has just read it in the box they dismissed, and a second, shorter copy is the second
-    // vocabulary NOTES § D264 ruling 1 refuses.
+    // **The link is the discriminator and not the store, because *nothing is answering* is the one
+    // fact these paragraphs disagreed with the header about** (NOTES § D295): four of the five
+    // arms below are reachable with an empty store, so a store read cannot tell them apart.
+    //
+    // **The two middle arms are one trigger apiece and their tenses differ because
+    // `k8s::Fault::standing` does** (`screens/states.md` § Over a pane with nothing to show yet):
+    // retrying can still clear a lost link and can never clear an expired login, so one arm says
+    // *nothing is coming back* and the other says *nothing more will come back until it is
+    // renewed*. Neither may say *reading the cluster…*, and under `Expired` that sentence is not
+    // merely premature but impossible.
     //
     // **The mark is `theme::ALARM` and the sentence carries it** — `ui::banner` hangs its wrap on
     // the mark the caller sent and spells none of its own.
-    if !connected {
-        return vec![
+    match (link, snapshot) {
+        // **Nothing is being read, so *reading the cluster…* is a false sentence** — the two
+        // paragraphs `screens/context.md` § After `esc dismiss` draws instead, which say what the
+        // state is and what the one key out of it does. **The reason is withheld on this arm
+        // alone**: the reader has just read it in the box they dismissed, and a second, shorter
+        // copy is the second vocabulary NOTES § D264 ruling 1 refuses. Nothing was dismissed on
+        // the arm below, which is why that one states its cause.
+        (ui::Link::Unconnected, _) => vec![
             views::Stripped::of(&format!(
                 "{} Not connected to the cluster right now.",
                 ui::mark(theme::ALARM)
             )),
             views::Stripped::of("Press X to try again, or pick a different cluster."),
-        ];
-    }
-    match snapshot {
-        None => {
+        ],
+        // **A login that ran out before anything had settled** (`screens/states.md` § Over a pane
+        // with nothing to show yet → Expired). The words are `screens/states.md` § Your login
+        // expired's own clause — *"the login token your kubeconfig creates has timed out"* —
+        // recapitalised as a sentence rather than phrased a second way, and **the fix is not named
+        // here**: `screens/help.md` already carries *paused — renew your login, then press X*, and
+        // a second copy is the repeated instruction that page refuses.
+        //
+        // **A kind whose own read had already settled reaches no arm here** — that pane draws
+        // `ui::empty`'s row over a `Table` that came back, and `notes` is the Alerts pane's alone.
+        (ui::Link::Expired, None) => vec![
+            views::Stripped::of(&format!(
+                "{} The login token your kubeconfig creates has timed out.",
+                ui::mark(theme::ALARM)
+            )),
+            views::Stripped::of("Nothing more will come back until it is renewed."),
+        ],
+        // **Nothing is answering, and the retry may still clear it** (`screens/states.md` § Over a
+        // pane with nothing to show yet → Lost). **Present tense, and that is the whole of the
+        // sentence's claim**: this arm covers a run where nothing ever arrived *and* one where a
+        // pods LIST had decoded objects before the socket died, so a past-tense *nothing came back*
+        // is false in two of its three shapes. It says neither *disconnected* nor *retrying* — the
+        // header says both — and it names no count, not even a stale one.
+        (ui::Link::Lost, None) => vec![
+            views::Stripped::of(&format!(
+                "{} Nothing is coming back from the cluster.",
+                ui::mark(theme::ALARM)
+            )),
+            views::Stripped::of(
+                "It keeps asking, on its own — nothing for you to do. Press X for a different \
+                 cluster.",
+            ),
+        ],
+        (_, None) => {
             // **The count is the pods LIST's own progress** (`k8s::Store::still_listing`), the
             // number that grows while the reader waits — `2,140 pods` in the mockup. A watch in
             // *trouble* is a different sentence and it is the banner's, not this paragraph's.
@@ -9699,7 +9743,7 @@ fn notes(
                 ),
             ]
         }
-        Some(snapshot) => vec![views::Stripped::of(&format!(
+        (_, Some(snapshot)) => vec![views::Stripped::of(&format!(
             "{} and {} checked, none of them is in trouble right now.",
             plural(snapshot.pods.len(), "pod"),
             plural(snapshot.nodes.len(), "node"),

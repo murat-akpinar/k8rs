@@ -15685,7 +15685,7 @@ fn the_connection_word_says_disconnected_only_when_no_watch_answers() {
 #[test]
 fn the_empty_panes_paragraphs_count_what_the_store_actually_read() {
     let waiting = notes(
-        true,
+        ui::Link::Connecting,
         None,
         &[k8s::Listing {
             kind: ObjectKind::Pod,
@@ -15707,7 +15707,7 @@ fn the_empty_panes_paragraphs_count_what_the_store_actually_read() {
 
     // A LIST of another kind is not the pod count this paragraph is about.
     let other = notes(
-        true,
+        ui::Link::Connecting,
         None,
         &[k8s::Listing {
             kind: ObjectKind::Node,
@@ -15723,7 +15723,7 @@ fn the_empty_panes_paragraphs_count_what_the_store_actually_read() {
 
     let store = a_cluster_with_cards();
     let snapshot = store.snapshot(now()).expect("every LIST landed");
-    let healthy = notes(true, Some(&snapshot), &[]);
+    let healthy = notes(ui::Link::Live, Some(&snapshot), &[]);
     let said = healthy[0].as_str();
     println!("{said}");
     assert!(
@@ -15738,7 +15738,7 @@ fn the_empty_panes_paragraphs_count_what_the_store_actually_read() {
     // **Nothing connected says so and does not claim to be reading** (`screens/context.md`
     // § After `esc dismiss`): the reason is not repeated — the reader just read it in the box they
     // dismissed — and what is here instead is the one key out.
-    let stranded = notes(false, None, &[]);
+    let stranded = notes(ui::Link::Unconnected, None, &[]);
     let said: Vec<&str> = stranded.iter().map(views::Stripped::as_str).collect();
     println!("{said:?}");
     assert_eq!(
@@ -15753,7 +15753,7 @@ fn the_empty_panes_paragraphs_count_what_the_store_actually_read() {
     // cluster's.
     assert_eq!(
         notes(
-            false,
+            ui::Link::Unconnected,
             Some(&snapshot),
             &[k8s::Listing {
                 kind: ObjectKind::Pod,
@@ -15766,6 +15766,193 @@ fn the_empty_panes_paragraphs_count_what_the_store_actually_read() {
         .collect::<Vec<&str>>(),
         said,
         "a store left over from another cluster was read as this one's progress"
+    );
+}
+
+/// **Which "nothing loaded yet" sentence an empty pane draws, and what decides it**
+/// (`screens/states.md` § Over a pane with nothing to show yet → Expired, → Lost, § Still loading;
+/// NOTES § D295). Every case here is an Alerts pane with **no snapshot**, which is why neither
+/// `k8s::Store::snapshot` nor `Console::unconnected` can separate them and [`linked`]'s answer has
+/// to: the defect was one state wearing another's words.
+///
+/// **No sentence is spelled here, and that is deliberate** — the words themselves are compared with
+/// `screens/states.md` by [`crate::ui::tests::the_empty_pane_sentences_are_the_pages_own_words`],
+/// which is the only place with both the producer and the file's own paragraphs in reach. A second
+/// copy of a sentence in this file is a third copy of it in the repo, and the copy nobody edits is
+/// the one that goes stale. What is left here is the half that needs no words: **which link reaches
+/// which arm**, and the properties every arm owes whatever it says.
+///
+/// **The link is fed from [`linked`] over real `k8s::Trouble` rows and not written in as a value**,
+/// so what is asserted is the chain a dead port runs through and not this test's opinion of it.
+///
+/// **The rows are built rather than read off a `k8s::Store`, and that is a limit rather than a
+/// choice**: the dead-port fault is `k8s::Fault::Unanswered`, which reaches a store only through a
+/// watch failure, and that field is private to `k8s.rs`. `k8s::Store::stop_waiting` — the one
+/// public route into *every watch in trouble* — is a different state: its `Unfinished` is
+/// **standing**, so the store publishes an empty snapshot and the pane becomes a banner over a
+/// settled read, with no paragraph to compare (measured, test host, this box). The drawn 80×24 are
+/// [`crate::ui::tests::every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`].
+#[test]
+fn a_pane_with_nothing_loaded_draws_the_sentence_its_own_trigger_earned() {
+    // 2,140 pods read so far, on every case below — both empty-pane sections rule that `so_far`
+    // need not be zero. A discriminator that keyed on the count would answer the same for all of
+    // them, and each state that must not name a number is handed one to name.
+    let listing = [k8s::Listing {
+        kind: ObjectKind::Pod,
+        so_far: 2140,
+        since: None,
+    }];
+    let said = |link| notes(link, None, &listing);
+    let words = |paragraphs: &[views::Stripped]| {
+        paragraphs
+            .iter()
+            .map(|paragraph| views::Stripped::as_str(paragraph).to_owned())
+            .collect::<Vec<String>>()
+    };
+    // **A dead port: every watch failed and none is answering** — the shape
+    // [`the_connection_word_says_disconnected_only_when_no_watch_answers`] measured on the binary
+    // against a released port, where the header drew `⚠ disconnected, retrying` at the first frame.
+    let dead = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+    // **A first launch whose token is already dead** — `connect_with` fails only on a kubeconfig
+    // that will not load or a client that will not build, so a live server with a spent credential
+    // passes it clean and every watch then answers `401`.
+    let spent = watcher::Error::WatchError(
+        kube::core::Status::failure("expired", "Unauthorized")
+            .with_code(401)
+            .boxed(),
+    );
+    // A `fn` and not a closure: the borrow in the rows it builds outlives the call that built them.
+    fn every_watch(failure: &watcher::Error) -> Vec<k8s::Trouble<'_>> {
+        WATCHED
+            .iter()
+            .map(|kind| in_trouble(kind.clone(), Some(failure), false))
+            .collect()
+    }
+    // **A derived list asserts it found something** (CLAUDE.md § Tests must not lie): `all` over an
+    // empty one is vacuously true, and an empty one is also every watch *answering*, which is the
+    // opposite state.
+    for (failure, fault) in [
+        (&dead, k8s::Fault::Unanswered),
+        (&spent, k8s::Fault::Expired),
+    ] {
+        let rows = every_watch(failure);
+        assert_eq!(
+            rows.len(),
+            WATCHED.len(),
+            "a watch is unaccounted for, so one absence would read as a watch that is answering"
+        );
+        assert!(
+            rows.iter().all(|trouble| trouble.fault() == Some(fault)),
+            "a fixture is not the fault this test is about: {fault:?}"
+        );
+    }
+
+    // 1. **`Lost`: nothing is answering, and the retry may still clear it.** Present tense, because
+    //    this arm also covers a pods LIST that had decoded objects before the socket died.
+    let lost = linked(true, None, &every_watch(&dead));
+    assert_eq!(
+        lost,
+        ui::Link::Lost,
+        "a startup that reached nothing did not reach the arm this box adds"
+    );
+    let unanswered = said(lost);
+    println!("{:?}", words(&unanswered));
+
+    // 2. **`Expired`: the login ran out before anything settled.** `k8s::Fault::standing` is true
+    //    of it, so *reading the cluster…* here is not premature but impossible — the arm this
+    //    round's correction added, and the one the first draft of this test wrongly pinned.
+    let expired = linked(true, None, &every_watch(&spent));
+    assert_eq!(
+        expired,
+        ui::Link::Expired,
+        "a login that ran out before the first LIST landed read as a dropped socket"
+    );
+    let timed_out = said(expired);
+    println!("{:?}", words(&timed_out));
+
+    // **The four arms are four answers** — which is the whole of *the link is the discriminator*,
+    // and it is asserted without naming any of them. Two arms that came to say the same thing would
+    // be a state that had stopped existing, which no single-arm assertion can see.
+    let progress = said(ui::Link::Connecting);
+    let dismissed = said(ui::Link::Unconnected);
+    let arms = [&unanswered, &timed_out, &progress, &dismissed];
+    for (at, one) in arms.iter().enumerate() {
+        assert!(
+            one.len() >= 2,
+            "arm {at} draws {} paragraph(s), so an empty answer would pass the comparisons below",
+            one.len()
+        );
+        for other in &arms[at + 1..] {
+            assert_ne!(
+                words(one),
+                words(other),
+                "two of the four arms draw one answer, so a state has stopped existing"
+            );
+        }
+    }
+
+    // 3. **Neither arm repeats its own header, and the expired one names no fix.** The header
+    //    already carries `⚠ disconnected, retrying` and `⚠ login expired`; `?`'s own *Changing
+    //    things* heading already carries *paused — renew your login, then press X*. So `Lost` may
+    //    not say *disconnected*, *retrying* or the dismissed switch's *try again*, and `Expired`
+    //    may not name the renewal command or tell the reader to press anything. **Stating that the
+    //    token will not come back until it is renewed is the fact, not the fix**, and is what the
+    //    page draws — the words themselves are the crossing test's to compare.
+    for (which, drawn, forbidden) in [
+        (
+            "Lost",
+            &unanswered,
+            ["disconnected", "retrying", "try again", "kubectl"],
+        ),
+        (
+            "Expired",
+            &timed_out,
+            ["login expired", "press x", "aws sso", "kubectl"],
+        ),
+    ] {
+        let joined = words(drawn).join(" ").to_lowercase();
+        for word in forbidden {
+            assert!(
+                !joined.contains(word),
+                "{which} repeats another surface, or names a fix that is not its to name: \
+                 {word:?} in {joined:?}"
+            );
+        }
+        // **No count, not even the stale one it was handed** — both sections' own rule, and the one
+        // assertion a `so_far`-keyed discriminator could not have passed.
+        assert!(
+            !joined.contains("2,140"),
+            "{which} drew a count that has stopped moving: {joined:?}"
+        );
+    }
+
+    // 5. **A watch answering somewhere is not either of these states**, and this is the case that
+    //    keeps the discriminator from being *merely usually right*: the pod LIST is running, four
+    //    watches are dead, and the pane is still reading.
+    let pods_flowing: Vec<k8s::Trouble<'_>> = WATCHED
+        .iter()
+        .filter(|kind| **kind != ObjectKind::Pod)
+        .map(|kind| in_trouble(kind.clone(), Some(&dead), false))
+        .collect();
+    assert_eq!(
+        pods_flowing.len(),
+        WATCHED.len() - 1,
+        "an empty list answers `connecting…` whatever the predicate does, so the four dead watches \
+         this case is about were filtered away with the pod watch"
+    );
+    let partial = linked(true, None, &pods_flowing);
+    assert_eq!(
+        partial,
+        ui::Link::Connecting,
+        "one absence is one watch answering, and with no snapshot yet that is a LIST in progress"
+    );
+    assert_eq!(
+        words(&said(partial)),
+        words(&progress),
+        "a pane whose pod LIST was moving drew one of the two stopped-link sentences"
     );
 }
 

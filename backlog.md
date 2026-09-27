@@ -3817,4 +3817,40 @@ Phase 12 close triage fixes them; the rest are notes.
   ([D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
   ruling 2). **The worst instance to name in any box that takes this: a mutation that
   succeeded and was not written down.** `k8s-admin`, [reports/2026-09-27](reports/2026-09-27-the-cut-message-pointer.md) § 8.
-
+- **The Resources browser may tell the same false-progress lie a first launch just
+  stopped telling, through a different code path — unverified.** Box 3 fixed `notes()`,
+  which governs the **Alerts** pane. A reader who leaves Alerts before the first watch
+  answers reaches `ui::note`'s generic `WAITING` fallback instead, under the identical
+  `Link::Lost` trigger, and may draw the same *a read is in progress* sentence over a
+  pane that has never reached the cluster
+  ([D295](NOTES.md#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)).
+  **The route this entry first named is measured false.** `tester` drove the real binary
+  on a pty and found a reader **cannot** leave Alerts before the first watch answers:
+  `↑↓`, `⏎` and `Tab` produce a byte-identical frame, the sidebar cursor never moves off
+  `▸ALERTS`, so the keys are withheld *and* inert — the inverse of `PRIOR-ART § G2`, and
+  it holds. The browser's `Pane::Loading` + `Lost` state **is** reachable, but only by a
+  **mid-session drop**: connect, open Resources, lose the link, then open a kind never
+  opened before. So the first move is a measurement of *that* journey, not of a first
+  launch. **And box 3 gave that pane the footer half of the fix without the body half** —
+  `stranded` promotes `X switch cluster` there while `ui::note`'s generic `WAITING`
+  still draws *reading the cluster…*, which is the same header-versus-body divergence
+  box 3 existed to remove, one pane over. `widgets.md` § 2a's row authorises the
+  promotion by its letter (*nothing loaded, and the link cannot currently answer*); the
+  *reason* behind it — least else on screen — is weaker on a mid-session drop, where the
+  badges have settled and another kind's list is one keypress away. `tui-designer`'s to
+  settle. `k8s-admin` finding 3, `tester`'s measurement.
+- **`unreadable()` tells a reader to wait for a fault that waiting cannot clear.** Its
+  sentence ends *"It keeps asking, and until that works nothing here about them can be
+  trusted"* — drawn for `Fault::Expired` and `Fault::Refused` as well as for the
+  transient faults, and both of those are `k8s::Fault::standing`: the asking will never
+  work, because a human has to renew a token or grant a verb. It is the same defect
+  [D295](NOTES.md#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)
+  corrected in `notes`, one surface over, and it is the screen a uniformly-expired first
+  launch actually lands on — measured on the binary by `dev-ui`. **The string is in
+  `main.rs` (`unreadable`, ~2793), not `k8s.rs`**, so it is `dev-ui`'s own file from
+  Phase 12 and needs no `dev-core` box: `k8s::Fault::standing` is already `pub(crate)`,
+  so picking a different tail for a standing fault is reachable from inside `main.rs`
+  alone. `dev-ui` reported it as `k8s.rs`'s and out of reach, the PM repeated that, and
+  `tui-designer` grepped and found both wrong — which is why the entry now names a line
+  rather than a file from memory. `dev-ui`, box 3; attribution corrected by
+  `tui-designer`.

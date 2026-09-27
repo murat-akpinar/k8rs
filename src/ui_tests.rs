@@ -875,7 +875,7 @@ fn the_header_of_every_link_state_is_the_pages_own() {
     }
     assert_eq!(
         found,
-        [1, 1, 5],
+        [1, 1, 6],
         "a link state stopped drawing its header, or grew one"
     );
 }
@@ -2111,6 +2111,13 @@ fn drawn_above(drawn: &Buffer) -> Vec<String> {
 /// **The mockup's own paragraphs, as the sentences a caller would hand over** — so a fixture is
 /// read out of `screens/states.md` rather than typed beside it, and a mockup that is edited feeds
 /// the edit straight into the screen this test draws.
+/// **[`against`] alone cannot catch an edit to the file**, because it feeds these paragraphs into
+/// the frame it then compares them with — the mockup is on both sides. The crossing is
+/// [`the_empty_pane_sentences_are_the_pages_own_words`], which compares the *producer* with them
+/// and lives here rather than beside `crate::notes` because `crate::ui::tests` can see a private
+/// item of the crate root and `crate::tests` cannot see one of this module (invariant 11 spells the
+/// `mod tests;` declaration, so it is not widened for a test helper).
+///
 /// **Nothing is stripped on the way through, [`CUT`] included.** `reading the cluster…` and
 /// `Retrying…` are sentences with an ellipsis in them and a capped banner ends on the same
 /// character, so no rule here can tell the two apart — which is why [`against`] is pointed only at
@@ -2132,6 +2139,53 @@ fn paragraphs(section: &str, nth: usize, from: usize) -> Vec<String> {
 /// The same paragraphs as the one string a banner is.
 fn joined(section: &str, nth: usize, from: usize) -> String {
     paragraphs(section, nth, from).join("\n\n")
+}
+
+/// **What `crate::notes` produces *is* what `screens/states.md` draws** — the one comparison with
+/// the file on a single side of it (NOTES § D295).
+///
+/// **Why it is needed at all**: [`against`] reads a mockup's paragraphs, hands them to the renderer
+/// and compares the drawn rows with the same paragraphs, so it proves the renderer and says nothing
+/// about the producer. An edit to a sentence in `screens/states.md` alone left every test green —
+/// and so would a producer quietly drifting from the page. This is both halves' only crossing.
+///
+/// **Two sentences, because they are the two this box wrote** (§ Over a pane with nothing to show
+/// yet): mockup 4 is *Expired, nothing settled*, mockup 5 is *Lost*. The progress and calm
+/// paragraphs carry a count out of the store and are
+/// [`crate::tests::the_empty_panes_paragraphs_count_what_the_store_actually_read`]'s.
+///
+/// **`so_far: 2140` on both**, because both sections rule that the count is not drawn however large
+/// it is — a producer that named it would fail here against a page that does not.
+#[test]
+fn the_empty_pane_sentences_are_the_pages_own_words() {
+    let listing = [crate::k8s::Listing {
+        kind: ObjectKind::Pod,
+        so_far: 2140,
+        since: None,
+    }];
+    let page = "## Your login expired";
+    let mut drawn = Vec::new();
+    for (nth, link) in [(4, Link::Expired), (5, Link::Lost)] {
+        let produced = crate::notes(link, None, &listing);
+        let page_says = fed(page, nth, 0);
+        println!("{link:?}\nproduced: {produced:?}\npage:     {page_says:?}\n");
+        assert_eq!(
+            produced, page_says,
+            "{link:?}: `notes` and `screens/states.md` [{nth}] have come apart"
+        );
+        assert_eq!(
+            produced.len(),
+            2,
+            "{link:?}: the mockup handed over {} paragraph(s) — a reader that stopped parsing \
+             would compare nothing with nothing",
+            produced.len()
+        );
+        drawn.push(produced);
+    }
+    assert_ne!(
+        drawn[0], drawn[1],
+        "both mockups draw one sentence, so this comparison cannot tell the two states apart"
+    );
 }
 
 /// **What every one of the nine owes its own mockup**: the footer byte for byte, the paragraphs
@@ -2187,9 +2241,10 @@ fn against(section: &str, nth: usize, app: &App, screen: &Screen) {
 /// screen, and a `###` subsection is inside its `##` parent as far as [`mockups`] reads. Every
 /// frame after the first in a section it had already ticked was therefore invisible to it: when
 /// `screens/states.md` grew § *Over a pane with nothing to show yet* under § *Your login expired*,
-/// two new screens arrived and the sweep stayed green (`dev-ui`, 2026-09-12). Twenty frames carry
-/// a footer today — twenty-two since § *Alerts had already found nothing, and then the link went*
-/// (NOTES § D266) — and each one is either drawn here or named below with the test that owns it.
+/// two new screens arrived and the sweep stayed green (`dev-ui`, 2026-09-12). **How many carry a
+/// footer is the closing assertion's number and is not repeated here** — a count is the copy that
+/// goes stale, and this one had: every frame the file draws is either drawn below or named there
+/// with the test that owns it, which is the claim.
 #[test]
 fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     let now = now();
@@ -2290,26 +2345,34 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
         seen.push((section, nth));
     }
 
-    // § Over a pane with nothing to show yet — the same expired login over the two panes that have
-    // no card to relabel as stale. **`X` is promoted wherever the link is `Link::Expired`, whatever
-    // the pane under it is drawing**, which is what separates it from `s` and `r`: it never acted
-    // on a selected object, so *nothing is selected* was never its condition. Each pane otherwise
-    // keeps its own shape — Still loading still drops the cursor keys, the empty kind still keeps
-    // `/ filter`. **Each frame is fed its own mockup and not the one it resembles**, so an edit to
-    // either drawing arrives here rather than being masked by the section it was copied from.
-    let waited = fed(section, 3, 0);
-    let mut waiting = screen(&loading, &now);
-    waiting.note = &waited;
-    waiting.link = Link::Expired;
-    against(section, 3, &app(), &waiting);
-    seen.push((section, 3));
-
-    let named = said_above(&mockups(section)[4].pane);
+    // § Over a pane with nothing to show yet — three frames over panes with no card to relabel as
+    // stale, and **`X` is on all three because `k8s::Fault::standing` decides the promotion**
+    // (NOTES § D295): under `Expired` regardless of what has settled, under `Lost` because nothing
+    // has. The order here is the file's — the kind whose own read had already settled comes first,
+    // then the two where nothing had. Each pane otherwise keeps its own shape: the browser keeps
+    // `/ filter`, the Alerts panes drop the cursor keys. **Each frame is fed its own mockup and not
+    // the one it resembles**, so an edit to any of the three arrives here rather than being masked
+    // by the one it was copied from.
+    let named = said_above(&mockups(section)[3].pane);
     let open_kind = [browsable(&named[0], true)];
     let mut bare = browsing(&none, &open_kind, &now);
     bare.link = Link::Expired;
-    against(section, 4, &opened(), &bare);
+    against(section, 3, &opened(), &bare);
+    seen.push((section, 3));
+
+    let timed_out_early = fed(section, 4, 0);
+    let mut unrenewed = screen(&loading, &now);
+    unrenewed.note = &timed_out_early;
+    unrenewed.link = Link::Expired;
+    against(section, 4, &app(), &unrenewed);
     seen.push((section, 4));
+
+    let never = fed(section, 5, 0);
+    let mut nothing_answering = screen(&loading, &now);
+    nothing_answering.note = &never;
+    nothing_answering.link = Link::Lost;
+    against(section, 5, &app(), &nothing_answering);
+    seen.push((section, 5));
 
     // § Your computer's clock is off — a banner over a *live* list: the header still reads
     // `live · admin`, so this is neither the connection's reason nor a permission's, and the keys
@@ -2463,8 +2526,8 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // that silently stopped parsing would make every loop above it vacuous and this whole sweep a
     // green that proves nothing.
     assert_eq!(
-        frames, 25,
-        "screens/states.md draws {frames} screens with a footer, not the 25 this sweep was \
+        frames, 26,
+        "screens/states.md draws {frames} screens with a footer, not the 26 this sweep was \
          written against — a frame was added or removed and this test has to say so"
     );
 }
@@ -2865,22 +2928,35 @@ fn a_namespace_scoped_login_that_may_act_keeps_its_keys() {
     );
 }
 
-/// **`X switch cluster` survives the two expired frames that have nothing else on them** — which
-/// are the two the key was promoted for: *"so a reader does not have to hold `aws sso login` in
-/// their head while hunting the key map"* (`screens/states.md` § Your login expired).
+/// **`X switch cluster`'s promotion follows [`crate::k8s::Fault::standing`], and all four reachable
+/// shapes are drawn here so the rule is visible rather than asserted** (`screens/states.md` § Over
+/// a pane with nothing to show yet, `screens/widgets.md` § 2a's closed-mode rows; NOTES § D295).
 ///
-/// **`screens/` now draws both**, in § *Over a pane with nothing to show yet*, and
-/// [`every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`] compares each against its
-/// own mockup — these two lines were this box's composition when the file had no drawing of them,
-/// and were reported as a gap rather than smuggled in. What is left here is the half a mockup
-/// cannot state: the seat the key keeps, and the link that must *not* name a key.
+/// | shape | `X`? | why |
+/// |---|---|---|
+/// | `jobs` browser, `Expired`, its own read settled | yes | standing — nothing moves without a human, whatever else is settled |
+/// | Alerts, `Expired`, nothing settled | yes | standing |
+/// | Alerts, `Lost`, nothing settled | yes | not standing, but nothing else to fall back on |
+/// | Resources, `Lost`, a never-opened kind mid-session | **no** | not standing, and the badges beside it are settled |
+///
+/// **The fourth is the one the earlier reading of this rule got wrong**, and it is the reason
+/// [`offered`]'s `landed` reads [`Screen::alerts`] rather than the open pane: that frame's *own*
+/// pane has answered nothing, and the reader still has settled badges and another opened kind a
+/// keypress away — § *The connection dropped*'s position, which promotes `X` from neither.
+///
+/// **Three of the four are also compared against their own mockups** by
+/// [`every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`]; the fourth has no mockup
+/// because the page rules its footer without drawing a body this file owns. What is left here is
+/// the half a mockup cannot state: the seat the key keeps, and the shape that must not name it.
 #[test]
-fn an_expired_login_keeps_the_key_that_renews_it_on_every_frame() {
+fn x_is_promoted_where_the_login_is_dead_or_nothing_has_settled_to_wait_with() {
     let now = now();
     let quiet = Pane::Ready(Vec::new());
     let loading = Pane::Loading;
+    let none = Pane::Ready(crate::k8s::Table::default());
+    let kinds = [browsable("jobs", true)];
 
-    // The state's own mockup, unchanged: the key sits after `⏎ open`.
+    // The seat, from § Your login expired's own mockup: the key sits after `⏎ open`.
     let mut cards = screen(&quiet, &now);
     cards.link = Link::Expired;
     assert!(
@@ -2888,13 +2964,94 @@ fn an_expired_login_keeps_the_key_that_renews_it_on_every_frame() {
         "the key moved out of the seat the mockup gives it"
     );
 
-    // A link that is merely down names no key to press: disconnected is retrying on its own.
-    let mut lost = screen(&loading, &now);
-    lost.link = Link::Lost;
+    // 1. The `jobs` browser under an expired login: its own read came back with zero rows, so
+    //    something *has* settled — and `X` is promoted anyway, because nothing will move again.
+    let mut settled_and_dead = browsing(&none, &kinds, &now);
+    settled_and_dead.link = Link::Expired;
+
+    // 2 and 3. Alerts with nothing settled, under each trigger — each fed its own mockup's
+    //    paragraphs, so the frames printed below are the screens the product draws and not a
+    //    footer over `ui::note`'s bare fallback.
+    let page = "## Your login expired";
+    let timed_out = fed(page, 4, 0);
+    let unanswered = fed(page, 5, 0);
+    let mut expired_early = screen(&loading, &now);
+    expired_early.note = &timed_out;
+    expired_early.link = Link::Expired;
+    let mut nothing_answering = screen(&loading, &now);
+    nothing_answering.note = &unanswered;
+    nothing_answering.link = Link::Lost;
+
+    // 4. **A never-opened kind, mid-session, when the link drops.** The browser pane has answered
+    //    nothing; the Alerts pane has a snapshot behind it, which is every settled badge on the
+    //    frame — so `X` is not promoted. `Pane::Ready(vec![oom()])` is that snapshot's evidence.
+    let live_cards = Pane::Ready(vec![oom()]);
+    let mut dropped_into_a_new_kind = browsing(&UNOPENED, &kinds, &now);
+    dropped_into_a_new_kind.alerts = &live_cards;
+    dropped_into_a_new_kind.link = Link::Lost;
+
+    // Bound, not borrowed from a temporary in the array below.
+    let alerts_app = app();
+    let browser_app = opened();
+    let shapes: [(&str, &App, &Screen, bool); 4] = [
+        (
+            "jobs browser · Expired · its own read settled",
+            &browser_app,
+            &settled_and_dead,
+            true,
+        ),
+        (
+            "Alerts · Expired · nothing settled",
+            &alerts_app,
+            &expired_early,
+            true,
+        ),
+        (
+            "Alerts · Lost · nothing settled",
+            &alerts_app,
+            &nothing_answering,
+            true,
+        ),
+        (
+            "Resources · Lost · a never-opened kind mid-session",
+            &browser_app,
+            &dropped_into_a_new_kind,
+            false,
+        ),
+    ];
+    for (shape, app, screen, promoted) in shapes {
+        let drawn = render(app, screen);
+        println!("{shape}\n{}\n", rows(&drawn).join("\n"));
+        let footer = unframed(&rows(&drawn)[22]);
+        assert_eq!(
+            footer.starts_with("X switch cluster"),
+            promoted,
+            "{shape}: the footer disagrees with `Fault::standing`: {footer:?}"
+        );
+    }
+
+    // And the exact lines the three promoted shapes draw, so a promotion that arrived as a
+    // *different* line than the page's would still fail.
     assert_eq!(
-        unframed(&rows(&render(&app(), &lost))[22]),
+        unframed(&rows(&render(&opened(), &settled_and_dead))[22]),
+        "X switch cluster  / filter  ? all keys  q quit"
+    );
+    for stranded in [&expired_early, &nothing_answering] {
+        assert_eq!(
+            unframed(&rows(&render(&app(), stranded))[22]),
+            "X switch cluster  ? all keys  q quit",
+            "a pane with nothing settled behind it lost its one way out"
+        );
+    }
+
+    // **The must-not-fire that keeps the promotion tied to the link and not to the empty pane**: a
+    // still-reading pane has no fault at all, so nothing about it says *go somewhere else*.
+    let mut still = screen(&loading, &now);
+    still.link = Link::Connecting;
+    assert_eq!(
+        unframed(&rows(&render(&app(), &still))[22]),
         "? all keys  q quit",
-        "a dropped connection invented a key for an action k8rs cannot perform"
+        "a LIST in progress was drawn as a cluster to leave"
     );
 }
 
