@@ -5086,7 +5086,7 @@ behaves as specified.
       banner stood 412 s longer, so one screen said both — and `--follow` on a
       container quiet past 292 s prints kube's own error `Display` to a person.
       Neither is new to this box and both are in [`backlog.md`](backlog.md)
-- [ ] **While the API server is restarting, the banner sends the operator to fix
+- [x] **While the API server is restarting, the banner sends the operator to fix
       their RBAC.** One frame, two sentences that cannot both be acted on: header
       `⚠ disconnected, retrying`, banner *the role this kubeconfig uses needs to
       `list` and `watch` pods*. A kube-apiserver coming back up really does answer
@@ -5095,7 +5095,44 @@ behaves as specified.
       plane draws it. **The contradiction is also the detector**: a `Refused` row
       while the link is `Lost` is not an RBAC problem, and nothing today reads the
       two together ([D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26) ruling 4 ·
-      [reports/2026-09-26-the-error-state-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md))
+      [reports/2026-09-26-the-error-state-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md)).
+      **Done 2026-09-28**
+      ([D300](NOTES.md#d300--a-403-while-nothing-else-is-answering-is-not-an-rbac-errand-and-the-detector-is-the-contradiction-itself-2026-09-28)),
+      and the detector took **three** conditions rather than the two this box
+      names: `k8s::Fault::Refused`, `k8s::Trouble::listed`, and *no watch is
+      answering* — `linked`'s own predicate, extracted as `nothing_answering` so
+      the header and the banner cannot disagree about whether the cluster is
+      there. **`listed` came out of the operator review, which measured the
+      window instead of reasoning about it**
+      ([reports/2026-09-28-a-403-from-a-restarting-apiserver.md](reports/2026-09-28-a-403-from-a-restarting-apiserver.md)):
+      the `403` is byte-identical in shape to a real denial — same `code`,
+      `reason` and `message` — so nothing in `k8s::said` can tell them apart, and
+      without `listed` the two-condition version drew the new clause over a
+      **namespace-scoped run's permanently refused nodes row** on any blip,
+      telling the one reader it exists for that their permanent permission
+      problem *may not be about permissions*. A watch that had listed and is
+      refused now is the control plane changing its answer under us; one that
+      never listed is RBAC, and a scoped run's nodes watch can never stop being
+      that.
+      **The sentence is `screens/states.md` § Refused by a cluster that is not
+      answering anything else, ruled before the code**: the errand is withheld,
+      the verbs stay because the security gate asks a refusal to name them, and
+      *a cluster starting up refuses like this* is an example of what produces
+      the state rather than a verdict about this one. Measured on the real binary
+      — `--live` against a server that refuses the pods LIST and answers the
+      other four printed it byte-identical to the page, the four neighbours kept
+      their own *nothing usable came back*, and the clause appears only on the
+      frame where the fifth row arrives.
+      **What this box did not take**: the same wire shape with **nothing
+      dropped** — a run launched inside the window, or a running one whose
+      connections survive it — still draws five errands under a header reading
+      `live`, and `/readyz` is the one answer measured to tell it from a
+      powerless login; `--once`'s own failure paragraph keeps the errand in its
+      stronger form (measured, exit `2`); `views::because`'s doc claims kube
+      loses a non-`Status` error code, which the pinned source refutes; and
+      `said_above` still reads a `▲ ` banner as the first card, so half of the
+      screen sweep is vacuous wherever `unreadable` draws. All four in
+      [`backlog.md`](backlog.md)
 - [ ] **`screens/widgets.md` illustrates the command log's outcome words with
       one the code cannot produce.** Line 300's gap rule names
       `→ not sent`, `→ refused`, `→ not allowed`, `→ login expired` — and

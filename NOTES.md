@@ -321,6 +321,7 @@ its line moving with it.
 - [D297](#d297--the-frozen-file-opens-for-a-wedged-watch-and-the-timeout-has-five-seconds-of-room-to-land-in-2026-09-27) — the frozen file opens for a wedged watch, and the timeout has five seconds of room to land in
 - [D298](#d298--the-second-guard-joins-the-devs-per-turn-list-and-it-costs-41-s-rather-than-the-017-s-the-first-one-did-2026-09-27) — the second guard joins the dev's per-turn list, and it costs 4.1 s rather than the 0.17 s the first one did
 - [D299](#d299--the-scope-list-went-stale-a-fifth-time-because-the-command-that-counts-it-cannot-see-a-digit-2026-09-27) — the scope list went stale a fifth time because the command that counts it cannot see a digit
+- [D300](#d300--a-403-while-nothing-else-is-answering-is-not-an-rbac-errand-and-the-detector-is-the-contradiction-itself-2026-09-28) — a `403` while nothing else is answering is not an RBAC errand, and the detector is the contradiction itself
 
 ## Why it exists — where the gap is
 
@@ -26857,3 +26858,169 @@ asserts it found something* read from the other end
 ([D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
 ruling 5). Found while picking the scope for the wedged-watch commit, by running
 the command and not believing its answer.
+
+### D300 — a `403` while nothing else is answering is not an RBAC errand, and the detector is the contradiction itself (2026-09-28)
+
+Phase 13's first box, out of the frame
+[D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+ruling 4 measured and could not fix inside its own box: header
+`⚠ disconnected, retrying`, banner *the role this kubeconfig uses needs to
+`list` and `watch` pods*
+([reports/2026-09-26-the-error-state-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md)
+§§ 2, G2). Two sentences in one frame that cannot both be acted on, and every
+rolling control plane draws it.
+
+**The wire was measured before the sentence was written, and it is faithful.**
+Two `docker restart`s of a single-node apiserver, polled
+([reports/2026-09-28-a-403-from-a-restarting-apiserver.md](reports/2026-09-28-a-403-from-a-restarting-apiserver.md)):
+a pods LIST inside the window answers `code: 403`, `reason: Forbidden`,
+`message: pods is forbidden: User "…" cannot list resource "pods" in API group
+"" in the namespace "default"` — **byte-identical in shape to a genuine RBAC
+denial**, so `k8s::said` hands the sentence nothing to key on. The window was
+under ~110 ms there; in the same instant `/version` and `/apis` answered `200`
+and `/readyz` answered `500` with four failed post-start hooks.
+
+**Ruling 1 — the detector is three conditions, and the third is `listed`.** The
+clause draws for a row whose fault is `k8s::Fault::Refused`, **and** whose watch
+had listed, **and** on a run where no watch is answering — the last being
+`main.rs`'s `nothing_answering`, D285 ruling 1's predicate exactly. The first
+draft of this box had two of them and `k8s-admin` falsified it on the object: a
+namespaced `Role` cannot `list nodes`, so a scoped run carries a permanently
+`Refused` nodes row, and the moment the other four drop — a lid, a VPN, a proxy
+killing long-lived connections — all five kinds have rows and the clause draws
+over the one reader it was written to protect, telling them their permanent
+permission problem *may not be about permissions* and to wait for a retry that
+can never succeed. `listed` separates the two without a new field: a watch that
+listed and is now refused is the control plane changing its answer under us (the
+measured frame had all five listed before `docker stop`), and a watch that never
+listed is the RBAC case — which a scoped run's nodes watch can never stop being,
+because `complete` is never reset. It is the same field `pods_unread` already
+keys on for *a failure rather than a blip*.
+
+**Ruling 2 — the errand is withheld and the verbs stay.** No *the role this
+kubeconfig uses needs to …* and no substitute errand either: k8rs cannot tell
+this `403` from an RBAC gap, so it sends the reader nowhere. `` `list` and
+`watch` pods `` stays, because the security gate asks a refusal to name the
+missing verb and resource and withholding the errand may not cost that. It may
+not borrow `Fault::Unanswered`'s *nothing usable came back* — the cluster
+answered, and `403` is what it said. *A cluster starting up refuses like this*
+is an example of what produces the state, never a verdict about this cluster,
+which [D150](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)
+forbids it from guessing; without it *this may not be about permissions* leaves
+a reader told to disbelieve the only diagnosis on screen with nothing in its
+place. The words are `screens/states.md` § Refused by a cluster that is not
+answering anything else, ruled before the code and not after.
+
+**Ruling 3 — the clause is built in `unreadable`, and the predicate is derived
+once.** `views::because` is handed one `k8s::Fault` and knows nothing about the
+link, and *a refusal while nothing is answering* is a fact about the whole
+troubles list. `unreadable` already holds it and already wraps `because`'s clause
+in the frame and the tails. `linked`'s `dropped && !answering` became
+`nothing_answering` and both call it: a second spelling of this predicate is
+this box's own defect reached one door along — a header and a banner that
+disagreed about whether the cluster was there
+([D295](#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)'s
+rule, one surface over). Measured: 275 columns against the errand's 186, 7 banner
+rows against 5 at this page's 43-column region and 6 against 4 at the real
+53-column floor; rank unchanged.
+
+**Ruling 4 — the predicate is the troubles-only half and never `ui::Link`.**
+`unreadable` is `--once`'s and `--live`'s as well as the console's and has no
+`connected` flag to read. So an `Expired` row that wins `linked`'s arm race draws
+`⚠ login expired` over this clause, and both halves stay true there: nothing else
+is answering, and that `403` is not about the reader's `Role`. Reaching it needs
+a `401`, a `403` and a drop latched at once — a restart during a credential
+rotation — and the reader gets the actionable sentence in the header and a true
+one in the banner. **Fed and pinned rather than argued**: `tester` produced the
+shape, `linked` answers `Expired`, the refused row draws the clause and the
+expired row keeps its own — the doc claimed it and nothing tested it until the
+review round.
+
+**Ruling 5 — `Fault::Unfinished` stays in the predicate, and the reachable
+example `k8s-admin` named is closed by ruling 1 rather than by forking it.**
+`Unfinished` is set only by `Store::stop_waiting` in the `--once` deadline path,
+so `linked` can never see it and the half is live only in the other reader — and
+a scoped `--once` run at its deadline could draw *nothing else is answering
+either* beside three lines saying *this run ran out of time*. That example needs
+the nodes row, which never listed, so ruling 1 takes it. The predicate is not
+split per reader: one derivation is the property ruling 3 exists to buy, and
+D285 ruling 1's list stands verbatim.
+
+**And the pair cannot co-occur at all, which `dev-ui` found by writing the test
+for it.** `listed`, `unfinished` and `outstanding` all gate on the same
+`complete`, so `listed: true` with `unfinished: true` is unreachable — the
+two-numbers tail can never carry this clause, and the first round's assertion
+that it does was pinning an impossible state. **Three tails can carry it, not
+four**, and the wedge shape keeps the errand and keeps
+[D150](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)'s
+two numbers. A brief that said *four tails* is what produced the false
+assertion; the dev read the fields instead of the brief.
+
+**What the box did not take, and it is all recorded rather than left to be
+discovered.** The shape `listed` cannot reach is the run **launched inside the
+window** — five refusals, nothing dropped, header `live`, five errands — and on
+a cluster whose authorization webhook is down, or whose apiserver restarted
+without etcd, that stands for minutes rather than milliseconds; `/readyz` is the
+one answer that tells it from a powerless login and no code asks it. `--once`'s
+own failure paragraph keeps the errand through `views::next_step`, on a surface
+`screens/once.md` owns and no ruling covers. `views::because`'s doc claims kube
+loses a non-`Status` error code, which the pinned source refutes, so a proxy's
+HTML `403` reaches this arm by a door that file says is closed. And `said_above`
+still reads `▲ ` as *the first card, stop*, so `against`'s paragraph half stays
+vacuous on any frame whose banner is `unreadable`'s — widening it is a change to
+a helper all thirty-two frames parse through. All four are in
+[`backlog.md`](backlog.md).
+
+**One residual inside the predicate itself, stated rather than discovered
+later.** `!answering` is satisfied by *any* row, a `Refused` one included — so
+proofs that the cluster answered count as silence. After ruling 1 what is left of
+it needs refusals that had **listed**: four watches whose RBAC was pruned or
+rotated out from under a running session, plus one dropped socket, and all four
+then draw the hedged clause instead of the errand. It self-clears — the moment a
+neighbour delivers again the errand comes back — and the predicate is
+D285 ruling 1's, not this box's, so it is recorded here and not re-decided.
+
+**Five assertions in the first draft could not fail, and a machine said so.**
+`tester` planted ten mutants: deleting `!answering` from the shared predicate
+left the new test green while both of `linked`'s went red — no negative had a
+dropped row, so the errand drew for the wrong reason in each of them; two
+`len() == WATCHED.len()` assertions sat over a `map`, which preserves length, so
+`WATCHED` shrunk from five to four stayed green; and the claim that the page and
+the code were compared *"byte for byte, one layer down"* was false — misspelling
+one word inside **both** mockups at the same width left 1 605 tests green. The
+crossing that makes the sentence true now exists
+(`ui_tests.rs`'s `the_refusal_banner_is_the_pages_own_words`), reading the pane
+rows directly because `said_above` reads this family's opening `▲ ` as *the first
+card, stop* — which also means `against`'s paragraph half is vacuous on these two
+frames and its footer half is live, and the footer half is what now asserts they
+withhold `s` and `r`. **It was watched red from both ends**: the code side by the
+author, the page side by `tester`, one word misspelled inside each mockup in turn,
+each red naming its own frame — which also proves the loop reaches the second
+frame rather than stopping at the first. **And `copy-guard` does not cover this
+pair**, a premise the PM's brief got wrong: that guard vets a fixed table of named
+pairs — `ops::SCALABLE`, `CERT_EXPIRY_WARN`, the removal hedges — so it was green
+before the box and would stay green if the two copies drifted. The test is the
+only thing holding them together, and a row in the guard would be a second copy
+of one check. **`just mutants-diff` could not have found the first one**:
+its catalogue swaps `&&` for `||`, which the test does catch, and does not delete
+an operand.
+
+**The PM's own two-step edit reddened somebody else's run.** `backlog.md` linked
+`#d300…` in one edit and the heading landed in the next, so `check-docs.py`
+failed twice inside `tui-designer`'s round — CLAUDE.md § *the gate is not split by
+tree* names exactly this, and the rule it names is that a PM edit is
+self-consistent **on its own**, not by the end of the turn.
+
+**And the PM put two agents on the test host at once.** `tester`'s gate was
+running in `~/k8rs-src` when the dev's fix round mirrored over it, so that run
+compiled a `main.rs` the tree no longer held and its `EXIT=0` described nothing
+current — caught by `tester` off the mirror's own mtimes, not by anything in the
+process, and re-run against a checksum-pinned tree. CLAUDE.md § *the one hard rule
+of concurrency* names the file trees and the cluster; **the mirror is a third
+shared resource and it takes the same rule** — steps 5 and 6 may run in parallel,
+but only one of them may hold the host.
+
+**And the first fixture encoded the shape the measurement did not produce** —
+the refused row `listed: false` beside four dropped neighbours `listed: true`,
+under a doc comment saying *measured*. It is a defect in the box being landed
+and was fixed in it, which is D285 ruling 5's own precedent one box later.

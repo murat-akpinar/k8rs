@@ -876,7 +876,7 @@ fn the_header_of_every_link_state_is_the_pages_own() {
     }
     assert_eq!(
         found,
-        [1, 1, 6],
+        [1, 3, 6],
         "a link state stopped drawing its header, or grew one"
     );
 }
@@ -2189,6 +2189,92 @@ fn the_empty_pane_sentences_are_the_pages_own_words() {
     );
 }
 
+/// **The refusal banner `screens/states.md` draws *is* the one [`crate::unreadable`] produces** —
+/// the second crossing with the file on a single side of it, beside
+/// [`the_empty_pane_sentences_are_the_pages_own_words`] and for its reason (NOTES § D295's rule,
+/// NOTES § D300 ruling 2).
+///
+/// **It exists because nothing else compares them, and that was measured.** The clause is a
+/// 258-character sentence hand-typed twice — once into the page, once into a `format!` in
+/// `main.rs` — and [`against`] cannot cross them: [`said_above`] reads this family's opening `▲ `
+/// as *the first card, stop*, so those two frames' paragraph comparison is `[] == []`. Misspelling
+/// one word inside both mockups at the same width left all 1 605 tests green (`tester`,
+/// 2026-09-28). **The red this was watched fail is the code side** — `starting` → `startinq` in
+/// `main.rs`'s own `format!` — because `screens/states.md` was another agent's file that round;
+/// the comparison is an equality, so it fails identically whichever copy drifts.
+///
+/// **So the pane rows are read here rather than through [`said_above`]**, which is the whole reason
+/// this is a test of its own and not an [`against`] argument. Both frames draw the same banner and
+/// both are read, because the second is a copy somebody can edit alone.
+///
+/// **The fixture is the measured frame** (`reports/2026-09-26-the-error-state-fix-review.md` § 2,
+/// `reports/2026-09-28-a-403-from-a-restarting-apiserver.md`): every watch had listed, the pod
+/// watch is now refused and the other four have dropped. Ruling 1's `listed` is why the row says
+/// `true` — a refused watch that never listed draws the RBAC errand instead, and this comparison
+/// would then be against the wrong sentence rather than failing.
+#[test]
+fn the_refusal_banner_is_the_pages_own_words() {
+    use kube::runtime::watcher;
+    // The `403` and the dropped socket, built the way § WATCHING A CLUSTER builds them — inlined
+    // rather than shared, because `crate::tests`'s own `api_error` is private to that module and
+    // `crate::ui::tests` is its sibling, not its child (invariant 11 spells the declaration).
+    let refused = watcher::Error::InitialListFailed(kube::Error::Api(
+        kube::core::Status::failure("refused", "Forbidden")
+            .with_code(403)
+            .boxed(),
+    ));
+    let dead = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+    let troubles: Vec<crate::k8s::Trouble<'_>> = crate::WATCHED
+        .iter()
+        .map(|kind| crate::k8s::Trouble {
+            kind: kind.clone(),
+            listed: true,
+            failure: Some(if *kind == ObjectKind::Pod {
+                &refused
+            } else {
+                &dead
+            }),
+            ended: false,
+            unfinished: false,
+            outstanding: None,
+        })
+        .collect();
+    let produced = crate::unreadable(&troubles, None, Some(&now()), false).remove(0);
+
+    let section = "## The connection dropped";
+    for nth in [1, 2] {
+        // **The banner rows, read whole** — [`said_above`] stops at this one's own first character,
+        // so the leading run of non-blank pane rows is taken directly and collapsed the way that
+        // function collapses a paragraph.
+        let pane = mockups(section)[nth].pane.clone();
+        let page_says = pane
+            .iter()
+            .take_while(|row| !row.is_empty())
+            .flat_map(|row| row.split_whitespace())
+            .collect::<Vec<_>>()
+            .join(" ");
+        println!("[{nth}]\npage:     {page_says:?}\nproduced: {produced:?}\n");
+        // **The read asserts it found something first** (CLAUDE.md § Tests must not lie): a
+        // `mockups` that stopped parsing, or a frame whose banner moved off the top of the pane,
+        // hands back an empty string — and `assert_eq!` against a produced sentence would then
+        // fail for a reason that has nothing to do with the words, which is the diagnosis this
+        // says out loud instead.
+        assert!(
+            page_says.starts_with('▲') && page_says.split(' ').count() > 20,
+            "{section} [{nth}]: the mockup's banner did not come back off the top of the pane, so \
+             the comparison below would be about the reader and not about the words: {page_says:?}"
+        );
+        assert_eq!(
+            page_says, produced,
+            "{section} [{nth}]: `unreadable` and `screens/states.md` have come apart — the page \
+             and the code are two hand-typed copies of this sentence and this is the only thing \
+             holding them together"
+        );
+    }
+}
 /// **What every one of the nine owes its own mockup**: the footer byte for byte, the paragraphs
 /// above the list word for word, and each mutating key on the screen exactly where the mockup's own
 /// footer draws it and nowhere else.
@@ -2323,6 +2409,36 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     lost.link = Link::Lost;
     against(section, 0, &app(), &lost);
     seen.push((section, 0));
+
+    // § *Refused by a cluster that is not answering anything else* and § *The same refusal with
+    // nothing under it* — the two frames added on 2026-09-27 (NOTES § D300). **One half of what
+    // [`against`] does here is vacuous and the other is live, and the split is worth having.**
+    //
+    // **Vacuous: the paragraph comparison.** Their banner is [`crate::unreadable`]'s and opens
+    // `▲ `, the character [`said_above`] reads as *the first card, stop* — so the mockup hands
+    // back no paragraphs, nothing is fed to the pane, and the drawn frame has no banner over the
+    // card. `[] == []` (measured: pointed at frame 1, the renderer drew the card alone and this
+    // passed). **What compares those words instead is
+    // [`the_refusal_banner_is_the_pages_own_words`]**, which reads the pane rows directly and
+    // crosses them with what `unreadable` produces.
+    //
+    // **Live: the footer, and each mutating key's position in it.** These two frames withhold
+    // `s scale` and `r restart` and mark neither `no` — the security-relevant claim this page makes
+    // about them ([`ui::Link::Lost`] withholds both because k8rs cannot ask whether a write would
+    // be allowed on a cluster it is not hearing from) — and nothing asserted it until this call.
+    // That half of [`against`] does not go through `said_above` and does not care that the banner
+    // is empty.
+    //
+    // **Widening `said_above` to tell a `▲ ` banner from a `▲` finding band** would make the other
+    // half live too, and it is a change to a helper every frame above parses through — its own box
+    // and not this one's.
+    for (nth, cards) in [(1, vec![oom()]), (2, Vec::new())] {
+        let refused = Pane::Denied(joined(section, nth, 0), cards);
+        let mut rolling = screen(&refused, &now);
+        rolling.link = Link::Lost;
+        against(section, nth, &app(), &rolling);
+        seen.push((section, nth));
+    }
 
     // § Your login expired — the one state on the page that promotes a key off `?`.
     let section = "## Your login expired";
@@ -2573,8 +2689,8 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // that silently stopped parsing would make every loop above it vacuous and this whole sweep a
     // green that proves nothing.
     assert_eq!(
-        frames, 30,
-        "screens/states.md draws {frames} screens with a footer, not the 30 this sweep was \
+        frames, 32,
+        "screens/states.md draws {frames} screens with a footer, not the 32 this sweep was \
          written against — a frame was added or removed and this test has to say so"
     );
 }

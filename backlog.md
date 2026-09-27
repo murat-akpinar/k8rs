@@ -3929,3 +3929,72 @@ Phase 12 close triage fixes them; the rest are notes.
   edit. Found by `k8s-admin` while confirming that a *wedge* does not reach that
   string (it does not — `next_step`'s two callers are the switch-cluster box and
   `--once`'s `pods_unread`, which `ONCE_DEADLINE` ends at 30 s).
+- **`--once`'s whole-run failure paragraph keeps the RBAC errand the banner just gave
+  up.** `pods_unread` builds *"What happened: {why}"* from the same
+  `views::because(Fault::Refused, …)` clause the console banner did, and then adds
+  `views::next_step`'s *"Ask whoever runs this cluster for a role that may read pods …"* —
+  so a `k8rs --once` run against a control plane that is coming back up exits `2` telling
+  the reader to go and fix a `Role` that is fine. The same defect
+  [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 4 named on the console, on the surface next door, and the detector carries over
+  unchanged: the predicate is over `&[k8s::Trouble]`, which that function already holds.
+  **What does not carry over is the words.** The banner's replacement clause ends in
+  *"It keeps asking, and until that works nothing here about them can be trusted"*, and a
+  `--once` run has already stopped asking — so the sentence has to be written rather than
+  reused, and `screens/once.md` owns it. Left out of the console box deliberately: the box
+  was screens-first, and its ruling was scoped to the banner. **Measured on the real binary
+  rather than read off the code** (`tester`, 2026-09-28, against a server that refuses the pods
+  LIST and answers the other four): `--once` exits `2` with *What happened: the role this
+  kubeconfig uses needs to `list` and `watch` pods* and the whole *Ask whoever runs this cluster
+  for a role that may read pods in every namespace* paragraph under it — the same errand the
+  console banner gives up, in its stronger form. `tui-designer` rules the paragraph, then
+  `dev-ui` writes it. PM, while briefing that box.
+- **`/readyz` is the one answer that tells a cold authorizer from a powerless login, and
+  nothing asks it.** Measured on a restarting single-node apiserver
+  ([reports/2026-09-28-a-403-from-a-restarting-apiserver.md](reports/2026-09-28-a-403-from-a-restarting-apiserver.md)):
+  in the instant the pods LIST answered `403`, `/version` and `/apis` answered `200` and
+  `/readyz` answered **`500`** with four failed post-start hooks — while an identity with no
+  `Role` at all answers the same `403` with `/readyz` `200`. The two are otherwise
+  byte-identical, `Status.message` included, which is why
+  [D300](NOTES.md#d300--a-403-while-nothing-else-is-answering-is-not-an-rbac-errand-and-the-detector-is-the-contradiction-itself-2026-09-28)
+  had to key on `listed` instead. What `listed` cannot reach is the whole window, launching or
+  running: five refusals, nothing dropped, header `live`, five RBAC errands. **A launch inside
+  the window is the narrow half** — ~110 ms on the cluster measured here; the wide half is a
+  **running** k8rs whose five watches had all listed and now all answer `403` with no socket
+  dropping, which a load balancer over replicas or an authorizer reloading under a live
+  apiserver gives for as long as the cause lasts — and a down authorization webhook or an
+  apiserver restarted without etcd lasts minutes or indefinitely. `listed` is `true` there and
+  nothing dropped, so the exclusion rests on the drop condition alone. `/readyz` costs no new RBAC row: a
+  zero-permission ServiceAccount's own `SelfSubjectRulesReview` came back `incomplete: false`
+  listing `get` on `/healthz /livez /readyz /version`, and `docs/security.md`'s read-only Role
+  already grants the class. **Two boxes, and the cheap one is words**: the free half is naming
+  the second branch in the sentence k8rs already draws — *if k8rs starts getting pods again this
+  was the cluster; if it does not, it is this kubeconfig's permissions after all* — and the other
+  is the probe. `k8s-admin` findings 2 and 3, 2026-09-28.
+- **`views::because`'s doc says kube loses a non-`Status` error code, and `k8s.rs` says the
+  opposite and is right.** `views.rs` (`because`, the `Fault::Rejected` fallback arm) claims *a
+  `400` whose body is not a `Status` at all loses its code inside kube and lands in
+  `k8s::Fault::Unanswered`*; `k8s.rs`'s `answer` says it keeps it, and the pinned source agrees —
+  `kube-client-4.2.0/src/client/mod.rs` builds `Status::failure(&text, "Failed to parse error
+  data").with_code(status.as_u16())`, and `with_code` assigns `code`
+  (`kube-core-4.2.0/src/response.rs:91-94`). So a gateway, mesh sidecar or corporate proxy
+  answering `403` with an HTML page arrives as `Fault::Refused` and is drawn as a permission
+  problem — which is also the sentence someone would cite to argue a proxy cannot reach
+  [D300](NOTES.md#d300--a-403-while-nothing-else-is-answering-is-not-an-rbac-errand-and-the-detector-is-the-contradiction-itself-2026-09-28)'s
+  arm. Pre-existing and behaviour-neutral: the correction is one doc sentence in `dev-ui`'s file,
+  and whether a proxy's `403` deserves a sentence of its own is the real question behind it.
+  `k8s-admin` finding 5, 2026-09-28.
+- **`said_above` reads a `▲ ` banner as the first card, so one half of the screen sweep is
+  vacuous wherever `unreadable` draws.** `ui_tests.rs`'s `against` compares a mockup's
+  paragraphs with the drawn ones, and both sides come back empty for a banner opening `▲ ` —
+  measured on the two frames
+  [D300](NOTES.md#d300--a-403-while-nothing-else-is-answering-is-not-an-rbac-errand-and-the-detector-is-the-contradiction-itself-2026-09-28)
+  added: pointed at one of them the renderer drew the card alone and the comparison passed on
+  `[] == []`. Those two now cross their words with the code directly
+  (`the_refusal_banner_is_the_pages_own_words`) and `against` still gives them its live half —
+  the footer and the four mutating-key positions, which is what asserts they withhold `s` and
+  `r`. **What is left is the class**: every frame whose banner is `unreadable`'s gets the same
+  empty comparison, and six older frames sit on `seen.push` for related reasons. Telling a
+  `▲ ` *banner* from a `▲` *finding band* is one predicate, and it is a change to a helper all
+  thirty-two frames parse through, which is why it is not a line in somebody's box. `tester`
+  finding F3/F4, `dev-ui`'s own note, 2026-09-28.

@@ -453,6 +453,296 @@ forbidden.
   the key is withheld outright, the same way it is under `--read-only` —
   structurally unreachable reads the same as never drawn.
 
+### Refused by a cluster that is not answering anything else
+
+**One frame said two things that cannot both be acted on, and the
+contradiction is also the detector.** Measured: `docker stop` on the control
+plane, the header holding `⚠ disconnected, retrying`, and the banner under it
+reading *the role this kubeconfig uses needs to `list` and `watch` pods*
+([NOTES § D285 ruling 4](../NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26),
+`reports/2026-09-26-the-error-state-fix-review.md` §§ 2, G2). A kube-apiserver
+that is coming back up really does answer `403` before its authorizers are
+ready, so the classification is faithful to the wire and the errand is still
+to the wrong place: the reader's `Role` is fine, and every rolling control
+plane draws this — `kubeadm upgrade`, a certificate rotation, a managed
+cluster's maintenance window.
+
+**What changes is one clause, and nothing about the link.** A refusal is still
+not a connection state; the header word, the withheld `r restart` and the
+`(reconnecting)` suffix below are all the ones
+[The connection dropped](#the-connection-dropped) already draws, unchanged.
+The banner's **middle clause** is the whole of this state.
+
+```
+ nodes 3/3 (40s ago)   ctx: prod-eu · ⚠ disconnected, retrying · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  ▲ k8rs is not getting pods from this         │
+│  RESOURCES         │  cluster: it refused `list` and `watch`       │
+│   workloads        │  pods, and nothing else is answering either.  │
+│   network          │  A cluster starting up refuses like this, so  │
+│   storage          │  this may not be about permissions. It keeps  │
+│   config           │  asking, and until that works nothing here    │
+│   cluster          │  about them can be trusted                    │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   certificates  30d│    Containers exceeded their memory limit     │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch   (reconnecting)                     │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **This mockup draws the banner the binary prints, not this page's older
+  wording for the same pane.** `▲ k8rs is not getting <kind> from this
+  cluster: …` is [`unreadable`](../src/main.rs)'s, the same string `--live`
+  prints, and `Pane::Denied` carries exactly it. The `⚠ Not connected to the
+  cluster right now.` prose just above, and *"Nodes are not checked at
+  all — your user can't list them"* under
+  [§ Nodes and deployments both refused](#nodes-and-deployments-both-refused),
+  are this page's older wording of panes the code draws in that frame instead.
+  That divergence is not this state's to close, and none of it is reworded
+  here — it is named so the next reader does not take one for the other.
+- **The frame and the tail do not move, and the middle clause is the only
+  change.** *"k8rs is not getting pods from this cluster"* keeps naming the
+  kind, which is the compensating record D285 ruling 4 leans on — a header
+  reading `live` while one watch is quiet is honest only because the pane says
+  which kind. The tail, *"It keeps asking, and until that works nothing here
+  about them can be trusted"*, is true here in the strongest sense on the
+  page: a control plane that is coming back up is exactly the case the retry
+  clears on its own.
+- **Where the clause is built: not
+  [`views::because`](../src/views.rs).** That function is handed one
+  `k8s::Fault` and knows nothing about the link, and *a refusal while nothing
+  is answering* is a fact about the whole console rather than about one fault.
+  `unreadable` already holds every `k8s::Trouble` and already builds the frame
+  and the tail around `because`'s clause, so it is the one place that can
+  choose between the two without either function learning the other's subject.
+- **It withholds the errand and keeps the verbs.** No *"the role this
+  kubeconfig uses needs to `list` and `watch` pods"*, and no substitute errand
+  to anywhere else either — k8rs cannot tell this refusal from an RBAC gap, so
+  it sends the reader nowhere. `` `list` and `watch` pods `` stays, because a
+  `403` naming neither the verbs nor the resource fails the security gate's own
+  row, and withholding the errand may not cost that
+  ([CLAUDE.md § Authorization](../CLAUDE.md)). The verbs are the API's own
+  spelling inside backticks, the one place they are allowed
+  ([invariant 14](../CLAUDE.md), `unreadable`'s own doc).
+- **The example is what keeps this from being a dead end, and it is not a
+  verdict.** *"A cluster starting up refuses like this"* says what produces the
+  state; it does not say this cluster is starting up, which k8rs has no way to
+  know and
+  [NOTES § D150](../NOTES.md#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)
+  forbids it from guessing — the same line that already refuses *the cluster
+  has gone quiet* over a LIST that is merely slow. Without it *"this may not be
+  about permissions"* leaves a reader told to disbelieve the only diagnosis on
+  screen with nothing in its place, which is the one thing
+  [§ Rules that hold](#rules-that-hold-across-every-state-on-this-page) says no
+  state may do.
+- **It may not say the cluster said nothing, which is why this state needs its
+  own words at all.** The cluster answered — `403` — so `Fault::Unanswered`'s
+  own clause, *nothing usable came back*, is a lie on this row even though its
+  neighbours' rows are exactly that. *"It refused"* is the true half, and
+  *"nothing else is answering either"* is the other, and between them they are
+  the contradiction stated out loud instead of drawn twice. The word is
+  `refused`, the one this product already uses for a cluster that answered
+  `403` to a write ([D285 ruling 2](../NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)) —
+  not a second vocabulary for one wire answer.
+- **The detector, exactly, so a reviewer can check a frame against it rather
+  than against a drawing — three conditions, and all three have to hold.** This
+  clause draws for a row whose fault is `k8s::Fault::Refused`, whose
+  [`k8s::Trouble::listed`](../src/k8s.rs) is **`true`**, on a console where
+  *no watch is answering*. The last is the same predicate
+  [`linked`](../src/main.rs) reads `⚠ disconnected, retrying` off: some row
+  carries `Fault::Unanswered` or `Unfinished`, and every one of the five
+  watched kinds has a row of its own
+  ([NOTES § D285 ruling 1](../NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)).
+- **`listed` is the condition that does the work, and it replaced one that
+  evaporates exactly when a reader is least able to reason about it.** A watch
+  that **had** delivered a complete initial LIST and is refused *now* is the
+  restarting control plane — the measured frame had all five listed before
+  `docker stop`. A watch that has **never** listed and is refused is a
+  permission problem that no retry will change — which is what
+  `Trouble::listed`'s own doc says, and [`pods_unread`](../src/main.rs) already
+  separates a failure from a blip by this same field, so there is no new field
+  and no new call. **An earlier draft of this section excluded the permission
+  case by *a neighbour is delivering* instead, and that condition is false
+  during a blip:** while the control plane is down nothing is
+  delivering, so a namespace-scoped run — whose nodes watch is refused from
+  its first attempt and never lists, because a namespaced `Role` cannot
+  `list nodes` — has all five kinds carrying a row the instant the other four
+  drop, and that nodes row would have drawn this clause. Every word of it
+  would then be wrong for that reader: the refusal is permanent, it **is**
+  about permissions, and the tail would promise a retry that can never
+  succeed. Invisible in the console, where the banner is the first trouble row
+  and during a blip that is pods, and plain under `--live` and `--once`
+  (`reports/2026-09-28-a-403-from-a-restarting-apiserver.md`).
+
+  Two shapes that look close, and what excludes each:
+  - **A scoped run's permanent nodes refusal — excluded by `listed`, by
+    name.** It is the commonest non-admin shape there is and
+    [§ Nodes and deployments both refused](#nodes-and-deployments-both-refused)'s
+    own, and it keeps the errand at **every** link state, mid-blip included,
+    because `listed` is false for that watch whatever its neighbours are
+    doing. The binary draws
+    *"▲ k8rs is not getting nodes from this cluster: the role this kubeconfig
+    uses needs to `list` and `watch` nodes. It keeps asking, and until that
+    works nothing here about them can be trusted"* there, and this ruling
+    leaves every word of it alone.
+  - **A credential refused on every kind — excluded by the *drop*
+    condition, whatever `listed` says, and the errand is the only thing k8rs
+    can say there.** Five `Refused` rows and no `Unanswered` one means every
+    watch is settled, the store has an answer, and the header reads `live`;
+    **nothing dropped**, so that one condition fails on its own, and it holds
+    however many of the five had listed — which is what keeps this exclusion
+    true of the shape one door along as well as of this one. The reader is
+    told about their `Role`.
+    **What k8rs cannot tell apart there is measured, and this page does not
+    claim the errand is right — only that it is the only thing k8rs can
+    say.** In the same instant a restarting apiserver answered `403` to
+    the pods LIST it answered `200` to `/version` and `/apis`, so a k8rs
+    *launched inside that window* takes `403` on all five initial LISTs: five
+    `Refused` rows, nothing dropped, this clause's predicate false, and five
+    RBAC errands under a header positively asserting `live`. The `Status` is
+    byte-identical to a real denial — `code: 403`, `reason: Forbidden`, the
+    same `message` — so there is nothing in `k8s::said` to key on. The window
+    measured under ~110 ms on a single-node cluster, which makes that launch
+    race narrow — **and the launch is not the only door into the same frame.
+    A *running* k8rs reaches it with no race at all:** five watches that had
+    already listed, on a cluster whose connections survive the window (a load
+    balancer over replicas, or the authorizer reloading under a live
+    apiserver), every one of them now answering `403` and no socket dropping
+    — `listed` true for all five, nothing dropped, the drop condition
+    excluding it on its own exactly as above, and the identical
+    header-`live`-over-five-errands frame.
+    That is where the window's cost is minutes rather than ~110 ms of
+    startup, because the identical wire shape stands for minutes or
+    indefinitely from two ordinary causes that cluster could not produce, and
+    both of them reach a reader who was already watching — an
+    authorization webhook that is down (AKS's Azure RBAC, any
+    `--authorization-mode=…,Webhook`) fails closed on every request, and an
+    apiserver restarted while etcd is unreachable never syncs its RBAC
+    informers. **The one thing measured to differ is `/readyz`** — `500` with
+    failed post-start hooks for the cold authorizer against `200` for an
+    identity that simply holds no `Role` — and whether k8rs ever asks it is
+    [`backlog.md`](../backlog.md)'s, not designed here
+    (`reports/2026-09-28-a-403-from-a-restarting-apiserver.md`).
+- **It ranks where the refusal it replaces already ranked, and it is taller.**
+  The banner is the **pane's own reason** in
+  [§ Rules that hold](#rules-that-hold-across-every-state-on-this-page)'s rank,
+  so the discovery sentence gives way first, then the audit one, and only the
+  clock pointer outranks it — unchanged by this state
+  ([NOTES § D263 ruling 5](../NOTES.md#d263--the-nine-states-a-refusal-that-was-also-a-scope-a-stack-that-cut-the-one-banner-with-nothing-else-to-say-and-a-test-named-for-a-body-it-never-compared-2026-09-12)).
+  What it does cost is rows: **seven** at this page's own 43-column banner
+  region and **six** at the real 53-column floor, against **five** and
+  **four** for the errand it replaces (275 columns unwrapped, against 186).
+  Seven of the thirteen rows the caveats share, plus the blank that separates
+  it from the list, leaves five for the clock, audit and discovery sentences
+  between them, where the errand left seven. A stack that runs out below that
+  trims and marks this banner's own last rows like any other, `…` at a word
+  boundary, and never drops it whole.
+- **The footer and the header are the ones already ruled, and nothing about
+  them is this state's.** `r restart` is withheld because the link is
+  gone — not marked `no`, which is `may_i_in`'s word — for
+  [The connection dropped](#the-connection-dropped)'s own reason; `X switch
+  cluster` is not promoted, because a stale card is something to wait it out
+  with ([§ Lost](#lost-nothing-is-currently-answering-and-the-retry-may-still-clear-it)'s
+  own `Fault::standing` test).
+- **Three things in these frames are borrowed and not ruled here.** The command
+  strip's `(reconnecting)` is
+  [The connection dropped](#the-connection-dropped)'s, drawn because this
+  watch had been running before it started answering `403` — what the strip
+  marks for a *failing* watch is its own open question and not this state's.
+  The `▲` is [`unreadable`](../src/main.rs)'s severity glyph for a degraded
+  read, and that it shares a glyph with a finding's warning is a collision
+  already recorded in [`backlog.md`](../backlog.md), not reopened by this
+  wording. And this banner's continuation rows sit flush at the two-column
+  pad, not hung under the text: the hang in
+  [§ Rules that hold](#rules-that-hold-across-every-state-on-this-page) is
+  written for a banner that opens `⚠ `, which is the character
+  [`ui::banner`](../src/ui.rs) tests for, and this family opens `▲ `.
+
+#### The same refusal with nothing under it
+
+Reachable from a cluster that was healthy: every watch listed, Alerts found
+nothing wrong, and then the control plane started rolling. The store still
+holds a complete answer, so the pane is the same `Pane::Denied` — the banner,
+and no list beneath it.
+
+```
+ nodes 3/3 (40s ago)   ctx: prod-eu · ⚠ disconnected, retrying · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │  ▲ k8rs is not getting pods from this         │
+│  RESOURCES         │  cluster: it refused `list` and `watch`       │
+│   workloads        │  pods, and nothing else is answering either.  │
+│   network          │  A cluster starting up refuses like this, so  │
+│   storage          │  this may not be about permissions. It keeps  │
+│   config           │  asking, and until that works nothing here    │
+│   cluster          │  about them can be trusted                    │
+│  ANALYSIS          │                                               │
+│   capacity      1 ▲│                                               │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch   (reconnecting)                     │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **`○ nothing is broken` does not draw, and that is already the rule.**
+  [§ Alerts had already found nothing, and then the link went](#alerts-had-already-found-nothing-and-then-the-link-went)
+  is the same pane under a different fault, and the claim is withheld for its
+  reason: k8rs cannot say the cluster is healthy while it cannot see the
+  cluster. That section's closing line — *"Nothing was broken 40 seconds ago,
+  the last time k8rs could check"* — is its own wording of this pane and is
+  part of the divergence named above, not a second sentence this state adds.
+- **The footer keeps `↑↓ move` and `⏎ open` and gains no `X`**, the same line
+  that section draws for the same reason: the sidebar's rows are settled even
+  though the list is empty, so there is something to wait it out with.
+- **An empty pane whose first read never landed is a different state and draws
+  none of this.** While any watch is still inside its first LIST the store
+  answers `None`, the pane is `Pane::Loading`, and `unreadable`'s lines do not
+  reach the screen at all — that is
+  [§ Lost](#lost-nothing-is-currently-answering-and-the-retry-may-still-clear-it),
+  below, and the bullet there is read against this state in its own place.
+
+#### More than one kind refused at once
+
+**In the console the banner is the *first* watch-trouble line and not the
+first refused one**, because `Pane::Denied` carries one sentence and it is
+built from whichever row comes first in
+[`k8s::Store::troubles`](../src/k8s.rs)'s own declared order — pods, nodes,
+Deployments, StatefulSets, DaemonSets — whatever that row's fault is. So this
+clause reaches a console frame only when the first row is the refused one
+**and** had listed; a refused nodes watch behind an unanswered pods one draws
+pods' own *nothing is coming back* line instead, with the refusal visible only
+under `--live`.
+
+**That order is not reordered here**, and the reason is not politeness about a
+frozen file: a rank per kind would be per-kind layout in a frame that has none
+([invariant 12](../CLAUDE.md)), and the reader's question is not *which kind
+first* but *is this my `Role`* — which every one of the lines answers the same
+way, so which one arrives first changes nothing they would do.
+
+**`--live` prints every line**, one per kind, each naming its own kind and its
+own API plural — *"…it refused `list` and `watch` pods, and nothing else is
+answering either…"*, *"…it refused `list` and `watch` statefulsets, and nothing
+else is answering either…"*. Unwrapped they run 275 and 291 columns, past this
+page's frame, so they are quoted here rather than fenced — the same treatment
+[§ k8rs could not read what this cluster serves](#k8rs-could-not-read-what-this-cluster-serves)
+gives a line too wide to draw. The repetition is the point on that surface:
+five lines all saying *nothing else is answering either* is the shape a reader
+recognises.
+
 ## Your login expired
 
 Not a 403, and not a dropped connection — the third case. On EKS, GKE and AKS
@@ -825,10 +1115,25 @@ present, not the past:
   watch, so it carries none of `(reconnecting)`'s suffix
   ([The connection dropped](#the-connection-dropped)) — that suffix marks a
   watch that *was* running and then dropped, which is not this trigger.
-- **A 403 cannot reach this pane.** It needs an answer from the cluster to
-  be classified at all, and a watch that has never heard back is neither
-  refused nor expired — it is unanswered, which is the one thing this
-  sentence says and the only one it is entitled to say.
+- **No 403 wording reaches this pane, and it is the pane that keeps it out
+  rather than the classification.** *This* watch is unanswered — it has
+  never heard back, so it is neither refused nor expired, and unanswered is
+  the one thing this sentence says and the only one it is entitled to say.
+  But a **neighbour** can be refused at the same time and still leave the
+  store at `None`: `Fault::Refused` is `standing`, so
+  [`Watch::settled`](../src/k8s.rs) is true for it and it drops out of
+  `Store::still_listing` without ever holding the gate — while an unanswered
+  watch that never listed holds it open. So a console reaching this pane
+  really can be carrying a `403`, and what keeps it off the screen is that
+  `snapshot: None` makes the pane `Pane::Loading`, which draws no
+  watch-trouble line at all. The moment the store has an answer instead that
+  pair of facts is a banner, and **which** sentence turns on one more field: a
+  refused watch that had never listed keeps its own errand, and one that had
+  listed before the refusal started draws
+  [§ Refused by a cluster that is not answering anything
+  else](#refused-by-a-cluster-that-is-not-answering-anything-else)'s instead.
+  A console reaching *this* pane is far likelier to hold the first, because its
+  own first read never landed.
 - **The Alerts pane's own equivalent is the only one drawn here, and that is
   measured rather than assumed.** A reader cannot reach the Resources
   browser from this pane at all: `tester` drove the binary and found `↑↓`,

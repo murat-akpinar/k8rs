@@ -2761,14 +2761,49 @@ fn plain_kind(kind: &ObjectKind) -> (&'static str, &'static str) {
 /// **`list` and `watch` appear inside backticks and nowhere else** (invariant 14). They are RBAC
 /// verbs, not English, and the sentence around them is readable by someone who has never seen
 /// one: a reader who does not know what a watch is still learns that k8rs is not getting pods and
-/// that this kubeconfig is not allowed to have them. The plural is the API's own — `statefulsets`
-/// and not `StatefulSets` — because it is what a `Role` has to spell.
+/// what the cluster said about them — *this kubeconfig is not allowed to have them* on all but one
+/// arm, and on that one the section below says why it may not claim even that. The plural is the
+/// API's own — `statefulsets` and not `StatefulSets` — because it is what a `Role` has to spell.
 ///
 /// **`ended` gets `●` and not `▲`.** It is the most severe thing this tool can say about itself —
 /// nothing about that kind will ever change again — and it was wearing the warning glyph while
 /// the merely-degraded line wore the same one. The reuse of the severity glyphs for a second axis
 /// is a real collision and is `tui-designer`'s to settle when `views.rs` lands (backlog); giving
 /// the terminal state the heavier of the two is free and correct either way.
+///
+/// # One refusal builds its clause here instead, and the contradiction is the detector
+///
+/// **A `403` from a watch that had listed, while nothing else is answering, is not an RBAC
+/// errand** (NOTES § D300 rulings 1 and 2, `screens/states.md` § Refused by a cluster that is not
+/// answering anything else): a kube-apiserver coming back up answers `403` — measured
+/// byte-identical in shape to a real denial, so `k8s::said` gives the sentence nothing to key on —
+/// before its authorizers are ready, and *the role this kubeconfig uses needs to `list` and
+/// `watch` pods* sends the reader to a `Role` that is fine. This arm withholds the errand, keeps
+/// the verbs the security gate's own row asks for, and names what produces the state without
+/// claiming it — *a cluster starting up refuses like this* is an example, not the verdict
+/// NOTES § D150 forbids.
+///
+/// **Three conditions, all three have to hold, and `trouble.listed` is the one a two-condition
+/// draft got wrong** (ruling 1): a watch that **listed** and is now refused is the control plane
+/// changing its answer under us, and one that **never listed** is the RBAC case — which a scoped
+/// run's nodes watch can never stop being, because `k8s::Watch`'s `complete` is never reset.
+/// Without it the clause drew over the one reader it was written to protect the moment their four
+/// healthy watches dropped.
+///
+/// **So three of the four tails below can carry this clause and the two-numbers one never can.**
+/// `k8s::Trouble::unfinished` and `::outstanding` both gate on `complete`, which is what `listed`
+/// reads — a kind the run stopped waiting for has by construction not listed, so ruling 1 excludes
+/// every row that tail draws and the errand is what belongs there.
+///
+/// **It is built here and not in [`because`]**, which is handed one `k8s::Fault` and knows nothing
+/// about the link; *a refusal while nothing is answering* is a fact about the whole troubles list,
+/// and this function is the one that holds it ([`nothing_answering`], shared with [`linked`]).
+///
+/// **The predicate is the troubles-only half and never `ui::Link`.** This function is `--once`'s
+/// and `--live`'s as well as the console's and has no `connected` flag to read — and an `Expired`
+/// row that wins [`linked`]'s arm race draws `⚠ login expired` over this very clause, which makes
+/// neither half of it less true: nothing else is answering, and the reader's `Role` is still not
+/// what this `403` is about.
 ///
 /// # Four tails, and *It keeps asking* is only true of one of them
 ///
@@ -2796,6 +2831,9 @@ fn unreadable(
     now: Option<&Time>,
     stopping: bool,
 ) -> Vec<String> {
+    // **A fact about the whole list, so it is read once above the rows** ([`nothing_answering`]):
+    // what it changes is one row's clause, but what it is about is every other row.
+    let quiet = nothing_answering(troubles);
     troubles
         .iter()
         .map(|trouble| {
@@ -2804,13 +2842,22 @@ fn unreadable(
             // and two calls is where they would come to disagree about which fault this is
             // ([`pods_unread`] states the same rule over the same value).
             let fault = trouble.fault();
+            let asked = views::watching(resource);
             let why = match fault {
-                Some(fault) => because(
-                    fault,
-                    &views::watching(resource),
-                    renewal,
-                    trouble.said().as_deref(),
+                // **The refusal nobody can act on** (NOTES § D300 rulings 1 and 2, the section
+                // above). It does not borrow `Fault::Unanswered`'s *nothing usable came back*:
+                // this cluster answered, and `403` is what it said.
+                //
+                // **`trouble.listed` is the third condition and it is not decoration** — the same
+                // field [`pods_unread`] keys on for *a failure rather than a blip*. Without it a
+                // scoped run's permanently refused nodes watch draws this the moment its four
+                // neighbours drop, and every clause of it is then wrong for the one reader the box
+                // was written to protect.
+                Some(k8s::Fault::Refused) if quiet && trouble.listed => format!(
+                    "it refused {asked}, and nothing else is answering either. A cluster \
+                     starting up refuses like this, so this may not be about permissions"
                 ),
+                Some(fault) => because(fault, &asked, renewal, trouble.said().as_deref()),
                 // `ended` with no failure: the stream finished and never said why. The only
                 // honest clause, and the one thing a fallback string is allowed to describe.
                 None => "nothing was ever said about why".to_string(),
@@ -9584,7 +9631,8 @@ fn vitals(
 }
 
 /// **The five watches [`k8s::Store::troubles`] reports on, in its own declared order** — what
-/// [`linked`] counts *no watch is answering* against (NOTES § D285 ruling 1).
+/// [`nothing_answering`] counts *no watch is answering* against (NOTES § D285 ruling 1), for
+/// [`linked`]'s header word and [`unreadable`]'s banner clause both.
 ///
 /// **It is a universe and not a count, because that call reports only the watches that are not
 /// delivering**: a healthy watch has no row there at all, so *every one of these named*
@@ -9600,6 +9648,33 @@ const WATCHED: [ObjectKind; 5] = [
     ObjectKind::StatefulSet,
     ObjectKind::DaemonSet,
 ];
+
+/// **Is *nothing* answering** — something has dropped and no watch is delivering
+/// (NOTES § D285 ruling 1), read off nothing but the troubles.
+///
+/// **One derivation, because two readers ask it** (NOTES § D295, NOTES § D300): [`linked`] turns
+/// it into `⚠ disconnected, retrying` and [`unreadable`] turns it into the clause that withholds
+/// the RBAC errand from a refusal nobody can act on. A second spelling of this predicate is
+/// exactly the defect D300 is about, reached one door along — a header and a banner that
+/// disagreed about whether the cluster was there.
+///
+/// **A watch that is answering is one with no row here at all** — `k8s::Store::troubles` reports
+/// only the watches that are not delivering ([`WATCHED`] is the universe it reports over), so a
+/// neighbour's absence is the evidence that the cluster is live. A standing fault is on neither
+/// side of it: a refused watch is not answering and is not retrying either, which is what keeps a
+/// scoped run's permanent refusal out of both halves.
+fn nothing_answering(troubles: &[k8s::Trouble<'_>]) -> bool {
+    let dropped = troubles.iter().any(|trouble| {
+        matches!(
+            trouble.fault(),
+            Some(k8s::Fault::Unanswered | k8s::Fault::Unfinished)
+        )
+    });
+    let answering = WATCHED
+        .iter()
+        .any(|kind| !troubles.iter().any(|trouble| trouble.kind == *kind));
+    dropped && !answering
+}
 
 /// **What the connection is doing** (`ui::Link`) — read off the *faults* the watches carry and off
 /// which of them carry none, never off the fact that a watch is in trouble at all.
@@ -9653,24 +9728,11 @@ fn linked(
         return ui::Link::Expired;
     }
     // **`Lost` is *no watch is answering*, and never *some watch is in trouble*** (NOTES § D285
-    // ruling 1). Both halves have to hold: something has dropped, and nothing is arriving.
-    //
-    // **A watch that is answering is one with no row here at all** — `k8s::Store::troubles`
-    // reports only the watches that are not delivering ([`WATCHED`] is the universe it reports
-    // over), so a neighbour's absence is the evidence that the cluster is live. A standing fault
-    // is on neither side of it: a refused watch is not answering and is not retrying either, which
-    // is what keeps a scoped run's permanent refusal out of both halves — the link stays whatever
-    // it was, and a real drop *inside* that run still reads `Lost`.
-    let dropped = troubles.iter().any(|trouble| {
-        matches!(
-            trouble.fault(),
-            Some(k8s::Fault::Unanswered | k8s::Fault::Unfinished)
-        )
-    });
-    let answering = WATCHED
-        .iter()
-        .any(|kind| !troubles.iter().any(|trouble| trouble.kind == *kind));
-    if dropped && !answering {
+    // ruling 1) — [`nothing_answering`] is both halves of it, and is shared with [`unreadable`]
+    // rather than spelled twice (NOTES § D300). A scoped run's permanent refusal is on neither
+    // side of it: the link stays whatever it was, and a real drop *inside* that run still reads
+    // `Lost`.
+    if nothing_answering(troubles) {
         return ui::Link::Lost;
     }
     match snapshot {

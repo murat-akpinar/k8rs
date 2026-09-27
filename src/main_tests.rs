@@ -3525,6 +3525,304 @@ fn a_run_that_is_about_to_exit_does_not_promise_it_keeps_asking() {
     }
 }
 
+/// **A `403` from a watch that had listed, while nothing else is answering, withholds the RBAC
+/// errand** (NOTES § D300 rulings 1 and 2, `screens/states.md` § Refused by a cluster that is not
+/// answering anything else).
+///
+/// **The measured frame, and it said two things that cannot both be acted on**: `docker stop` on
+/// the control plane — **after all five watches had listed** — left the header holding
+/// `⚠ disconnected, retrying` and the banner under it reading *the role this kubeconfig uses needs
+/// to `list` and `watch` pods` (NOTES § D285 ruling 4,
+/// `reports/2026-09-26-the-error-state-fix-review.md` § 2). A restarting apiserver's `403` is
+/// byte-identical in shape to a real denial — polled on a cluster, in
+/// `reports/2026-09-28-a-403-from-a-restarting-apiserver.md` — so nothing in `k8s::said` can tell
+/// them apart and the third condition of the predicate has to be `k8s::Trouble::listed`.
+///
+/// **The negatives are the test, and they are split two and two.** Two turn on `listed` — a
+/// scoped run's permanently refused nodes watch while its neighbours blip, and a real `Role` that
+/// grants only pods — and two on the predicate. A two-condition draft drew this clause over the one
+/// reader it was written to protect: a namespaced `Role` cannot `list nodes`, so a scoped run
+/// carries a permanently refused nodes row, and one dropped socket on each of the other four made
+/// `quiet` hold. Every clause was then wrong for them — the refusal is permanent, it **is** about
+/// permissions, and the tail promises a retry that can never succeed (`k8s-admin`, 2026-09-28).
+///
+/// **The universe is pinned by a fixture's shape and not by a `len()` over a `map`.** That is a
+/// tautology, and `WATCHED` shrunk from five to four left the first draft of this test green — the
+/// clause simply fired over a smaller universe (`tester`, 2026-09-28). What each fixture asserts
+/// instead is the side of [`nothing_answering`] it sits on, and the shrink now fails here too:
+/// *one watched kind with no row at all* is not a property a four-kind universe can have.
+/// [`the_connection_word_says_disconnected_only_when_no_watch_answers`] is the crossing that names
+/// it, comparing `WATCHED` with a real `k8s::Store`'s own reported kinds.
+#[test]
+fn a_refusal_from_a_cluster_answering_nothing_else_does_not_send_the_reader_to_their_role() {
+    let refused = watcher::Error::InitialListFailed(api_error(403, "Forbidden"));
+    let dead = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+    let expired = watcher::Error::WatchError(
+        kube::core::Status::failure("expired", "Unauthorized")
+            .with_code(401)
+            .boxed(),
+    );
+    // Read through the public path `unreadable` reads, so the fixtures are the faults this test
+    // claims they are and not whatever they happen to classify as.
+    for (failure, fault) in [
+        (&refused, k8s::Fault::Refused),
+        (&dead, k8s::Fault::Unanswered),
+        (&expired, k8s::Fault::Expired),
+    ] {
+        assert_eq!(
+            in_trouble(ObjectKind::Pod, Some(failure), true).fault(),
+            Some(fault),
+            "a fixture is not the fault this test is about"
+        );
+    }
+    let lines = |troubles: &[k8s::Trouble<'_>], stopping| {
+        let lines = unreadable(troubles, None, Some(&now()), stopping);
+        for line in &lines {
+            println!("{line}");
+        }
+        lines
+    };
+    let errand = "the role this kubeconfig uses needs to";
+    // Every watched kind but one, each carrying the same failure — the neighbours of whichever row
+    // a shape is about. A `fn` because the rows borrow the failure.
+    fn others<'a>(
+        except: &ObjectKind,
+        failure: &'a watcher::Error,
+        listed: bool,
+    ) -> Vec<k8s::Trouble<'a>> {
+        WATCHED
+            .iter()
+            .filter(|kind| *kind != except)
+            .map(|kind| in_trouble(kind.clone(), Some(failure), listed))
+            .collect()
+    }
+
+    // **The measured frame**: the pod watch had listed and is now refused, every neighbour had
+    // listed and has now dropped, and all five kinds carry a row — which is what
+    // [`nothing_answering`] reads *no watch is answering* off.
+    let mut rolling = vec![in_trouble(ObjectKind::Pod, Some(&refused), true)];
+    rolling.extend(others(&ObjectKind::Pod, &dead, true));
+    assert!(
+        nothing_answering(&rolling),
+        "the measured frame is not on the side of the predicate this shape is about"
+    );
+    let drawn = lines(&rolling, false);
+    assert_eq!(
+        drawn[0],
+        "▲ k8rs is not getting pods from this cluster: it refused `list` and `watch` pods, and \
+         nothing else is answering either. A cluster starting up refuses like this, so this may \
+         not be about permissions. It keeps asking, and until that works nothing here about them \
+         can be trusted",
+        "the banner a rolling control plane draws is not the one `screens/states.md` rules"
+    );
+    // **Two claims the equality above carries and no separate assertion repeats**, because an
+    // `assert!` that cannot fail on its own is prose wearing a macro (`tester`, 2026-09-28): the
+    // errand is absent from that sentence, and `` `list` and `watch` pods `` is present in it —
+    // the security gate's own row, which ruling 2 says withholding the errand may not cost.
+    // **The four neighbours keep `because`'s own clause**: their cluster really did say nothing,
+    // and the new clause is the refused row's alone.
+    for line in &drawn[1..] {
+        assert!(
+            line.contains("nothing usable came back") && !line.contains("nothing else is"),
+            "a watch that got no answer borrowed the refused row's clause: {line:?}"
+        );
+    }
+
+    // **Negative 1 — the scoped run during a blip, the shape the two-condition draft got wrong.**
+    // A namespaced `Role` cannot `list nodes`, so that watch never listed and never will; its four
+    // neighbours had listed and have now dropped. The predicate holds here, so `listed` is the
+    // whole of what keeps the errand — which is the finding, stated as the assertion.
+    let mut scoped_blip = vec![in_trouble(ObjectKind::Node, Some(&refused), false)];
+    scoped_blip.extend(others(&ObjectKind::Node, &dead, true));
+    assert!(
+        nothing_answering(&scoped_blip),
+        "this shape is about a refusal the *predicate* cannot save, and the predicate is false here"
+    );
+    let blipped = lines(&scoped_blip, false);
+    assert_eq!(
+        blipped[0],
+        "▲ k8rs is not getting nodes from this cluster: the role this kubeconfig uses needs to \
+         `list` and `watch` nodes. It keeps asking, and until that works nothing here about them \
+         can be trusted",
+        "a scoped run's permanent permission problem was told it may not be about permissions, and \
+         to wait for a retry that can never succeed (NOTES § D300 ruling 1)"
+    );
+
+    // **Negative 2 — one watched kind with no row at all**, which is the only shape that fails if
+    // `nothing_answering` loses its second half: with `dropped` alone the clause draws here
+    // (`tester`, 2026-09-28 — deleting `!answering` leaves every other assertion in this test
+    // green). The refused watch **had** listed, so `listed` cannot be what saves it.
+    let watching_still = vec![
+        in_trouble(ObjectKind::Pod, Some(&refused), true),
+        in_trouble(ObjectKind::Node, Some(&dead), true),
+        in_trouble(ObjectKind::Deployment, Some(&dead), true),
+        in_trouble(ObjectKind::StatefulSet, Some(&dead), true),
+    ];
+    assert!(
+        !nothing_answering(&watching_still),
+        "a shape with a kind reporting no trouble at all was read as nothing answering"
+    );
+    let partly = lines(&watching_still, false);
+    assert!(
+        partly[0].contains(errand) && !partly[0].contains("nothing else is answering"),
+        "a refusal beside a watch that is still delivering was hedged, which takes the errand off \
+         the commonest non-admin shape there is: {partly:?}"
+    );
+
+    // **Negative 3 — a real `Role` that grants only pods, and then the pod watch drops.** Four
+    // refusals that never listed beside one dropped socket
+    // (`reports/2026-08-29-namespace-scope-under-a-real-role.md` R1): the predicate holds, and
+    // before ruling 1 all four flipped to the hedged clause at once.
+    let mut real_role = vec![in_trouble(ObjectKind::Pod, Some(&dead), true)];
+    real_role.extend(others(&ObjectKind::Pod, &refused, false));
+    assert!(
+        nothing_answering(&real_role),
+        "this shape is about four refusals the predicate cannot save"
+    );
+    for line in &lines(&real_role, false)[1..] {
+        assert!(
+            line.contains(errand) && !line.contains("nothing else is answering"),
+            "a credential that may genuinely not read this kind was hedged: {line:?}"
+        );
+    }
+
+    // **Negative 4 — a credential that may read nothing, with nothing dropped**, at both values of
+    // `listed`. Every watch is settled, the cluster is answering, and the reader is told about
+    // their `Role` — which is the truth there. The `listed: true` pass is what fails if the
+    // predicate is dropped from the guard while `listed` is kept.
+    for listed in [false, true] {
+        let all_refused: Vec<k8s::Trouble<'_>> = WATCHED
+            .iter()
+            .map(|kind| in_trouble(kind.clone(), Some(&refused), listed))
+            .collect();
+        assert!(
+            !nothing_answering(&all_refused),
+            "five standing refusals with nothing dropped were read as nothing answering"
+        );
+        for line in lines(&all_refused, false) {
+            assert!(
+                line.contains(errand) && !line.contains("nothing else is answering"),
+                "a credential refused on every kind was told its cluster might be starting up: \
+                 {line:?}"
+            );
+        }
+    }
+
+    // **An expired login beside it draws `⚠ login expired` over this clause, and both stay true**
+    // (ruling 4): `unreadable` has no `ui::Link` to read, and *nothing else is answering* and *this
+    // `403` is not about your `Role`* are neither of them made false by a third watch's `401`.
+    let store = a_cluster_with_cards();
+    let snapshot = store.snapshot(now()).expect("every LIST landed");
+    let mut amid_a_renewal = vec![
+        in_trouble(ObjectKind::Pod, Some(&refused), true),
+        in_trouble(ObjectKind::Node, Some(&expired), true),
+    ];
+    amid_a_renewal.extend(
+        [
+            ObjectKind::Deployment,
+            ObjectKind::StatefulSet,
+            ObjectKind::DaemonSet,
+        ]
+        .map(|kind| in_trouble(kind, Some(&dead), true)),
+    );
+    assert_eq!(
+        linked(true, Some(&snapshot), &amid_a_renewal),
+        ui::Link::Expired,
+        "the header word this clause is asserted to sit under is not the one `linked` answers"
+    );
+    let renewing = lines(&amid_a_renewal, false);
+    assert!(
+        renewing[0].contains("nothing else is answering either"),
+        "a refusal lost its clause because a neighbour's login had also run out: {renewing:?}"
+    );
+    assert!(
+        renewing[1].contains("no longer accepts this login"),
+        "the expired row borrowed the refused row's clause instead of keeping its own: {renewing:?}"
+    );
+
+    // **The tails, each over a shape that can actually reach it.** The frame and the tails are
+    // `unreadable`'s and do not move; what this pins is that they compose with a clause longer
+    // than the errand it replaces.
+    let tail = |ended, stopping| {
+        let mut rows = vec![k8s::Trouble {
+            kind: ObjectKind::Pod,
+            listed: true,
+            failure: Some(&refused),
+            ended,
+            unfinished: false,
+            outstanding: None,
+        }];
+        rows.extend(others(&ObjectKind::Pod, &dead, true));
+        lines(&rows, stopping)
+    };
+    let clause = "it refused `list` and `watch` pods, and nothing else is answering either. A \
+                  cluster starting up refuses like this, so this may not be about permissions";
+    assert_eq!(
+        tail(true, false)[0],
+        format!(
+            "● k8rs has stopped receiving pods from this cluster: {clause}. What is shown about \
+             them will not change again"
+        ),
+        "the terminal tail lost the clause or the clause lost the tail"
+    );
+    assert_eq!(
+        tail(false, true)[0],
+        format!(
+            "▲ k8rs is not getting pods from this cluster: {clause}. Nothing here about them can \
+             be trusted"
+        ),
+        "a run one instant from exiting either promised a retry or lost the clause"
+    );
+
+    // **The two-numbers tail cannot carry this clause, and that is structural rather than a
+    // choice** (`k8s::Trouble::unfinished`, `::outstanding`: *`Some` and `unfinished` are `true`
+    // together, both gating on `complete`*). A watch the run stopped waiting for has by
+    // construction not listed, so ruling 1 excludes every row that tail can ever draw — the
+    // errand is what belongs there, and asserting the clause would be pinning an unreachable
+    // state.
+    let mut wedged = vec![k8s::Trouble {
+        kind: ObjectKind::Pod,
+        listed: false,
+        failure: Some(&refused),
+        ended: false,
+        unfinished: true,
+        outstanding: Some(k8s::Listing {
+            kind: ObjectKind::Pod,
+            so_far: 0,
+            since: None,
+        }),
+    }];
+    wedged.extend(others(&ObjectKind::Pod, &dead, true));
+    assert!(
+        nothing_answering(&wedged),
+        "the deadline shape is not on the side of the predicate this assertion is about"
+    );
+    assert_eq!(
+        lines(&wedged, true)[0],
+        format!(
+            "▲ k8rs never finished reading pods from this cluster: {errand} `list` and `watch` \
+             pods; 0 read so far, and this run ran out of time — so nothing here about them can be \
+             trusted"
+        ),
+        "a watch the run stopped waiting for had never listed, so it may not draw the hedged \
+         clause — NOTES § D300 ruling 1 excludes it and NOTES § D150's two numbers stay"
+    );
+
+    // **Jargon only inside backticks** (invariant 14), the rule the older tails are held to. The
+    // new clause adds English around two quoted verbs and may not leak one into it.
+    for line in [&drawn[0], &tail(true, false)[0], &tail(false, true)[0]] {
+        let english = prose(line);
+        assert!(
+            !english.contains("watch") && !english.contains("list"),
+            "the sentence a reader has to understand uses an RBAC verb outside a quoted one: \
+             {english:?}"
+        );
+    }
+}
+
 /// **Ten faults, ten sentences, and no two of them the same** — the second box's whole claim
 /// (`PRIOR-ART § C1`), checked as a set rather than one at a time.
 ///
