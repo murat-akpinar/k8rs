@@ -642,14 +642,20 @@ cannot skip compiling**, so:
 
 - **dev runs:** `cargo fmt --all -- --check` · `cargo clippy --locked
   --all-targets --all-features -- -D warnings` · `cargo test --locked
-  --all-targets` · `just mutants-diff` · **`python3 scripts/width-guard.py`**.
-  Clippy is not optional — `-D warnings` makes one lint a red build. **The width
-  guard is on this list and no other guard is**, because it is the one that fails
-  on the prose a dev writes every turn and `cargo fmt` will not rewrap a comment:
-  it costs **0.17 s** measured, against 43 violations that rode all the way to
-  step 5 and reddened the gate there, stopping `cargo deny` and `cross` from
-  running at all
-  ([D293](NOTES.md#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)).
+  --all-targets` · `just mutants-diff` · **`python3 scripts/width-guard.py`** ·
+  **`python3 scripts/security-guard.py`**.
+  Clippy is not optional — `-D warnings` makes one lint a red build. **Two guards
+  are on this list and the rest are not**, and the test of membership is whether a
+  guard fails on something the author produces on an ordinary turn that no
+  compiler sees
+  ([D293](NOTES.md#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27) ·
+  [D298](NOTES.md#d298--the-second-guard-joins-the-devs-per-turn-list-and-it-costs-41-s-rather-than-the-017-s-the-first-one-did-2026-09-27)).
+  **`width-guard.py`** is the prose one — `cargo fmt` will not rewrap a comment —
+  and costs **0.13 s** measured, against 43 violations that rode all the way to
+  step 5 and reddened the gate there. **`security-guard.py`** is the other, at
+  **4.1 s** and not the width guard's fraction of a second: one banned outbound
+  host literal in a test cost a whole gate run at step 5, with `guards.sh` being
+  `set -e` so `cargo deny` and `cross` never ran.
 - **`tester` alone runs the full `just check`**, which adds `guards`,
   `cargo deny check` and `cross`. Those do not turn on the dev's judgement.
 
@@ -864,11 +870,14 @@ in order, no skipping:
   ```
 
   - **types:** `feat` `fix` `docs` `perf` `refactor` `style` `test` `chore` `ci` `revert`
-  - **scopes:** `rules` `ops` `ui` `theme` `main` `fixtures` `guards` `screens`
-    `ci` `docs` `changelog` — **counted off the log, not recalled**:
-    `git log --format='%s' | grep -oE '^[a-z]+\(([a-z-]+)\)' | sed 's/.*(//;s/)//' | sort | uniq -c | sort -rn`.
-    This list has now gone stale four times, in the file that warns about it. A
-    scope is a word a reader of the changelog sorts by, so the rule is the file
+  - **scopes:** `rules` `ops` `k8s` `ui` `theme` `main` `fixtures` `guards`
+    `screens` `ci` `docs` `changelog` — **counted off the log, not recalled**:
+    `git log --format='%s' | grep -oE '^[a-z]+\(([a-z0-9-]+)\)' | sed 's/.*(//;s/)//' | sort | uniq -c | sort -rn`.
+    **The class is `[a-z0-9-]` and the digit is not decoration**: with `[a-z-]`
+    the command cannot see `k8s` at all, which is how this list stayed missing
+    the fifth-most-used scope in the repo through four re-derivations
+    ([D299](NOTES.md#d299--the-scope-list-went-stale-a-fifth-time-because-the-command-that-counts-it-cannot-see-a-digit-2026-09-27)).
+    A scope is a word a reader of the changelog sorts by, so the rule is the file
     the change is in, and a new one is added here in the same commit that first
     uses it
   - **subject:** English, imperative, lowercase, no trailing period
