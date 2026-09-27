@@ -149,6 +149,7 @@
 - *(ui)* Give the restart guard its caller, and stop four surfaces naming a dead key ([0363df8](https://github.com/murat-akpinar/k8rs/commit/0363df8787185803d09980adeb1a8296619c81cc)) — Phase 12's close read the phase's seams against each other rather than re-reading 20 019 lines, and found three defects no per-box round could have seen.
 - *(ui)* Say where the rest of a cut rejection is, and only where it is ([b61e142](https://github.com/murat-akpinar/k8rs/commit/b61e142f24c4919c58320780a43aa1c33d965f9e)) — A rejection longer than the box drew four quoted rows, a `…`, and nothing saying the rest existed anywhere — a dead end that looks like the whole answer with a typo on the end. The quote's last row now names where more of it is.
 - *(ui)* Stop claiming a read is under way when nothing is answering ([ddfc211](https://github.com/murat-akpinar/k8rs/commit/ddfc21131daa81030e9578ef4dd3470fddf03506)) — At startup against an unreachable API the header read `disconnected, retrying` while the body read `reading the cluster… 0 pods` and promised findings would appear as they were found. Nothing was being read and nothing would appear.
+- *(ui)* Say when the cluster would not name the kinds it serves ([f96ad16](https://github.com/murat-akpinar/k8rs/commit/f96ad16724d57fda214fc982a5a82e9107ffcac6)) — A kubeconfig refused `get /apis` got a sidebar drawing all five RESOURCES groups over content that could never arrive, and no sentence anywhere — the refusal reached the headless drivers and no console frame.
 
 ### 💼 Other
 
