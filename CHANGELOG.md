@@ -150,6 +150,7 @@
 - *(ui)* Say where the rest of a cut rejection is, and only where it is ([b61e142](https://github.com/murat-akpinar/k8rs/commit/b61e142f24c4919c58320780a43aa1c33d965f9e)) — A rejection longer than the box drew four quoted rows, a `…`, and nothing saying the rest existed anywhere — a dead end that looks like the whole answer with a typo on the end. The quote's last row now names where more of it is.
 - *(ui)* Stop claiming a read is under way when nothing is answering ([ddfc211](https://github.com/murat-akpinar/k8rs/commit/ddfc21131daa81030e9578ef4dd3470fddf03506)) — At startup against an unreachable API the header read `disconnected, retrying` while the body read `reading the cluster… 0 pods` and promised findings would appear as they were found. Nothing was being read and nothing would appear.
 - *(ui)* Say when the cluster would not name the kinds it serves ([f96ad16](https://github.com/murat-akpinar/k8rs/commit/f96ad16724d57fda214fc982a5a82e9107ffcac6)) — A kubeconfig refused `get /apis` got a sidebar drawing all five RESOURCES groups over content that could never arrive, and no sentence anywhere — the refusal reached the headless drivers and no console frame.
+- *(k8s)* End a watch that stops delivering instead of reading it as live ([d276790](https://github.com/murat-akpinar/k8rs/commit/d276790e66563b49eaa8c22cb497407aded59937)) — A watch whose socket stays open and drops every byte raised nothing at all. kube's own bound returns None rather than Err, so the watcher re-watched in silence, Store::troubles stayed empty and every predicate over it was right to answer live over a cluster that had stopped arriving.
 
 ### 💼 Other
 
@@ -268,6 +269,7 @@
 - *(docs)* Measure the console at rest, and at a thousand pods ([a5bf413](https://github.com/murat-akpinar/k8rs/commit/a5bf413eb3acba34e8f8e457d5517f572ca73bcb)) — Phase 12's last box, measured against the wired console for the first time. Both existing figures were the temporary driver's and the only idle reading was 2 s against a disconnected console.
 - *(docs)* Close phase 12, and carry phase 11's unfinished close into it ([fe5390d](https://github.com/murat-akpinar/k8rs/commit/fe5390d0833bf59474ea775de2d8e97aea8e4062)) — Phase 11's close stopped half-way on 2026-09-13 and its head note listed seven owed items that nobody was routed to for five sessions and four phase closes. Five of them have no subject left: the six-blocker commit touched no Rust, and all eight screen files it did touch were rewritten during Phase 12, each by a box with its own designer and operator rounds. The remaining three are this close's own steps, and one PR carries both phases because there has only ever been one branch.
 - *(docs)* Record what phase 12 closed with, and what it paid for ([76d9cab](https://github.com/murat-akpinar/k8rs/commit/76d9cab9b1713f725fcacd440c190e93f033261a))
+- *(docs)* Put security-guard on the dev's gate, and teach the scope counter to see a digit ([4de661c](https://github.com/murat-akpinar/k8rs/commit/4de661c88ceda19fee865a2f48e34d3d78c6bce9)) — Two rules, both paid for by this box.
 
 ### ⚡ Performance
 
