@@ -166,6 +166,14 @@ python3 scripts/twin-guard.py
 # reader builds against, pinned by nothing.
 python3 scripts/copy-guard.py --self-test
 python3 scripts/copy-guard.py
+# The one field that turns a wedged watch from a silence into an error, at the
+# one call site nothing else can reach (NOTES § D297). `Client` never hands its
+# `Config` back, so `k8s_tests.rs` can only assert what `bounded_reads` returns;
+# and `cargo mutants` rewrites bodies and return values, never a call argument,
+# so `Client::try_from(config)` is a one-word regression with no red in the whole
+# of `just check`.
+python3 scripts/read-deadline-guard.py --self-test
+python3 scripts/read-deadline-guard.py
 # `cargo fmt` reflows code and leaves comments alone, so the 100-column rule was
 # a convention until this ran. rustfmt's own options for it are nightly-only.
 python3 scripts/width-guard.py --self-test

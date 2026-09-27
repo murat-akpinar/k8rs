@@ -5046,7 +5046,7 @@ behaves as specified.
       never re-asked, and `widgets.md` § 7's closed list of twelve cuts still
       omits the banner-stack cut two committed mockups already draw — both in
       [`backlog.md`](backlog.md)
-- [ ] **A watch that stops delivering without erroring is read as delivering, so
+- [x] **A watch that stops delivering without erroring is read as delivering, so
       the header says `live` over data that stopped arriving.** Measured with a
       relay blackholing the socket — open, every byte dropped — rather than
       closing it: with all six watches wedged there are no `Store::troubles` rows,
@@ -5065,7 +5065,27 @@ behaves as specified.
       never called — and a client `read_timeout` above the 290 s watch timeout
       closes it with no new field and no clock. **`k8s.rs` has been frozen since
       Phase 6, so this box opens with a recorded reversal, and the timeout is
-      measured against a real watch before it is chosen**, not read off a default
+      measured against a real watch before it is chosen**, not read off a default.
+      **Done 2026-09-27**
+      ([D297](NOTES.md#d297--the-frozen-file-opens-for-a-wedged-watch-and-the-timeout-has-five-seconds-of-room-to-land-in-2026-09-27)).
+      The reversal is recorded and scoped to one field and the doc lines it
+      falsifies; the number is **292 s**, measured before it was chosen over 30
+      watch lifetimes on a v1.36.1 API server
+      ([reports/2026-09-27-watch-close-timing.md](reports/2026-09-27-watch-close-timing.md)) —
+      the close lands at 290.001–290.017 s and kube's silent reconnect at 295, so
+      the window is 5 s wide and both edges are kube's. Four lines of product code:
+      `READ_TIMEOUT`, `bounded_reads`, and the one `Client::try_from`.
+      **Measured on the real binary against the four-node journey**
+      ([reports/2026-09-27-the-wedged-watch-journey.md](reports/2026-09-27-the-wedged-watch-journey.md)):
+      700 s on a healthy cluster drew **no** fault row of any shape, the wedged
+      connections were closed by the client at **292.001–292.002 s** after their own
+      last byte, one wedged watch drew its kind at T+292.154 while the header stayed
+      `live` for the whole 620 s, and all five wedged moved the header 7.8 s after
+      the first row. **What this box did not take**: the row outlives the wedge —
+      un-wedged on an idle cluster the header returned to `live` in 17.5 s and the
+      banner stood 412 s longer, so one screen said both — and `--follow` on a
+      container quiet past 292 s prints kube's own error `Display` to a person.
+      Neither is new to this box and both are in [`backlog.md`](backlog.md)
 - [ ] **While the API server is restarting, the banner sends the operator to fix
       their RBAC.** One frame, two sentences that cannot both be acted on: header
       `⚠ disconnected, retrying`, banner *the role this kubeconfig uses needs to

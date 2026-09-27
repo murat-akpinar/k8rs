@@ -857,9 +857,10 @@ const FOR_REAL: Pass = Pass(false);
 ///
 /// **It bounds a hang and not a slow answer**, which is [`crate::k8s::REPORT_FETCH`]'s own
 /// *diagnosis* one layer down — its **number** is rejected three paragraphs below, and the two are
-/// not the same borrowing: `Config::read_timeout` is `None` in all three kube constructors, so
-/// nothing under [`perform`]'s call bounds it and an apiserver that accepts the connection and
-/// answers nothing holds it forever. **What is different here is who waits.**
+/// not the same borrowing: `Config::read_timeout` is `None` in all three kube constructors, so the
+/// only thing under [`perform`]'s call that bounds an apiserver which accepts the connection and
+/// answers nothing is [`crate::k8s::READ_TIMEOUT`]'s 292 s — k8rs's own, sized for a watch, and
+/// eight times this number. **What is different here is who waits.**
 /// `screens/dialogs.md` § While the check is still on the wire draws that frame with **no live key
 /// at all** — `esc` is inert until a verdict exists (NOTES § D214), and `q` and `?` are not
 /// offered — so an unbounded check is not a slow screen, it is a terminal the reader has to kill.

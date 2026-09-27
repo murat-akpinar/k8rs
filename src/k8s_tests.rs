@@ -2364,6 +2364,289 @@ async fn a_throttled_api_server_reaches_the_store_as_a_code_and_not_as_prose() {
     );
 }
 
+/// **Whether anything in a failure's chain was a read that ran out of time**, which is what names
+/// the cause below rather than leaving it to a duration.
+///
+/// A walk of `source()` and not a match on [`kube::Error`]: the variant a transport failure arrives
+/// on is kube's business and has moved before, while `std::io::ErrorKind::TimedOut` is what
+/// `hyper-timeout` raises (`hyper-timeout-0.5.2/src/stream.rs:96`) and is the fact under test.
+///
+/// **`TimedOut` alone is not the question, because the *connect* deadline raises it too** —
+/// `io::Error::new(ErrorKind::TimedOut, Elapsed)` at `hyper-timeout-0.5.2/src/lib.rs:85`. The two
+/// are told apart by the payload and not by `source()`: the read deadline is
+/// `io::Error::from(ErrorKind::TimedOut)` with nothing inside it, so `get_ref()` is `None`, while
+/// the connect deadline carries the `Elapsed` and answers `Some`. **Walking further does not
+/// help**: both chains end at an `io::Error` whose `kind()` is `TimedOut`, so the walk reaches the
+/// same kind of node either way and only the payload at that node tells them apart. Without this
+/// call the helper would pass on a connect that ran out of time, which today only cannot happen
+/// because kube's `connect_timeout` is 30 s — a default nothing here asserts
+/// (`tester`, 2026-09-27).
+fn timed_out(failure: &(dyn std::error::Error + 'static)) -> bool {
+    std::iter::successors(Some(failure), |step| step.source())
+        .filter_map(|step| step.downcast_ref::<std::io::Error>())
+        .any(|read| read.kind() == std::io::ErrorKind::TimedOut && read.get_ref().is_none())
+}
+
+/// **[`timed_out`] tells a read that ran out of time from a connect that did**, which is the whole
+/// of the `get_ref()` call in it and the only thing that fails if that call is removed.
+///
+/// **Both shapes are spelled the way `hyper-timeout` spells them**, which is the only reason this
+/// proves anything: the read deadline is `io::Error::from(ErrorKind::TimedOut)` with nothing inside
+/// it (`hyper-timeout-0.5.2/src/stream.rs:96`) and the connect deadline is
+/// `io::Error::new(ErrorKind::TimedOut, Elapsed)` (`lib.rs:85`), carrying a real `Elapsed` rather
+/// than a stand-in. Same `kind()`, and a `source()` walk ends on the same kind of node for both.
+#[tokio::test]
+async fn a_connect_that_ran_out_of_time_is_not_a_read_that_did() {
+    let elapsed = tokio::time::timeout(std::time::Duration::ZERO, std::future::pending::<()>())
+        .await
+        .expect_err("a zero deadline over a future that never finishes");
+
+    let read = std::io::Error::from(std::io::ErrorKind::TimedOut);
+    let connect = std::io::Error::new(std::io::ErrorKind::TimedOut, elapsed);
+
+    assert!(
+        timed_out(&read),
+        "the read deadline's own error shape is not recognised, so the assertions that rest on \
+         this helper are passing for some other reason"
+    );
+    assert!(
+        !timed_out(&connect),
+        "a connect deadline counts as a read that ran out of time, so those assertions cannot \
+         tell READ_TIMEOUT firing from kube's 30s connect_timeout firing"
+    );
+}
+
+/// **The client this binary connects with bounds a read that delivers nothing** —
+/// [`bounded_reads`] is the only place [`READ_TIMEOUT`] is applied, and `Client` never hands its
+/// `Config` back, so this is where the field is watched at all (NOTES § D297).
+///
+/// **Two assertions because they catch different things.** The second catches the field going
+/// missing or changing value. The first catches kube growing a `read_timeout` of its own, which
+/// would make this change look redundant while sizing the deadline to a number nobody measured.
+///
+/// **No network, and the host is `.invalid` rather than a loopback literal**: nothing here connects
+/// at all — `bounded_reads` is a field assignment — and `scripts/security-guard.py`'s *no second
+/// outbound path* clause refuses any `https?://<host>` literal whose host is not RFC 2606/6761
+/// reserved. The sandbox § CONNECTING uses is a *different* pattern and not this one: it builds
+/// `format!("http://{address}")` over a port the kernel just handed it, which never appears in the
+/// source as a literal host.
+#[test]
+fn the_client_this_binary_builds_bounds_a_read_that_delivers_nothing() {
+    let plain = Config::new(
+        "http://cluster.invalid"
+            .parse()
+            .expect("a reserved host no resolver answers for"),
+    );
+    assert_eq!(
+        plain.read_timeout, None,
+        "kube grew a read_timeout of its own, so READ_TIMEOUT may no longer be the thing that \
+         bounds a wedged watch and its window was measured against the wrong default"
+    );
+    assert_eq!(
+        bounded_reads(plain).read_timeout,
+        Some(READ_TIMEOUT),
+        "the config handed to Client::try_from does not carry READ_TIMEOUT, so a watch whose \
+         socket stays open and delivers nothing is silent again (NOTES § D297)"
+    );
+}
+
+/// **A socket that accepts and never writes ends the read instead of holding it** —
+/// [`READ_TIMEOUT`]'s whole mechanism, at a duration a suite can afford (NOTES § D297).
+///
+/// **Both sides of the field, because one side alone proves nothing.** With a `read_timeout` the
+/// call comes back an error, no earlier than its own deadline and long before the suite's patience;
+/// with the field left `None` the *same* call against the *same* listener does not come back at
+/// all. Without that second half, a listener that had quietly started answering — or ending the
+/// connection — would satisfy the first half just as well.
+///
+/// **300 ms and not 292 s**: the number is the field's, the mechanism is the duration's, and a test
+/// that waited the shipped value would be a test nobody runs.
+#[tokio::test]
+async fn a_read_timeout_ends_a_socket_that_accepts_and_says_nothing() {
+    let deadline = std::time::Duration::from_millis(300);
+    let patience = deadline * 4;
+
+    let (bounded, accepting) = writes_then_stops(Some(deadline), &[]).await;
+    let started = std::time::Instant::now();
+    let answer = Api::<Pod>::all(bounded).list(&ListParams::default()).await;
+    let waited = started.elapsed();
+    accepting.abort();
+    let failure = answer.expect_err("a server that wrote no byte answered with a list of pods");
+
+    assert!(
+        timed_out(&failure),
+        "the call failed but nothing in it was a read that ran out of time, so this proves a \
+         broken socket and not a bounded one: {failure:?}"
+    );
+    assert!(
+        waited >= deadline,
+        "the read ended after {waited:?}, before the {deadline:?} it was given — so whatever \
+         ended it, it was not this deadline"
+    );
+    assert!(
+        waited < patience,
+        "the read was still open after {waited:?}, so the deadline did not end it"
+    );
+
+    let (unbounded, accepting) = writes_then_stops(None, &[]).await;
+    let held = tokio::time::timeout(
+        patience,
+        Api::<Pod>::all(unbounded).list(&ListParams::default()),
+    )
+    .await;
+    accepting.abort();
+    assert!(
+        held.is_err(),
+        "the same call against the same listener ended on its own with no read_timeout set, so \
+         the field is not what ended the one above: {held:?}"
+    );
+}
+
+/// **A watch whose response arrived and whose body then stopped is a failure and not a silent end**
+/// — the shape the wedged-watch box is actually about, and one a response that never starts cannot
+/// reach (NOTES § D297).
+///
+/// **Why this is a second test and not the one above.** A listener that writes no byte at all fires
+/// the deadline before any header, so the error leaves `Client::send` and never enters the event
+/// stream. A wedge does not look like that: the response arrived, the body stopped, and kube reads
+/// body errors somewhere else entirely — `kube-client-4.2.0/src/client/mod.rs:340-400`.
+///
+/// **What this test defends is a line that today does the right thing by accident.** `:384-386`
+/// turns an `ErrorKind::TimedOut` body error into `None` — a silent stream end,
+/// `State::InitListed`, a re-watch, no row, header still `live` — and its comment says *our client
+/// timeout*, so it was written for exactly the field [`READ_TIMEOUT`] sets. It is unreachable only
+/// because `:355-358` rewrites every hyper body error to `ErrorKind::Other` first, so the wedge
+/// falls to `_ => Some(Err(Error::ReadEvents(e)))` at `:394` instead. A kube release that makes
+/// `:384` do what its comment says takes the row away, and this assertion is what turns that red.
+///
+/// **The partial line is deliberate**: 15 bytes with no newline is a body read that resets the
+/// deadline and yields no event — the δ NOTES § D297 sizes the ceiling against — so the error has
+/// to land `deadline` after the *chunk* and not after the headers, which is the per-read reset.
+#[tokio::test]
+async fn a_watch_whose_body_stops_after_it_started_is_an_error_and_not_a_silent_end() {
+    const HEADERS: &str = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+    const PARTIAL: &str = "f\r\n{\"type\":\"ADDED\"\r\n";
+    const OPENING: &[(u64, &str)] = &[(0, HEADERS), (200, PARTIAL)];
+
+    let deadline = std::time::Duration::from_millis(300);
+    // **Derived from the schedule and never retyped beside it**, which is `twin-guard.py`'s class
+    // one function apart instead of one file apart: a copy of the 200 goes slack the moment the
+    // schedule moves, and the assertion below would then pass while claiming a reset it no longer
+    // measures. **The sum and not the last wait** — [`writes_then_stops`] sleeps *before* each
+    // write, so the waits accumulate and the last byte lands at their total. The two coincide
+    // here only because the first wait is `0`, and that coincidence is what a second element
+    // would quietly break.
+    let delivered =
+        std::time::Duration::from_millis(OPENING.iter().map(|(wait, _)| *wait).sum::<u64>());
+    let (client, accepting) = writes_then_stops(Some(deadline), OPENING).await;
+    let pods = Api::<Pod>::all(client);
+
+    let started = std::time::Instant::now();
+    let mut watch = Box::pin(
+        pods.watch(&kube::api::WatchParams::default(), "0")
+            .await
+            .expect("a 200 with chunked headers is a watch kube agrees to read"),
+    );
+    let first = watch.next().await;
+    let waited = started.elapsed();
+    accepting.abort();
+
+    let failure = match first {
+        Some(Err(failure)) => failure,
+        None => panic!(
+            "the watch stream ended silently instead of reporting a failure, so a wedged watch \
+             produces no Trouble row and the header goes on saying live (kube client/mod.rs:384)"
+        ),
+        Some(Ok(event)) => panic!("no whole event was sent and one arrived anyway: {event:?}"),
+    };
+    assert!(
+        timed_out(&failure),
+        "the watch failed but nothing in it was a read that ran out of time, so this proves a \
+         broken body and not a bounded one: {failure:?}"
+    );
+    assert!(
+        waited >= delivered + deadline,
+        "the body error landed after {waited:?}, sooner than the {delivered:?} of quiet plus the \
+         {deadline:?} deadline — so the deadline was not restarted by the chunk and it is a \
+         deadline on the response rather than on each read"
+    );
+    assert!(
+        waited < delivered + deadline * 4,
+        "the body read was still open after {waited:?}, so the deadline did not end it"
+    );
+}
+
+/// **The two kube numbers [`READ_TIMEOUT`] had to land between, pinned as far as kube exposes
+/// them** (NOTES § D297) — the same reason
+/// [`kube_still_pages_the_initial_list_at_the_number_this_repo_chose`] pins the page size: a kube
+/// upgrade that moves either edge must be a red gate rather than a field that quietly stops firing.
+///
+/// **The floor is pinned on the wire**, which is stronger than a struct default: `timeoutSeconds`
+/// is what the server closes the watch on, and it is the query kube actually builds.
+///
+/// **The ceiling is pinned as kube's own refusal, and that is not the same fact as the ceiling.**
+/// kube's real ceiling is computed at `kube-runtime-4.2.0/src/watcher.rs:494` out of **two** terms,
+/// and **neither is pinned here**: `WATCH_IDLE_TIMEOUT_MARGIN`, a private const (`:483`) nothing
+/// public reads, and kube-runtime's own `timeout.unwrap_or(290)` on the line above it. What this
+/// test asserts instead is `WatchParams::validate`'s refusal at 295 (`kube-core params.rs:361-366`)
+/// — the same number from the same upstream issue, refused above and accepted below.
+///
+/// **And the 290 pinned above is the *wire* default, which is a third `unwrap_or(290)`**
+/// (`kube-core params.rs:381`) in a different crate that merely looks identical to kube-runtime's.
+/// So a kube release whose idle base dropped to 280 while the wire default and `validate`'s 295
+/// stayed put would put the real ceiling at 285, make [`READ_TIMEOUT`] inert, and leave this test
+/// green. Reaching either unpinned term from a test costs a fake apiserver and a wait longer than
+/// the margin; `scripts/read-deadline-guard.py` derives the window from kube's own sources instead,
+/// and that is where the coverage this test does not have lives.
+#[test]
+fn kubes_watch_window_is_still_the_one_read_timeout_was_chosen_inside() {
+    let pods = Request::new("/api/v1/pods");
+    let asked = pods
+        .watch(&kube::api::WatchParams::default(), "1")
+        .expect("kube built a watch request");
+    assert!(
+        asked
+            .uri()
+            .query()
+            .unwrap_or_default()
+            .contains("timeoutSeconds=290"),
+        "kube no longer asks the server to close a watch at 290s, so READ_TIMEOUT's floor is not \
+         where it was measured (kube-core params.rs:381) — the query was {:?}",
+        asked.uri().query()
+    );
+    assert!(
+        pods.watch(&kube::api::WatchParams::default().timeout(294), "1")
+            .is_ok(),
+        "kube refuses a 294s watch, so its ceiling moved down and READ_TIMEOUT may now be above \
+         the reconnect it has to stay under"
+    );
+    assert!(
+        pods.watch(&kube::api::WatchParams::default().timeout(295), "1")
+            .is_err(),
+        "kube accepts a 295s watch, so the 295 READ_TIMEOUT's ceiling was read off is no longer \
+         the bound kube enforces (kube-core params.rs:361-366)"
+    );
+}
+
+/// **[`READ_TIMEOUT`] is inside the window above**, and it is the one assertion that fails if
+/// somebody adjusts the number without reading NOTES § D297.
+///
+/// Both edges, because either one alone leaves half the space open: below the floor a healthy quiet
+/// watch draws a fault that did not happen, and at or above the ceiling the field never fires.
+#[test]
+fn read_timeout_is_above_the_servers_close_and_below_kubes_reconnect() {
+    assert!(
+        READ_TIMEOUT > std::time::Duration::from_secs(290),
+        "READ_TIMEOUT is {READ_TIMEOUT:?}, at or below the server's own close, so an ordinary \
+         quiet watch would report a failure that did not happen"
+    );
+    assert!(
+        READ_TIMEOUT < std::time::Duration::from_secs(295),
+        "READ_TIMEOUT is {READ_TIMEOUT:?}, at or above kube's idle reconnect, so the idle arm \
+         wins every race and the field is inert — which reads as a fix"
+    );
+}
+
 // --- A FIRST SYNC THAT DOES NOT FINISH ---
 //
 // **`PRIOR-ART § A7` asks that a first sync which never completes become a state rather than a
@@ -11335,28 +11618,73 @@ async fn a_cluster_with_no_certificate_requests_answers_an_empty_list_and_not_a_
 }
 
 /// **A client pointed at a listener that accepts and answers nothing** — the hang [`REPORT_FETCH`]
-/// exists for, and the handle to abort it with.
-///
-/// **The socket is held** — never read from, never written to, never dropped. Dropping it would
-/// close the connection and make this the ordinary `Err` a refusal already covers, which is the
-/// failure that *does* come back on its own.
+/// exists for, and the handle to abort it with. Unbounded, and it stays the five callers' whole
+/// story — the two [`READ_TIMEOUT`] tests that want a deadline or an answer call
+/// [`writes_then_stops`] directly.
 async fn never_answers() -> (Client, tokio::task::JoinHandle<()>) {
+    writes_then_stops(None, &[]).await
+}
+
+/// **A listener that writes what it is given and then goes quiet forever**, with the client's
+/// `read_timeout` left to the caller — `None` for the hang [`REPORT_FETCH`] exists for, `Some` for
+/// [`READ_TIMEOUT`]'s mechanism at a duration a suite can afford (NOTES § D297).
+///
+/// **`opening` is `(wait in ms, bytes)` pairs, written in order.** Empty is the *never answers*
+/// case every other caller wants. Non-empty is the shape the wedged-watch box is actually about: a
+/// response that **started** and a body that then stops, which goes down a different path in kube
+/// (`kube-client-4.2.0/src/client/mod.rs:340-400`) from a response that never began. The waits are
+/// what make the per-read reset visible — the deadline restarts on each write, so an error that
+/// lands `deadline` after the *last* pair and not after the first is the reset itself.
+///
+/// **One function and not three listeners**: the socket-holding half is the part that must not come
+/// apart, and a second copy of it is what NOTES § D103 is named for.
+///
+/// **A non-empty `opening` serialises the accepts, and that is a real limit and not an oversight**:
+/// the schedule is awaited *inside* the accept loop, so connection #2 is not accepted until #1's
+/// whole schedule has been written. Every caller that needs concurrent connections passes `&[]`
+/// today and so reaches no sleep at all —
+/// [`the_five_lists_wait_side_by_side_and_not_one_after_another`] is the test this would destroy,
+/// and it is safe for exactly that reason. **A caller that wants a schedule *and* concurrency has
+/// to spawn the per-connection work**, which is a change to this function and not something a
+/// caller can arrange from outside it.
+///
+/// **The socket is held after the last write** — never read from, never dropped. Dropping it would
+/// close the connection, which is a different failure: mid-body it is the `UnexpectedEof` kube ends
+/// the stream silently on (`client/mod.rs:390-393`), and before any byte it is the ordinary `Err` a
+/// refusal already covers.
+async fn writes_then_stops(
+    read_timeout: Option<std::time::Duration>,
+    opening: &'static [(u64, &'static str)],
+) -> (Client, tokio::task::JoinHandle<()>) {
+    use tokio::io::AsyncWriteExt as _;
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a loopback port");
     let address = listener.local_addr().expect("the port it picked");
     let held = tokio::spawn(async move {
         let mut open = Vec::new();
-        while let Ok((socket, _)) = listener.accept().await {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            for (wait, bytes) in opening {
+                tokio::time::sleep(std::time::Duration::from_millis(*wait)).await;
+                // **A write that fails is the test's own business, not this task's**: the client
+                // has gone, and the assertion that was waiting on it says so far better than a
+                // panic inside a spawned task nobody joins.
+                if socket.write_all(bytes.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
             open.push(socket);
         }
     });
-    let client = Client::try_from(Config::new(
+    let mut config = Config::new(
         format!("http://{address}")
             .parse()
             .expect("an address the kernel just gave us"),
-    ))
-    .expect("a client over plain http asks the machine for nothing");
+    );
+    config.read_timeout = read_timeout;
+    let client =
+        Client::try_from(config).expect("a client over plain http asks the machine for nothing");
     (client, held)
 }
 
@@ -11364,10 +11692,12 @@ async fn never_answers() -> (Client, tokio::task::JoinHandle<()>) {
 /// [`REPORT_FETCH`]'s whole reason, run at a deadline a suite can afford.
 ///
 /// **This is a hang and not a slow answer, and it is the *startup* path.** `Config::read_timeout`
-/// is `None` in every kube constructor, so without the bound this test never returns and the
-/// binary never draws: the fetch runs after `k8rs: watching — …` has gone to stderr and before the
-/// first watch, so the reader sees a tool that connected and then stopped
-/// (`main.rs`'s `live`, `tester` 2026-08-28).
+/// is `None` in every kube constructor and this client sets none of its own, so without the bound
+/// this test never returns and the binary never draws: the fetch runs after `k8rs: watching — …`
+/// has gone to stderr and before the first watch, so the reader sees a tool that connected and then
+/// stopped (`main.rs`'s `live`, `tester` 2026-08-28). **The shipped client does set one**
+/// ([`READ_TIMEOUT`], NOTES § D297) and it changes nothing here: 292 s is sized for a watch, so
+/// [`REPORT_FETCH`] is still the number this path waits.
 ///
 /// **The listener accepts and keeps the socket** — never read from, never written to, never
 /// dropped. Dropping it would close the connection and make this the ordinary `Err` the test above

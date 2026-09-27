@@ -318,6 +318,9 @@ its line moving with it.
 - [D294](#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27) — verbatim names where verbatim lives, because a 13-row box cannot hold 4096 bytes
 - [D295](#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27) — a first launch that never reached the cluster is a third state, not either of the two the code has
 - [D296](#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27) — a refused `/apis` is two surfaces with two gates, and the row outlives the sentence
+- [D297](#d297--the-frozen-file-opens-for-a-wedged-watch-and-the-timeout-has-five-seconds-of-room-to-land-in-2026-09-27) — the frozen file opens for a wedged watch, and the timeout has five seconds of room to land in
+- [D298](#d298--the-second-guard-joins-the-devs-per-turn-list-and-it-costs-41-s-rather-than-the-017-s-the-first-one-did-2026-09-27) — the second guard joins the dev's per-turn list, and it costs 4.1 s rather than the 0.17 s the first one did
+- [D299](#d299--the-scope-list-went-stale-a-fifth-time-because-the-command-that-counts-it-cannot-see-a-digit-2026-09-27) — the scope list went stale a fifth time because the command that counts it cannot see a digit
 
 ## Why it exists — where the gap is
 
@@ -26538,3 +26541,319 @@ Evidence: `reports/2026-09-26-the-error-state-pass.md` § 5 and F5, and
 `reports/2026-09-27-the-refused-discovery-sentence.md` for the review. The screen is
 `screens/states.md` § *k8rs could not read what this cluster serves*, with
 `screens/resources.md` § Rules and `screens/widgets.md` § 2 following it.
+
+### D297 — the frozen file opens for a wedged watch, and the timeout has five seconds of room to land in (2026-09-27)
+
+Phase 13's wedged-watch box is a `k8s.rs` change, and `k8s.rs` has been frozen
+since Phase 6
+([todo.md § Phase 6](todo.md)). **The reversal, recorded before it is acted on**
+(CLAUDE.md § Architecture workflow): the file opens for the client's
+`read_timeout` and for the doc lines that stop being true when it is set, and for
+nothing else. **A doc line in another frozen file that this change falsifies is
+covered by the same reversal** — `ops.rs:860` reasons from `read_timeout` being
+unset, and a comment left asserting a field's absence after the field is set is
+the stale-doc failure CLAUDE.md § Language and documentation rules calls a failed
+step, not a second box. It buys no licence to change what either file *does*. Phase 6's freeze already carries two named exceptions
+([D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03))
+and **neither covers this** — they are the browser's `Table` LIST and the browser
+view's refresh, both read paths, both since written. This is a third, and it is
+not a read path: it is the one field that turns a silence into an error. It is
+`dev-core`'s, as the freeze note says a `k8s.rs` box must be.
+
+**Why the file has to be the one that changes.** The state
+[D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+ruling 4 measured is a watch whose socket stays open and delivers nothing.
+`k8s.rs` § WHAT A THROTTLE LOOKS LIKE names both halves of why it is invisible:
+`Config::read_timeout` is `None` in all three kube constructors
+(`config/mod.rs:191`, `:273`, `:339`) and `set_tcp_keepalive` is never called, so
+the socket raises nothing; and kube's own bound above it returns `None` rather
+than `Err` (`kube-runtime-4.2.0/src/watcher.rs:714`), which goes to
+`State::InitListed` and re-watches from the stored `resourceVersion`. **A row is
+never produced, so `Store::troubles` is empty and the header's predicate is
+right to say `live`** — the defect is upstream of the predicate, which is why
+neither `linked()` nor anything over `troubles()` is the door.
+
+**What the field does, read off the crate rather than recalled.**
+`config.read_timeout` reaches `hyper_timeout::TimeoutConnector::set_read_timeout`
+(`kube-client-4.2.0/src/client/builder.rs:230`), which hands it to a
+`TimeoutStream` per connection (`hyper-timeout-0.5.2/src/lib.rs:91`) — a deadline
+on **each read**, reset by every byte that arrives, not a deadline on the
+request. On a wedged socket it fires and the error reaches
+`watcher::Error::WatchFailed` (`watcher.rs:709`), which
+`Trouble::failure` already keeps typed. **No new field on `Store`, no clock in
+`k8rs`, one line at the `Client`.**
+
+**And the room it has to land in is five seconds wide, which is the whole of the
+design.** kube bounds the watch at `Config::timeout.unwrap_or(290)` plus a fixed
+`WATCH_IDLE_TIMEOUT_MARGIN` of 5 s (`watcher.rs:483`, `:494`), and k8rs sends
+`timeoutSeconds=290`, so a healthy watch's socket is quiet for **at most the
+server's own close at ~290 s** and kube's silent reconnect fires at **~295 s**.
+So the timeout `R` has to satisfy `290 < R < 295`:
+
+- **at or below the server's close**, a healthy quiet watch draws a fault that
+  did not happen — the same class of lie as the header saying `disconnected`
+  while connected, one direction over;
+- **at or above kube's 295 s**, the idle timeout wins every race, returns `None`,
+  and the wedge stays exactly as silent as it is today. The field would be
+  inert, which is worse than absent because it reads as a fix.
+
+The 5 s is kube's constant and not ours, and **lowering `watcher::Config::timeout`
+does not widen it** — the window is `(T, T+5)` for any `T`, and a lower `T`
+re-establishes six watches more often for nothing. `T` stays kube's default.
+
+**So the number is a measurement and not a default, and this is what it has to
+measure**: where a real API server's close actually lands relative to its own
+`timeoutSeconds=290`, over several healthy cycles. The only samples this repo
+holds are two, incidental, off a plain-HTTP relay in front of `kubectl proxy`
+([reports/2026-09-26-the-error-state-fix-review.md](reports/2026-09-26-the-error-state-fix-review.md)
+§ 1: the nodes watch re-requested at `+325.8 s` having opened at `+35.8 s`, and
+pods at `+326.3` from `+36.2` — 290.0 s and 290.1 s). **Two samples through a
+proxy is not the measurement**; whatever margin is left over the real close is
+all the budget there is, and it is under five seconds.
+
+**One `Client` serves everything, so this is client-wide, and exactly one surface
+legitimately idles longer than five minutes.** `connect_with` builds a single
+`Client::try_from(config)` (`k8s.rs` § CONNECTING) and every read borrows it. The
+metrics poll, the probes, `ops`'s writes and the detail reads all carry their own
+tighter deadlines, and the initial LIST — documented in § WHAT A THROTTLE LOOKS
+LIKE as blocking forever against a dead socket — gains a per-read bound it has
+never had, which is the same box's doc correction and not a side effect to leave
+unstated. **The exception is a followed log stream**, which has no ending to be
+late for and no bytes between two quiet minutes: `follow: true` is reachable only
+from `--follow` (`main.rs:4413`), one of the ten scaffolding flags this phase
+removes
+([D288](#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)).
+**Counted rather than assumed: `k8s::log_stream` has exactly one call site in
+product code**, `logs_run` (`main.rs:4720`), and the console opens no log stream
+at all — the first draft of this ruling said its logs tab fetches, which is a
+claim about a read the console does not make. So the regression is
+real, named, bounded to a flag with a removal box in the same phase, and **the
+box reports what `--follow` does on a container quiet past `R` rather than
+discovering it later**.
+
+**What this ruling left open.** The number — that was the measurement's, and it
+is ruled below rather than here. And whether a wedged watch's row says something
+a reader can act on: the sentence comes from the existing `Trouble::failure`
+path, and if what it draws is wrong for this cause that is a finding on this box,
+not a second door.
+
+**The number, ruled 2026-09-27 after the measurement this entry owed:
+`read_timeout` is 292 s**
+([reports/2026-09-27-watch-close-timing.md](reports/2026-09-27-watch-close-timing.md)).
+30 watch lifetimes over TLS straight at a v1.36.1 API server, three rounds of ten
+concurrent watches — idle, churning, and churning under 8 busy loops on 4 cores —
+put the close at **290.001 s to 290.017 s**, so the server's own lateness over its
+`timeoutSeconds=290` is at most **17 ms** and does not move with load. The stream
+ends as a clean HTTP/1.1 last chunk on a connection the server then **keeps
+open** (a 5 s probe read after the last chunk timed out on all 30, no FIN, no
+reset), which is what kube reads as a stream end and re-watches from. The run
+also settles the transport this reasoning assumed: `kube-client-4.2.0` compiles
+`hyper-util` with no `http2` feature and sets `alpn_protocols` nowhere, so no
+ALPN is offered, the server stays on HTTP/1.1, and **each watch is its own
+connection with its own read deadline** — a per-connection deadline is a
+per-watch deadline, which is what makes one wedged watch distinguishable at all.
+
+**Why 292, and the argument the PM lost.** The two edges are not equally
+knowable. The floor is `290 + the server's lateness + the network's delivery of
+the last chunk`, and the measurement is **loopback** — every sample added ~0 round
+trip, and a kubeconfig pointing at a managed control plane over a WAN adds its
+RTT to every row, which this run explicitly did not measure. The ceiling is
+`290 + 5`, both integers read off kube's source and neither subject to a network.
+**The PM first ruled 293 on that asymmetry alone — give the unmeasured side the
+larger share — and `k8s-admin` recommended 292 with the better reason**: kube's
+`tokio::time::timeout` starts when `next()` is *polled*, which is never earlier
+than the last read, so a read deadline **structurally** wins the race for any `R`
+below 295 and clearance under the ceiling buys almost nothing. That argument
+taken at face value would push `R` to 294; what stops it is the one thing
+neither pass had written down. **The two timers are started by different
+events**: kube's by the last *item* the stream yielded, `read_timeout`'s by the
+last *byte* the socket read, and a partial event straddling TCP segments puts the
+second after the first by some δ. Then the read deadline fires at
+`t_item + δ + R` against kube's `t_item + 295`, so `R` must clear `295 − δ` and
+not 295 — which is why the room under the ceiling is not free after all, and why
+**292 is better supported than 293 rather than tied with it**: it tolerates a δ of
+3 s where 293 tolerates 2 and 294 tolerates 1. Margins as ruled: **1.98 s above
+the worst measured close, 3.0 s below kube's idle timeout, δ up to 3 s.** The
+ceiling side is *additionally* covered, so that a kube upgrade which moves it
+turns the gate red rather than making this field **inert** — the one failure mode
+that would read as a fix. **This sentence first said the two terms were pinned by
+a test, and `tester` falsified it**: `WATCH_IDLE_TIMEOUT_MARGIN` is private to
+`kube-runtime` and nothing public reads it, and the 290 a test *can* reach is
+`kube-core`'s **wire default** (`params.rs:381`), a different `unwrap_or(290)` in
+a different crate that merely looks identical to the idle base at
+`watcher.rs:494`. What covers it is `scripts/read-deadline-guard.py`, which
+derives the window from kube's own sources the way `write-guard.py` derives its
+ban list, and prints it: `window close=290s idle=290s margin=5s ours=292s`.
+
+**What the measurement took away from the brief's own reasoning.** Bookmarks
+arrived on all five kinds on all 30 watches, 5 or 6 each at ~60 s, with a final
+one 1.0–2.7 s before the close — so the largest quiet gap on a *real* healthy
+watch is **60.91 s**, not the ~290 s this entry reasoned from. That does **not**
+move the number: kube's own params doc says clients may not assume any bookmark
+interval (`kube-core-4.2.0/src/params.rs:329`), and a server with bookmarks
+suppressed puts the gap back at the full window. Recorded because the
+290-second figure above is a *guarantee* and the 60-second one is a *habit*, and
+only the first may size a timeout.
+
+**The review rounds, and the box's own premise narrowed.** Three things the two
+reviews established that the box's title claims and the code does not deliver, so
+the record says what the field does rather than what the box hoped.
+
+**1. `live` does not stop at 292 s — the pane names *a* kind, and the header
+follows only the last one.** `linked()` leaves `Live` unless `dropped &&
+!answering`, and `answering` is true while **any** watched kind has no row
+([D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+ruling 1's deliberate trade, so a namespaced Role's permanently refused node
+watch cannot read as `disconnected`). So **one** wedged flow — a NAT entry
+expiring, one load-balancer flow dropped, the commonest wedge there is — draws
+its kind on the Alerts pane at ~292 s and leaves the header `live` for as long as
+it lasts. That is not a defect and is not to be "fixed" by loosening the
+predicate; it is the shape the box's title mis-states. And when **all five** are
+wedged the header does not flip at 292 s either: each timer is anchored on that
+watch's own last byte, not on the wedge, and the bytes do not stop together.
+**Measured through the product's own client, the lag was 7.825 s**
+([reports/2026-09-27-the-wedged-watch-journey.md](reports/2026-09-27-the-wedged-watch-journey.md)):
+row at pty T+582.2, header at T+590.0, four of the five connections timing out
+within 6 ms of each other and the fifth 7.8 s later because a real event had reset
+its timer. The upper bound is a bookmark interval — ~60 s, since a bookmark resets
+the deadline like any other byte — and **this entry first quoted 59.6–60.9 s as a
+per-kind offset, which misread the companion report**: that range is the gap
+between consecutive bookmarks on **one** watch, and the kinds are very nearly in
+step. The mechanism was right, the number was not.
+
+**And what the pane draws while all five are wedged is one banner, not five.** It
+renders `said.first()`, so it names pods and says nothing of the other four: a
+reader cannot tell one dropped flow from a total partition by the pane at all,
+only by the header 7.8 s later. `k8s-admin` found this checking whether this
+entry's own *"the pane names the kind"* was true; it is accidentally true and it
+was not what the sentence meant.
+
+**2. The row this box adds outlives the wedge on a quiet cluster.** A failure
+clears only on `Apply`/`Delete`/`InitDone`-with-`filling`, and kube's `watcher()`
+swallows bookmarks (`WatchEvent::Bookmark` returns no `Event`), so the one
+recovery signal actually on the wire every ~60 s cannot reach `Store`. A VPN blip
+of six minutes therefore leaves five rows standing after all five watches have
+re-established, until each kind next sees real traffic — on the measured idle
+round that is 2 node events in 290 s and nothing at all on pods. This is
+[D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)'s
+named cost charged to a cause that produced no row at all before today, and it is
+recorded here and in [`backlog.md`](backlog.md) rather than fixed: there is no
+cheap door inside kube's `watcher()` API, and the alternative — clearing a row on
+a signal `Store` cannot see — is worse than a stale row that says k8rs is still
+asking.
+
+**What the live journey added, and it is the reader-visible half this entry first
+left out.** Un-wedged on an idle cluster, the header came back to `live` in 17.5 s
+and **the banner was never removed** — it stood for 412 s after the header said
+`live`, every intervening frame a 25-byte no-op, so the screen carried
+`ctx: kind-review · live` and `▲ k8rs is not getting pods from this cluster … It
+keeps asking` **at the same time**
+([reports/2026-09-27-the-wedged-watch-journey.md](reports/2026-09-27-the-wedged-watch-journey.md)).
+That is one screen a reader has to reconcile at 3am, and it is the
+self-contradiction
+[D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+opened with, running the other way. **Not new to this box and not a blocker on
+it** — any transient watch failure on a quiet kind has always left a row standing
+under a `live` header — but this box adds a cause that reaches it, so the cost is
+written here rather than found later.
+
+**And what refreshes a row while a wedge lasts is not 292 s**, which is the
+natural wrong inference from the paragraph above. In the measured wedge every
+retry died inside kube's `connect_timeout` at exactly **30.0 s** — the relay
+starved the TLS handshake too — and the metrics poll in its own 10.0 s on a 30 s
+period. A wedge that kills only established flows, a NAT drop, would refresh on a
+different period again, and that shape was not run.
+
+**3. Two unbounded paths became bounded without being named, and one of them is
+worth a number.** `session()`'s three startup reads — `apiserver_version`, `skew`
+and discovery — carry no deadline of their own under `--live` (`--once` wraps them
+in `ONCE_DEADLINE`), so a black-holed endpoint used to hold the console open
+forever and now ends at 292 s each, serially: **about 15 minutes** worst case
+before `--live` draws its failure. Better than never and still bad, recorded
+rather than discovered. And `ops::perform`'s **real** call, deliberately
+unbounded, now ends at 292 s as `Outcome::Failed { fault: Unanswered }` — where
+the sentence already reads correctly, *"k8rs does not know whether the change was
+made"* rather than *nothing was changed*, with the audit line recording the
+attempt either way.
+
+**And the class the `--follow` regression belongs to, which outlives the flag.**
+This `Client` is now globally unable to sit quiet for more than 292 s, and 292 is
+sized for a watch. `--follow` is scaffolding with a removal box in this phase, so
+its wrong story on a container quiet past 292 s is accepted — **and the story is
+worse than it was reported**: run for real against a container that writes
+nothing, it exits `2` after 292 s with 0 bytes on stdout and, on stderr,
+`the log stopped arriving before it ended, so what is above is not all of it —
+ServiceError: error reading a body from connection`. Not *"— timed out"*, which is
+what a reading of the code predicted: the clause after the dash is kube's and
+hyper's own `Display`, a Rust error type on a line a person reads, which
+invariant 14 forbids, and *"what is above"* points at nothing at all. Pre-existing
+wording on a path this box gives a new way to reach, and the strongest single
+argument the removal box has — but `screens/detail.md`
+already draws a logs tab, and **the first box that gives it a live tail inherits a
+watch's deadline on a stream that legitimately has no traffic**. The door then is
+a second `Client`, or that one call on a config without the field; it is a design
+question and it is in [`backlog.md`](backlog.md) so it is not rediscovered at the
+keyboard.
+
+### D298 — the second guard joins the dev's per-turn list, and it costs 4.1 s rather than the 0.17 s the first one did (2026-09-27)
+
+[D293](#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)
+put `width-guard.py` on the dev's per-turn list and said in as many words that it
+was **the** guard on that list and no other would be, because it is the one that
+fails on the prose a dev writes every turn and `cargo fmt` will not rewrap a
+comment. One box later the same shape arrived through a different guard, so the
+rule is the class and not the file: **`scripts/security-guard.py` joins the list.**
+
+**What it cost to learn.** The wedged-watch box's mechanism test needed a client
+that connects to nothing, and it was written as `Config::new` over the literal
+`"http://127.0.0.1:1"`. `security-guard.py`'s *no second outbound path* clause
+refuses any `https?://<host>` literal whose host is not RFC 2606/6761 reserved,
+and `guards.sh` is `set -e` — so `just check` came back `EXIT=1` at step 5 with
+`cargo deny` and `cross` never reached, and a whole gate run (ten minutes on the
+host, plus a review round and a re-run) bought one substitution:
+`http://cluster.invalid`. The dev's list had fmt, clippy, the suite,
+`mutants-diff` and the width guard; it did not have the one guard that could see
+this, and the leak is D293's leak with a new subject.
+
+**The number, measured on the test host rather than assumed — and it is not
+width-guard's.** `security-guard.py` is **4.06–4.14 s** over five runs (4.00–4.05 s
+of it single-threaded user CPU, so it does not get worse on a busy machine and
+will not get better), against `width-guard.py`'s **0.13 s**. Thirty-one times the
+first guard's cost, and still trivial beside the `cargo clippy --locked
+--all-targets` already on the list. **Quoted as 4.1 s deliberately**: a rule that
+implied parity with the width guard would be held to it by the next reader, and
+this file's own history is of numbers that went stale by being recalled rather
+than counted.
+
+**What does not join.** `read-deadline-guard.py` (0.69 s, of which 0.24 s is
+`cargo metadata`) guards one call site, not a shape a dev writes every turn; it
+stays in `just check` and off the per-turn list. The test of membership is the
+one D293 set — *does it fail on something the author produces on an ordinary turn
+that no compiler sees* — and it is now met twice, by prose width and by an
+outbound host literal.
+
+### D299 — the scope list went stale a fifth time because the command that counts it cannot see a digit (2026-09-27)
+
+CLAUDE.md § Git rules lists the conventional-commit scopes, warns that the list
+has gone stale four times *in the file that warns about it*, and prescribes the
+command that re-derives it rather than recalling it:
+
+```
+git log --format='%s' | grep -oE '^[a-z]+\(([a-z-]+)\)' | sed 's/.*(//;s/)//' | sort | uniq -c | sort -rn
+```
+
+**The character class is `[a-z-]`, so a scope with a digit in it matches
+nothing** — and `k8s` is a scope with a digit in it. Run with `[a-z0-9-]`, the
+same log gives **30** `k8s` commits, the fifth-most-used scope in the repo, from
+`feat(k8s)` through `fix(k8s)`, `perf(k8s)` and `test(k8s)`. The documented list
+omitted it, which is exactly what the warning above it predicts — but the cause is
+not a writer forgetting to add a word. **The counter could not see it**, so every
+re-derivation confirmed the list was complete.
+
+Both halves fixed here: the command gains the digit, and `k8s` joins the list.
+**The finding is the shape, not the word** — a derived list that cannot see part
+of its own subject reports a clean count, which is this repo's *a derived list
+asserts it found something* read from the other end
+([D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+ruling 5). Found while picking the scope for the wedged-watch commit, by running
+the command and not believing its answer.

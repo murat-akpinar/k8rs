@@ -976,6 +976,8 @@ pub enum Fault {
     /// looks exactly like a server that accepted the request and went quiet. This doc claimed *the
     /// connection is fine and the server went quiet* until 2026-09-03 — an overclaim past the
     /// shipped sentence beside it, which correctly hedges *or the network in between*.
+    /// [`READ_TIMEOUT`] does not narrow that: it ends the stall, and both causes end it the same
+    /// way, which is why the hedge stands.
     ///
     /// **And it carries no verdict about speed either** (NOTES § D150). A LIST holding 1 500
     /// objects with a stamp from this millisecond is *slow*, not dead, and this variant cannot
@@ -1543,10 +1545,12 @@ impl<T: Watched> Watch<T> {
         // achieved. It is worse than a wrong word: `complete` is never reset, so
         // [`Watch::progress`] returns `None` for a relisting watch and [`Store::still_listing`]
         // says nothing either. Clearing here would take **both** facts quiet at once — and the
-        // call this relist is sitting in is `api.list()`, which is the **unbounded** half of
-        // § WHAT A THROTTLE LOOKS LIKE: the watch poll unblocks at ~295 s, a LIST against a
-        // keepalive-less socket never does. So the store would read perfectly healthy, for as
-        // long as the process ran, while it served a cluster from before the failure.
+        // call this relist is sitting in is `api.list()`, which kube bounds nowhere
+        // (§ WHAT A THROTTLE LOOKS LIKE): the watch poll unblocks at ~295 s, and a LIST against a
+        // keepalive-less socket unblocks only at [`READ_TIMEOUT`] — a bound this file sets, not
+        // one kube gives it. So the store would read perfectly healthy while it served a cluster
+        // from before the failure, and 292 s of that is still long enough for the argument to
+        // hold: what ends it is an error the relist reports, never this arm clearing.
         //
         // **This is the same fact D150 reads for a different question, not a contradiction of
         // it.** There, `Init` and `InitApply` both count, because the question is *is this LIST
@@ -1731,6 +1735,8 @@ impl<T: Watched> Watch<T> {
 /// events — and a screen that draws on events (invariant 7) never redraws to show the count
 /// standing still. [`since`](Listing::since) is what a redraw on a timer can read a duration
 /// off; without it the frozen number and a screen that simply is not repainting look identical.
+/// **[`READ_TIMEOUT`] bounds that stall at 292 s and does not remove this need**: for those 292 s
+/// there is still no event, and a list that is merely slow never trips it at all.
 ///
 /// **Nothing here cancels anything.** The clause this type answers says *becomes a state*, not
 /// *gives up*, and nothing in this design may quit because a cluster is slow.
@@ -2271,6 +2277,9 @@ impl Store {
     /// that died with no keepalive (NOTES § D148) are one answer here; the wait happens below
     /// `watcher()` in a tower layer with no callback. What separates them is the *shape over
     /// time* of the two numbers, which is the caller's to watch and this call's to report.
+    /// **The third of those three now ends by itself** at [`READ_TIMEOUT`], as a row on
+    /// [`Store::troubles`] rather than as anything this call can say — the other two do not, and
+    /// while all three are running they are still one answer here.
     ///
     /// **Pods is the kind whose size is reasoned about** — [`INITIAL_LIST_PAGE`] is derived from
     /// it — so *still reading: pods, 4 500 so far* names the long list rather than leaving a hang
@@ -2493,12 +2502,13 @@ impl Store {
 /// seconds (§ WHAT A REPORT ASKS FOR).
 ///
 /// **It exists because the failure it bounds is a hang, not a slow answer.** `Config::read_timeout`
-/// is `None` in every kube constructor — `config/mod.rs:191`, `:273`, `:339` — so nothing under
-/// this call bounds it, and a middlebox that accepts the connection, reads the request and answers
-/// nothing holds it forever. That is [`SERVING_PROBE`]'s reasoning, which this box wrote one
-/// function away and did not apply here: the fetch runs on the startup path *after* the greeting
-/// has gone to stderr, so an unbounded one prints `k8rs: watching — …` and then nothing at all,
-/// looking connected (`tester`, 2026-08-28).
+/// is `None` in every kube constructor — `config/mod.rs:191`, `:273`, `:339` — so nothing *kube*
+/// sets bounds this call, and a middlebox that accepts the connection, reads the request and
+/// answers nothing holds it for [`READ_TIMEOUT`]'s 292 s: this ten is the number the reader waits,
+/// twenty-nine times tighter, and the one that makes the wait a state. That is [`SERVING_PROBE`]'s
+/// reasoning, which this box wrote one function away and did not apply here: the fetch runs on the
+/// startup path *after* the greeting has gone to stderr, so an unbounded one prints
+/// `k8rs: watching — …` and then nothing at all, looking connected (`tester`, 2026-08-28).
 ///
 /// **The same ten seconds, and deliberately shorter than kube's own 30-second `connect_timeout`**
 /// (`config/mod.rs:418`) — which bounds *connecting* and not answering, so it is not a fallback
@@ -3075,11 +3085,12 @@ impl From<NodeMetricsList> for Metrics {
 /// same reasoning [`whole_list`] carries, and it costs less here because the list is one entry per
 /// node.
 ///
-/// **Bounded by the caller's `deadline`, because nothing under it is** — `Config::read_timeout` is
-/// `None` in every kube constructor. Unbounded, a middlebox that accepts the connection and
-/// answers nothing would hold this poll's stream forever and the *next* poll would never be sent,
-/// so the pane would keep drawing a reading that stopped being true (the failure [`REPORT_FETCH`]
-/// was added for, one stream along).
+/// **Bounded by the caller's `deadline`, because nothing kube sets under it is** —
+/// `Config::read_timeout` is `None` in every kube constructor, and [`READ_TIMEOUT`]'s 292 s is
+/// k8rs's own and is sized for a watch. On that alone a middlebox that accepts the connection and
+/// answers nothing would hold this poll's stream for most of five minutes and the *next* poll
+/// would never be sent, so the pane would keep drawing a reading that stopped being true (the
+/// failure [`REPORT_FETCH`] was added for, one stream along).
 ///
 /// **And the deadline is what ends three status codes as well as the hang**, which was measured
 /// here rather than inherited: kube retries **`429`, `503` and `504`** inside a tower layer with
@@ -3417,7 +3428,9 @@ impl Store {
 /// **No deadline of its own**, for [`pod`]'s reason — the caller owns it. Here the caller is the
 /// watch pump, which has no ending to be late for, and a `get` a throttling server is silent on
 /// for the two and a half to eight minutes NOTES § D148 measured delays **a heading** and nothing
-/// else: the snapshot is published with the ReplicaSet as the owner and never held back (the
+/// else — and [`READ_TIMEOUT`] does not shorten that, because those minutes are kube's retry layer
+/// sleeping *above* the transport between short answered reads, each of which resets this
+/// deadline: the snapshot is published with the ReplicaSet as the owner and never held back (the
 /// region doc). What it also does is hold the one queue in [`owner_fetches`] behind it, which is
 /// the ceiling named rather than closed — a second in-flight fetch buys a faster heading on a
 /// cluster that is already too slow to answer one.
@@ -3576,7 +3589,10 @@ const INITIAL_LIST_PAGE: u32 = 500;
 // oldest-supported-API-server box, not this one. No selectors: invariant 6 watches every pod,
 // node and workload. And **`Config::timeout` is left unset deliberately**: it is one field for
 // both calls (`:400`, `:414`), so a timeout short enough to bound the initial LIST would also
-// cap the watch and re-LIST the whole cluster on that period.
+// cap the watch and re-LIST the whole cluster on that period. **Still true, and [`READ_TIMEOUT`]
+// is not this field** — lowering `T` here would not widen the window that number has to land in,
+// because the window is `(T, T+5)` for any `T` kube is given (NOTES § D297), and the bound the
+// LIST gained comes from the socket rather than from a query parameter kube never serialises.
 
 // --- THE INITIAL LIST END ---
 
@@ -3653,42 +3669,102 @@ const INITIAL_LIST_PAGE: u32 = 500;
 //
 // **A dead connection, and the two halves of it are not the same story.** `Config` sets
 // `connect_timeout` 30 s and `write_timeout` 295 s (`config/mod.rs:418-419`) and leaves
-// **`read_timeout` unset** (`:191`, `:273`, `:339`); the connector is a bare
-// `HttpConnector::new()` (`client/builder.rs:117`) whose `TcpKeepaliveConfig::default()` is
-// all-`None`, so `into_tcpkeepalive()` yields `None` and `set_tcp_keepalive` is never called
+// **`read_timeout` unset** (`:191`, `:273`, `:339`) — kube's default, and no longer k8rs's:
+// [`READ_TIMEOUT`] below sets it, and the two paragraphs after this one are what that changes.
+// The connector is a bare `HttpConnector::new()` (`client/builder.rs:117`) whose
+// `TcpKeepaliveConfig::default()` is all-`None`, so `into_tcpkeepalive()` yields `None` and
+// `set_tcp_keepalive` is never called
 // (`hyper-util-0.1.20/src/client/legacy/connect/http.rs:94-98`, `:104-110`, `:842-843`).
-// **SO_KEEPALIVE is off on the watch sockets**, so a connection that dies without a FIN or an
-// RST — a laptop suspending, a NAT entry expiring, a load balancer dropping an idle flow —
-// raises no error at the socket at all. What happens next depends on which call is waiting.
+// **SO_KEEPALIVE is off on the watch sockets and stays off** (NOTES § D297), so a connection that
+// dies without a FIN or an RST — a laptop suspending, a NAT entry expiring, a load balancer
+// dropping an idle flow — still raises no error *at the socket*. What raises one is the read
+// deadline above it, and what that deadline reaches depends on which call is waiting.
 //
-// **The watch is bounded, and kube does it above the socket.** `next_with_idle_timeout` wraps
-// the stream poll in a `tokio::time::timeout` of `Config::timeout.unwrap_or(290)` plus a 5 s
-// margin (`watcher.rs:483`, `:494`) and is used by both watching states (`:589`, `:659`). So a
-// severed watch unblocks after **~295 s** and reconnects with nobody at the keyboard — kube
-// found a period it could safely use, and it is the watch's own `timeoutSeconds=290` rather
-// than a client-wide read deadline. **The timeout arm returns `None`, not `Err`** (`:714`,
+// **The watch is bounded twice over, and the two bounds do different things.** kube's sits above
+// the socket: `next_with_idle_timeout` wraps the stream poll in a `tokio::time::timeout` of
+// `Config::timeout.unwrap_or(290)` plus a 5 s margin (`watcher.rs:483`, `:494`), used by both
+// watching states (`:589`, `:659`), and **its timeout arm returns `None`, not `Err`** (`:714`,
 // which goes to `State::InitListed` and re-watches from the stored resourceVersion without
-// re-listing), so for up to five minutes the store serves a frozen cluster and
-// [`Store::troubles`] is **correctly empty**. Stale, silent, self-healing, bounded — and the
-// silence is the honest answer, because nothing failed.
+// re-listing). On that bound alone a watch severed *or wedged* unblocks at ~295 s and reconnects
+// with nobody at the keyboard, [`Store::troubles`] stays empty, and the store serves a frozen
+// cluster: stale, silent, self-healing, bounded — and **honest only for the half where nothing
+// failed**. A socket held open delivering nothing has failed, and it read identically.
+// [`READ_TIMEOUT`] is the second bound and it fires first, so that half is an `Err` now —
+// `watcher::Error::WatchFailed` (`:709`), one [`Trouble::failure`] row, per watch.
 //
-// **The initial LIST is genuinely unbounded, and that is where `PRIOR-ART § A7` stands.**
+// **The initial LIST is where `PRIOR-ART § A7` stands, and kube bounds it nowhere.**
 // `next_with_idle_timeout` does not wrap `State::InitPage`'s `api.list()`, and no deadline
 // reaches the wire either: `to_list_params` copies `timeout` into the `ListParams`
 // (`watcher.rs:400`) and `ListParams::populate_qp` never serialises it
 // (`kube-core-4.2.0/src/params.rs:94-122`) — `timeoutSeconds` is appended in exactly one place
 // in that crate, `:381`, which is the **watch** builder. `ListParams::timeout`'s own doc says
-// *"Defaults to 290s"* (`:137-139`) and the query builder one screen away disagrees with it.
-// So a LIST against a dead socket blocks forever: [`drive`] waits, [`Store::troubles`] stays
-// empty, and [`Store::still_listing`] is the only thing with anything to say. **Not fixable
-// from here** — `read_timeout` is client-wide and a healthy watch is idle for long stretches,
-// and kube's params doc says clients "should not assume bookmarks are returned at any specific
-// interval" (`:329`). That is the *deadline on the first watch sync* box, next in this phase.
+// *"Defaults to 290s"* (`:137-139`) and the query builder one screen away disagrees with it. So
+// a LIST against a dead socket used to block forever, with [`drive`] waiting,
+// [`Store::troubles`] empty and [`Store::still_listing`] the only thing with anything to say.
+// **[`READ_TIMEOUT`] bounds it, and *not fixable from here* — which this paragraph said until
+// 2026-09-27 — rested on a wrong reading of how long a healthy watch is quiet.** The bound on
+// that quiet is the server's own close at `timeoutSeconds=290`, which is a guarantee; the
+// bookmark cadence kube's params doc says no client may assume (`:329`) is a habit, and only the
+// first may size a timeout (NOTES § D297). What the LIST gains is a deadline **per read** rather
+// than on the call: a list slowly streaming bytes is slow and not hung, and only one delivering
+// nothing at all trips it. [`Store::still_listing`] is still what a reader sees while it works.
 //
 // **What source-reading cannot settle**, stated because the box asked for a number: whether any
 // real API server ever throttles a five-watch client at all, what its Priority-and-Fairness
 // `Retry-After` actually says, and whether its 429 body carries `retry_after_seconds` as well as
 // the header. Those are one cluster measurement, and none of the three has been made.
+
+/// **How long one read may deliver nothing before it is an error** — 292 s, client-wide, applied
+/// by [`bounded_reads`] to the one `Config` this binary builds a `Client` from
+/// (NOTES § D297, `reports/2026-09-27-watch-close-timing.md`).
+///
+/// **The state it exists for is a watch whose socket stays open and delivers nothing**, which the
+/// paragraphs above describe as invisible: kube's own bound returns `None` rather than `Err`, so a
+/// wedged watch has never produced a [`Trouble`] row and every predicate over [`Store::troubles`]
+/// was right to answer *live*. This is the field that turns that silence into
+/// `watcher::Error::WatchFailed`, and it is the only door — [`Store`] grows no field and k8rs
+/// gains no clock.
+///
+/// **What it becomes, read off the crates rather than recalled**:
+/// `hyper_timeout::TimeoutConnector::set_read_timeout` (`kube-client-4.2.0/src/client/builder.rs`
+/// `:230`) hands it to a `TimeoutStream` per connection, where it is a deadline on **each read**,
+/// restarted by every byte that arrives — never a deadline on a request. The per-read decision is
+/// `TimeoutReader::poll_read` (`hyper-timeout-0.5.2/src/stream.rs:189-201`): a `Pending` read polls
+/// the timer, and anything else resets it. `:58-97` is the timer's own state machine and its
+/// `restart()` is not on this path. `kube-client` compiles `hyper-util` with no `http2` feature and
+/// offers no ALPN, so each watch is its own HTTP/1.1 connection and a per-connection deadline is a
+/// per-watch one.
+///
+/// **The window is `290 < R < 295` and both edges are kube's**, which is why this number is not
+/// free to move: at or below the server's close, a healthy watch that is merely quiet draws a
+/// fault that did not happen; at or above kube's idle timeout the idle arm wins every race and
+/// this field is inert, which is worse than absent because it reads as a fix. 292 leaves **1.98 s**
+/// over the worst of 30 measured closes and **3.0 s** under the ceiling, and that lower clearance
+/// is the one that buys something: the two timers start on different events — kube's on the last
+/// *item* the stream yielded, this one on the last *byte* the socket read — so a partial event
+/// straddling segments puts this one later by some δ, and `R` has to clear `295 − δ`.
+///
+/// **What holds the ceiling is `scripts/read-deadline-guard.py`, which derives the window from
+/// kube's own sources and prints it** — `window close=290s idle=290s margin=5s ours=292s`. Neither
+/// of `watcher.rs:494`'s two terms is reachable from a test, so `k8s_tests.rs` pins the wire
+/// default and `validate`'s 295 refusal and no more than that;
+/// `kubes_watch_window_is_still_the_one_read_timeout_was_chosen_inside` carries which release would
+/// pass it while making this field inert.
+pub(crate) const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(292);
+
+/// **[`READ_TIMEOUT`] put onto the one `Config` this binary builds a `Client` from**, which is
+/// [`connect_with`]'s single `Client::try_from` (§ CONNECTING).
+///
+/// **A function and not a line inside that call, because a line there is one no test can reach**:
+/// `Client` never hands its `Config` back, and the whole content of this change is that the field
+/// is *not* kube's `None`. **This is the case § THE INITIAL LIST rejects a `watch_config()` for and
+/// it is not the same case** — there the two configs compared equal and no assertion could tell the
+/// function from the silent inheritance it existed to prevent (NOTES § D147); here they differ by
+/// the only field in question, so one can.
+fn bounded_reads(mut config: Config) -> Config {
+    config.read_timeout = Some(READ_TIMEOUT);
+    config
+}
 
 // --- WHAT A THROTTLE LOOKS LIKE END ---
 
@@ -6827,11 +6903,12 @@ impl Coverage {
 /// phase that has a namespace picker to trigger one from.
 ///
 /// **Bounded by [`REPORT_FETCH`]'s ten seconds, reusing that constant rather than inventing a
-/// second number.** The hang it bounds is the same one: nothing under a kube call has a read
-/// deadline (`Config::read_timeout` is `None` in every constructor), and this call sits between
-/// building the client and starting the first watch — so an unbounded one is a tool that has
-/// connected and will never draw. Timing out is [`Fault::Unanswered`] by the paragraph above, so
-/// it stays cluster-wide.
+/// second number.** The hang it bounds is the same one: no kube constructor gives a call a read
+/// deadline (`Config::read_timeout` is `None` in all three), and [`READ_TIMEOUT`]'s 292 s is
+/// k8rs's own and is sized for a watch, not for this — and this call sits between building the
+/// client and starting the first watch, so on that bound alone it is a tool that has connected and
+/// will not draw for most of five minutes. Timing out is [`Fault::Unanswered`] by the paragraph
+/// above, so it stays cluster-wide.
 ///
 /// **A namespace that is not a namespace name is refused from either source**
 /// ([`namespace_name`], which replaced [`path_safe`] here on 2026-08-29). The asked-for one is
@@ -7338,7 +7415,7 @@ pub(crate) async fn connect_with(
     // leaves `serving_expiry` unused and `-D warnings` files the build as `unviable` — the class
     // NOTES § D133 is about, an honest-looking count over a question nobody asked. The test is the
     // gate here, not the run.
-    match Client::try_from(config) {
+    match Client::try_from(bounded_reads(config)) {
         Ok(client) => {
             // **Before the watches are built, because a watch cannot change what it watches**
             // ([`coverage`] carries the whole argument). On a run that named a namespace this
@@ -8591,7 +8668,8 @@ where
 ///
 /// **Deliberately shorter than kube's own 30-second `connect_timeout`** (`config/mod.rs:418`),
 /// which is what the four calls a session actually needs get — and *only* over the connecting:
-/// `read_timeout` is `None` in every kube constructor, so nothing bounds their answers at all
+/// `read_timeout` is `None` in every kube constructor, so the only thing bounding their answers is
+/// [`READ_TIMEOUT`]'s 292 s, which is k8rs's own and is sized for a watch
 /// ([`REPORT_FETCH`], which is the same hole one region down). This one owes the reader nothing: a
 /// link too slow for ten seconds produces exactly the same silence as a handshake that failed, and
 /// no screen is different for it.

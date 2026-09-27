@@ -3884,3 +3884,48 @@ Phase 12 close triage fixes them; the rest are notes.
   `tui-designer` grepped and found both wrong — which is why the entry now names a line
   rather than a file from memory. `dev-ui`, box 3; attribution corrected by
   `tui-designer`.
+- **A live log tail inherits a watch's deadline, and 292 s is not a log's number.**
+  `k8s::READ_TIMEOUT` is client-wide on the one `Client` this binary builds, so from
+  2026-09-27 nothing k8rs reads may sit quiet for more than 292 s —
+  [D297](NOTES.md#d297--the-frozen-file-opens-for-a-wedged-watch-and-the-timeout-has-five-seconds-of-room-to-land-in-2026-09-27).
+  Today the only surface that legitimately can is `--follow`, scaffolding with a
+  removal box in Phase 13, so the wrong story it prints on a container quiet past
+  292 s is **accepted** — measured on the real binary against a container that
+  writes nothing: exit `2` after 292 s, 0 bytes on stdout, and on stderr
+  `the log stopped arriving before it ended, so what is above is not all of it —
+  ServiceError: error reading a body from connection`, where the clause after the
+  dash is kube's own `Display` on a line a person reads (invariant 14) and *"what
+  is above"* points at nothing. What outlives the flag is the class: `screens/detail.md` already
+  draws a logs tab, and the first box that gives it a live tail gets a watch's
+  deadline on a stream with no traffic. The door then is a second `Client`, or that
+  one call built off a config without the field — a design question, not a wording
+  one, and not to be met at the keyboard. `k8s-admin` item 5's condition.
+- **A wedged watch's row outlives the wedge on a quiet cluster.** A failure clears
+  only on `Apply`/`Delete`/`InitDone`-with-`filling`, and kube's `watcher()` yields
+  no `Event` for a bookmark — so the recovery signal that *is* on the wire every
+  ~60 s (measured on all 30 watches of
+  [reports/2026-09-27-watch-close-timing.md](reports/2026-09-27-watch-close-timing.md))
+  cannot reach `Store`. Measured on the real
+  binary: un-wedged on an idle cluster the header returned to `live` in 17.5 s and
+  the banner was **never** removed — it stood 412 s longer, so the screen carried
+  `live` and *"k8rs is not getting pods from this cluster … It keeps asking"* at
+  once
+  ([reports/2026-09-27-the-wedged-watch-journey.md](reports/2026-09-27-the-wedged-watch-journey.md)).
+  A reader has to reconcile those two, and the pane draws only `said.first()`, so
+  one banner stands for however many kinds are stale.
+  [D145](NOTES.md#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)'s
+  named cost, newly charged to a cause that produced no row at all before
+  [D297](NOTES.md#d297--the-frozen-file-opens-for-a-wedged-watch-and-the-timeout-has-five-seconds-of-room-to-land-in-2026-09-27).
+  No cheap door exists inside kube's `watcher()` API and clearing on a signal
+  `Store` cannot see is worse, so this is a ruling to make, not a bug to fix
+  quietly. `k8s-admin` finding 4.
+- **`views::next_step(Unanswered)` sends a throttled server's reader to check the
+  address.** `k8s::answer()` falls through to `Unanswered` for 429, 503 and 504, and
+  the step drawn for it is *"Check the server address this kubeconfig names, and
+  that this machine can reach it"* — wrong for a server that answered and asked us
+  to slow down. Pre-existing, untouched by
+  [D297](NOTES.md#d297--the-frozen-file-opens-for-a-wedged-watch-and-the-timeout-has-five-seconds-of-room-to-land-in-2026-09-27),
+  and in a file frozen at Phase 12's close, so it needs a ruling before it needs an
+  edit. Found by `k8s-admin` while confirming that a *wedge* does not reach that
+  string (it does not — `next_step`'s two callers are the switch-cluster box and
+  `--once`'s `pods_unread`, which `ONCE_DEADLINE` ends at 30 s).
