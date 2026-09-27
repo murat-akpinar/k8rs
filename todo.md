@@ -4934,7 +4934,7 @@ behaves as specified.
       ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
       ruling 10) — and on a webhook-authorizer cluster no key is ever marked at
       all, both recorded in [`backlog.md`](backlog.md)
-- [ ] **A dialog cannot draw the server's whole sentence, and nothing tells the
+- [x] **A dialog cannot draw the server's whole sentence, and nothing tells the
       reader where the rest of it is.**
       [REQUIREMENTS.md](REQUIREMENTS.md) promises the server's message
       verbatim; measured against a real `ValidatingAdmissionPolicy` rejection,
@@ -4946,7 +4946,32 @@ behaves as specified.
       So this is not *draw more*: it is either a pointer to the audit log on the
       box, or the requirement's *verbatim* is narrowed to name where verbatim
       lives. **A screen ruling before code** — `screens/dialogs.md` owns the
-      box's last row
+      box's last row.
+      **Done 2026-09-27, and it took both halves plus a correction to the ruling
+      itself**
+      ([D294](NOTES.md#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27)).
+      The requirement is narrowed, and the row says
+      `More of this message is in the audit log.` — or, when the result line's
+      write failed, `k8rs could not write this to the audit log either.`, chosen
+      by `ops::Performed::recorded`, which `views::Modal::Refused` now carries.
+      **The ruling's first draft was wrong and both reviews falsified it
+      independently**: `k8s::message` runs the string through `k8s::text` at
+      `FREE_TEXT` before either surface sees it, so past 4096 bytes the audit line
+      ends in k8rs's own marker too and *the full message* was false there; and
+      `recorded == false` means it is nowhere at all. **And the row came out of
+      the wrong budget** — state 1c was tight only because k8rs's *own*
+      explanation ran to two rows, so that sentence is now
+      `k8rs's check before the real change stopped this.` (49 of 52 columns) and
+      the measured 212-character rejection draws **whole, uncut, with no pointer**
+      in all three quote-bearing states. `left` is 5 everywhere; the pointer is
+      reserved for messages that genuinely overflow. `screens/widgets.md` § 7's
+      closed list of cuts gained the twelfth entry it was missing
+      ([D266](NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
+      **What this box did not take**: a lost result line is announced only where
+      the message overflowed, and a *successful* write that was never recorded is
+      silent in the console — a vocabulary ruling, recorded in
+      [`backlog.md`](backlog.md), as is `unconnected`'s own copy of the same dead
+      end, which cannot use either sentence because nothing holds its message
 - [ ] **At startup against an unreachable API the header and the body disagree,
       and the screen and the requirement disagree behind them.** Measured
       against a dead port: header `⚠ disconnected, retrying`, body *reading the

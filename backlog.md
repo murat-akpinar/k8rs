@@ -3767,4 +3767,54 @@ Phase 12 close triage fixes them; the rest are notes.
   ruling 4 already books v0.2's `drain` gaining a resource beside each verb, and a second
   `RESTART_VERBS` entry puts this row over. Whoever adds either owes the row a new shape,
   not another column. `k8s-admin`, round 2 Q3.
+- **`unconnected` cuts the cluster's words and leaves the same dead end box 2 just
+  closed, one screen over — and it must not get the same sentence.** `ui.rs`'s
+  `unconnected` (~3240) quotes what the cluster said through `cut`, so a long message
+  is truncated with a `…` and nothing says where the rest is, which is exactly the
+  defect [D294](NOTES.md#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27)
+  ruled on for the refusal dialog. **The refusal box's fix cannot be copied here**:
+  *"The full message is saved in the audit log"* would be **false** — `ops.rs`'s
+  `and_said` is the mutation-audit path and a failed context switch never reaches it,
+  so that screen's whole message is kept nowhere. So this needs its own screen ruling
+  and a different sentence, or an honest decision that a switch failure's long message
+  is simply cut. Found by `dev-ui` while implementing box 2, correctly refused rather
+  than pattern-matched. **This entry read as though the refusal box were the safe case,
+  and it is not**: `tester` found the same sentence false there too whenever
+  `recorded == false` — the audit append failing after the attempt line — which is why
+  box 2's pointer draws on `over && recorded` and not on `over`, and why it says *more
+  of* rather than *the full* (D294's correction). What `unconnected` lacks is therefore
+  not *a record the refusal box has* — it is a record **anything** has.
+- **`⏎` on a refusal box discards the last on-screen copy of the message it has just
+  said there is more of.** The box's key row is `esc dismiss  ⏎ open`, and `⏎` closes the
+  modal and opens the *object* — the message is in neither the object nor the command-log
+  strip, which carries only the outcome word and `→ rejected`. A reader who has just read
+  *more of this is elsewhere* and sees a key labelled **open** two rows below will press
+  it. `esc` loses it too, which is part of why the pointer earns its row. Not box 2's
+  defect; it wants a screen ruling — either the pointer names `esc` first, or `⏎`'s word
+  stops reading like *open the message*. `k8s-admin`, round 1 finding 5.
+- **No surface names the audit log's path on a healthy run.** The pointer names the log
+  and not its path, which is right — the path is not a constant (`$XDG_STATE_HOME`, then
+  `$HOME`), and the one actually opened is never carried into `views`, so a literal on
+  screen could be wrong. But the only in-app surface that draws it is
+  `states.md` § *The audit log could not be opened* — the one run where there is nothing
+  to go and read — and `?` help never names it. So the sentence is findable today only
+  from `docs/security.md`. Cheap close: `?` names the path on a healthy run.
+  `k8s-admin`, round 1 finding 6.
+- **A lost audit result line is announced only when the message happened to be too long
+  — and a *successful* write that was never recorded is silent in the console
+  entirely.** Box 2 gated the refusal box's last row on `over && recorded`, which is
+  right, but the row lives inside `if over`: so `over && !recorded` says *"k8rs could not
+  write this to the audit log either"*, a **short** 403 whose result line was lost says
+  nothing, a quote-less box (409, 1a, 1b) says nothing, and **`Done` / `Started` with
+  `recorded == false` opens no box at all** — while `ops::Performed::plainly` says it
+  plainly on the headless surface. **Message length currently decides whether a
+  record-integrity failure is announced**, which is not a rule anybody chose.
+  [D21](NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)
+  ruled this for the *attempt* line; the result line has no equivalent surface. The
+  silence pre-dates box 2 and widening it needs a **vocabulary ruling** rather than code:
+  `outcome_word` already owns `"not recorded"` for `outcome: None`, and `views::Log`'s
+  four `SAID` names are a screen call
+  ([D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 2). **The worst instance to name in any box that takes this: a mutation that
+  succeeded and was not written down.** `k8s-admin`, [reports/2026-09-27](reports/2026-09-27-the-cut-message-pointer.md) § 8.
 

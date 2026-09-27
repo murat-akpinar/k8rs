@@ -10658,6 +10658,7 @@ fn settled(console: &mut Console<'_>, performed: Result<ops::Performed, String>)
     console
         .log
         .outcome(outcome_word(performed.outcome.as_ref()));
+    let recorded = performed.recorded;
     let Some(outcome) = performed.outcome else {
         // **Nothing was sent because nothing could be recorded** (NOTES § D21): the sentence is
         // already on the log line, and there is no cluster answer to open a box about.
@@ -10672,15 +10673,22 @@ fn settled(console: &mut Console<'_>, performed: Result<ops::Performed, String>)
             // recreates one of those on its own (`views::Modal::Gone::recreated`).
             recreated: false,
         }),
+        // **`recorded` travels with the words, and leaving it behind was a defect rather than a
+        // simplification** (NOTES § D294's correction): the result line is the only one of the two
+        // that quotes `said`, so when its write failed the message the box points at is nowhere.
+        // It was read here already — `outcome_word` above is the log strip's — and the box that
+        // draws the cluster's words is the one surface that had no way to say so.
         ops::Outcome::NotSent { fault, said } => Some(views::Modal::Refused {
             sent: false,
             fault,
             said,
+            recorded,
         }),
         ops::Outcome::Failed { fault, said } => Some(views::Modal::Refused {
             sent: true,
             fault,
             said,
+            recorded,
         }),
     };
 }

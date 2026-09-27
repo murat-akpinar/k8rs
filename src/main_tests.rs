@@ -16137,6 +16137,26 @@ fn a_refusal_opens_the_box_that_says_which_side_of_the_call_it_was() {
         Some(views::Modal::Refused {
             sent: true,
             said: Some(_),
+            recorded: true,
+            ..
+        })
+    ));
+    // **`recorded` reaches the box, and the `false` case is the one that matters**
+    // (NOTES § D294's correction). The result line is the only audit line that quotes the cluster,
+    // so a refusal whose result line was never written must arrive at the renderer knowing it —
+    // the row it draws under a cut quote is a different sentence. This function read
+    // `performed.outcome` and left `performed.recorded` on the floor until 2026-09-27, and nothing
+    // was red: the field the box did not have could not be asserted.
+    assert!(matches!(
+        opened(Ok(ops::Performed {
+            outcome: Some(ops::Outcome::Failed {
+                fault: k8s::Fault::Refused,
+                said: Some("forbidden".to_owned())
+            }),
+            recorded: false
+        })),
+        Some(views::Modal::Refused {
+            recorded: false,
             ..
         })
     ));
@@ -18105,6 +18125,7 @@ fn a_terminal_box_closes_on_esc_and_only_the_refusal_opens_on_enter() {
         sent: true,
         fault: k8s::Fault::Refused,
         said: Some("forbidden".to_owned()),
+        recorded: true,
     };
     let gone = || views::Modal::Gone {
         object: views::Object::new(

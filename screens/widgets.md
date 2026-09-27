@@ -1260,17 +1260,20 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   characters; `String::truncate` slices bytes and panics in the middle of a
   multi-byte name. Handing the full `Span` to the widget is both shorter and
   correct.
-- **Eleven cuts are deliberate, and this list is closed — a truncation found
-  anywhere else on a screen is a bug, not a twelfth entry**
+- **Twelve cuts are deliberate, and this list is closed — a truncation found
+  anywhere else on a screen is a bug, not a thirteenth entry**
   ([NOTES § D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)).
-  Five cut from the **back**; six cut from the **front**, and one of those six
-  is one rule reused at six call sites rather than six separate rules — **the
-  identity cut**, defined once below because it is the one most screens on
-  this page now share.
+  Six cut from the **back** — one of them numbered 12, after the front-cuts
+  below, so the other eleven keep the numbers already cited elsewhere on this
+  page — six cut from the **front**, and one of those six is one rule reused
+  at six call sites rather than six separate rules — **the identity cut**,
+  defined once below because it is the one most screens on this page now
+  share.
 
-  **Back-cuts.** The full text is one `⏎` away in three of the five, which is
+  **Back-cuts.** The full text is one `⏎` away in three of the six, which is
   what makes cutting them legitimate — the reader loses nothing, only a
-  keypress:
+  keypress. Entry 12, below, has no such keypress and says so in its own
+  terms:
 
   1. The Alerts card's evidence line, capped at three wrapped lines with `…`
      at the cut
@@ -1309,16 +1312,16 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
      it is taller than the pane — [analysis.md § A row taller than the
      pane](analysis.md#a-row-taller-than-the-pane-and-the-cut-that-keeps-the-cursors-row-on-screen).
 
-  All five are marked with a character the reader can see and step by whole
-  characters, never a byte. 1, 2 and 5 walk back to a whole word before they
-  cut, because each is made of more than one token and a word with its last
-  character sheared off would still look like a real one —
+  All six are marked with a character the reader can see and step by whole
+  characters, never a byte. 1, 2, 5 and 12 walk back to a whole word before
+  they cut, because each is made of more than one token and a word with its
+  last character sheared off would still look like a real one —
   `--show-managed-fiel` is not a flag a reader would notice was wrong
   ([detail.md's yaml tab](detail.md#the-yaml-tab) draws the case: the whole
   flag gives way, `…` lands right after `yaml`, and deleting just the `…`
   leaves a real command — the one `kubectl get -o yaml` already runs by
   default). 3 and 4 walk back the same way for a **flag**, and differ from
-  the other three in one respect only: the object's own `kind/name` token —
+  the other four in one respect only: the object's own `kind/name` token —
   the one thing on the line that says *which* object this command runs
   against — is never a whole-word drop candidate. Where even the flag's own
   **value** would otherwise be dropped whole though part of it would still
@@ -1439,6 +1442,26 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
       No word-boundary walk-back in any case, the same reasoning the
       browser's own row-name cut already gives: a name is one token (or two
       joined by one `/`), so there is no word to find.
+
+  12. **The refused box's own quoted message** — where the cluster's own
+      words run past the rows a state has left, the row that would otherwise
+      hold a fifth (or later) quoted line instead names where the rest of it
+      is, in the box's own colour and voice, never the cluster's: *"More of
+      this message is in the audit log"* when the write that would hold it
+      landed, or *"k8rs could not write this to the audit log either"* when
+      it did not — one sentence or the other, never both and never either on
+      a quote that was never cut
+      ([dialogs.md § The quote's last row says where the rest is](dialogs.md#the-quotes-last-row-says-where-the-rest-is)).
+      **Numbered here, out of order, so the eleven above keep the numbers
+      every other citation on this page already uses them by** — it is a
+      back-cut in every other respect (same mark, same word-boundary
+      walk-back, the same honest loss the five above accept), but for a
+      third reason neither of them needed: the full text is not one `⏎` away
+      — this is a terminal box, and nothing k8rs can press reopens it — and
+      it is not merely narrower with no escape either, the way 3 and 4
+      accept losing part of a command line. It says *where* instead, which
+      is the property that makes this cut different enough to need its own
+      entry rather than a footnote on one of the first five.
 
   Everything else on a card, every other string in the browser, and every
   command log line that fits is drawn whole and clips at the pane edge like

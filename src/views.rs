@@ -956,8 +956,8 @@ pub enum Modal {
     /// **It carries the fault and not just the words, because two of the sentences that box used
     /// to print are false for half the cases that reach it.** `ops::Outcome` distinguishes
     /// `NotSent { fault, said }` from `Failed { fault, said }`, and this variant threw both away:
-    /// *"Nothing was changed."* and *"This is the check that runs before the real change — it
-    /// stopped this one."* were fixed text. `delete` is `checkable: false` (NOTES § D225 ruling 1)
+    /// *"Nothing was changed."* and *"k8rs's check before the real change stopped this."* were
+    /// fixed text. `delete` is `checkable: false` (NOTES § D225 ruling 1)
     /// so **no check is ever sent** and every delete refusal is post-send; and invariant 2 names
     /// the state where the first sentence is unknowable — a dead socket on a delete ends in *k8rs
     /// does not know whether the change was made*. A hardcoded sentence standing in for a typed
@@ -981,8 +981,26 @@ pub enum Modal {
         /// row and not tidiness**: `k8s::FREE_TEXT` allows 4096 bytes, and a
         /// `fieldValidation=Strict` rejection hands back the whole object that was sent —
         /// 4859 bytes on a trivial Deployment (NOTES § D217). That is eighty wrapped lines into a
-        /// box that has room for four.
+        /// box that has room for five.
+        ///
+        /// **And it arrives already cut at that cap, which is why the box says *more* and never
+        /// *the full message*** (NOTES § D294 and its same-day correction): `k8s::message` runs
+        /// every `Status.message` through
+        /// `k8s::text` at `k8s::FREE_TEXT` and appends its own marker past it, `ops::Outcome::said`
+        /// hands that same string on unchanged, and `ops::Record`'s result line quotes it — so past
+        /// 4096 bytes nothing in this product holds the whole thing, the audit line included.
         said: Option<String>,
+        /// **Whether the audit line that carries [`Self::Refused::said`] was written** —
+        /// `ops::Performed::recorded`, which is set from the result line's own write and is the
+        /// only line of the two that quotes the cluster (NOTES § D294's correction).
+        ///
+        /// **It decides which of two sentences the box draws under a cut quote**, and it is a field
+        /// rather than an assumption because the happier one is a lie exactly when the reader can
+        /// least afford it: a disk that fills between the attempt line and the result line leaves
+        /// that message nowhere, and *go and look in the audit log* then sends them after something
+        /// that was never written (`screens/dialogs.md` § The quote's last row says where the rest
+        /// is). It is `ops::Performed::plainly`'s own reasoning, in one row.
+        recorded: bool,
     },
     /// **The object stopped existing while the dialog was open** (`screens/dialogs.md` § The
     /// object went away, NOTES § D22).

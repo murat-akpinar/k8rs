@@ -8901,6 +8901,42 @@ const WORDY: &str = "The cluster answered this check with a sentence far longer 
 const DENIED: &str = "admission webhook 'limits.example.com' denied the request: replicas may not \
                       exceed 5 in this namespace";
 
+/// **The real `ValidatingAdmissionPolicy` rejection the error-state pass measured**, whole — 212
+/// characters, of which 189 reached the box on the day it was measured and the clause naming the
+/// actual reason did not (`reports/2026-09-26-the-error-state-pass.md` § 8, finding F3;
+/// NOTES § D294).
+///
+/// **It is the exact-fit case, in every state**: it wraps to five rows at the quote's own width,
+/// which is what `left` now is in all three — 1c's own explanation came down to one row with the
+/// rest of this round (NOTES § D294's correction), so the state this message was clipped in is the
+/// state it draws whole in. The **cut** case is [`oversized`]; this fixture never reaches a `…`.
+const FREEZE: &str = "deployments.apps \"broken-owned\" is forbidden: ValidatingAdmissionPolicy \
+                      'k8rs-no-restarts' with binding 'k8rs-no-restarts' denied request: this \
+                      cluster does not allow restarting deployments during a change freeze";
+
+/// **The four-kilobyte fixture `screens/dialogs.md` § The quote's last row names by
+/// construction** — 4068 bytes, deliberately just *under* `k8s::FREE_TEXT`, so the cut it forces
+/// is the box's own and not one ingest had already made ([`beyond_free_text`] is the other side of
+/// that boundary). Shared rather than rebuilt per test, because the screen file draws its wrap
+/// points and two tests compare against them.
+fn oversized() -> String {
+    "denied: ".to_owned() + &"replicas may not exceed five ".repeat(140)
+}
+
+/// **A rejection past `k8s::FREE_TEXT`, cut by the real ingest and carrying the real marker** —
+/// the shape `views_tests.rs` already measured at 4859 bytes (NOTES § D217), run through
+/// `k8s::text` here rather than hand-written, so what this box is fed ends exactly as the audit
+/// line does. This is the case the pointer says *more* for and not *the full message*: past the cap
+/// neither surface holds the whole thing (NOTES § D294's correction).
+fn beyond_free_text() -> String {
+    let mut said = format!(
+        "Deployment in version \"v1\" cannot be handled: {}",
+        "x".repeat(4859)
+    );
+    crate::k8s::text(&mut said, crate::k8s::FREE_TEXT);
+    said
+}
+
 /// § Delete's second box — the one cluster-scoped object any operation reaches, whose title bar
 /// carries no namespace (rule 1).
 fn deleting_a_node() -> views::Dialog {
@@ -8961,6 +8997,7 @@ fn every_dialog_on_the_screen_it_belongs_to() {
                 sent: false,
                 fault: crate::k8s::Fault::Rejected,
                 said: Some(DENIED.to_owned()),
+                recorded: true,
             },
         ),
         (
@@ -9024,7 +9061,9 @@ fn nested(rows: &[String]) -> Vec<String> {
 /// implementation with itself; the screen file is the specification, so it is what the assertion
 /// reads. The blocks are in the file's own order: 0 scale · **1 scale, check on the wire** ·
 /// 2 restart · 3 restart paused · **4 restart, check on the wire** · 5 delete pod ·
-/// 6 delete node · 7 the object changed first · 8 refused · 9 gone · 10 drain.
+/// 6 delete node · 7 the object changed first · 8 refused · **9 refused, the 212-character
+/// message drawn whole** · **10 refused, the quote cut and the pointer under it** · 11 gone ·
+/// 12 drain.
 fn mockup_dialog(nth: usize) -> Vec<String> {
     let path = format!("{}/screens/dialogs.md", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path)
@@ -9056,8 +9095,8 @@ fn mockup_dialog(nth: usize) -> Vec<String> {
     }
     assert_eq!(
         blocks.len(),
-        11,
-        "screens/dialogs.md no longer draws eleven screens"
+        13,
+        "screens/dialogs.md no longer draws thirteen screens"
     );
     nested(&blocks[nth])
 }
@@ -9296,6 +9335,7 @@ fn every_dialog_says_the_words_the_screen_file_says() {
                 sent: true,
                 fault: crate::k8s::Fault::Conflict,
                 said: None,
+                recorded: true,
             },
         ),
         (
@@ -9304,10 +9344,29 @@ fn every_dialog_says_the_words_the_screen_file_says() {
                 sent: false,
                 fault: crate::k8s::Fault::Rejected,
                 said: Some(DENIED.to_owned()),
+                recorded: true,
             },
         ),
         (
             9,
+            views::Modal::Refused {
+                sent: false,
+                fault: crate::k8s::Fault::Rejected,
+                said: Some(FREEZE.to_owned()),
+                recorded: true,
+            },
+        ),
+        (
+            10,
+            views::Modal::Refused {
+                sent: false,
+                fault: crate::k8s::Fault::Rejected,
+                said: Some(oversized()),
+                recorded: true,
+            },
+        ),
+        (
+            11,
             views::Modal::Gone {
                 object: deleting().object,
                 recreated: true,
@@ -9320,6 +9379,25 @@ fn every_dialog_says_the_words_the_screen_file_says() {
             width(&drawn[0]),
             width(&mockup[0]),
             "block {nth} is a different width from the box the screen file draws"
+        );
+        // **The height, which nothing here asserted until 2026-09-27.** [`said_by`] splits on
+        // whitespace, so it cannot see a wrap point, a blank row that should not be there, or a
+        // row that went — and block 8 carried five such discrepancies for however long they had
+        // been in the file before `tester` read the two side by side. Width and words together
+        // still do not pin a box's shape; the row count is the third thing.
+        //
+        // **It was two blocks short of passing when it was written, and the page was the wrong
+        // side** — block 7 and block 11 each drew a blank row *below* `[ esc dismiss ]`, which
+        // neither [`ui::refused`] nor [`ui::gone`] can emit: both end on their button row. Block 7
+        // is drawn by the very same `refused` as block 8, which had no such row, so the page
+        // contradicted itself and no edit here could satisfy both. `tui-designer` removed the two
+        // rows on 2026-09-27; this is the plain assertion again, with nothing excused.
+        assert_eq!(
+            drawn.len(),
+            mockup.len(),
+            "block {nth} is a different height from the box screens/dialogs.md draws:\n{}\n{}",
+            drawn.join("\n"),
+            mockup.join("\n")
         );
         assert_eq!(
             said_by(&drawn),
@@ -9419,9 +9497,10 @@ fn the_unanswered_box_says_how_long_it_waited_where_that_is_what_k8rs_knows() {
     let blocks = fenced("dialogs.md", "## The cluster said no");
     assert_eq!(
         blocks.len(),
-        5,
-        "screens/dialogs.md § The cluster said no no longer draws a 409, 1a, 1b's two readings \
-         and 1c"
+        8,
+        "screens/dialogs.md § The cluster said no no longer draws a 409, 1a, 1b's two readings, \
+         1c, 1c with the whole 212-character message, 1c with that quote cut and the pointer \
+         under it, and the one row that changes when the write failed"
     );
     let waited = format!(
         "k8rs waited {} seconds for the cluster to check this change and heard nothing back",
@@ -9433,6 +9512,7 @@ fn the_unanswered_box_says_how_long_it_waited_where_that_is_what_k8rs_knows() {
             sent: false,
             fault: crate::k8s::Fault::Unanswered,
             said,
+            recorded: true,
         });
         let mockup = nested(&blocks[nth]);
         assert!(
@@ -9510,6 +9590,7 @@ fn a_refusal_sentence_the_size_the_api_allows_gives_way_before_the_button_does()
         sent: false,
         fault: crate::k8s::Fault::Unanswered,
         said: Some(said),
+        recorded: true,
     });
     // **Exactly [`MODAL_ROWS`], not *at most* it** — a sentence with more to say than the box has
     // room for spends every row the box has and not one more. `<=` passes on a budget that is one
@@ -9566,6 +9647,7 @@ fn a_dialog_picks_one_of_three_widths_and_centring_decides_the_rest() {
                 sent: false,
                 fault: crate::k8s::Fault::Rejected,
                 said: None,
+                recorded: true,
             },
         ),
         (
@@ -9920,44 +10002,80 @@ fn a_ten_thousand_character_name_does_not_grow_the_box_it_is_drawn_in() {
     );
 }
 
-/// **What the cluster sent back is cut to the rows the box has left** — the one string in any
-/// dialog that came off the API, and the reason [`cut`] takes a line cap
-/// (NOTES § D217: a `fieldValidation=Strict` rejection hands back the object that was sent).
+/// **What the cluster sent back is cut to the rows the box has left**, and the reason [`marked`]
+/// takes a line cap at all (NOTES § D217: a `fieldValidation=Strict` rejection hands back the
+/// object that was sent — 4096 bytes of it, which [`MODAL_ROWS`] has room for a twentieth of).
+///
+/// **Where the rest of it went is the pointer's own test**
+/// ([`the_pointer_to_the_audit_log_draws_where_the_quote_lost_rows_and_nowhere_else`],
+/// NOTES § D294). What is asserted here is the bound the pointer's own row has to fit inside.
 #[test]
 fn a_four_kilobyte_refusal_is_cut_to_the_box_and_says_so() {
     let alerts = Pane::Ready(vec![oom()]);
     let now = now();
     let log = logged_pair();
-    let said = "denied: ".to_owned() + &"replicas may not exceed five ".repeat(140);
+    let said = oversized();
     assert!(said.len() > 4000, "the fixture stopped being oversized");
+    assert!(
+        said.len() < crate::k8s::FREE_TEXT,
+        "the fixture crossed the ingest cap, so the cut under test is no longer the box's"
+    );
 
-    let drawn = rows(&render(
-        &over(views::Modal::Refused {
-            sent: false,
-            fault: crate::k8s::Fault::Rejected,
-            said: Some(said.clone()),
-        }),
-        &opened_over(&alerts, &now, &log),
-    ));
-    assert_eq!(
-        drawn.len(),
-        usize::from(MIN_HEIGHT),
-        "a refusal blew the frame"
-    );
-    let box_ = nested(&drawn);
-    assert!(
-        box_.len() <= MODAL_ROWS + 2,
-        "the box grew to {} rows on a 4 kB message",
-        box_.len()
-    );
-    assert!(
-        box_.iter().any(|row| row.contains(CUT)),
-        "4 kB was dropped in silence:\n{}",
-        box_.join("\n")
-    );
-    // And the two sentences the box owns are still both on it — the quote gave way, not them.
-    assert!(box_.iter().any(|row| row.contains("Nothing was changed.")));
-    assert!(box_.iter().any(|row| row.contains("it stopped this one.")));
+    // **All three states that can carry a quote, fed the same 4 kB.** The pointer under a cut
+    // quote takes a row out of whatever budget its own state had left (NOTES § D294), and which of
+    // the three is tightest is arithmetic off an explanation whose length is not the same in any
+    // two of them — so the bound is measured on each rather than on the roomiest.
+    let mut boxes = Vec::new();
+    for (named, sent, fault) in [
+        ("the check refused it", false, Fault::Rejected),
+        ("the real change was refused", true, Fault::Rejected),
+        ("the real change got no answer", true, Fault::Unanswered),
+    ] {
+        let drawn = rows(&render(
+            &over(views::Modal::Refused {
+                sent,
+                fault,
+                said: Some(said.clone()),
+                recorded: true,
+            }),
+            &opened_over(&alerts, &now, &log),
+        ));
+        assert_eq!(
+            drawn.len(),
+            usize::from(MIN_HEIGHT),
+            "{named}: a refusal blew the frame"
+        );
+        let box_ = nested(&drawn);
+        println!("{named}\n{}", box_.join("\n"));
+        assert!(
+            box_.len() <= MODAL_ROWS + 2,
+            "{named}: the box grew to {} rows on a 4 kB message",
+            box_.len()
+        );
+        assert!(
+            box_.iter().any(|row| row.contains(CUT)),
+            "{named}: 4 kB was dropped in silence:\n{}",
+            box_.join("\n")
+        );
+        assert!(
+            box_.iter().any(|row| row.contains("esc dismiss")),
+            "{named}: the row the pointer took was the one the way out needed:\n{}",
+            box_.join("\n")
+        );
+        boxes.push(box_);
+    }
+    // And the two sentences the check's own box owns are still both on it — the quote gave way,
+    // not them.
+    for sentence in [
+        "Nothing was changed.",
+        "k8rs's check before the real change stopped this.",
+    ] {
+        assert!(
+            boxes[0].iter().any(|row| row.contains(sentence)),
+            "the check's own box lost {sentence:?} to 4 kB of quote:\n{}",
+            boxes[0].join("\n")
+        );
+    }
 
     // A refusal the cluster did not explain drops the heading with the quote.
     let quiet = nested(&rows(&render(
@@ -9965,6 +10083,7 @@ fn a_four_kilobyte_refusal_is_cut_to_the_box_and_says_so() {
             sent: false,
             fault: crate::k8s::Fault::Rejected,
             said: None,
+            recorded: true,
         }),
         &opened_over(&alerts, &now, &log),
     )));
@@ -9972,6 +10091,222 @@ fn a_four_kilobyte_refusal_is_cut_to_the_box_and_says_so() {
         !quiet.iter().any(|row| row.contains("sent back")),
         "an unexplained refusal still promised something sent back"
     );
+}
+
+/// **A cut quote says that more of the message exists; an uncut one says nothing extra**
+/// (`screens/dialogs.md` § The quote's last row says where the rest is, NOTES § D294 and its
+/// same-day correction). A 4 kB rejection cannot be drawn into [`MODAL_ROWS`] rows that do not
+/// widen with the terminal, and a reader who sees `…` and is told nothing has been handed a dead
+/// end that looks like the whole answer.
+///
+/// **The exact-fit boundary is the case with no other assertion on it, and it is where the defect
+/// this whole round is about actually sat** — one row past what its state offered
+/// (`reports/2026-09-26-the-error-state-pass.md` § 8). A message wrapping to exactly `left` rows
+/// draws whole, uncut and unpointed, so `>=` written for `>` draws a pointer over a message that
+/// lost nothing. It is asserted in all three quote-bearing states, because `left` is the same 5 in
+/// each only since 1c's own explanation came down to one row, and that equality is the fix.
+///
+/// **The ellipsis case is the defect that would otherwise have shipped, and it is wrong in both
+/// directions.** A mark read off the drawn text answers yes on a cluster message that ends in an
+/// ellipsis of its own — a row pointing away from words already whole on the screen — and answers
+/// **no** on the one string that really did arrive shortened, since `k8s::text`'s own marker ends
+/// in a bracket (`tester`, 2026-09-27). Only the arithmetic is immune to both.
+#[test]
+fn the_pointer_to_the_audit_log_draws_where_the_quote_lost_rows_and_nowhere_else() {
+    const FELL_OFF: &str = "during a change freeze";
+    assert_eq!(
+        FREEZE.chars().count(),
+        212,
+        "the fixture stopped being the 212-character message the report measured"
+    );
+
+    // **Exactly `left` rows, in every state that can quote.** Five is what each of the three now
+    // offers, and the measured message wraps to exactly five — the boundary, from below.
+    for (named, sent, fault) in QUOTING {
+        let box_ = refusal(sent, fault, FREEZE, true);
+        println!("{named}, the 212-character message\n{}", box_.join("\n"));
+        assert!(
+            shows(&box_, FELL_OFF),
+            "{named}: the message that fits exactly was cut anyway, losing {FELL_OFF:?}:\n{}",
+            box_.join("\n")
+        );
+        assert!(
+            !sentences(&box_).any(|row| row.contains(CUT)),
+            "{named}: a message that fits exactly was marked as cut:\n{}",
+            box_.join("\n")
+        );
+        assert!(
+            !pointed(&box_),
+            "{named}: a whole message was labelled as if part of it were elsewhere:\n{}",
+            box_.join("\n")
+        );
+    }
+
+    // **A message that ends in an ellipsis of its own, and fits.** A mark read off the last drawn
+    // row answers yes here with nothing dropped.
+    let ellipsis = format!("the cluster is still making up its mind{CUT}");
+    let whole = refusal(false, Fault::Rejected, &ellipsis, true);
+    println!(
+        "1c, a message that ends in its own ellipsis\n{}",
+        whole.join("\n")
+    );
+    assert!(
+        shows(&whole, &ellipsis),
+        "the fixture did not reach the box whole, so the false positive is not under test:\n{}",
+        whole.join("\n")
+    );
+    assert!(
+        !pointed(&whole),
+        "the cut was read off the cluster's own trailing ellipsis rather than the arithmetic:\n{}",
+        whole.join("\n")
+    );
+
+    // **And one that really is too long**, so the test that proves the row is withheld cannot pass
+    // by never drawing it at all.
+    let cut_ = refusal(false, Fault::Rejected, &oversized(), true);
+    assert!(
+        pointed(&cut_),
+        "a quote that lost rows said nothing about where the rest of it is:\n{}",
+        cut_.join("\n")
+    );
+}
+
+/// **Which of two sentences the cut quote's last row says, and it is not a matter of taste**
+/// (`screens/dialogs.md` § The quote's last row says where the rest is, NOTES § D294's correction).
+/// `ops::Performed::recorded` is the write of the *result* line, the only one of the audit log's
+/// two that quotes the cluster at all — so when it failed, the message this row would send the
+/// reader after is nowhere. `ops::Performed::plainly` already refuses to do that on the headless
+/// surface; this is the same refusal on the surface that draws.
+///
+/// **It also pins the row's colour, which no mutant can reach.** cargo-mutants does not substitute
+/// a call's arguments, so `text` swapped for `dim` there is a silent change — and `theme::DIM` is
+/// the cluster's own voice on this box and nobody else's, which is the one thing this sentence must
+/// never be mistaken for. Asserted against the box's *own* rows rather than an RGB literal: the
+/// same colour as the outcome sentence k8rs wrote, a different one from the quote.
+///
+/// **And a message past `k8s::FREE_TEXT`**, which the 4 kB fixture deliberately is not: ingest cut
+/// that one before the box ever saw it and appended its own marker, which is the case *"more"* is
+/// worded for — the audit line ends in that marker too, so *the full message* is nowhere.
+#[test]
+fn the_cut_quotes_last_row_says_whether_the_audit_log_has_it() {
+    const MORE: &str = "More of this message is in the audit log.";
+    const NEITHER: &str = "k8rs could not write this to the audit log either.";
+
+    let recorded = refusal(false, Fault::Rejected, &oversized(), true);
+    let lost = refusal(false, Fault::Rejected, &oversized(), false);
+    println!("1c, cut, the result line written\n{}", recorded.join("\n"));
+    println!("1c, cut, the result line lost\n{}", lost.join("\n"));
+    for (named, box_, says, not) in [
+        ("the result line written", &recorded, MORE, NEITHER),
+        ("the result line lost", &lost, NEITHER, MORE),
+    ] {
+        assert!(
+            shows(box_, says),
+            "{named}: the row does not say {says:?}:\n{}",
+            box_.join("\n")
+        );
+        assert!(
+            !shows(box_, not),
+            "{named}: the row says {not:?}, which is the other case:\n{}",
+            box_.join("\n")
+        );
+        assert_eq!(
+            box_.len(),
+            MODAL_ROWS + 2,
+            "{named}: the two sentences are one row each and this box is not {}:\n{}",
+            MODAL_ROWS + 2,
+            box_.join("\n")
+        );
+    }
+
+    // **The colour, off the cells and not off the rows.** The pointer is the box's voice, so it is
+    // the outcome sentence's colour and not the quote's.
+    let alerts = Pane::Ready(vec![oom()]);
+    let now = now();
+    let log = logged_pair();
+    let drawn = render(
+        &over(views::Modal::Refused {
+            sent: false,
+            fault: Fault::Rejected,
+            said: Some(oversized()),
+            recorded: true,
+        }),
+        &opened_over(&alerts, &now, &log),
+    );
+    let at = |needle: &str| {
+        let rows = rows(&drawn);
+        let y = rows
+            .iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} is on no row of\n{}", rows.join("\n")));
+        let x = rows[y].find(needle).expect("the column it was found at");
+        drawn
+            .cell((
+                u16::try_from(x).expect("a column inside the frame"),
+                u16::try_from(y).expect("a row inside the frame"),
+            ))
+            .expect("a cell inside the frame")
+            .fg
+    };
+    let pointer = at(MORE);
+    assert_eq!(
+        pointer,
+        at("Nothing was changed."),
+        "the pointer is not drawn in the same colour as the box's own sentences"
+    );
+    assert_ne!(
+        pointer,
+        at("denied: replicas"),
+        "the pointer is drawn in the quote's colour, so it reads as one more line the cluster sent"
+    );
+
+    // **Past `k8s::FREE_TEXT`, where the audit line is cut too** — the case *"more"* exists for.
+    let ingested = refusal(false, Fault::Rejected, &beyond_free_text(), true);
+    println!(
+        "1c, a message ingest had already cut\n{}",
+        ingested.join("\n")
+    );
+    assert!(
+        shows(&ingested, MORE),
+        "a message ingest had already shortened drew no row at all:\n{}",
+        ingested.join("\n")
+    );
+    assert!(
+        ingested.len() <= MODAL_ROWS + 2,
+        "a message past FREE_TEXT grew the box to {} rows:\n{}",
+        ingested.len(),
+        ingested.join("\n")
+    );
+}
+
+/// **The three states a quote can be drawn in**, with the name each box is printed under. `left` is
+/// 5 in all three since 1c's explanation came down to one row (NOTES § D294's correction), which is
+/// what lets one fixture be the exact-fit case for every one of them.
+const QUOTING: [(&str, bool, Fault); 3] = [
+    ("1c, the check refused it", false, Fault::Rejected),
+    ("2, the real change was refused", true, Fault::Rejected),
+    ("3, the real change got no answer", true, Fault::Unanswered),
+];
+
+/// One `Refused` box at the 80×24 floor, by the four things that decide what it draws.
+fn refusal(sent: bool, fault: Fault, said: &str, recorded: bool) -> Vec<String> {
+    box_of(views::Modal::Refused {
+        sent,
+        fault,
+        said: Some(said.to_owned()),
+        recorded,
+    })
+}
+
+/// Whether a row of `box_` carries the given text.
+fn shows(box_: &[String], text: &str) -> bool {
+    box_.iter().any(|row| row.contains(text))
+}
+
+/// **Whether either of the two pointer sentences is on the box** — asked as *is a pointer drawn*
+/// and never as *which one*, so a test about the row's presence cannot pass on the wrong sentence.
+fn pointed(box_: &[String]) -> bool {
+    shows(box_, "is in the audit log.") || shows(box_, "could not write this to the audit log")
 }
 
 /// **The verdict's row is reserved before the verdict arrives**, so the box does not grow by one
@@ -10076,8 +10411,8 @@ fn the_typed_field_keeps_the_end_of_a_name_too_long_for_it() {
 /// case** (`screens/dialogs.md` § The cluster said no, PRIOR-ART § C1).
 ///
 /// **Three shapes, and two of them the box used to get wrong.** `delete` sends no check at all
-/// (NOTES § D225 ruling 1), so every delete refusal is post-send — *"This is the check that runs
-/// before the real change"* is false of all of them. And invariant 2 names the state where
+/// (NOTES § D225 ruling 1), so every delete refusal is post-send — *"k8rs's check before the real
+/// change stopped this."* is false of all of them. And invariant 2 names the state where
 /// *"Nothing was changed."* is unknowable in those words: a dead socket on a delete leaves the
 /// request on the wire with no answer.
 #[test]
@@ -10088,7 +10423,7 @@ fn a_refusal_says_what_is_true_of_the_fault_it_carries() {
             Fault::Rejected,
             "The cluster refused this",
             "Nothing was changed.",
-            "This is the check that runs before the real change",
+            "k8rs's check before the real change stopped this.",
         ),
         (
             true,
@@ -10109,6 +10444,7 @@ fn a_refusal_says_what_is_true_of_the_fault_it_carries() {
             sent,
             fault,
             said: None,
+            recorded: true,
         }));
         for wanted in [title, outcome, because] {
             assert!(
@@ -10124,9 +10460,13 @@ fn a_refusal_says_what_is_true_of_the_fault_it_carries() {
         sent: true,
         fault: Fault::Unanswered,
         said: None,
+        recorded: true,
     }));
     assert!(!post.contains("Nothing was changed."), "{post}");
-    assert!(!post.contains("check that runs before"), "{post}");
+    assert!(
+        !post.contains("k8rs's check before the real change"),
+        "{post}"
+    );
 }
 
 /// A box's text as one line — borders dropped and the wrap undone — so an assertion about a
@@ -13116,7 +13456,12 @@ fn each_way_a_check_can_fail_draws_its_own_box_and_a_conflict_draws_another() {
         ),
     ];
     let refused = |sent: bool, fault: Fault, said: Option<String>| {
-        box_of(views::Modal::Refused { sent, fault, said })
+        box_of(views::Modal::Refused {
+            sent,
+            fault,
+            said,
+            recorded: true,
+        })
     };
     let mut boxes: Vec<Vec<String>> = Vec::new();
     for (audit, faults, title) in classes {

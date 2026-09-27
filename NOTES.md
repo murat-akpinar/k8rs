@@ -315,6 +315,7 @@ its line moving with it.
 - [D291](#d291--the-gate-was-green-and-three-tests-on-the-new-write-path-guard-could-not-fail-2026-09-26) — the gate was green and three tests on the new write-path guard could not fail
 - [D292](#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26) — wiring the permission probe: the owner, the dead-writes gate, and the plural three existing tables refuse to give
 - [D293](#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27) — the permission probe review rounds: a clause drawn for a key the footer withholds, and the guard the dev's list could not see
+- [D294](#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27) — verbatim names where verbatim lives, because a 13-row box cannot hold 4096 bytes
 
 ## Why it exists — where the gap is
 
@@ -26130,3 +26131,110 @@ card; a live cluster has one.
 so a PM measurement does not open a file there. It lands in the box body and in this
 entry — which is the precedent `reports/README.md` itself names, the
 `docker restart` exit code that lives in `todo.md` and nowhere else.
+
+### D294 — verbatim names where verbatim lives, because a 13-row box cannot hold 4096 bytes (2026-09-27)
+
+Phase 13's second box found [REQUIREMENTS.md](REQUIREMENTS.md) and the code
+disagreeing: *"a rejected write shows the API server's message **verbatim**, in the
+same panel, and stays visible until dismissed"*, against a real
+`ValidatingAdmissionPolicy` rejection where 189 of 212 characters reached four quoted
+rows and the clause naming the *reason* fell off the end. The box asked for one of two
+things — a pointer to the audit log on the box, or the requirement narrowed — and this
+is the ruling it needs before a screen can be drawn.
+
+**The requirement is narrowed, and it is narrowed because it is unachievable rather
+than expensive.** Counted against the objects, not argued: `k8s::FREE_TEXT` bounds a
+free-text field at **4096 bytes**, and a `fieldValidation=Strict` rejection hands back
+*the whole object that was sent*
+([D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)),
+so the worst case this promise covers is roughly **54 wrapped rows** at the width a
+modal has. `ui.rs`'s `MODAL_ROWS` is **13** and deliberately does not widen with the
+terminal. No budget rearrangement closes a 41-row gap: *verbatim on screen* is a
+promise the product cannot keep for the case that most needs it, and a requirement
+nobody can comply with is CLAUDE.md § *Second pass*'s second question failing in the
+document that sets the target.
+
+**Where verbatim does live, verified rather than assumed.** `ops.rs`'s `and_said`
+appends the whole `said` to the audit line with **no row bound** — the audit log is
+bounded only by `FREE_TEXT`, the same 4096 bytes the value arrives with. So the record
+that must not lie (invariant 4) already holds the whole sentence; what the dialog is
+for is teaching, and it is the surface that cannot hold it.
+
+**So the shape is: show what fits, mark the cut, and name where the rest is.** The
+first two already happen — `cut` is `marked(wrapped(…))` and leaves `CUT` (`…`) — so
+what is missing is only the third, and *that* is the defect. A reader at 3am who sees
+`…` and is told nothing has been given a dead end, which is worse than either drawing
+less or drawing more, because it looks like the whole answer with a typo at the end.
+
+**What this ruling does not decide, and deliberately leaves to `screens/dialogs.md`.**
+Where the pointer sits, what it says, and whether it costs a row at all — the existing
+heading *"What the cluster sent back:"* is already one row and could carry it. And one
+measurement the box hands over rather than settles: **the case that was clipped missed
+by a single row** (212 characters is about four rows at a modal's width, and it got
+four), so whether the quote can afford one more row by giving up something else is a
+real question and a separate one from the pointer. The answer must hold for the 4096-byte
+case too, which is why the pointer is not optional whatever the row arithmetic says.
+`ui.rs`'s § Delete already reaches `MODAL_ROWS` exactly with four consequence lines, so
+a row is not free on every path and the ruling must not assume it is.
+
+**Correction, same day, and the ruling above was wrong where it was most confident.**
+Steps 5 and 6 each falsified *"the audit log already holds the whole sentence"* by a
+different route, and neither needed a cluster to do it.
+
+**`k8s-admin`'s route — the bound this entry cited is applied before either surface
+sees the value.** `k8s::message` runs `text(&mut said, FREE_TEXT)`, which truncates at
+4096 bytes and appends `SHORTENED` — `… (shortened by k8rs)` — and `Outcome::said` is
+not cleaned again. So the dialog and the audit line receive the **same already-cut
+`String`**: for any rejection over 4096 bytes the audit line itself ends in that
+marker, and nothing in this product holds the whole message. **The entry used
+`FREE_TEXT` as the reason the *dialog* cannot hold the message and then forgot that it
+had already bounded the *value*** — two paragraphs apart, in the same ruling. The tree
+had already measured the case at **4859 bytes** (`views_tests.rs`), which is exactly
+the shape the narrowing was written for. Reachable today without `edit`: a multi-rule
+Kyverno or Gatekeeper denial, or a proxy answering the `PATCH` with a non-JSON body —
+kube puts the whole body in `message`, and an HTML 502 page is routinely over 4 KiB.
+
+**`tester`'s route — the record may not exist at all.** `ops::perform` sets
+`recorded = write_line(audit, &record.result_line(…)).is_ok()`, and the result line is
+the *only* line carrying `said`. `settled` reads `performed.outcome` and leaves
+`performed.recorded` unread in the same function, so when the append fails after the
+attempt line succeeded — a disk that filled mid-run, measured by `tester` on a tmpfs —
+the server's sentence is **nowhere** and the box sends the reader to look for it.
+`Outcome::plainly` already refuses to do this on the headless surface, in words this
+repo wrote for exactly this case: *"k8rs could not write it to the audit log"* is more
+honest than *"go and look"*, **because k8rs holds that fact at the moment the operator
+is least able to go and get it.** The dialog is the surface that did not get the memo.
+
+**The ruling, revised.** *Verbatim* is still not owed on screen — that half stands, and
+for the reason given. What is withdrawn is *the audit log is where it is owed*: it is
+where **more** of it is owed, and only when the write succeeded. So:
+
+- **The sentence says `More of this message is in the audit log.`** — true whether or
+  not `FREE_TEXT` shortened it, where *full* and *whole* are not. Measured at 41
+  columns against the 52 the box has.
+- **It draws on `over && recorded`, not on `over`.** When the write failed the row says
+  so instead, which costs no extra row and is `plainly`'s own sentence reaching the
+  surface that draws.
+- **`REQUIREMENTS.md`'s row drops *verbatim is still owed*.** Nothing in k8rs holds a
+  rejection over 4096 bytes whole, and a requirement is not the place to promise
+  storage no code provides.
+
+**And the row should not have come out of the cluster's words at all.** `k8s-admin`
+re-derived the budget: `left` is **4** in state 1c and **5** in states 2 and 3, and the
+measured 212-character message wraps to **5**. 1c is tight for one reason — its own
+explanation, *"This is the check that runs before the real change — it stopped this
+one."*, is **73 columns** against 52 and so takes two rows where the other two arms take
+one. Shorten **k8rs's own sentence** to one row and 1c's budget becomes 5: the realistic
+message draws **whole, uncut, unpointed**, and the pointer still exists for the 4 KiB
+case. That is better than either option this entry costed, and it spends k8rs's words
+rather than the cluster's, which is the ordering the rest of this product already uses.
+
+**What the trade got right, and it is worth keeping the reason.** Asked which is better
+at 3am — four quoted rows and a dead end, or three and a route — `k8s-admin` answered
+three, and not on row count. At four rows the last drawn words are *"cluster does not
+allow restarting deployments…"*, which **reads as a complete thought and is a different
+thought from the truth**: the operator concludes restarts are forbidden and goes to
+argue with the policy, when the real answer is a temporary change freeze and the next
+action is to wait or ask for an exception. At three it ends *"denied request: this…"*,
+which names the policy and is visibly incomplete. **A cut that changes the meaning of
+what it kept is worse than a shorter cut that admits it.**

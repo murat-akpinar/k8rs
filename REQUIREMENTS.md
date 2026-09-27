@@ -155,7 +155,21 @@
 - **Drain must report what blocks it** (PDBs, unmanaged pods) *before*
   starting, not after hanging. This is the whole reason drain is in the tool.
 - **Failure is a first-class state:** a rejected write shows the API server's
-  message verbatim, in the same panel, and stays visible until dismissed.
+  message in the same panel and stays visible until dismissed — **as much of it as
+  the box holds, with the cut marked, and a route to more of it where there is one**,
+  which is the audit log
+  ([D294](NOTES.md#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27)).
+  This row said *verbatim* unqualified until 2026-09-27, and no build could have met
+  it: a `fieldValidation=Strict` rejection hands back the whole object that was sent
+  ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)),
+  up to `k8s::FREE_TEXT`'s 4096 bytes — about 54 wrapped rows against a modal capped
+  at 13 that does not widen with the terminal. **What the panel names is where *more*
+  of it is, and only when that is true**: `FREE_TEXT` bounds the value before either
+  the screen or the audit log sees it, so a rejection over 4096 bytes is held whole
+  **nowhere**, and a failed audit append means it is held nowhere at all. This row
+  promised *verbatim is still owed, and the audit log is where it is owed* for one day
+  and that was wrong on both counts — corrected the same day, after two reviews
+  falsified it independently. A requirement may not promise storage no code provides.
 
 ### Error states (all were undefined; all happen on first launch)
 

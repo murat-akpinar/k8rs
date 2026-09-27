@@ -1439,7 +1439,6 @@ whether it was the check or the real call that hit it:
 │      │  looks like now.                                     │      │
 │      │                                                      │      │
 │      │                    [ esc dismiss ]                   │      │
-│      │                                                      │      │
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
@@ -1573,15 +1572,13 @@ own quoted words:
 │      │  Nothing was changed.                                │      │
 │      │                                                      │      │
 │      │  What the cluster sent back:                         │      │
-│      │    admission webhook 'limits.example.com' denied     │      │
-│      │    the request: replicas may not exceed 5 in this    │      │
+│      │    admission webhook 'limits.example.com' denied the │      │
+│      │    request: replicas may not exceed 5 in this        │      │
 │      │    namespace                                         │      │
 │      │                                                      │      │
-│      │  This is the check that runs before the real change  │      │
-│      │  — it stopped this one.                              │      │
+│      │  k8rs's check before the real change stopped this.   │      │
 │      │                                                      │      │
 │      │                    [ esc dismiss ]                   │      │
-│      │                                                      │      │
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
@@ -1657,6 +1654,236 @@ sent back:"** — true whether the field holds a sentence a person wrote or an
 object echoed back at k8rs — in every state above that can carry one, and
 still drawn only when there is something to quote, exactly as before.
 
+### The quote's last row says where the rest is
+
+REQUIREMENTS.md promised the cluster's message **verbatim**; measured against a
+real `ValidatingAdmissionPolicy` rejection, 189 of 212 characters reached the
+box and the clause naming the actual reason — `during a change freeze` — fell
+off the end
+([reports/2026-09-26-the-error-state-pass.md § 8](../reports/2026-09-26-the-error-state-pass.md#8-rejected-admission--a-real-validatingadmissionpolicy)).
+[NOTES § D294](../NOTES.md#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27)
+narrows that promise to *as much as the box holds, the cut marked, the rest
+named* — [`cut`] already does the first two, leaving [`CUT`] where it dropped
+the rest. What was still missing is the third piece — where the rest of it
+went — and this box is the only place left to draw it: a reader at 3am who
+sees `…` and is told nothing has been handed a dead end that looks like the
+whole answer with a typo on it.
+
+**The rule: one line follows the quote, in the box's own voice and never the
+cluster's, and it draws only when the quote actually lost something.** An
+untruncated quote earns nothing extra — a sentence that appears or disappears
+depending on how long the cluster's message happened to be is one thing to
+learn; a heading or a mark that changed shape between the two would be a
+second, for no reason. The line is drawn `margined`, in `theme::TEXT` — never
+`theme::DIM`, which is the quote's own colour and nobody else's, so this
+sentence can never be mistaken for one more line the cluster sent. **It is
+one of two sentences, not one** — which one depends on a second fact this box
+did not used to need: whether the write that would hold the rest actually
+landed.
+
+> More of this message is in the audit log.
+
+**"More", never "the full message" — the audit log is not guaranteed to hold
+that either.** `k8s::message` runs every `Status.message` through `k8s::text`
+capped at `k8s::FREE_TEXT` (4096 bytes) before anything else ever sees it, and
+past that cap `text` appends *"… (shortened by k8rs)"* itself
+([NOTES § D217](../NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
+`ops::Outcome::said` returns that same already-cut string, unchanged, and it is
+what both the dialog and the audit line's `and_said` read — so a rejection over
+4096 bytes ends in that marker **on the audit line too**, and nothing in this
+product ever holds the whole thing. This is not hypothetical: a
+`fieldValidation=Strict` 422 on a real Deployment already measured at 4859
+bytes on this tree ([NOTES § D217](../NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04))
+is over the cap before the box ever sees it. *"More"* stays true either
+way — the audit copy is always at least as long as what four or five rows can
+show, whether or not it is itself the whole thing — which is the whole reason
+the word is *more* and not *full*.
+
+**The second sentence is for the write that did not happen.** The audit log
+gets two lines per attempt — the one taken before anything is sent, and the
+result line that alone carries `said` — and `ops::perform` sets
+`Performed::recorded` from whether that second write succeeded
+(`write_line(audit, &record.result_line(...)).is_ok()`). A disk that fills
+between the two lines is a real, measured failure mode (`tester`), and when it
+happens the message this row would point at is nowhere, not merely hard to
+find. Sending the reader to look for it there is worse than the missing row
+this whole page exists to fix, so the row says which fact is true instead of
+assuming the happier one:
+
+> k8rs could not write this to the audit log either.
+
+This is `ops::Performed::plainly`'s own reasoning, worded for one row rather
+than for the sentence it appends there — *"the change was made — but k8rs
+could not write it to the audit log … because k8rs holds that fact at the
+moment the operator is least able to go and get it"* (`k8s-admin`,
+2026-09-04). **This draws on the write's own outcome, which the box now
+carries**: `views::Modal::Refused` carries its own `recorded: bool`, `main.rs`
+passes `performed.recorded` at both places it builds one, and `ui::refused`
+takes it as a parameter — so the choice below is which sentence draws, not
+whether the fact can reach the box at all. `over && recorded` draws the
+first, `over && !recorded` the second — never both, and never either when the
+quote was never cut at all.
+
+**It names the audit log, never the path.**
+`~/.local/state/k8rs/audit.log` is the one place either sentence would have to
+give up most of its own row to spell out, and the reader who actually needs
+that path is already looking at a different screen that draws it in full —
+[states.md § The audit log could not be opened](states.md#the-audit-log-could-not-be-opened).
+Both sentences' job is only to say the fact: there is more (or there is not),
+and where it would be if it exists.
+
+**A heading that carried the pointer instead was measured and dismissed, not
+assumed away.** *"What the cluster sent back — more in the audit log:"* is 51
+of the 52 columns the heading's own row has — one column of slack on a row
+that must never wrap, since `refused` counts the heading as exactly one line
+before it ever sizes the quote around it. A heading that occasionally needed a
+second line would not just look wrong; it would make every number below it
+wrong too, silently, the day anyone touched the wording. That is on top of the
+cost already named above: a heading that changes shape depending on whether
+the quote happened to fit is a second thing to learn, for the one row on this
+whole page where getting it wrong is hardest to notice. Both are reasons to
+keep the pointer as its own line under the quote rather than folding it into
+the heading.
+
+**One rule computes the row this line takes, and there is no branch in it —
+the row always comes out of the quote's own budget, never a spare one
+sitting elsewhere.** [`MODAL_ROWS`] is 13 in every state that can carry a
+quote, and how many rows the quote is offered before anything is cut —
+call it `left` — is arithmetic off what the rest of that state's own box
+already spends: the outcome sentence, the heading, the explanation and the
+button, counted the same way the code counts them. The quote is wrapped in
+full first; if that wrap already fits in `left` rows, nothing is cut and this
+line draws nothing — the box is simply as tall as the quote needs and no
+taller. Only when the wrap runs past `left` does the quote give up exactly
+one of its own rows — `left` minus one, never `left` itself — so that this
+line has somewhere to stand. That is the whole rule, in every state; nothing
+about it forks.
+
+**What differs between states is `left`, and until this round one state paid
+for the difference in the wrong currency.** `left` is computed from the
+explanation each state draws, and that explanation used to be two rows long
+in exactly one of the three quote-bearing states — 1c's own, *"This is the
+check that runs before the real change — it stopped this one,"* 73 columns
+against the 52 the box has. States 2 and 3 (*"sent, and the cluster answered
+with a refusal"* and *"sent, and nothing came back"*) both draw the shorter
+*"This was the real change, not a check,"* one row, and both already had
+`left = 5`. 1c alone had `left = 4` — not because its quote deserves less
+room, but because its own sentence, k8rs's to write and cheaper to shorten
+than the cluster's words are to lose, spent a row nothing required it to.
+1c's explanation is shortened instead of spending the cluster's words on
+it — and it was shortened a second time before landing here, for a reason
+worth stating rather than quietly fixing. **The first draft, *"The check
+before the real change stopped this one,"* left *the check* with no
+antecedent anywhere in the box — and the quote two rows above it names a
+`ValidatingAdmissionPolicy` that itself *"denied request,"* so the nearest
+candidate for *the check* was the cluster's own policy, not k8rs's preflight
+(`k8s-admin`).** The old, longer sentence this round replaces had the same
+gap — this is not a regression the shortening introduced — but the box exists
+so a reader at 3am is not misled about who did what, which makes it
+invariant 14's to fix here rather than leave standing. The possessive this
+whole file already reaches for whenever a sentence has to say whose action
+something was (*"k8rs's own check,"* *"k8rs's own call,"* both used
+elsewhere on this page) settles it:
+
+> k8rs's check before the real change stopped this.
+
+Forty-nine columns, one row. It costs *"one"* off the old closing clause to
+make room for the possessive — *"this"* alone still names only the one thing
+in the box it could mean, so nothing is lost that a reader could misread.
+With this, `left = 5` in **every** quote-bearing state — 1c, 2 and 3 alike —
+and the row this section adds never has to be paid for by cutting the
+cluster's own words one row sooner than the ceiling actually requires.
+
+**The 212-character message this page opened with no longer needs cutting
+anywhere.** It wraps to exactly five rows at the quote's own 50-column width,
+and five is now `left` in every state that can quote it — the case measured
+above was one row short of the ceiling for the reason just fixed, not because
+the message was too long for what this box can honestly hold. State 1c's own
+box, corrected, is the *whole message reached the box* case, unchanged from
+before except for the one row its own sentence now takes:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│      ┌ The cluster refused this ────────────────────────────┐      │
+│      │                                                      │      │
+│      │  Nothing was changed.                                │      │
+│      │                                                      │      │
+│      │  What the cluster sent back:                         │      │
+│      │    deployments.apps "broken-owned" is forbidden:     │      │
+│      │    ValidatingAdmissionPolicy 'k8rs-no-restarts' with │      │
+│      │    binding 'k8rs-no-restarts' denied request: this   │      │
+│      │    cluster does not allow restarting deployments     │      │
+│      │    during a change freeze                            │      │
+│      │                                                      │      │
+│      │  k8rs's check before the real change stopped this.   │      │
+│      │                                                      │      │
+│      │                    [ esc dismiss ]                   │      │
+│      └──────────────────────────────────────────────────────┘      │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl --context prod-eu get pods -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ esc dismiss  ⏎ open                                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+No `…`, no pointer, no heading change — every row above is spent on the
+cluster's own words or on this box's own fixed sentences, and the box is 13
+rows because this particular message happens to need exactly what `left`
+now offers, not because 13 is a floor every box reaches. **States 1a and 1b
+never draw either sentence and never need this rule** — neither ever carries
+a quote (§ *The cluster said no* above), so there is nothing on either box to
+point away from.
+
+**A message actually too long for `left` still needs the row, in every
+state.** The four-kilobyte fixture `tester` already exercises —
+`"denied: " + "replicas may not exceed five ".repeat(140)`, 4068
+bytes — wraps to dozens of rows at this width regardless of which state draws
+it, so `left = 5` still is not enough and the quote gives up its fifth row
+the rule above describes. State 1c, with the write recorded:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│      ┌ The cluster refused this ────────────────────────────┐      │
+│      │                                                      │      │
+│      │  Nothing was changed.                                │      │
+│      │                                                      │      │
+│      │  What the cluster sent back:                         │      │
+│      │    denied: replicas may not exceed five replicas may │      │
+│      │    not exceed five replicas may not exceed five      │      │
+│      │    replicas may not exceed five replicas may not     │      │
+│      │    exceed five replicas may not exceed five replicas…│      │
+│      │  More of this message is in the audit log.           │      │
+│      │                                                      │      │
+│      │  k8rs's check before the real change stopped this.   │      │
+│      │                                                      │      │
+│      │                    [ esc dismiss ]                   │      │
+│      └──────────────────────────────────────────────────────┘      │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl --context prod-eu get pods -n payments                   │
+├────────────────────────────────────────────────────────────────────┤
+│ esc dismiss  ⏎ open                                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Four quoted rows instead of five, the fifth spent on the sentence above it —
+13 rows either way, because this message is long enough to fill the ceiling
+whichever of the two it draws. **The one row that changes** if the result
+line could not be written is the same row, nothing else on the box:
+
+```
+│      │  k8rs could not write this to the audit log either.  │      │
+```
+
+Fifty columns, the same one row, in the same place — the quote above it, the
+explanation below it and the button are all identical to the box above. A
+reader who reaches this box is told plainly not to go looking.
+
 ## The object went away while the dialog was open
 
 The watch never stopped running behind the modal, so a dialog knows when the
@@ -1680,7 +1907,6 @@ deleted while you were typing its name
 │      │  Nothing was changed.                                │      │
 │      │                                                      │      │
 │      │                    [ esc dismiss ]                   │      │
-│      │                                                      │      │
 │      └──────────────────────────────────────────────────────┘      │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤

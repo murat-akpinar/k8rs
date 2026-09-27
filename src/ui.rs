@@ -294,8 +294,10 @@ const HINT_LINES: usize = 2;
 
 /// **The rows a nested box has between its own borders**, at the 80×24 floor this product is
 /// drawn to (`screens/widgets.md` § 5). § Restart's paused variant and § Drain both land on
-/// exactly this; it is what bounds what the cluster sent back in a `Refused` box, which is the one
-/// string in a dialog that came off the API.
+/// exactly this; it is what bounds what the cluster sent back in a `Refused` box — and being a
+/// ceiling that does not widen with the terminal is why *verbatim on screen* was never reachable
+/// there, so that box names whether **more** of the message exists instead ([`refused`],
+/// NOTES § D294 and its same-day correction).
 const MODAL_ROWS: usize = 13;
 
 /// The rows a typed-name field takes: its label, and the three the box around it draws
@@ -2011,8 +2013,21 @@ fn modal(frame: &mut Frame, body: Rect, open: &views::Modal, changing: bool, scr
     match open {
         views::Modal::Help => help(frame, body, changing, screen),
         views::Modal::Confirm(dialog) => confirm(frame, body, dialog, screen),
-        views::Modal::Refused { sent, fault, said } => {
-            refused(frame, body, *sent, fault, said.as_deref(), screen);
+        views::Modal::Refused {
+            sent,
+            fault,
+            said,
+            recorded,
+        } => {
+            refused(
+                frame,
+                body,
+                *sent,
+                fault,
+                said.as_deref(),
+                *recorded,
+                screen,
+            );
         }
         views::Modal::Gone { object, recreated } => gone(frame, body, object, *recreated, screen),
         // **Nothing to pick is the box not being drawn at all** (`screens/detail.md` § The pod
@@ -2429,9 +2444,12 @@ fn confirm(frame: &mut Frame, body: Rect, dialog: &views::Dialog, screen: &Scree
 ///
 /// **Two strings in this box came off the API, and both are bounded at draw time**:
 /// `k8s::FREE_TEXT` allows 4096 bytes and a `fieldValidation=Strict` rejection hands back the
-/// object that was sent (NOTES § D217), which is eighty wrapped lines into a box with room for
-/// four. [`cut`] and [`marked`] mark what they dropped, which is what keeps this out of
-/// `screens/widgets.md` § 7's ban on a silent truncation.
+/// object that was sent (NOTES § D217), which is eighty wrapped lines into a box with room for a
+/// handful — how many is arithmetic per state and is counted below, never a number written here.
+/// [`marked`] leaves [`CUT`] where it dropped the rest, which is what keeps this out of
+/// `screens/widgets.md` § 7's ban on a silent truncation — and where it dropped anything at all,
+/// one line under the quote says whether more of the message exists and where (NOTES § D294 and
+/// its same-day correction, which found *the full message* false by two routes).
 ///
 /// **The second one is new and the doc here said *the one string* until 2026-09-20**: state 1b's
 /// second reading draws `ops::Outcome::said` as the explanation line rather than as a quote
@@ -2450,6 +2468,7 @@ fn refused(
     sent: bool,
     fault: &Fault,
     said: Option<&str>,
+    recorded: bool,
     screen: &Screen,
 ) {
     let columns = room(DISMISS_BOX);
@@ -2509,7 +2528,20 @@ fn refused(
         (Fault::Refused | Fault::Rejected | Fault::Expired | Fault::Gone, false) => (
             "The cluster refused this",
             "Nothing was changed.",
-            "This is the check that runs before the real change — it stopped this one.",
+            // **One row where it used to take two, and the row bought goes to the cluster's
+            // words** (`screens/dialogs.md` § The quote's last row says where the rest is,
+            // NOTES § D294's correction). The old wording was 73 columns against the 52 this box
+            // has, so 1c alone offered its quote four rows where states 2 and 3 offered five — and
+            // the message the report measured needs exactly five.
+            //
+            // **`k8rs's check` and not `the check`, which is the whole point of the sentence**
+            // (`k8s-admin`, 2026-09-27; the page's own idiom for this, as in `k8rs's own call`).
+            // *The check* is a definite reference with no antecedent anywhere earlier in this box,
+            // and two rows above it the quote has a `ValidatingAdmissionPolicy` *denying a
+            // request* — so the nearest thing a reader could take *the check* for is the cluster's,
+            // in the one box whose job is saying who did what. 49 of the 52 columns; the closing
+            // `one` went because keeping both `own` and `one` runs to 53.
+            "k8rs's check before the real change stopped this.",
             true,
         ),
         (fault, true) if answered(*fault) => (
@@ -2567,7 +2599,29 @@ fn refused(
         let heading = margined("What the cluster sent back:", columns, text);
         // The quote's own blank row under it is the `1`.
         let left = MODAL_ROWS.saturating_sub(lines.len() + heading.len() + 1 + tail.len());
-        let quoted = cut(said, columns.saturating_sub(2), left);
+        let wide = columns.saturating_sub(2);
+        // **The cut is detected arithmetically and never from [`CUT`] on the last row**
+        // (`screens/dialogs.md` § The quote's last row says where the rest is, NOTES § D294), and
+        // a mark read off the text is wrong in *both* directions. The string being measured is the
+        // cluster's own free text, so an API message ending in an ellipsis of its own would answer
+        // `ends_with(CUT)` yes with nothing dropped — a row pointing away from a message already
+        // whole on the screen. And the one string that really did arrive shortened answers **no**:
+        // `k8s::text` appends `… (shortened by k8rs)`, which ends in a closing parenthesis, so the
+        // mark would miss the 4096-byte case this row exists for (`tester`, 2026-09-27). What the
+        // wrap produced against what the box kept cannot be wrong either way.
+        let wrap = wrapped(said, wide);
+        let over = wrap.len() > left;
+        // **The pointer's row comes out of the quote's own budget and there is no branch in it**
+        // (that page's *one rule computes the row this line takes*): the quote is wrapped whole
+        // first, and only a wrap that runs past `left` gives up one of its own rows — `left - 1`,
+        // never `left` itself. A wrap that fits is drawn whole and this row draws nothing.
+        //
+        // **There is always a row to take, and that is provable rather than assumed.** Every
+        // explanation a quote-bearing state draws is a one-row literal in the match above, so
+        // `tail` is 3 and `left` is 5 in all three of them — well clear of [`marked`]'s own floor
+        // of one marked row, where a budget of nothing would start costing the quote everything.
+        // The arm that draws an API string as its explanation is 1b's, and 1b carries no quote.
+        let quoted = marked(wrap, wide, left.saturating_sub(usize::from(over)));
         // **The heading goes with the quote and never stands over an empty space**, and so does
         // the blank that closes it: one blank row between the outcome and the explanation whether
         // or not a quote sits there, where two used to stack (`screens/dialogs.md` § The cluster
@@ -2575,6 +2629,34 @@ fn refused(
         if !quoted.is_empty() {
             lines.extend(heading);
             lines.extend(indent(quoted, "    ", dim));
+            // **Where the rest of the message is, in the box's own voice** — `theme::TEXT` and
+            // not the quote's `theme::DIM`, so nothing here can read as one more line the cluster
+            // sent. It names the audit log and not the path, which is drawn in full on the one
+            // screen whose reader needs it (`screens/states.md` § The audit log could not be
+            // opened).
+            //
+            // ***More*, never *the full message*, and `recorded` picks which of the two sentences
+            // says it** (`screens/dialogs.md` § The quote's last row says where the rest is,
+            // NOTES § D294's correction). Both halves of *the audit log holds the whole thing*
+            // were false: `k8s::message` already ran this string through `k8s::text` at
+            // `k8s::FREE_TEXT` and appended its own marker past it, so beyond 4096 bytes the
+            // audit line ends in that marker too — and `ops::Performed::recorded` is the write
+            // of the result line, the only one of the two that quotes `said` at all. A disk that
+            // fills between the two leaves this message nowhere, and *go and look* then sends the
+            // reader after something that was never written. **`more` stays true either way**:
+            // this row is drawn only where rows were dropped, so the audit copy is always longer
+            // than what the box kept, whether or not it is itself the whole thing.
+            if over {
+                lines.extend(margined(
+                    if recorded {
+                        "More of this message is in the audit log."
+                    } else {
+                        "k8rs could not write this to the audit log either."
+                    },
+                    columns,
+                    text,
+                ));
+            }
             lines.push(Line::raw(""));
         }
     }
@@ -6324,16 +6406,23 @@ fn wrapped(text: &str, columns: usize) -> Vec<String> {
 
 /// Text, wrapped and **cut at `most` lines with a visible `…`**.
 ///
-/// **Two callers and one rule.** A card's evidence is cut at [`EVIDENCE_LINES`], which is a
-/// measurement (`screens/alerts.md` § How wide a card is, and how tall); a `Refused` dialog's
-/// quoted cluster message is cut at whatever rows the box has left, which is arithmetic
-/// ([`refused`]). Both are the only unbounded thing on the screen they are drawn on — everything
-/// else there was written by a rule author, and these carry the cluster's own sentence verbatim
+/// **One rule, wherever it is called from, and the cap is the caller's own business.** Most hand
+/// over a measured constant — [`EVIDENCE_LINES`] for a card's evidence (`screens/alerts.md` § How
+/// wide a card is, and how tall), [`HINT_LINES`], [`SERVER_ROWS`], [`MATCH_LINES`] elsewhere — two
+/// hand over a bare `1`, where the thing being cut has exactly one row to live in, and one is
+/// arithmetic off the rows a box has left. What none of them varies is the rule: the loss is
+/// marked where it happened, because what is being cut is the only unbounded thing on that screen
 /// (NOTES § D37, § D217).
 ///
+/// **A `Refused` dialog's quote does not come through here**, and that is the one exception: it
+/// has to know whether the wrap overran before it can settle the budget it marks to, so it calls
+/// [`wrapped`] and [`marked`] itself ([`refused`], NOTES § D294).
+///
 /// The cut walks back to a whole word to make room for the marker, and steps by characters where
-/// there is no word boundary to find. The full text is one `⏎` away, which is what makes cutting
-/// it legitimate at all (`screens/widgets.md` § 7).
+/// there is no word boundary to find. **What makes the loss legitimate is the mark, and a route to
+/// the whole text only where one exists** — `screens/widgets.md` § 7 claims the `⏎` for three of
+/// its six back-cuts and not for the others, so a caller whose screen has no way back is bound by
+/// the mark alone.
 fn cut(text: &str, columns: usize, most: usize) -> Vec<String> {
     marked(wrapped(text, columns), columns, most)
 }

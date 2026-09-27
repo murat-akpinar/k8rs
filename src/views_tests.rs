@@ -3330,6 +3330,7 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
                     sent: false,
                     fault: crate::k8s::Fault::Rejected,
                     said: None,
+                    recorded: true,
                 }),
                 ..App::default()
             },
@@ -3572,6 +3573,7 @@ fn a_modal_keeps_its_own_closed_set_even_with_a_call_running_under_it() {
                 sent: true,
                 fault: crate::k8s::Fault::Rejected,
                 said: None,
+                recorded: true,
             },
             "esc dismiss  ⏎ open",
         ),
@@ -3641,6 +3643,7 @@ fn no_footer_is_wider_than_the_page_the_mockups_are_drawn_at() {
                 sent: false,
                 fault: crate::k8s::Fault::Rejected,
                 said: None,
+                recorded: true,
             }),
         ),
         (
@@ -4065,6 +4068,7 @@ fn a_refusal_reaches_no_footer_that_does_not_draw_the_key() {
                 sent: false,
                 fault: crate::k8s::Fault::Rejected,
                 said: None,
+                recorded: true,
             }),
         ),
         (
