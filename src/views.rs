@@ -2360,14 +2360,6 @@ impl Refused {
     /// word, and dropping the mark to protect the `?` clause would hide a refusal the login
     /// actually has. [`Self::default`] — nothing selected, nothing asked — is the one shape where
     /// an empty `resource` is right, and it marks nothing.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "built from `ops::may_i_in`'s answers, and no box wires that probe yet — \
-                      the console draws every key unmarked (NOTES § D229 ruling 4's fail-open)"
-        )
-    )]
     pub fn of(
         resource: &'static str,
         scale: [Option<&Verdict>; Self::SCALE_VERBS.len()],
@@ -2460,14 +2452,6 @@ pub fn picking(open: Detailing) -> bool {
 /// same rule read across a set: an operation the login cannot complete is not lit because most of
 /// what it needs was granted. An empty set — an operation with nothing asked — is lit, which is
 /// `any`'s own answer and is the *not asked* case above.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "private to `Refused::of`, and no box wires the `ops::may_i_in` probe it is \
-                  built from"
-    )
-)]
 fn refuses(answers: &[Option<&Verdict>]) -> bool {
     answers
         .iter()
@@ -2691,12 +2675,39 @@ impl Offer {
             // way a kind with no `/scale` already takes it off, so no verdict about it is claimed
             // and `?` says *not built yet* instead.
             //
-            // **`crate::ops::scalable` is still asked** — it is the answer this goes back to when
-            // the count step lands, and one word turns it back on.
-            scalable: SCALE_IS_BUILT
-                && crate::ops::scalable(kind).is_ok_and(|served| served.group == group),
-            restartable: crate::ops::restartable(kind).is_ok_and(|served| served.group == group),
+            // **[`Self::serves_scale`] is still asked** — it is the answer this goes back to when
+            // count step lands, and one word turns it back on.
+            scalable: SCALE_IS_BUILT && Self::serves_scale(group, kind),
+            restartable: Self::serves_restart(group, kind),
         }
+    }
+
+    /// **Whether `crate::ops::scale` serves the object at this address**, and
+    /// [`Self::serves_restart`] the same for `crate::ops::restart` — the (group, kind) pair
+    /// compared whole, which is
+    /// [`Self::act`]'s own paragraph above and the reason neither is a bare kind word.
+    ///
+    /// **They are `pub` and separate from [`Self::act`] because a second reader needs them and the
+    /// two may not disagree** (NOTES § D293): `crate::main`'s permission probe asks which questions
+    /// to put to the cluster *at all*, and an operation the selected kind does not support is
+    /// **withheld** — the key off the line, no verdict claimed — and never **refused**
+    /// ([`Refused`], `screens/help.md` § When a key is refused). Asking anyway drew `?` a clause
+    /// saying `r` was unavailable for want of `patch pods` on a bare Pod, whose footer carries no
+    /// `r` at all and which granting `patch pods` would not change.
+    ///
+    /// **[`SCALE_IS_BUILT`] is deliberately *not* folded in here and stays [`Self::act`]'s alone.**
+    /// That constant suppresses a key that exists; this answers whether the operation exists for
+    /// this kind. A probe that read the constant would have its *never asked* true for the wrong
+    /// reason — and wrong the day the constant flips, when what keeps a DaemonSet's `s` off the
+    /// line is this function and not that word.
+    pub fn serves_scale(group: &str, kind: &str) -> bool {
+        crate::ops::scalable(kind).is_ok_and(|served| served.group == group)
+    }
+
+    /// **Whether `crate::ops::restart` serves the object at this address** —
+    /// [`Self::serves_scale`]'s doc is the pair's.
+    pub fn serves_restart(group: &str, kind: &str) -> bool {
+        crate::ops::restartable(kind).is_ok_and(|served| served.group == group)
     }
 
     /// **Whether this line carries that key** — [`App::may_mutate`]'s last condition, and the whole

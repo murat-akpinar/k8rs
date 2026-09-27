@@ -7451,19 +7451,21 @@ fn mockup_paused() -> Vec<Vec<String>> {
     blocks
 }
 
-/// **Every kind an operation can be pointed at, singular and plural** — `src/main.rs`'s own
-/// `KINDS`, the closed set NOTES § D246 means by *literals in the driver*. Transcribed rather than
-/// imported because that list is `dev-core`'s and goes away at Phase 12; the singular is what
+/// **Every kind an operation can be pointed at, singular and plural** — `crate::KINDS`, the closed
+/// set NOTES § D246 means by *literals in the driver*. The singular is what
 /// [`every_clause_names_the_plural_its_own_operation_would_send`] hands `ops`, and the plural is
 /// what the column budget is measured over.
-const KINDS: [(&str, &str); 6] = [
-    ("deployment", "deployments"),
-    ("statefulset", "statefulsets"),
-    ("daemonset", "daemonsets"),
-    ("replicaset", "replicasets"),
-    ("pod", "pods"),
-    ("node", "nodes"),
-];
+///
+/// **Read off that table rather than transcribed beside it, which it was until the `may_i_in` box**
+/// (NOTES § D292 ruling 3). The transcription's reason was *that list is `dev-core`'s and goes away
+/// at Phase 12*, and neither half survived that phase — `main.rs` is `dev-ui`'s from Phase 12 and
+/// the table outlived the headless driver above it. What reading it buys is the tie that test was
+/// written to want: `crate::Kind::plural` is the word the console now hands
+/// `views::Refused::resource`, so the assertion is against the word actually drawn and not against
+/// a copy of it.
+fn kinds() -> [(&'static str, &'static str); 6] {
+    crate::KINDS.map(|kind| (kind.singular, kind.plural))
+}
 
 /// A refusal for each of the three keys, from the one answer that may mark one — every permission
 /// the operation needs refused at once, which is the shape the drawn row is the same for.
@@ -7568,18 +7570,21 @@ fn each_refused_row_answers_only_for_its_own_key() {
 /// **The body stays sixteen rows and every row stays inside the frame, for every kind and every
 /// combination** (`screens/help.md`'s own count, `screens/widgets.md` § 1's budget).
 ///
-/// **The longest plural is what decides it**, which is why every entry of [`KINDS`] is fed and
-/// not just the `deployments` the mockup happens to draw. `s` and `r` are **tied**, not one
-/// tighter than the other — both are 65 columns plus the plural — so `statefulsets` puts both at
-/// 77 against the 78 a body row has at the floor: **one column of headroom** over the six kinds
-/// that ship, and **13 columns is the longest plural that fits at all**. Those boundaries are
-/// asserted below rather than left to this comment, because a number in a doc comment is what the
-/// next person builds on — and this comment's own first draft called `s` the tightest of the
-/// three, which it never was.
+/// **The longest plural is what decides it**, which is why every entry of [`kinds`] is fed and not
+/// just the `deployments` the mockup happens to draw. **`r`'s refused row is the tightest and `s`
+/// has no clause at all** — that row carries the fixed *not built yet* sentence in every state, 68
+/// columns whatever is selected. Counted by `len()` against the landed literals rather than
+/// estimated: `r` is **66 columns plus the plural** and `ctrl-d` 62, so `statefulsets` — the
+/// longest plural `restart` names — puts `r` on **78 exactly**, the 78 a body row has at the floor,
+/// with **no column to spare**, and **12 columns is the longest plural that fits at all**. Those
+/// boundaries are asserted below rather than left to this comment, because a number in a doc
+/// comment is what the next person builds on — and this comment has now been wrong twice: once
+/// calling `s` the tightest of the three, and once carrying the one column of headroom that `no`
+/// spent (NOTES § D293).
 #[test]
 fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
     let mut seen = 0;
-    for (_, resource) in KINDS {
+    for (_, resource) in kinds() {
         for scale in [false, true] {
             for restart in [false, true] {
                 for delete in [false, true] {
@@ -7609,11 +7614,16 @@ fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
     }
     assert_eq!(seen, 48, "a kind or a combination stopped being measured");
 
-    // **The ceiling from both sides, and what a plural off discovery would do.** `deviceclasses`
-    // (13) is the longest plural that fits; `storageclasses` (14) is the shortest that does not;
-    // `customresourcedefinitions` (25) draws 90. All three are real API plurals and none is a kind
-    // `s` can be pointed at — which is the point of feeding them here rather than to [`KINDS`]:
-    // what stops a row overflowing is the closed set in the driver, not the arithmetic.
+    // **The ceiling from both sides, and what a plural off discovery would do.** `clusterroles`
+    // (12) is the longest plural that fits; `deviceclasses` (13) is the shortest that does not;
+    // `customresourcedefinitions` (25) draws 91. All three are real API plurals and none is a kind
+    // `s` or `r` can be pointed at — which is the point of feeding them here rather than to
+    // [`kinds`]: what stops a row overflowing is the closed set in the driver, not the arithmetic.
+    //
+    // **The two boundaries moved one column each when `no` landed** (NOTES § D293) and they are
+    // re-derived here, not adjusted: `statefulsets` and `clusterroles` are both 12 and both land on
+    // the ceiling exactly, which is why the six shipped kinds now have **zero** headroom rather
+    // than one and why the assertion below is the only thing that would catch a plural growing.
     let widest = |resource| {
         key_map(HELP, refusing(true, true, true, resource), false, None)
             .lines()
@@ -7622,35 +7632,43 @@ fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
             .expect("a body with rows in it")
     };
     assert_eq!(
-        widest("deviceclasses"),
+        widest("clusterroles"),
         usize::from(MIN_WIDTH - 2),
-        "13 columns is no longer the longest plural that fills the body exactly"
+        "12 columns is no longer the longest plural that fills the body exactly"
     );
     assert_eq!(
-        widest("storageclasses"),
+        widest("deviceclasses"),
         usize::from(MIN_WIDTH - 1),
-        "14 columns is no longer the shortest plural that overflows by one"
+        "13 columns is no longer the shortest plural that overflows by one"
     );
     assert_eq!(
         widest("customresourcedefinitions"),
-        90,
-        "the longest plural in a stock cluster no longer draws 90"
+        91,
+        "the longest plural in a stock cluster no longer draws 91"
     );
 }
 
 /// **The word the clause prints is the word the probe would send** — for every kind an operation
 /// can be pointed at, the plural in the drawn row is the one `ops` derives from that kind's own
 /// `ApiResource`, never a word this layer spelled (`k8s-admin`, 2026-09-12). Four hand-kept lists
-/// of these kinds exist — `ops`'s derived one, `main.rs`'s singulars, [`KINDS`] here and whatever
-/// Phase 12 passes — and nothing but this tied the word on screen to the word on the wire, so
-/// `""` was only the smallest wrong value: `statefulsets` under a selected Deployment is another,
-/// and no type catches either.
+/// of these kinds existed — `ops`'s derived one, `main.rs`'s [`crate::KINDS`], a transcription
+/// here, and whatever the console would come to pass — and nothing but this tied the word on screen
+/// to the word on the wire, so `""` was only the smallest wrong value: `statefulsets` under a
+/// selected Deployment is another, and no type catches either.
 ///
-/// **The tie is through [`KINDS`] and is transitive, which is the whole of what is available
+/// **Three of those four are now one list, which is what the `may_i_in` box closed** (NOTES § D292
+/// ruling 3): `crate::KINDS` gained the plural, the console passes that field, and this test reads
+/// it — so the driver's singulars, the transcription here and *what the console passes* are one
+/// place. What is still uncoupled is `ops`'s own derived word, and that is the tie asserted below.
+///
+/// **The tie is through [`crate::KINDS`] and is transitive, which is the whole of what is available
 /// here.** `ApiResource::plural` is a `String` and [`Refused::of`] takes a `&'static str`, so the
-/// drawn clause cannot literally be fed `ops`'s own word; both are checked against [`KINDS`]'s
-/// instead. What that catches is the list drifting — which is the one thing four uncoupled copies
-/// of these kinds does. What it cannot catch is Phase 12 handing one call the wrong kind's plural.
+/// drawn clause cannot literally be fed `ops`'s own word; both are checked against
+/// [`crate::KINDS`]'s instead. What that catches is the list drifting — which is the one thing
+/// uncoupled copies of these kinds do. What it still cannot catch is the console passing the plural
+/// of a kind other than the selected one — `main_tests.rs`'s
+/// `a_rules_review_marks_the_keys_this_login_may_not_use_before_either_is_pressed`, which presses a
+/// cursor onto one card and reads the word back, and not this test's claim.
 ///
 /// **`ctrl-d`'s row is not covered and cannot be from here.** The only place `delete` derives a
 /// plural is `ops::removal`, which is private in a frozen file; making it `pub` for a test is not
@@ -7666,7 +7684,7 @@ fn no_refused_row_outgrows_the_body_for_any_kind_it_can_name() {
 #[test]
 fn every_clause_names_the_plural_its_own_operation_would_send() {
     let mut seen = 0;
-    for (kind, plural) in KINDS {
+    for (kind, plural) in kinds() {
         for (operation, resource, row, names) in [(
             "restart",
             crate::ops::restartable(kind),
@@ -8607,6 +8625,15 @@ fn help_pauses_the_four_keys_a_running_call_refuses() {
 /// `ctrl-d` are inactionable for the wait's reason alone, whatever a probe would otherwise say
 /// about any one of them — so the map is the same sixteen rows for all eight combinations, and
 /// `no` (a permission this login lacks) never lands beside `paused` (a wait).
+///
+/// **The fragments are built from the same constants [`key_map`] interpolates, and that is a fix
+/// rather than a flourish** (NOTES § D293). Written out by hand they went stale twice with no
+/// word said:
+/// `"(scale — "` has named nothing since `s`'s row took its fixed sentence on 2026-09-24, and
+/// `"(delete "` stopped matching the moment `no` opened that bracket — two of the three conjuncts
+/// were unfailable, in a test whose whole subject is that a clause must not appear. **`s` has no
+/// third fragment because it has no clause in any state**; what covers its row is the `assert_eq!`
+/// above, which compares the whole map.
 #[test]
 fn a_call_in_flight_draws_no_permission_clause_on_any_row() {
     let expected = key_map(HELP, Refused::default(), true, None);
@@ -8620,10 +8647,10 @@ fn a_call_in_flight_draws_no_permission_clause_on_any_row() {
                     None,
                 );
                 assert_eq!(drawn, expected, "s {scale} · r {restart} · ctrl-d {delete}");
+                let restarts = format!("· no {}", Refused::RESTART_VERBS.join("+"));
+                let deletes = format!("(no {}", Refused::DELETE_VERBS.join("+"));
                 assert!(
-                    !drawn.contains("(scale — ")
-                        && !drawn.contains("rollout restart — ")
-                        && !drawn.contains("(delete "),
+                    !drawn.contains(&restarts) && !drawn.contains(&deletes),
                     "a permission clause drew over the wait: {drawn}"
                 );
                 for line in drawn.lines() {

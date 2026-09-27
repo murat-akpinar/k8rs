@@ -5694,12 +5694,28 @@ const OPERATIONS: [Operation; 3] = [
 /// **This is not invariant 12's per-kind code and it is not the browser.** The browser reads its
 /// kinds off discovery and `k8s::kind_named` resolves a word against them — which needs a cluster,
 /// and this driver refuses a line before it dials one. What is written down here is NOTES
-/// § Operations' *Applies to* column, in the file that disappears at Phase 12; the operations
-/// themselves resolve the kind against `k8s::Browsable`, whose `namespaced` is the cluster's own
-/// answer to the same question.
+/// § Operations' *Applies to* column; the operations themselves resolve the kind against
+/// `k8s::Browsable`, whose `namespaced` is the cluster's own answer to the same question.
+///
+/// **The console reads it too, which it did not when this table was written.** [`refusals`] needs
+/// the API plural of the selected object's kind as a `&'static str` and this is the one table that
+/// already holds those six kinds as literals ([`Kind::plural`], NOTES § D292 ruling 3) — so the
+/// table outlives the headless driver above it, and the sentence that said it *disappears at Phase
+/// 12* was true of neither half by the time that phase closed.
 struct Kind {
     /// The word a manifest spells, and the one the sentences quote.
     singular: &'static str,
+    /// **The word the API path spells and a `Role`'s `resources:` list spells** — what
+    /// `ops::Asking::resource` asks about and what `views::Refused::resource` draws ([`refusals`],
+    /// NOTES § D292 ruling 3).
+    ///
+    /// **Written down rather than derived, and that is what [`views::Refused::resource`]'s type
+    /// costs**: it is a `&'static str`, because every word `?` draws is k8rs's own and never one
+    /// the API handed back (NOTES § D246) — so the two ways to feed it are a literal and a leak,
+    /// and a leak drops invariant 9 and the help body's row budget together (NOTES § D261 ruling
+    /// 10). [`known_kind`] derived it as *the singular with an `s`* until this box and now reads it
+    /// here, so the rule is written once.
+    plural: &'static str,
     /// `kubectl`'s short name for it, because `deploy/web` is what an operator's hands type.
     short: &'static str,
     /// Whether objects of this kind live in a namespace — the two namespace refusals are this and
@@ -5714,31 +5730,37 @@ struct Kind {
 const KINDS: [Kind; 6] = [
     Kind {
         singular: "deployment",
+        plural: "deployments",
         short: "deploy",
         namespaced: true,
     },
     Kind {
         singular: "statefulset",
+        plural: "statefulsets",
         short: "sts",
         namespaced: true,
     },
     Kind {
         singular: "daemonset",
+        plural: "daemonsets",
         short: "ds",
         namespaced: true,
     },
     Kind {
         singular: "replicaset",
+        plural: "replicasets",
         short: "rs",
         namespaced: true,
     },
     Kind {
         singular: "pod",
+        plural: "pods",
         short: "po",
         namespaced: true,
     },
     Kind {
         singular: "node",
+        plural: "nodes",
         short: "no",
         namespaced: false,
     },
@@ -5753,18 +5775,19 @@ fn operation_named(word: &str) -> Option<&'static Operation> {
 ///
 /// **Named apart from `k8s::kind_named` on purpose.** That one resolves a word against what
 /// discovery said the cluster serves and is the answer the operations themselves will use; this
-/// one is six literals in the file that goes away at Phase 12. One word for both would be two
-/// answers to one question under one name.
+/// one is [`KINDS`]' six literals. One word for both would be two answers to one question under one
+/// name.
 ///
 /// **Matched in lower case for `k8s::kind_named`'s own reason**: `kubectl get Pod` works, and a
 /// reader who spells the kind the way every manifest does is not making a mistake. The plural is
-/// the singular with an `s`, which is true of all six and is not a general rule — the general one
-/// is discovery's, and it is what the operations themselves will use.
+/// [`Kind::plural`] and not the singular with an `s` after it, which is what this read until the
+/// `may_i_in` box needed the word itself — *a plural is a spelling and not a rule* is discovery's
+/// answer, and it is what the operations themselves use.
 fn known_kind(word: &str) -> Option<&'static Kind> {
     let word = word.to_lowercase();
-    KINDS.iter().find(|kind| {
-        word == kind.singular || word == kind.short || word.strip_suffix('s') == Some(kind.singular)
-    })
+    KINDS
+        .iter()
+        .find(|kind| word == kind.singular || word == kind.short || word == kind.plural)
 }
 
 /// **The usage `k8rs ops` prints**, built from [`OPERATIONS`] and [`KINDS`] so neither a fourth
@@ -7392,9 +7415,14 @@ fn ending(performed: &ops::Performed) -> Ended {
 // `Console<'a>`, never `Console`.
 //
 // **What is not wired yet, said here rather than left to be found**: the browser's `Table` fetch
-// (`k8s::Browsing`), the four detail reads and the log stream, and the `may_i_in` permission probe.
-// Each has a slot the frame already fills honestly — `Pane::Loading`, `Refused::default` — and each
-// is a box of its own.
+// (`k8s::Browsing`), and the four detail reads and the log stream. Each has a slot the frame
+// already fills honestly — `Pane::Loading` — and each is a box of its own.
+//
+// **The `may_i_in` probe is wired and was the third of those** ([`refusals`], [`permitted`],
+// `Console::permits`): the marks it draws are `r no restart` on the footer and the *why not* clause
+// on `?`'s `r` and `ctrl-d` rows. Two halves of it are deliberately still out and are not slots
+// waiting to be filled — a **Node**'s `ctrl-d`, which no rules review can answer (NOTES § D261
+// ruling 10), and `s`, which is withheld before any permission is asked (`views::SCALE_IS_BUILT`).
 
 /// **How long a burst of watch events may collect before the screen catches up** — invariant 7's
 /// *"coalesce ~100ms during storms"*, `screens/widgets.md` § 6's *"a rollout that restarts 200 pods
@@ -7407,6 +7435,35 @@ fn ending(performed: &ops::Performed) -> Ended {
 /// the frame lands at most this far behind and the last event of a burst is inside it by
 /// construction.
 const COALESCE: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// **How long one `SelfSubjectRulesReview` may be out before k8rs stops waiting for it**
+/// ([`permitted`]).
+///
+/// **It bounds a slot and not a frame.** The probe is polled in [`pump`]'s `select!` beside the
+/// watches, so nothing on screen waits for it either way; what a deadline buys is the *next*
+/// namespace's question, which a review that never comes back would otherwise hold the one slot
+/// against for the rest of the run.
+///
+/// **Ten seconds, which is `k8s::REPORT_FETCH`'s and `k8s::SERVING_PROBE`'s** — the same shape of
+/// question to the same API server, and no reason for a third number.
+const PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// **How many namespaces' permission answers are kept at once** ([`Console::permits`]).
+///
+/// **It bounds the *number* of entries and not the size of one**, which is a narrower claim than
+/// the security gate's *sizes are bounded* row: each `ops::Permits` holds a `Vec<ResourceRule>` the
+/// server decided the length of, and nothing here caps that. What it does close is unbounded
+/// **growth** — Alerts spans namespaces, so the key space is the cluster's and not k8rs's, and a
+/// session walking a long list of cards across a thousand namespaces would otherwise keep one rules
+/// list per namespace for the life of the run.
+///
+/// **Emptying it and starting again is the whole eviction policy, and the cost is all 256 and not
+/// one.** The namespace the cursor is on goes with them — measured, `tester` 2026-09-27: a mark
+/// reads `true → false` for exactly one frame, with [`Console::wondering`] `Some` again on that
+/// same frame and the review back before the next one. Self-healing, fail open while it heals, and
+/// it takes a 256-namespace session to reach at all; what a least-recently-used policy would buy is
+/// that one frame, and it is `backlog.md`'s.
+const PERMITS_KEPT: usize = 256;
 
 /// **One analysis pane: what the sidebar calls it, and what produces it** — a name because the
 /// tuple is otherwise the widest type in this file and `clippy::type_complexity` is right about it.
@@ -7519,6 +7576,31 @@ struct Console<'a> {
     /// run-level state the console holds between calls, and `pump` already takes seven arguments,
     /// which is clippy's ceiling.
     carried: Option<Halt>,
+    /// **The connected session's client, kept for the one question a frame asks that the store
+    /// cannot answer** — `ops::may_i_in`, and `None` while nothing is connected ([`refusals`]).
+    ///
+    /// **A clone and not a borrow of `Cluster::session`, which is what makes the probe poll-able in
+    /// [`pump`]'s own `select!`**: the future has to outlive the frame that wanted it and may not
+    /// borrow the console it writes its answer into (NOTES § D232's shape, one size down).
+    client: Option<kube::Client>,
+    /// **What one `SelfSubjectRulesReview` answered, per namespace** (NOTES § D261 ruling 10, §
+    /// D23) — the cache is the ruling and not an optimisation: Alerts spans namespaces, so a probe
+    /// per cursor move is one review per row on a list of hundreds.
+    ///
+    /// **Emptied with the connection** ([`switched`]): a listed rule is a fact about one cluster's
+    /// RBAC and about one login, and both change under `X`.
+    ///
+    /// **A namespace that timed out is absent rather than remembered as unanswerable** — there is
+    /// nothing to remember, since `ops::may_i_in` never fails and a `Verdict::CouldNotTell` it
+    /// *did* answer with is cached like any other (NOTES § D229 ruling 4: neither marks a key).
+    permits: std::collections::BTreeMap<String, ops::Permits>,
+    /// **The namespace the last frame wanted permissions for and had none for**, or `None`
+    /// ([`refusals`]) — drained by [`pump`], which is the only place that can `await` one.
+    ///
+    /// **Overwritten every frame and never accumulated**: a cursor that moved on before the review
+    /// went out has withdrawn the question, and a list of namespaces nobody is looking at any more
+    /// is a queue of round trips with no reader.
+    wondering: Option<String>,
     /// **Whether a stop can be come back from — `SIGCONT` armed** ([`watching_for_stops`]).
     ///
     /// **`false` makes `ctrl-z` do nothing at all, and that is the ruling** (PM, 2026-09-24): the
@@ -7937,6 +8019,12 @@ async fn console(opening: &Opening<'_>, keyboard: bool) -> Option<String> {
         opened: None,
         offer: views::Offer::Nothing { switch: false },
         carried: None,
+        // **Nothing to ask and nobody to ask it of** — both arrive with the first connection
+        // ([`connected`]), and a run that never gets one marks no key, which is the fail-open state
+        // every other cause of *no answer* already draws (NOTES § D229 ruling 4).
+        client: None,
+        permits: std::collections::BTreeMap::new(),
+        wondering: None,
         // **Nothing is armed yet**, and nothing can press a key before the channel below exists.
         resumable: false,
     };
@@ -8240,6 +8328,9 @@ async fn connected(
     // (`k8s::Session::context`'s own doc).
     console.connection = views::Connection::Live(session.context.clone());
     console.unconnected = false;
+    // **The permission probe's own client** ([`Console::client`], [`refusals`]) — cloned here
+    // rather than reached for through `Cluster::session`, which [`pump`] is not handed.
+    console.client = Some(session.client.clone());
     // **The old cluster's lines go here and not on `⏎`** (NOTES § D280 item 2,
     // `screens/context.md` § When the new cluster does not work): emptied when the switch was
     // *asked for*, the strip drew blank for as long as `connect_with` was out — seconds, on an SSO
@@ -8337,6 +8428,12 @@ async fn switched<B: ratatui::backend::Backend>(
     console.clock = None;
     console.kinds = Vec::new();
     console.unconnected = false;
+    // **The old cluster's answers about what this login may do go with the old cluster**
+    // ([`Console::permits`]): the rules are that cluster's RBAC, and the client is that cluster's
+    // credential. A switch that then fails leaves both empty, which marks no key.
+    console.client = None;
+    console.permits.clear();
+    console.wondering = None;
     console.context = views::Stripped::of(&zone(asked.to.as_deref(), namespace));
     // **Step 3's frame, drawn before the connect is awaited** — `ctx: staging · connecting…` over
     // the loading body `screens/states.md` already has. Nothing else draws while `connect_with` is
@@ -8879,6 +8976,20 @@ async fn pump<B: ratatui::backend::Backend>(
     // § Still loading is a screen and not a wait, so it is drawn before the first LIST returns.
     let mut owing = Owing::default();
     owing.now();
+    // **The permission review that is out, if one is** — the namespace it was asked about beside
+    // the future, so the answer cannot be filed under a namespace the cursor has since left
+    // ([`Console::permits`], [`permitted`]).
+    //
+    // **One slot, which is what makes this one round trip per namespace and not one per frame**: a
+    // second question is not asked while the first is out, and [`Console::wondering`] is re-set by
+    // every frame that still wants one.
+    //
+    // **A local and not a [`Console`] field, which is what makes [`switched`]'s clear complete.** A
+    // switch leaves this frame, so a review already on the wire for the *old* cluster's client is
+    // dropped with it. Moved onto `Console` — the obvious tidying — it would survive the switch and
+    // file that answer into the new cluster's cache under a namespace name both clusters have
+    // (`default`, `kube-system`), and `switched`'s three-line clear would still look complete.
+    let mut probing: Option<(String, ProbeInFlight)> = None;
     loop {
         tokio::select! {
             // **Biased, and the order is the ruling**: a frame already owed goes out before more
@@ -8890,6 +9001,18 @@ async fn pump<B: ratatui::backend::Backend>(
                 owing = Owing::default();
                 if let Err(said) = drawn(terminal, console, store, at) {
                     return Halt::Failed(said);
+                }
+                // **The frame said which namespace it could not answer for, and this is the only
+                // place that can ask** — [`drawn`] is synchronous, so the want is left in a field
+                // and the review goes out here ([`refusals`], NOTES § D23).
+                if probing.is_none()
+                    && let Some(client) = console.client.clone()
+                    && let Some(namespace) = console.wondering.take()
+                {
+                    probing = Some((
+                        namespace.clone(),
+                        Box::pin(permitted(client, namespace)),
+                    ));
                 }
             }
             woke = keys.recv() => {
@@ -8966,6 +9089,31 @@ async fn pump<B: ratatui::backend::Backend>(
                 settled(console, performed);
                 running = None;
                 owing.now();
+            }
+            // **The permission review, polled the way the mutation above is** — out of the loop's
+            // own slot, so a cluster that is slow to answer *what may this login do* costs the
+            // screen nothing (NOTES § D229 ruling 4: a key is never dimmed on a probe that did not
+            // answer, and a frame is never held for one either).
+            answered = async {
+                match probing.as_mut() {
+                    Some((_, asking)) => asking.as_mut().await,
+                    None => std::future::pending().await,
+                }
+            }, if probing.is_some() => {
+                // **The slot is freed whatever the answer was**, so a review that timed out does
+                // not hold the next namespace's question against the rest of the run. Nothing is
+                // remembered for it and no frame is owed, so the retry rides the next frame
+                // something else owes — which bounds a cluster that will not answer to **one review
+                // per deadline** and not to one per frame. It is not *asked once*: on a cluster
+                // with traffic a watch event owes a frame inside [`COALESCE`], `wondering` is still
+                // set, and the question goes out again ten seconds later for as long as the cursor
+                // stays there.
+                if let Some((namespace, _)) = probing.take()
+                    && let Some(permits) = answered
+                {
+                    remember(&mut console.permits, namespace, permits);
+                    owing.now();
+                }
             }
             update = updates.merged.next(), if !updates.drained => {
                 match update {
@@ -9103,7 +9251,7 @@ fn drawn<B: ratatui::backend::Backend>(
         let keys: Vec<Option<&str>> = pods.iter().map(|id| Some(id.name.as_str())).collect();
         console.app.pods.follow(&keys);
     }
-    let screen = ui::Screen {
+    let mut screen = ui::Screen {
         depth: console.depth,
         vitals: vitals(!console.unconnected, snapshot.as_ref(), &troubles),
         context: console.context.clone(),
@@ -9119,8 +9267,9 @@ fn drawn<B: ratatui::backend::Backend>(
         kinds: &console.kinds,
         reports: &reports,
         log: console.log.lines(),
-        // **Nothing has asked `may_i_in` yet, and a probe that never answered marks no key**
-        // (NOTES § D229 ruling 4 — fail open). Wiring the probe is its own box.
+        // **Filled in below, after [`ui::offered`] has said whether a mark could be read at all** —
+        // unmarked here because `offered` reads this struct and a probe that never answered marks
+        // no key either way (NOTES § D229 ruling 4 — fail open).
         refused: views::Refused::default(),
         writes: console.writes,
         clock: console.clock.as_deref().map(views::Stripped::of),
@@ -9136,10 +9285,46 @@ fn drawn<B: ratatui::backend::Backend>(
             _ => &[],
         },
     };
+    // **A link that changed is a cluster that may have been re-granted while k8rs was not looking**
+    // ([`Console::permits`], `k8s-admin` 2026-09-27). The cache is otherwise emptied only by
+    // [`switched`], and a drop and recovery keeps the session — so an operator adding
+    // `delete deployments` to fix the very refusal the reader is looking at left `ctrl-d` reading
+    // refused for the rest of the run. **Only the screen was stale, never the behaviour**:
+    // `views::App::may_mutate` does not read `views::Refused`, so the key always worked.
+    //
+    // **Any transition and not just *back to `Live`***: one comparison, and the wrong direction
+    // costs a re-probe on a link that is already refusing every other question anyway.
+    //
+    // **What this closes is the link-drop family and not staleness in general, measured rather
+    // than hoped.** Two shapes are left open and neither moves [`Console::link`], so neither
+    // reaches this line: a **partial** watch drop, where `linked` needs *every* watch in trouble
+    // and the failures interleave inside [`COALESCE`] — a relay cut of all six connections never
+    // produced `ui::Link::Lost` at all (NOTES § D285 ruling 4); and a **review** that fails while
+    // the link stays `Live`, where a `500` on the endpoint caches a `Verdict::CouldNotTell` that
+    // is never asked again (`tester`, 2026-09-27: `wondering` `None` across three frames). Both
+    // fail open, and the re-ask budget they want is `backlog.md`'s — not a clock invented here.
+    if console.link != screen.link {
+        console.permits.clear();
+    }
     // **What this frame offered, kept for the keys that answer it** ([`Console::offer`]): the value
     // the footer was drawn from *is* the value a mutating key is checked against, which is
     // `ui::offered`'s own reason for being `pub`.
     console.offer = ui::offered(&console.app, &screen);
+    // **The permission marks, read off the offer that was just drawn from** ([`refusals`], NOTES §
+    // D292 ruling 2): `views::Offer::Act` is the only arm a mark reaches — the only footer that
+    // spells `no` beside a key, and the only state in which `ui::help` draws a permission clause
+    // rather than one run-level reason over all three keys. So gating on it is what keeps a review
+    // off the wire on a run whose answer nothing could read, without re-deriving `ui::withheld`'s
+    // three causes here.
+    //
+    // **`offered` does not read `Screen::refused`**, so filling the field after it changes nothing
+    // about the value just stored — and both are in front of the one `terminal.draw` below.
+    let (refused, wondering) = match console.offer {
+        views::Offer::Act { .. } => refusals(console, carded_pane(&alerts)),
+        _ => (views::Refused::default(), None),
+    };
+    screen.refused = refused;
+    console.wondering = wondering;
     // **What this frame said the connection was doing, kept for the key that answers it**
     // ([`Console::link`]): `X` opens the picker the header just described.
     console.link = screen.link;
@@ -9170,6 +9355,161 @@ fn carded_pane(alerts: &views::Pane<Vec<views::Card>>) -> &[views::Card] {
         views::Pane::Loading => &[],
     }
 }
+
+/// **Which mutating keys this login may not use on the selected object, and the namespace still to
+/// be asked about** — the wire between `ops::may_i_in` and the mark on a key
+/// (NOTES § D23, § D292, `screens/help.md` § *When a key is refused*).
+///
+/// **It answers `Refused::default` for every way the question cannot be put, and that is the fail
+/// open** (NOTES § D229 ruling 4): nothing selected, a kind outside [`KINDS`], a browser row, and —
+/// the one the ruling names — a **cluster-scoped** object.
+///
+/// **The browser is two separate refusals and only one of them expires.** [`selected`] answers
+/// `None` off any view but Alerts, which is that function's own guard and stays; and `Offer::Act`
+/// is unreachable from `View::Resources` anyway, because [`drawn`] hands `&UNOPENED` and a
+/// `Loading` pane answers `Offer::Nothing`. The second goes away the day the `Table` fetch lands
+/// and the first does not, so a browser row still reaches nothing here for a reason that has
+/// nothing to do with this box.
+///
+/// **The cluster-scoped refusal is a Node.** `ops::Permits::may` sends a question with no namespace
+/// to `Verdict::CouldNotTell` by construction, so a selected Node's `ctrl-d` can never be marked
+/// off a rules review; it needs `ops::may_i`, one question at a time, and that is not this box
+/// (NOTES § D261 ruling 10). Nothing is asked for it here, so nothing is spent finding out again
+/// per frame.
+///
+/// **The caller gates it on `views::Offer::Act`, which is the only reason this asks nothing about
+/// the run** (NOTES § D292 ruling 2, [`drawn`]): `ui::offered` already folds *is a write possible
+/// at all in this run*, *is the link answering* and *can the clock be trusted* into that arm, so a
+/// dead-writes run, a lost link, an expired login and a skewed clock all answer `Offer::Move` and
+/// never reach here. Under any of them `ui::help` heads *Changing things* with the reason and draws
+/// no permission clause at all, and the footer names no mutating key — so a review sent there is a
+/// round trip whose answer nothing on screen could read. **`App::changing` is the one state it does
+/// not fold in**: a mutation in flight leaves `Offer::Act` standing, so one review can go out whose
+/// answer that frame cannot draw. It is cached when it lands, so the cost is one round trip and not
+/// one per frame.
+///
+/// **An operation the selected kind does not support is never asked about, and that is the whole of
+/// `Refused::of`'s `Option` slots** (`views::Offer::serves_scale`,
+/// `views::Offer::serves_restart`, NOTES §
+/// D293): a kind with no `/scale` and no rollout is **withheld** — the key off the line — and never
+/// **refused**, so no verdict about it may exist to be drawn. Asking anyway drew `?` a clause
+/// telling the reader `r` was unavailable for want of `patch pods` on a bare **Pod**, the commonest
+/// card this product has, whose footer carries no `r` at all and for which granting `patch pods`
+/// would change nothing.
+///
+/// **`scale` is gated the same way even though `s` is drawn nowhere**, which makes the type's
+/// contract true rather than accidentally true — and `views::SCALE_IS_BUILT` is not the thing
+/// holding it: the day that constant flips, what keeps a DaemonSet's `s no scale` off the footer is
+/// `views::Offer::serves_scale`, exactly as it is for `r` today.
+///
+/// **`delete` is asked for every kind that gets this far**, because `ops::delete` serves all six of
+/// [`KINDS`] and refuses none (NOTES § D225 ruling 3) — the same reason [`wanting`] reads
+/// `views::Op::Delete` for it rather than `Restart`'s shape.
+///
+/// **The question names the object** (`ops::Asking::name`), which is what makes a `resourceNames`
+/// rule answerable exactly instead of only in the reader's favour: a `Role` limited to
+/// `resourceNames: ["web"]` refuses `ctrl-d` on `api`, and that is a mark the reader can act on.
+fn refusals(console: &Console<'_>, cards: &[views::Card]) -> (views::Refused, Option<String>) {
+    let nothing = (views::Refused::default(), None);
+    let Some(card) = selected(console, cards) else {
+        return nothing;
+    };
+    let (group, singular) = ui::addressed(&card.owner.kind);
+    let Some(kind) = known_kind(singular) else {
+        return nothing;
+    };
+    let Some(namespace) = card.owner.namespace.as_deref() else {
+        return nothing;
+    };
+    let Some(permits) = console.permits.get(namespace) else {
+        return (views::Refused::default(), Some(namespace.to_owned()));
+    };
+    let asking = |verb: &'static str, subresource: Option<&'static str>| ops::Asking {
+        verb,
+        group,
+        resource: kind.plural,
+        subresource,
+        name: Some(&card.owner.name),
+        namespace: Some(namespace),
+    };
+    // **One array per operation, the length of that operation's own permission list** — the arity
+    // is `views::Refused::of`'s to police, which is why the answers are collected with `map` over
+    // the constant rather than written out (that function's own doc: *the count is the type*).
+    //
+    // **`"scale"` below is the subresource path and not [`SCALE`] the operation word**, which
+    // happen to be spelled alike: this one is the API's, `<plural>/scale`, and a rule granting the
+    // parent does not grant it (`ops::Asking::subresource`, measured against a
+    // `SubjectAccessReview` in NOTES § D230).
+    let scale = views::Offer::serves_scale(group, singular)
+        .then(|| views::Refused::SCALE_VERBS.map(|verb| permits.may(&asking(verb, Some("scale")))));
+    let restart = views::Offer::serves_restart(group, singular)
+        .then(|| views::Refused::RESTART_VERBS.map(|verb| permits.may(&asking(verb, None))));
+    let delete = views::Refused::DELETE_VERBS.map(|verb| permits.may(&asking(verb, None)));
+    (
+        views::Refused::of(
+            kind.plural,
+            answered(&scale),
+            answered(&restart),
+            delete.each_ref().map(Some),
+        ),
+        None,
+    )
+}
+
+/// **What an operation nobody asked about has to say, which is nothing** — `views::Refused::of`'s
+/// `Option` slots, filled only where the question went out (NOTES § D293).
+///
+/// **`None` is not a verdict and may not become one.** It is *not asked*, which
+/// `views::Refused::of` draws exactly as a yes: an operation the selected kind does not support is
+/// withheld, and a key that is off the line may not also carry a reason for being off it.
+fn answered<const N: usize>(asked: &Option<[ops::Verdict; N]>) -> [Option<&ops::Verdict>; N] {
+    match asked {
+        Some(answers) => answers.each_ref().map(Some),
+        None => [None; N],
+    }
+}
+
+/// **One namespace's permissions, bounded** ([`PROBE_DEADLINE`], [`Console::permits`]).
+///
+/// **`None` is *nothing was learned*, and it is not a verdict.** `ops::may_i_in` never fails —
+/// every refused, half-answered or unanswered review comes back as a `Verdict::CouldNotTell` it can
+/// still be asked questions of (NOTES § D229 ruling 4) — so the only thing left to answer for is a
+/// review that never returns at all, and the answer to that is to remember nothing and mark
+/// nothing.
+///
+/// **A free function and not an `async` block in the arm**, so the future is `'static`: it owns the
+/// client clone and the namespace, and borrows no part of the [`Console`] it writes into.
+async fn permitted(client: kube::Client, namespace: String) -> Option<ops::Permits> {
+    tokio::time::timeout(PROBE_DEADLINE, ops::may_i_in(&client, &namespace))
+        .await
+        .ok()
+}
+
+/// **One namespace's answer kept, and the cache bounded before it grows** ([`PERMITS_KEPT`],
+/// [`Console::permits`]).
+///
+/// **A function and not three lines inside [`pump`]'s arm, and that is the gate's own reason rather
+/// than tidiness**: every mutant cargo-mutants can write for `pump` replaces the whole loop and is
+/// unviable, so a bound living in there is a branch nothing can drive and nothing can prove. Out
+/// here it takes a map and two values and needs no loop, no terminal and no cluster.
+///
+/// **The bound is read *before* the insert**, so the map never holds more than [`PERMITS_KEPT`] —
+/// and the namespace just answered is the one that survives the emptying, because it is inserted
+/// after it.
+fn remember(
+    permits: &mut std::collections::BTreeMap<String, ops::Permits>,
+    namespace: String,
+    answer: ops::Permits,
+) {
+    if permits.len() >= PERMITS_KEPT {
+        permits.clear();
+    }
+    permits.insert(namespace, answer);
+}
+
+/// **The permission review [`pump`] is holding, if one is out** — a name because the type is
+/// otherwise the widest line in the loop, which is [`Pane`]'s own reason for being one.
+type ProbeInFlight = std::pin::Pin<Box<dyn Future<Output = Option<ops::Permits>>>>;
 
 /// **The browser pane a console that has fetched none hands over** — `Loading` is what a view
 /// nobody has opened has answered, and it is a `static` because `ui::Screen` borrows it.

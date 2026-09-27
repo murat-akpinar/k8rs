@@ -446,12 +446,28 @@ const HELP: &str = "  Moving around
 /// join is [`HELP`] back, character for character, which is what the *fail open* half of NOTES
 /// § D229 ruling 4 looks like from the screen's side.
 ///
-/// **The clause extends the jargon parenthesis for `s` and `r` and opens a new one for `ctrl-d`**,
-/// and both `s`'s and `r`'s `(` move left to the 40th character where [`HELP`] has them at the
-/// 44th — the screen file's ruling, and forced: `s` now names two verbs, and holding either `(`
-/// at the 44th puts that row past the 78-column ceiling. The padding is written into the literals
-/// rather than computed, because what it lines up with is [`HELP`]'s own hand-set columns and
-/// there is no second budget to derive it from.
+/// **Both clauses open with `no`, the word the footer already uses** (`screens/help.md` § When a
+/// key is refused, NOTES § D293): a parenthesis that named only the grant — `(delete deployments)`
+/// — read the same as one that only teaches a kubectl term, and `ctrl-d` is the one key that
+/// reaches no footer in any state and so has no other cue to lean on. **`no` sits beside the verb
+/// and the resource and never beside the term**, because `no rollout restart` would misname the
+/// command; `ctrl-d` has no term to protect and opens its fresh bracket with `no` directly.
+///
+/// **What joins the term to the reason on `r`'s row is `·` and not an em dash** (that section's
+/// own re-ruling, `k8s-admin`): `A — no B` with a verb phrase either side parses as *does A, does
+/// not do B* — *"restarts, does not patch the deployment"* — which is coherent, plausible and
+/// false, and is the **more** natural reading for anyone who has not met `patch` as an RBAC verb.
+/// `·` is already this product's separator for two unrelated facts, cannot be read as *not*, and is
+/// one display column exactly as the dash was, so every count below stands unchanged.
+///
+/// **`r`'s `(` moves left to the 38th character where [`HELP`] has it at the 44th** — the screen
+/// file's ruling, and forced by the ceiling: at the 40th, `no` reaches 79 on `deployments` and 80
+/// on `statefulsets`. At the 38th `statefulsets` lands on **78 exactly**, with no column to spare,
+/// which is why `ui_tests.rs`'s `no_refused_row_outgrows_the_body_for_any_kind_it_can_name` is the
+/// only thing between this row and a silent clip by a `Paragraph` with no `.wrap()`. `ctrl-d` has
+/// no baseline position to hold and moves nothing. The padding is written into the literals rather
+/// than computed, because what it lines up with is [`HELP`]'s own hand-set columns and there is no
+/// second budget to derive it from.
 ///
 /// **The verbs come from [`Refused`]'s own permission lists**, so the sentence the reader is asked
 /// to hand their cluster owner cannot name fewer grants than the probe asked about — which is the
@@ -526,7 +542,7 @@ fn key_map(help: &str, refused: Refused, changing: bool, held: Option<Held>) -> 
             clauses.push((
                 RESTART_ROW,
                 format!(
-                    "    r       restart, at its own pace   (rollout restart — {} {resource})",
+                    "    r       restart, at its own pace (rollout restart · no {} {resource})",
                     Refused::RESTART_VERBS.join("+")
                 ),
             ));
@@ -535,7 +551,7 @@ fn key_map(help: &str, refused: Refused, changing: bool, held: Option<Held>) -> 
             clauses.push((
                 DELETE_ROW,
                 format!(
-                    "    ctrl-d  delete — you type the name to confirm ({} {resource})",
+                    "    ctrl-d  delete — you type the name to confirm (no {} {resource})",
                     Refused::DELETE_VERBS.join("+")
                 ),
             ));

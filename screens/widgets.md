@@ -454,10 +454,17 @@ are counted below, after the refused table they extend.
   footer, `r` supported and unrefused, is 56 columns, leaving 20. `no` costs
   3 columns (`r restart` → `r no restart`), landing at 59 — inside the
   ceiling with 17 to spare. The reason still does not try to live here: the
-  shortest honest one, `patch deployments` (18 columns), plus the
-  punctuation to introduce it, is one convention this page keeps in exactly
-  one place — a mark on the crowded line, the sentence on the roomy one, not
-  two competing homes for the same fact. It is one `?` away, drawn
+  shortest honest one is no longer the bare phrase this passage used to
+  count, and that phrase was never 18 columns to begin with —
+  `patch deployments` is 17. `?`'s own `no` ruling means the string it
+  actually draws is `no patch deployments`, 20 columns whole. Read
+  against either spare figure above, it is already over before a single
+  character of punctuation is added to introduce it: 20 is 3 more than the
+  17 left once the mark itself is drawn, and it spends the entire
+  20-column budget the unmarked footer starts with, leaving nothing over for
+  that punctuation either way. It is one convention this page keeps in
+  exactly one place — a mark on the crowded line, the sentence on the roomy
+  one, not two competing homes for the same fact. It is one `?` away, drawn
   in [help.md § When a key is refused](help.md#when-a-key-is-refused) — the
   same trade the browser's row and the evidence line already make: the
   crowded surface marks, the roomy one explains

@@ -4898,7 +4898,7 @@ behaves as specified.
 > before the README for that reason. Evidence for all five, frame by frame:
 > [reports/2026-09-26-the-error-state-pass.md](reports/2026-09-26-the-error-state-pass.md).
 
-- [ ] **Wire `may_i_in`, because the typed-name delete still asks a reader who
+- [x] **Wire `may_i_in`, because the typed-name delete still asks a reader who
       may not delete.** Measured on a restricted credential, D23 verbatim: the
       footer offered `r restart`, `ctrl-d` opened the box, the object's name was
       typed in full, `⏎` — and *then* the cluster said
@@ -4913,7 +4913,27 @@ behaves as specified.
       [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
       ruling 3). **Done when** a key the credential cannot use is marked before
       it is pressed, on a real restricted kubeconfig, and nobody is asked to
-      type a name they were never allowed to use
+      type a name they were never allowed to use.
+      **Done 2026-09-27**
+      ([D292](NOTES.md#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26) ·
+      [D293](NOTES.md#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)).
+      Measured on the four-node `k8rs` kind cluster against a `ServiceAccount`
+      granted `get`/`list`/`watch` on `pods` and `apps/deployments,replicasets`
+      and nothing else — `kubectl auth can-i patch deployments` **no**,
+      `delete deployments` **no** — running **without** `--read-only`, so the keys
+      were offered and the probe had to answer for them. A DaemonSet card drew
+      `r no restart` on the footer and
+      `r  restart, at its own pace (rollout restart · no patch daemonsets)` under
+      `?`; a Pod card, whose `r` no login can use, drew **no** `r` clause and
+      `ctrl-d  delete — you type the name to confirm (no delete pods)`. The
+      namespaced `SelfSubjectRulesReview` came back `incomplete: false` carrying
+      the Role's own rules, so the empty-list shape that would have marked every
+      key `no` is not reachable. **What this box did not take**: a Node's `ctrl-d`
+      is still never marked — a cluster-scoped question needs `ops::may_i` and
+      `Permits::may` answers `CouldNotTell` for one by design
+      ([D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+      ruling 10) — and on a webhook-authorizer cluster no key is ever marked at
+      all, both recorded in [`backlog.md`](backlog.md)
 - [ ] **A dialog cannot draw the server's whole sentence, and nothing tells the
       reader where the rest of it is.**
       [REQUIREMENTS.md](REQUIREMENTS.md) promises the server's message

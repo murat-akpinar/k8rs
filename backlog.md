@@ -27,15 +27,19 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
 
 ## Open
 
-### The console draws three things it never fetches, and none of them is boxed
+### The console draws two things it never fetches, and neither is boxed
 
-The browser's `Table` fetch (`k8s::Browsing`), the four detail reads (pod read,
-document, events, log stream) and the `may_i_in` permission probe are wired
-nowhere and have no box in any phase. `⏎` on a sidebar kind and all four detail
-tabs draw *reading the cluster…* indefinitely, and every mutating key draws
-unmarked because `Screen::refused` is `Refused::default()` — which is
-[D229](NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)
-ruling 4's fail-open and honest, but it means `s no scale` can never appear.
+The browser's `Table` fetch (`k8s::Browsing`) and the four detail reads (pod read,
+document, events, log stream) are wired nowhere and have no box in any phase. `⏎`
+on a sidebar kind and all four detail tabs draw *reading the cluster…*
+indefinitely.
+
+**This entry said three, and the third has left it under rule 3**: the `may_i_in`
+permission probe was boxed in Phase 13 and landed 2026-09-27, so `r no restart`
+and the `?` clauses are now reachable
+([D292](NOTES.md#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26)).
+`s no scale` still cannot appear, but for a different reason than this entry gave —
+`views::SCALE_IS_BUILT`, not the missing probe.
 
 **Phase 12's *Done when: k8rs runs against kind end-to-end* cannot be true while
 these stand**, so the phase-close triage decides whether Phase 12 extends or v0.1
@@ -3684,3 +3688,83 @@ Phase 12 close triage fixes them; the rest are notes.
   machinery against 0.043 %, and the number is recorded here so nobody re-measures
   it to find that out
   ([D286](NOTES.md#d286--the-console-at-rest-idle-is-two-readings-the-poll-the-console-never-stops-and-a-budget-missed-by-the-same-margin-as-the-driver-2026-09-26) item 2).
+
+- **The permission probe is inert on any webhook-authorizer cluster, and the screen
+  cannot say so.** A webhook authorizer returns `incomplete: true` on *every*
+  `SelfSubjectRulesReview` — `WebhookAuthorizer.RulesFor` sets it unconditionally and
+  `union`'s resolver ORs the flag — so every question is `CouldNotTell` and no key is
+  ever marked. **AKS with Azure RBAC / Entra ID is one checkbox away, and it is on by
+  default on AKS Automatic.** That is the correct fail-open direction and nothing on
+  screen is wrong; what is missing is any way to tell it from a login that may do
+  everything. No surface exists for it either — `views::Refused` deliberately drops
+  `CouldNotTell`'s sentence and `ui::help`'s clauses only append. GKE,
+  EKS-with-access-entries and OpenShift are **unverified**; one `kubectl` call
+  settles each. `k8s-admin`, [reports/2026-09-26](reports/2026-09-26-the-permission-probe.md)
+  §§ 1a–1b, F2 — and § 1c's `system-privileged-group` authorizer is the reachable
+  shape of [D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  ruling 11, which the webhook was wrongly suspected of.
+- **When the browser's `Table` lands, Alerts and the browser will disagree about the
+  same object's keys.** `refusals` reaches `selected`, which answers `None` unless the
+  view is Alerts; `ui::offered` *can* answer `Offer::Act` from `View::Resources` and
+  today does not only because `drawn` hands it `Pane::Loading`. Fill that pane and one
+  Deployment draws `r no restart` in Alerts and `r restart` in the browser, with no
+  test failing. `PRIOR-ART § G2`'s *read-only enforced per view is a hole per view*.
+  **This belongs in the browser box's premise** — its reviewer will be shown the
+  browser and not this function. `k8s-admin`, F5.
+- **`PERMITS_KEPT`'s eviction clears the whole map, so above 256 namespaces in one
+  session a mark flickers.** The 257th answer drops the other 256, and scrolling back
+  up a long cluster-wide list re-draws `r restart` for an object that read
+  `r no restart` a moment earlier until the re-probe lands. Fail open, and the dry-run
+  still refuses on the press — but a mark that flickers is a worse screen than one
+  that never appears. Keeping the newest N instead is the same few lines; 256 is
+  otherwise a sound number. Not boxed against a cluster where an operator walks more
+  than 256 namespaces in a sitting. `k8s-admin`, F7.
+- **`selected` clones a whole `views::Card` on every frame now, to read three
+  fields.** A `Card` owns `Vec<Finding>` and every finding's strings; before the
+  permission probe this happened on a keypress. `shown_cards` already hands back
+  `Vec<&Card>`, so a borrowing sibling would do — but `selected` is shared with
+  `wanting` and `entered`, and CLAUDE.md keeps a shared-helper change per-box, so it
+  is not worth a round trip of its own. `k8s-admin`, F11.
+- **A stale permission answer outlives the thing that made it stale, in the two cases
+  the link clear cannot see.** `refusals` short-circuits on `permits.get(namespace)`
+  being `Some`, so a cached answer is never re-asked within a connection. The box added
+  `if console.link != screen.link { console.permits.clear(); }`, which closes a **total**
+  outage — and `k8s-admin` measured that it closes only that:
+  [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+  ruling 4 already found that a relay cut of all six connections never produced `Lost`
+  at all — `live` to `live`, because `linked` needs *every* watch in trouble and the
+  five failures and recoveries interleave inside the coalescing window. So two cases
+  stand: a **partial** watch drop that caches a `CouldNotTell` nothing re-asks, and
+  **RBAC edited under a live link** — an admin granting `delete deployments` while the
+  reader stares at the refusal, which drops no watch and changes no link. Both are
+  fail-open: the key still works, `may_mutate` does not read `Refused`, and the dry-run
+  still decides — so what is stale is the screen, not the behaviour. **The ruling this
+  waits on is a re-ask budget**: `refusals` can already tell an unsure answer from a
+  whole one, but re-asking without looping against a standing 403 needs a budget or a
+  backoff. `tester`, step 5 §7; `k8s-admin`, round 2 R1.
+- **`console()` has no headless test, and its three surviving whole-function mutants
+  are live in production rather than unreachable.** `just mutants-diff` reports
+  `replace console -> Option<String> with None / Some("") / Some("xyzzy")` surviving.
+  It has one call site behind `at_a_keyboard`, no test calls it, and `tests/binary.rs`
+  uses piped stdio so the binary always takes the `USAGE` branch — but `tester` drove
+  it over a pty (`ssh -tt` + `stty`) and got `console()`'s own return value out of the
+  real binary, so `-> None` would print nothing and exit 0 undetected. **A coverage
+  hole, not a false positive** — and not the permission probe's doing: that box only
+  added three field initialisers to the `Console { … }` literal, which is what pulled
+  the function into `--in-diff` scope, and all three are covered. Every future box
+  adding a field there trips the same three. **Needs a ruling before it can be boxed**:
+  a pty from Rust means `libc::openpty`/`forkpty`, and invariant 10 pins `libc` to
+  *"`raise` and three signal constants and nothing else"*
+  ([D276](NOTES.md#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24));
+  `script -qec` is a command string and `security-guard.py` refuses one from a
+  spawning file. `tester`, step 5 §8.
+- **`?`'s refused `r` row sits exactly on the 78-column body ceiling, and the next
+  operation is what that costs.** `r`/`statefulsets` is 78 with the `no` the wording
+  ruling added — zero headroom. Affordable today because both growable inputs are closed
+  sets and `ui_tests.rs` asserts the boundary from both sides, so a grown plural is a red
+  test rather than a silent clip by a `Paragraph` with no `.wrap()`. But
+  [D261](NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+  ruling 4 already books v0.2's `drain` gaining a resource beside each verb, and a second
+  `RESTART_VERBS` entry puts this row over. Whoever adds either owes the row a new shape,
+  not another column. `k8s-admin`, round 2 Q3.
+

@@ -565,7 +565,7 @@ What may genuinely run at the same time — at most one writer per row:
 | Safe together | Because |
 |---|---|
 | one dev writing `src/` · `tester` writing `tests/`, `scripts/` | disjoint trees |
-| one dev writing · `tui-designer` on a **later** phase's screen | `screens/` is not code |
+| one dev writing · `tui-designer` on a **later** phase's screen | disjoint trees — but **`later` is the whole of it, and not scheduling advice**: `screens/` is not code and *is* read by code, because tests compare a drawn block against the page ([D293](NOTES.md#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)). Re-ruling **this** box's screen beside a running gate turns a screen edit into a red `cargo test` in somebody else's report |
 | two reviewers (`k8s-admin` + `tui-designer`) on the same diff | disjoint trees; but if `k8s-admin` is measuring, no capture runs beside it |
 | **`tester` (step 5) · `k8s-admin` (step 6)** | disjoint trees — `tests/`+`scripts/` against `reports/`. Halves the review wall clock. **Not** while `k8s-admin` is measuring on the test host: one command runs in the mirror at a time |
 | one dev writing · `k8s-admin` auditing an **already merged** phase | the audit lands as findings and a `reports/` file, never as an edit |
@@ -642,8 +642,14 @@ cannot skip compiling**, so:
 
 - **dev runs:** `cargo fmt --all -- --check` · `cargo clippy --locked
   --all-targets --all-features -- -D warnings` · `cargo test --locked
-  --all-targets` · `just mutants-diff`. Clippy is not optional — `-D warnings`
-  makes one lint a red build.
+  --all-targets` · `just mutants-diff` · **`python3 scripts/width-guard.py`**.
+  Clippy is not optional — `-D warnings` makes one lint a red build. **The width
+  guard is on this list and no other guard is**, because it is the one that fails
+  on the prose a dev writes every turn and `cargo fmt` will not rewrap a comment:
+  it costs **0.17 s** measured, against 43 violations that rode all the way to
+  step 5 and reddened the gate there, stopping `cargo deny` and `cross` from
+  running at all
+  ([D293](NOTES.md#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)).
 - **`tester` alone runs the full `just check`**, which adds `guards`,
   `cargo deny check` and `cross`. Those do not turn on the dev's judgement.
 

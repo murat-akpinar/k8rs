@@ -4,10 +4,16 @@
 > `rules.rs`, `analysis.rs`, `k8s.rs`, `ops.rs`, and since Phase 12's close
 > (2026-09-26) the console on top of them: one binary with the event loop, the
 > Alerts view, the seven analysis panes, the dialogs, the write path and the
-> cluster picker wired. **Four reads are not**, each drawing an honest waiting
+> cluster picker wired, and since Phase 13's first box the permission probe that
+> marks a key this login may not use before it is pressed
+> ([NOTES § D292](../NOTES.md#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26)).
+> **Three reads are not**, each drawing an honest waiting
 > state rather than a wrong one: the browser's server-side `Table`, the four detail
-> tabs, the log stream, and the `may_i_in` permission probe.
-> `ui.rs` and `views.rs` are frozen. What is left is shipping it — Phase 13 — and
+> tabs, and the log stream.
+> `ui.rs` is frozen; `views.rs` is frozen against new behaviour, and the probe's
+> box reached it for one mechanical edit only — deleting the two
+> `expect(dead_code)` attributes that existed to say the probe was unwired, which
+> `-D warnings` turns into a red build the moment it is. What is left is shipping it — Phase 13 — and
 > the ten driver flags coming out before it ships
 > ([NOTES § D288](../NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)).
 > Decisions and their rationale live in `../NOTES.md`; the technology choices

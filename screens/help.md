@@ -487,10 +487,13 @@ no other block on this screen changes
 ever asked (the Rules list above), so its row here reads the same fixed
 sentence the mockup at the top of this file carries, whatever this login may
 do. `r` and `ctrl-d` are independent of each other — one refused, or both —
-and each row only ever answers for itself; the worst case, drawn below, is
-both at once, with `payments/web` selected (the running example everywhere
-else in this product) and this login able to `list` and `watch` it but
-nothing more:
+and each row only ever answers for itself; the harder case *for a reader*,
+drawn below, is both at once, with `payments/web` selected (the running
+example everywhere else in this product) and this login able to `list` and
+`watch` it but nothing more. It is not the only shape a real cluster
+produces, though: [§ A bare Pod](#a-bare-pod-withheld-beside-refused-on-the-commonest-card-this-product-has),
+below, draws the case where `r` and `ctrl-d` do not even reach the same
+state on the one card this product draws most:
 
 **Drawn at the real 80-column floor, not this file's usual 70-column page —
 each row is one line in the real UI and is shown as one line here, the same
@@ -501,9 +504,9 @@ for its own over-70 row:**
   Changing things (each one asks first, and shows the command)
     s       not built yet — there is no way yet to type a copy count
             works on a deployment, a statefulset and a replicaset
-    r       restart, at its own pace   (rollout restart — patch deployments)
+    r       restart, at its own pace (rollout restart · no patch deployments)
             works on a deployment, a statefulset and a daemonset
-    ctrl-d  delete — you type the name to confirm (delete deployments)
+    ctrl-d  delete — you type the name to confirm (no delete deployments)
 ```
 
 **The two `works on …` lines are unchanged by a refusal and are shown here
@@ -516,42 +519,97 @@ Counted, not estimated:
 | Row | Columns (`deployments`) | Columns (`statefulsets`) |
 |---|---|---|
 | `s`, not built | 68 | 68 |
-| `r`, refused | 76 | 77 |
-| `ctrl-d`, refused | 70 | 71 |
+| `r`, refused | 77 | 78 |
+| `ctrl-d`, refused | 73 | 74 |
 
 `s`'s row never varies by kind — the sentence is fixed, the same 68 columns
 whatever is selected — so it never enters the ceiling comparison below at
 all. `statefulsets` is the longest plural `restart` names (`daemonsets`, 10,
 is shorter) — so it is `r`'s own refused row that decides the ceiling, not
-the one this file's running example happens to draw. All four remaining
-counts fit inside the 78-column ceiling a body row has at the floor
-(`src/ui_tests.rs::mockup`'s own `MIN_WIDTH - 2` assertion, measured at HEAD).
+the one this file's running example happens to draw, and it decides it
+exactly: `r`'s row on `statefulsets` is **78**, the ceiling itself, with no
+column to spare, against **1** spare on `deployments`. `ctrl-d` is not close
+on either kind, five and four spare. All four counts fit inside the
+78-column ceiling a body row has at the floor (`src/ui_tests.rs::mockup`'s
+own `MIN_WIDTH - 2` assertion, measured at HEAD) — one of them exactly, not
+comfortably.
 **No row is added and none is removed**: the sixteen-row body this screen is
 tested against is unchanged in count, only in the text of up to two of its
 lines.
 
-- **The clause extends the existing jargon parenthesis for `r`, and opens a
-  new one for `ctrl-d`.** `(rollout restart)` already taught the kubectl
-  term this key stands for; adding *why not* inside the same parenthesis
-  keeps one bracket meaning *the technical detail*, rather than a second
-  bracket beside the first that a reader has to learn means something else.
-  `ctrl-d`'s row has no such parenthesis to extend — its own em dash already
-  separates the key from *"you type the name to confirm"* — so its reason
-  opens a fresh one instead of reusing that dash for a second job. `s` gains
-  no clause here at all: its row already carries the fixed *not built yet*
-  sentence everywhere on this screen, so there is nothing for a refusal to
-  append to.
-- **The opening `(` moves from the row's 44th character to its 40th on `r`'s
-  refused row.** Positions here are 1-based, the way an editor's own column
-  indicator counts — everywhere else in this section "columns" measures a
-  length, not a position, and the two are not interchangeable. The baseline
-  has `r` opening `(` at the 44th character (`(rollout restart)`). Holding it
-  there pushes the refused row past the 78-column ceiling — `(rollout
-  restart — patch statefulsets)` alone reaches 81 at that position — so it
-  gives up four characters of alignment with the baseline and opens at the
-  40th instead; the counts are in the table above. `ctrl-d`'s new
-  parenthesis needs no such shift, because it has no baseline position to
-  hold onto in the first place.
+- **A parenthesis that named only the grant — `(delete deployments)` — read
+  the same as a parenthesis that only teaches a term, and this row is the
+  one place that ambiguity had no other row to lean on.** `r`'s own
+  refused bracket had the identical gap: `(rollout restart — patch
+  deployments)` names the missing grant and never says so, either — the gap
+  is only harder to see on `r`'s row because a refused `r` is also marked on
+  the footer moments before `?` is ever opened (`r no restart`), and `ctrl-d`
+  never is, on either list footer, in any state
+  ([D261 ruling 7](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12),
+  [widgets.md § 2a](widgets.md#2a-the-footer)) — this row is the only place
+  a refused delete is ever drawn, so it is the one row that cannot borrow a
+  cue from anywhere else on screen. **Both brackets now open with `no`** —
+  the same word `r no restart` already puts on the footer, chosen there for
+  the same reason it is chosen here: it is not new vocabulary, needs no
+  legend, and survives a copy-paste as the plain word it is
+  ([D261 ruling 1](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
+  `ctrl-d` never reaches a footer to borrow the word *from*, but it is the
+  same word regardless, not a second one reached for because the first was
+  out of room on this particular key — one wording for one fact, on both
+  rows now, not two.
+- **`no` sits beside the verb and the resource, never beside the kubectl
+  term — and what joins them to the term is `·`, not the em dash a first
+  draft used.** `(rollout restart — no patch deployments)` reads left to
+  right as one verb phrase, a dash, then a second — the shape `A — no B`,
+  which parses as *does A, not B*: *"restarts, does not patch the
+  deployment,"* coherent and false for a reader who does not already know
+  `patch` is the RBAC verb this key needs rather than something k8rs might
+  or might not do to the object. That reading does not need the reader to
+  be careless; it is the more natural one for anybody who has not yet met
+  `patch` as jargon. `·` is this product's own separator for two unrelated
+  facts on one line, never a contrast — the header's `ctx: prod-eu · live ·
+  admin`, and this very file's own `filter · namespace` and `f follow · not
+  built yet: …` two lines above the mockup (27 uses between `views.rs` and
+  `ui.rs`, measured) — so `(rollout restart · no patch deployments)` reads
+  as the term, then, separately, the refusal, with no room to parse it as
+  one negating the other. `no` still never touches the term itself —
+  `no rollout restart` would read as if that were the command's own name,
+  whichever character joins them — so it opens only the second half.
+  `ctrl-d`'s row has no term to protect and no existing bracket to extend —
+  its own em dash already separates the key from *"you type the name to
+  confirm"*, a different job on a different piece of punctuation, and has
+  no `A — no B` shape to misread since there is only one verb phrase in it
+  — so `no` opens straight into the fresh bracket that names the grant,
+  unchanged: `(no delete deployments)`. `s` gains no clause here at all: its
+  row already carries the fixed *not built yet* sentence everywhere on this
+  screen, so there is nothing for a refusal to append to.
+- **The opening `(` moves from the row's 44th character to its 38th on `r`'s
+  refused row — six characters given up, not four.** Positions here are
+  1-based, the way an editor's own column indicator counts — everywhere else
+  in this section "columns" measures a length, not a position, and the two
+  are not interchangeable. The baseline has `r` opening `(` at the 44th
+  character (`(rollout restart)`). The separator and the grant's name
+  already cost four of those six, landing at the 40th — this section's own
+  position before `no` was added, back when the separator was still an em
+  dash rather than `·` (above); swapping the character costs nothing in
+  columns, since both are one column wide. Holding the 40th while adding
+  `no` reaches 79 on `deployments` and 80 on `statefulsets`, one and two
+  over the ceiling; giving up two characters more, to the 38th, lands
+  `statefulsets` exactly on it and `deployments` one short — the counts are
+  in the table above. `ctrl-d`'s new parenthesis needs no such shift,
+  because it has no baseline position to hold onto in the first place, and
+  even its own longest combination, `no delete statefulsets`, lands four
+  columns short of the ceiling without moving anything.
+- **Zero headroom is affordable today, and it is a debt against the next
+  change to what `restart` needs, not a fact to rediscover later.**
+  `RESTART_VERBS` names one verb, `patch`, measured sufficient end to end
+  ([D261 ruling 4](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)).
+  If a later review ever finds `restart` needs a second verb the way
+  `scale` needed both `get` and `patch` ([same ruling](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)),
+  this bracket would have to name two verbs on `statefulsets` with no column
+  left to give one — the ceiling is already spent. That review has not
+  happened and nothing here pre-empts it; this sentence only records where
+  the room went.
 - **The resource named is the selected object's own kind, not a fixed
   string, and this whole section presumes the kind supports the operation at
   all — a key the kind does not support is out of its scope.**
@@ -596,7 +654,15 @@ lines.
   unexplained, not that it never appear — the sentence a beginner reads first
   is already the plain one (*"run more or fewer copies"*), and the bracket
   beside it is where the exact term has always lived, on every row, refused
-  or not.
+  or not. **`no` is that same sentence's plain half, worn down to the one
+  word this row has room for** — `states.md`'s own *"your user can't … .
+  Missing permission: list nodes"* spends a whole clause saying so where
+  there is room for one; a footer with three spare columns and no more
+  already wears the same fact down to `no`
+  ([D261 ruling 1](../NOTES.md#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)),
+  and this row, with less room than a banner but more than a footer, wears
+  it down to the same single word rather than inventing a middle-length
+  phrase nobody else on this product uses.
 - **The slash reads two different ways depending which tool sees it, and this
   section keeps the Role's own spelling rather than a `can-i` query's**
   ([D230 ruling 1](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)).
@@ -630,3 +696,55 @@ lines.
   heading has the same nothing to rewrite, under the same run — one gap,
   not two, and neither section says it twice. Drawn whole at [§ Under a
   dead-writes run](#under-a-dead-writes-run).
+
+### A bare Pod: withheld beside refused, on the commonest card this product has
+
+`payments/web`, a Deployment, is the running example everywhere else in this
+file, but it is not the card most readers will meet this section on first —
+a bare Pod is. On one, `r` and `ctrl-d` do not even reach the same state.
+`restart` never reaches a Pod at all: `ops::restartable`'s own three kinds
+are a Deployment, a StatefulSet and a DaemonSet, so `may_i_in` is never asked
+for it here and `r` is *withheld*, not *refused* — the same distinction this
+section already draws for a kind that `scale` or `restart` does not cover
+([§ above](#when-a-key-is-refused)). `delete` does reach a Pod
+(`ops::DELETABLE` names all six kinds this product ships), so `ctrl-d` can
+still be refused on the very same card. Drawn together, this login able to
+`list` and `watch` the pod but nothing more:
+
+```
+  Changing things (each one asks first, and shows the command)
+    s       not built yet — there is no way yet to type a copy count
+            works on a deployment, a statefulset and a replicaset
+    r       restart, at its own pace       (rollout restart)
+            works on a deployment, a statefulset and a daemonset
+    ctrl-d  delete — you type the name to confirm (no delete pods)
+```
+
+Counted against `src/main_tests.rs`'s own fixture for exactly this card, not
+estimated:
+
+- **`r`'s row is the plain, unrefused sentence — the identical string this
+  file draws at the very top, `(rollout restart)` at its own 44th-character
+  position, never shifted.** A Pod is not a fourth kind for the *refused*
+  mockup above to cover: `may_i_in` is never asked for it, so it can never
+  read `no`, whatever this login may or may not do. The footer agrees —
+  `↑↓ move  ⏎ open  / filter  ? all keys  q quit`, no `r` on it at all,
+  never `r no restart` — the two readers cannot disagree because both now
+  read the same `restartable` check
+  ([D293](../NOTES.md#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)).
+- **`ctrl-d`'s row is the shortest refused row on this page, 66 columns
+  whole — twelve inside the 78-column ceiling, more room than either
+  `deployments` or `statefulsets` leaves.** `pods` is the shortest plural
+  any of these three operations ever names (4 columns, against 11 and 12),
+  and nothing about a Pod changes how the clause itself reads: same `no`,
+  same bracket, same place in it — the ordinary case with a shorter word.
+- **This is the mockup [D293](../NOTES.md#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)
+  would have caught at step 2 instead of step 5.** Before that box, `?` drew
+  `(rollout restart — patch pods)` on the very `r` row this mockup now shows
+  plain, for a key the footer was never offering on a Pod in the first
+  place — a permission clause for a permission nobody was ever asked about.
+  No screen drew a bare Pod's own *Changing things* block until this one, so
+  nothing on paper could be checked against the code before a real cluster
+  was, five review steps later. It is not a new mechanism this mockup adds —
+  every rule above already governs it — it is the one card this section had
+  not yet been asked to draw.

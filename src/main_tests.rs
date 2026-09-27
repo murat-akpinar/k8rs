@@ -2840,7 +2840,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
 /// all five watches finish their initial LIST, so the bootstrap gate opens and there is a report
 /// (NOTES § D28).
 ///
-/// **It is [`refusing`]'s opposite and is written beside it for that reason.** That one proves
+/// **It is [`refusals`]'s opposite and is written beside it for that reason.** That one proves
 /// what `--once` does when the cluster will not show it anything; this one proves what it does
 /// when the cluster shows it everything there is, which is nothing. Between them they are the two
 /// exit codes.
@@ -3023,7 +3023,7 @@ async fn refusing() -> kube::Client {
     .expect("a client over plain http asks the machine for nothing")
 }
 
-/// The five watches driven against [`refusing`] over a store whose successful LISTs — if it has
+/// The five watches driven against [`refusals`] over a store whose successful LISTs — if it has
 /// any; one caller hands in none — have already been handed in, and the report [`live_report`]
 /// then draws.
 ///
@@ -7284,7 +7284,7 @@ async fn a_list_that_is_only_slow_still_gets_the_two_facts_and_no_verdict() {
 ///
 /// **Asserted over the store a `--once` run actually leaves behind**, and the store it was
 /// asserted over until 2026-08-30 was not one (`tester`). That one was driven against
-/// [`refusing`], where a real `--once` returns at [`pods_unread`] before [`live_report`] is
+/// [`refusals`], where a real `--once` returns at [`pods_unread`] before [`live_report`] is
 /// called at all — so the doc said `--once` and the test proved `--live --analysis`. It is
 /// [`emptied`] now, which is the listener the run that reaches the panes actually has under it.
 /// The pane text is the assertion because it is the thing the flag decides; the stream it lands
@@ -14242,6 +14242,13 @@ fn bare_console<'a>() -> Console<'a> {
         // a frame first, exactly as a reader does.
         offer: views::Offer::Nothing { switch: false },
         carried: None,
+        // **No client, so no frame of these tests puts a `SelfSubjectRulesReview` on a wire** — and
+        // no answer either, so every key draws unmarked, which is the fail-open state a run whose
+        // probe has not replied yet is in (NOTES § D229 ruling 4). A test about a *mark* fills
+        // `permits` itself ([`permitted_in`]).
+        client: None,
+        permits: std::collections::BTreeMap::new(),
+        wondering: None,
         // **Armed, which is every run that reached a keyboard** — the refusal `false` buys is its
         // own test ([`ctrl_z_does_nothing_at_all_when_the_resume_could_not_be_armed`]).
         resumable: true,
@@ -16549,6 +16556,593 @@ fn r_asks_for_a_restart_on_a_kind_that_has_one() {
     assert_eq!(wanted.verb, RESTART);
     assert_eq!(wanted.kind, "deployment");
     assert_eq!(wanted.name, owner.name);
+}
+
+// --- THE PERMISSION PROBE ---
+//
+// **What this box wired, in one sentence: a `SelfSubjectRulesReview` answered once per namespace
+// becomes a `no` beside a key before that key is pressed** (NOTES § D23, § D292, and finding **F6**
+// of `reports/2026-09-26-the-error-state-pass.md`, where a Deployment's name was typed in full
+// before the cluster said `cannot delete resource "deployments"`).
+//
+// **No cluster, and a real `ops::Permits`.** Its fields are private to `ops.rs`, so the only way to
+// hold one is `ops::may_i_in` — which [`permitted_in`] gives a stub answering one review body, the
+// same shape [`ops_stub`] already gives the three operations.
+
+/// **A stub that answers every request with one namespace's rules review** — `rules` is the
+/// `resourceRules` array's contents, so a test writes the RBAC it is about and nothing else.
+async fn reviewing(rules: &str) -> (kube::Client, Requests) {
+    let body = format!(
+        "{{\"kind\":\"SelfSubjectRulesReview\",\"apiVersion\":\"authorization.k8s.io/v1\",\
+         \"status\":{{\"resourceRules\":[{rules}],\"nonResourceRules\":[],\"incomplete\":false}}}}"
+    );
+    ops_stub(move |_| ("201 Created".to_string(), body.clone())).await
+}
+
+/// One namespace's `ops::Permits`, out of [`reviewing`]'s stub.
+async fn permitted_in(namespace: &str, rules: &str) -> ops::Permits {
+    let (client, _) = reviewing(rules).await;
+    ops::may_i_in(&client, namespace).await
+}
+
+/// **A cluster that accepts the connection and never writes a byte** — the one failure
+/// `ops::may_i_in` has no verdict of its own for, and therefore the only thing [`PROBE_DEADLINE`]
+/// exists to answer.
+///
+/// **The sockets are held rather than dropped**, which is [`served`]'s own note: returning would
+/// drop the connection, and a dropped connection is an error the probe *does* have a verdict for.
+async fn never_answering() -> kube::Client {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            held.push(socket);
+        }
+    });
+    kube::Client::try_from(kube::config::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing")
+}
+
+/// **The probe itself, which no other test here reaches** ([`permitted`]): the ones below hand
+/// `Console::permits` an answer directly, so what puts the question on a wire is covered only here
+/// — `just mutants-diff` said so, with `replace permitted … with None` surviving.
+///
+/// **Every *other* way a review can fail is already an answer** — refused, half answered, a dead
+/// socket are each a `Verdict::CouldNotTell` that `ops::may_i_in` hands back (NOTES § D229 ruling
+/// 4) — so what this wrapper adds is the bound, and its two outcomes are two different instructions
+/// to the caller: an answer is remembered for that namespace and a timeout is not
+/// ([`Console::permits`]).
+///
+/// **The two halves are two tests because the clock cannot be paused for both, measured rather than
+/// reasoned.** Written as one `start_paused` test the *answering* half failed: tokio auto-advances
+/// a paused clock whenever the scheduler is idle, and it reached the ten-second deadline before the
+/// loopback socket had answered — so the stub's review was thrown away by its own deadline. The
+/// real clock costs this half milliseconds.
+#[tokio::test]
+async fn the_probe_keeps_what_the_review_answered_and_asks_about_the_namespace_it_was_handed() {
+    let (client, asked) =
+        reviewing(r#"{"verbs":["patch"],"apiGroups":["apps"],"resources":["deployments"]}"#).await;
+    let permits = permitted(client, "payments".to_owned())
+        .await
+        .expect("a review that answered is an answer");
+    assert_eq!(
+        permits.may(&ops::Asking {
+            verb: "patch",
+            group: "apps",
+            resource: "deployments",
+            subresource: None,
+            name: None,
+            namespace: Some("payments"),
+        }),
+        ops::Verdict::Yes,
+        "what the stub granted is not what the probe kept"
+    );
+    // **The question went out about the namespace it was handed.** A probe that asked about another
+    // one answers `CouldNotTell` for every key and is indistinguishable on screen from a slow
+    // cluster (`ops::Permits::may`'s own namespace guard).
+    let sent = asked.lock().expect("the log is never poisoned").join("\n");
+    assert!(
+        sent.contains("POST /apis/authorization.k8s.io/v1/selfsubjectrulesreviews"),
+        "the probe did not post a rules review: {sent:?}"
+    );
+    assert!(
+        sent.contains("\"namespace\":\"payments\""),
+        "the review did not name the namespace it was asked about: {sent:?}"
+    );
+}
+
+/// **A review that never comes back is kept as nothing, and the wait is [`PROBE_DEADLINE`] long** —
+/// the other half of the test above, on tokio's paused clock so the ten seconds cost the suite
+/// nothing.
+///
+/// **The elapsed time is asserted and not only the `None`.** Without it this passes just as well
+/// for a probe bounded at a nanosecond — and on a paused clock it would pass for a probe with no
+/// bound at all only by hanging, which is not a pass anybody should have to wait for. Both sides of
+/// the deadline are named, so a bound that grew or shrank fails here rather than changing how often
+/// a slow cluster is re-asked.
+#[tokio::test(start_paused = true)]
+async fn a_review_that_never_returns_is_bounded_and_kept_as_nothing() {
+    let started = tokio::time::Instant::now();
+    let answered = permitted(never_answering().await, "payments".to_owned()).await;
+    assert!(
+        answered.is_none(),
+        "a review that never came back was kept as an answer"
+    );
+    let waited = started.elapsed();
+    assert!(
+        waited >= PROBE_DEADLINE && waited < PROBE_DEADLINE * 2,
+        "the probe waited {waited:?}, which is not its own {PROBE_DEADLINE:?} deadline"
+    );
+}
+
+/// **The cache is bounded and the namespace just answered is never the one thrown away**
+/// ([`remember`], [`PERMITS_KEPT`]) — the security gate's *sizes are bounded* read against a map
+/// whose keys come from the cluster.
+///
+/// **One answer past the bound and not one at it**, so an off-by-one in either direction fails
+/// here: at the bound the map is full and untouched, one past it the map has started again with
+/// exactly the newest namespace in it. A `clear()` after the insert, or a `>` where the `>=` is,
+/// loses the namespace the cursor is actually on — which is invisible on screen, because the next
+/// frame simply asks again.
+///
+/// **One stub answers all of them.** `ops::Permits` has no `Clone` and no constructor but
+/// `ops::may_i_in`, so the only way to fill a cache is to ask a review that many times; over
+/// loopback that is milliseconds.
+#[tokio::test]
+async fn the_answers_kept_are_bounded_and_the_newest_namespace_survives_the_emptying() {
+    let (client, _) =
+        reviewing(r#"{"verbs":["patch"],"apiGroups":["apps"],"resources":["deployments"]}"#).await;
+    let mut permits = std::collections::BTreeMap::new();
+    for nth in 0..PERMITS_KEPT {
+        let namespace = format!("ns-{nth}");
+        remember(
+            &mut permits,
+            namespace.clone(),
+            ops::may_i_in(&client, &namespace).await,
+        );
+    }
+    assert_eq!(
+        permits.len(),
+        PERMITS_KEPT,
+        "the cache emptied itself before it was full"
+    );
+
+    let one_more = format!("ns-{PERMITS_KEPT}");
+    remember(
+        &mut permits,
+        one_more.clone(),
+        ops::may_i_in(&client, &one_more).await,
+    );
+    assert_eq!(
+        permits.keys().collect::<Vec<_>>(),
+        vec![&one_more],
+        "one answer past the bound did not leave exactly the namespace just answered"
+    );
+}
+
+/// **Every plural this box wrote down is checkable, and all six are checked** — three of them
+/// against `ops`' own derived word, in `ui_tests.rs`'s
+/// `every_clause_names_the_plural_its_own_operation_would_send`, which reads this very table; the
+/// other three — `replicasets`, `pods`, `nodes` — have no `pub` derivation to be tied to
+/// (`ops::removal` is private in a frozen file), so what holds them is the rule the field replaced.
+///
+/// **A typo in the field is two defects and not one**, which is why this is not only about the
+/// clause: [`known_kind`] resolves a plural off it too, so `k8rs ops restart pods` would stop being
+/// a word this driver knows. **The rule is asserted and never computed** — `ingresses` and
+/// `endpoints` are both counter-examples to it, which is the whole reason a plural is a literal
+/// here rather than a `format!`.
+#[test]
+fn every_kinds_plural_is_its_singular_plus_an_s_and_resolves_back_to_it() {
+    for kind in KINDS {
+        assert_eq!(
+            kind.plural,
+            format!("{}s", kind.singular),
+            "{} is not its own singular with an s",
+            kind.singular
+        );
+        assert_eq!(
+            known_kind(kind.plural).map(|found| found.singular),
+            Some(kind.singular),
+            "the plural of {} no longer resolves back to it",
+            kind.singular
+        );
+    }
+}
+
+/// **A console whose content cursor is on a card filed under a Deployment** — the one shape both
+/// `r` and `ctrl-d` can be refused on, and the shape § 10 of the error-state report was driven in.
+fn on_a_workload_card(store: &k8s::Store) -> (Console<'static>, Vec<views::Card>, views::Card) {
+    let cards = carded(store);
+    let at = cards
+        .iter()
+        .position(|card| card.owner.kind == ObjectKind::Deployment)
+        .expect("the committed Deployments produced no card");
+    let card = cards[at].clone();
+    let mut console = bare_console();
+    console.app.content.select(at, &vec![None; cards.len()]);
+    (console, cards, card)
+}
+
+/// **The footer of a drawn frame** — [`framed`] draws 24 rows and the footer is the last one inside
+/// the border, which is the row `ui_tests.rs` reads the same line off one layer down.
+fn footer_of(frame: &str) -> String {
+    frame
+        .lines()
+        .nth(22)
+        .expect("a 24-row frame has a row 22")
+        .trim_matches('│')
+        .trim()
+        .to_string()
+}
+
+/// **The wire, read at the one function that is it** ([`refusals`]): a review granting `patch` and
+/// not `delete` marks `ctrl-d` and leaves `r` lit, and a review granting only `delete` marks `r`
+/// and leaves `ctrl-d` lit — so neither assertion can be passed by a `Refused` that marks
+/// everything or one that marks nothing.
+///
+/// **The first call is the first frame of every run**: nothing answered, nothing marked, and the
+/// namespace handed back as the one to go and ask about (NOTES § D229 ruling 4's fail open).
+///
+/// **The `/scale` questions are asserted because a rule naming the parent does not grant the
+/// subresource** (`ops::Asking::subresource`, measured against a `SubjectAccessReview` in NOTES §
+/// D230): a probe that sent `subresource: None` would answer `Yes` under `patch deployments` and be
+/// invisible on screen for ever, since `s` draws no mark either way (`views::SCALE_IS_BUILT`).
+#[tokio::test]
+async fn a_rules_review_marks_the_keys_this_login_may_not_use_before_either_is_pressed() {
+    let store = a_cluster_with_a_workload_card();
+    let (mut console, cards, card) = on_a_workload_card(&store);
+    let namespace = card
+        .owner
+        .namespace
+        .clone()
+        .expect("a Deployment lives in a namespace");
+
+    let (refused, wondering) = refusals(&console, &cards);
+    assert_eq!(
+        refused,
+        views::Refused::default(),
+        "a key was marked before any review had answered"
+    );
+    assert_eq!(
+        wondering.as_deref(),
+        Some(namespace.as_str()),
+        "the frame did not ask about the selected object's namespace"
+    );
+
+    // **The limited credential of F6** — it may patch a Deployment, so a restart works, and it may
+    // not delete one, which is what that reader learned after typing the name in full.
+    let may_patch = r#"{"verbs":["get","list","watch","patch"],
+        "apiGroups":["apps"],"resources":["deployments"]}"#;
+    console
+        .permits
+        .insert(namespace.clone(), permitted_in(&namespace, may_patch).await);
+    let (refused, wondering) = refusals(&console, &cards);
+    assert_eq!(
+        wondering, None,
+        "a namespace that has already answered was asked about again"
+    );
+    assert!(
+        refused.delete(),
+        "`ctrl-d` is unmarked for a login the cluster would refuse"
+    );
+    assert!(
+        !refused.restart(),
+        "`r` is marked for a login that may patch a Deployment"
+    );
+    assert!(
+        refused.scale(),
+        "`patch deployments` was read as granting `patch deployments/scale`"
+    );
+    assert_eq!(
+        refused.resource(),
+        "deployments",
+        "the clause `?` draws names some other kind's plural"
+    );
+
+    // **The same three keys the other way round** — a login that may only delete.
+    let may_delete = r#"{"verbs":["delete"],"apiGroups":["apps"],"resources":["deployments"]}"#;
+    console.permits.insert(
+        namespace.clone(),
+        permitted_in(&namespace, may_delete).await,
+    );
+    let (refused, _) = refusals(&console, &cards);
+    assert!(
+        !refused.delete(),
+        "`ctrl-d` is marked for a login that may delete"
+    );
+    assert!(
+        refused.restart(),
+        "`r` is unmarked for a login that may not patch"
+    );
+
+    // **And the subresource spelled the way RBAC grants it**, which is the one rule shape a reader
+    // guesses wrong.
+    let may_scale =
+        r#"{"verbs":["get","patch"],"apiGroups":["apps"],"resources":["deployments/scale"]}"#;
+    console
+        .permits
+        .insert(namespace.clone(), permitted_in(&namespace, may_scale).await);
+    let (refused, _) = refusals(&console, &cards);
+    assert!(
+        !refused.scale(),
+        "`get+patch deployments/scale` did not answer the scale questions"
+    );
+}
+
+/// **Nothing is asked and nothing is marked for an object no rules review can answer about** — a
+/// **Node**, which is cluster-scoped, so `ops::Permits::may` sends every question about it to
+/// `Verdict::CouldNotTell` and the drawn answer would be *fail open* whatever the review said
+/// (NOTES § D261 ruling 10). Its `ctrl-d` needs `ops::may_i`, one question at a time, and that is a
+/// box of its own; what this pins is that no namespaced review goes out for it in the meantime.
+#[test]
+fn a_cluster_scoped_object_asks_no_review_and_marks_no_key() {
+    let mut store = a_cluster_with_cards();
+    for node in objects::<Node>("nodes.json") {
+        store.node(&now(), Event::Apply(node));
+    }
+    let cards = carded(&store);
+    let at = cards
+        .iter()
+        .position(|card| card.owner.kind == ObjectKind::Node)
+        .expect("the listed Nodes produced no card");
+    assert_eq!(
+        cards[at].owner.namespace, None,
+        "the node card selected below is in a namespace"
+    );
+    let mut console = bare_console();
+    console.app.content.select(at, &vec![None; cards.len()]);
+    assert_eq!(
+        refusals(&console, &cards),
+        (views::Refused::default(), None),
+        "a cluster-scoped object put a namespaced review on the wire"
+    );
+}
+
+/// **A key the selected kind cannot act on is asked about by nobody, so `?` draws it no reason** —
+/// the defect this box shipped and a review round sent back (NOTES § D293,
+/// `views::Offer::serves_restart`, `screens/help.md` § When a key is refused: *"where the selected
+/// kind does not support the key at all, `may_i_in` is never asked, `Verdict::No` never arrives,
+/// and the key does not read as refused by this section"*).
+///
+/// **A bare Pod, because it is the commonest card this product has** and because `ops::restart`
+/// reaches no pod and `ops::scale` reaches no pod either. Under a login granted `get,list,watch
+/// pods` the footer carries **no `r` at all** — correctly, the key is *withheld* — and `?` drew
+/// *"(rollout restart · no patch pods)"* beside it anyway, a reason for a key that is not offered
+/// and which granting `patch pods` would not have changed.
+///
+/// **`ctrl-d` on the same card is the negative that makes this a gate and not a switch-off**:
+/// `ops::delete` does serve a pod (NOTES § D225 ruling 3), so its clause is drawn and has to be —
+/// asserted here so a fix that simply stopped asking would fail too.
+///
+/// **What no existing test could have caught**:
+/// `ui_tests.rs::no_refused_row_outgrows_the_body_for_any_kind_it_can_name` does feed `pods` to a
+/// refused `Refused`, and asserts only its column count — never whether the clause should exist.
+#[tokio::test]
+async fn a_key_the_selected_kind_cannot_act_on_is_never_asked_about_and_draws_no_reason() {
+    let store = a_cluster_with_cards();
+    let cards = carded(&store);
+    let at = cards
+        .iter()
+        .position(|card| card.owner.kind == ObjectKind::Pod)
+        .expect("the listed pods produced no card");
+    let card = cards[at].clone();
+    let namespace = card
+        .owner
+        .namespace
+        .clone()
+        .expect("a pod lives in a namespace");
+    let mut console = bare_console();
+    console.app.content.select(at, &vec![None; cards.len()]);
+
+    let may_read = r#"{"verbs":["get","list","watch"],"apiGroups":[""],
+        "resources":["pods"]}"#;
+    console
+        .permits
+        .insert(namespace.clone(), permitted_in(&namespace, may_read).await);
+    let (refused, _) = refusals(&console, &cards);
+    assert!(
+        !refused.restart(),
+        "`r` is marked refused on a kind `ops::restart` does not reach"
+    );
+    assert!(
+        !refused.scale(),
+        "`s` is marked refused on a kind `ops::scale` does not reach"
+    );
+    assert!(
+        refused.delete(),
+        "`ctrl-d` lost its mark on a kind `ops::delete` does serve"
+    );
+
+    // **And the drawn screen, because the mark is only half of it** — the footer withholds `r`, so
+    // `?` may not name a reason for it, and the one key that *is* refused still carries its own.
+    //
+    // **The `r` row is compared whole against the unmarked one**, not searched for the absence of a
+    // word: `(rollout restart)` is in that row in *every* state, so a `!contains("rollout
+    // restart")` could never pass and a `!contains("no patch")` would pass for a row that had grown
+    // some other clause instead.
+    let lit = framed(&mut console, &store);
+    assert_eq!(
+        footer_of(&lit),
+        "↑↓ move  ⏎ open  / filter  ? all keys  q quit",
+        "the footer offered a mutating key on a bare pod:\n{lit}"
+    );
+    let _ = keyed(&mut console, typed('?'), &store);
+    let help = framed(&mut console, &store);
+    let rows: Vec<&str> = help
+        .lines()
+        .filter_map(|line| line.strip_prefix('│'))
+        .collect();
+    let row_of = |key: &str| {
+        rows.iter()
+            .find(|line| line.starts_with(key))
+            .copied()
+            .unwrap_or_else(|| panic!("no {key:?} row on the drawn `?` screen:\n{help}"))
+    };
+    assert_eq!(
+        row_of("    r ").trim_end_matches(['│', ' ']),
+        "    r       restart, at its own pace       (rollout restart)",
+        "`?` drew a reason on the `r` row of a kind that key is withheld from:\n{help}"
+    );
+    assert!(
+        row_of("    ctrl-d ").contains("(no delete pods)"),
+        "`?` dropped the one clause a pod can carry: {:?}",
+        row_of("    ctrl-d ")
+    );
+}
+
+/// **The mark on the drawn footer, which is where a reader meets it before pressing anything**
+/// (`screens/widgets.md` § 2a) — both states of the same line, so a frame that stopped drawing a
+/// footer at all cannot pass either.
+///
+/// **The first frame is what asks**: [`drawn`] is synchronous, so it leaves the namespace in
+/// [`Console::wondering`] and [`pump`] is what puts the review on the wire. That is asserted rather
+/// than assumed, because a frame that asked about nothing would draw this first screen for ever.
+#[tokio::test]
+async fn the_footer_spells_r_no_restart_only_once_a_review_has_refused_it() {
+    let store = a_cluster_with_a_workload_card();
+    let (mut console, _, card) = on_a_workload_card(&store);
+    let namespace = card
+        .owner
+        .namespace
+        .clone()
+        .expect("a Deployment lives in a namespace");
+
+    let lit = framed(&mut console, &store);
+    assert_eq!(
+        console.wondering.as_deref(),
+        Some(namespace.as_str()),
+        "the frame drew a mutating footer and asked about no namespace"
+    );
+    assert_eq!(
+        footer_of(&lit),
+        "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
+        "the unrefused footer is not the ordinary line:\n{lit}"
+    );
+
+    let may_get =
+        r#"{"verbs":["get","list","watch"],"apiGroups":["apps"],"resources":["deployments"]}"#;
+    console
+        .permits
+        .insert(namespace.clone(), permitted_in(&namespace, may_get).await);
+    let marked = framed(&mut console, &store);
+    assert_eq!(
+        footer_of(&marked),
+        "↑↓ move  ⏎ open  r no restart  / filter  ? all keys  q quit",
+        "a login that may not patch was still offered `r restart`:\n{marked}"
+    );
+    assert_eq!(
+        console.wondering, None,
+        "the namespace was asked about again after it had answered"
+    );
+}
+
+/// **A link that went away and came back forgets what it was told while it was up** — the one thing
+/// besides `X` that empties the cache ([`Console::permits`], [`drawn`], NOTES § D293).
+///
+/// **Why it has to**: a reconnect after `ui::Link::Lost` keeps the session, so nothing else would
+/// ever clear the answers — and the likeliest reason a link drops and returns while a reader is
+/// staring at a refusal is an operator fixing that very refusal. Only the *screen* was stale, never
+/// the behaviour: `views::App::may_mutate` does not read `views::Refused`, so the key always
+/// worked.
+///
+/// **The negative is the footer test above**: it inserts an answer and the *next* frame draws the
+/// mark, which is a frame with no link transition in it. Without that pair, a clear on *every*
+/// frame would pass this test — and `just mutants-diff` says the same thing from the other side: it
+/// kills `replace != with ==` in [`drawn`] only because that pair exists.
+#[tokio::test]
+async fn a_link_that_dropped_and_came_back_forgets_what_the_old_one_was_told() {
+    let store = a_cluster_with_a_workload_card();
+    let (mut console, _, card) = on_a_workload_card(&store);
+    let namespace = card
+        .owner
+        .namespace
+        .clone()
+        .expect("a Deployment lives in a namespace");
+    let may_get = r#"{"verbs":["get","list","watch"],"apiGroups":["apps"],
+        "resources":["deployments"]}"#;
+    console
+        .permits
+        .insert(namespace.clone(), permitted_in(&namespace, may_get).await);
+
+    // **What the last frame drew**, which is the only place the previous link is kept — the store
+    // is healthy, so this frame computes `Link::Live` and the two disagree.
+    console.link = ui::Link::Lost;
+    let after = framed(&mut console, &store);
+    assert!(
+        console.permits.is_empty(),
+        "the answers the old link was given survived it"
+    );
+    assert_eq!(
+        console.wondering.as_deref(),
+        Some(namespace.as_str()),
+        "the frame that forgot did not ask again"
+    );
+    assert_eq!(
+        footer_of(&after),
+        "↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit",
+        "a mark from before the drop was still drawn:\n{after}"
+    );
+}
+
+/// **The `?` rows, which is where `ctrl-d`'s refusal is drawn at all** — that key is on neither
+/// list footer (NOTES § D259 took it off for width), so `screens/help.md` is the only surface
+/// carrying it.
+#[tokio::test]
+async fn help_names_the_grant_a_reader_has_to_ask_for_on_the_two_rows_that_can_carry_one() {
+    let store = a_cluster_with_a_workload_card();
+    let (mut console, _, card) = on_a_workload_card(&store);
+    let namespace = card
+        .owner
+        .namespace
+        .clone()
+        .expect("a Deployment lives in a namespace");
+    let may_get =
+        r#"{"verbs":["get","list","watch"],"apiGroups":["apps"],"resources":["deployments"]}"#;
+    console
+        .permits
+        .insert(namespace.clone(), permitted_in(&namespace, may_get).await);
+    let _ = framed(&mut console, &store);
+    let _ = keyed(&mut console, typed('?'), &store);
+    let help = framed(&mut console, &store);
+
+    // **Each clause is read off the row it belongs to and never off the screen as a whole** — the
+    // defect `ui::key_map`'s own doc records is a clause landing on a *neighbouring* row, which a
+    // `contains` over the frame passes (`tester`, 2026-09-12).
+    let rows: Vec<&str> = help
+        .lines()
+        .filter_map(|line| line.strip_prefix('│'))
+        .collect();
+    let row_of = |key: &str| {
+        rows.iter()
+            .find(|line| line.starts_with(key))
+            .copied()
+            .unwrap_or_else(|| panic!("no {key:?} row on the drawn `?` screen:\n{help}"))
+    };
+    for (key, names) in [
+        ("    r ", "(rollout restart · no patch deployments)"),
+        ("    ctrl-d ", "(no delete deployments)"),
+    ] {
+        assert!(
+            row_of(key).contains(names),
+            "the {key:?} row does not name {names:?} under a login that may only read: {:?}",
+            row_of(key)
+        );
+    }
+    // **The `s` row takes no clause whatever this login may not do** (`screens/help.md` § When a
+    // key is refused): it is withheld before a permission is ever asked, so its fixed sentence
+    // stands.
+    assert_eq!(
+        row_of("    s ").trim_end_matches(['│', ' ']),
+        "    s       not built yet — there is no way yet to type a copy count",
+        "a clause grew onto the `s` row:\n{help}"
+    );
 }
 
 /// **Keys that belong to a detail tab reach nothing while no tab is open** — `[`, `]` and `f` are

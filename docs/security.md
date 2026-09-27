@@ -200,6 +200,22 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes"]
     verbs: ["get", "list"]
+  # `may_i_in` asks the cluster what this login may do, so a key it cannot use is
+  # marked before it is pressed instead of failing after the object's name has
+  # been typed (NOTES § D23, § D292). **Two readers, and neither is a write**: the
+  # console's per-namespace probe, and `k8rs --read-only ops may-i …`, which
+  # D230 ruling 3 made permitted precisely so a read-only user can ask what they
+  # are allowed to do. A `SelfSubject*Review` can only ask about its own caller,
+  # reads no object and cannot escalate — the cheapest grant in RBAC.
+  #
+  # **On an ordinary cluster this rule changes nothing**: the default
+  # `system:basic-user` ClusterRole already grants both to every authenticated
+  # user. It matters only on a cluster that dropped that binding — D160's own
+  # condition — where without it the probe answers `CouldNotTell`, no key is
+  # marked, and the typed-name delete is refused only after the name is typed.
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectrulesreviews", "selfsubjectaccessreviews"]
+    verbs: ["create"]
   # only needed for rule C4, and only where cert-manager is installed —
   # omitted deliberately, add it if you want the certificate rows it feeds:
   #   - apiGroups: ["cert-manager.io"]
@@ -277,23 +293,55 @@ rules:
     verbs: ["create"]
 ```
 
-**`k8rs-readonly` does not carry that last rule, and since 2026-09-05 that is a
-gap rather than a policy.** This paragraph said *no read-only code path calls
-`may_i` today*, holding the file to *every rule is reachable by code that
-exists* — [D187](../NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
-removed two grants on that test. **Phase 7 shipped one**:
-[D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
-ruling 3 made `k8rs --read-only ops may-i …` permitted, precisely so a read-only
-user can ask what they are allowed to do. So on a cluster without the default
-`system:basic-user` binding — [D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)'s
-condition — a user bound only to `k8rs-readonly` gets `CouldNotTell` and exit `2`
-for a subcommand shipped for them. **It fails open, so nothing breaks and nothing
-is granted by accident**; what is wrong is a role that does not cover a path that
-now exists. Found by the Phase 7 family review
-([reports/2026-09-05](../reports/2026-09-05-the-frozen-write-path-read-whole.md)). It arrives with the browser row that reads it
-([NOTES § D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)).
-The probe **fails open**, so a read-only login without the grant is told k8rs
-could not find out — never that it may not.
+**`k8rs-readonly` now carries that rule too, and the gap it closes was open for
+three weeks.** The role omitted it from 2026-09-05 — recorded then as *a gap
+rather than a policy*, waiting on *every rule is reachable by code that exists*
+([D187](../NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
+removed two grants on that test) — and the file said it would *arrive with the
+browser row that reads it*. **It arrived with a different box.** Phase 13's
+permission probe is a second reader and landed first
+([D292](../NOTES.md#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26)),
+which turned the gap from an unreachable grant into the exact defect the probe
+exists to remove: on a cluster without the default `system:basic-user` binding —
+[D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)'s
+condition — a login bound only to `k8rs-readonly` and running **without**
+`--read-only` reached `Offer::Act`, had its review refused, saw no key marked,
+and was asked to type a Deployment's name in full before the cluster refused the
+delete. Found by the Phase 13 operator review
+([reports/2026-09-26](../reports/2026-09-26-the-permission-probe.md) § F1); the
+Phase 7 family review
+([reports/2026-09-05](../reports/2026-09-05-the-frozen-write-path-read-whole.md))
+found the gap itself. **The probe fails open either way**, so a login still
+missing the grant is told k8rs could not find out — never that it may not; what
+the rule buys is the mark being drawn at all.
+
+**On some clusters no key is ever marked, and that is the cluster answering rather
+than k8rs failing.** A `SelfSubjectRulesReview` can only be answered by an
+authorizer able to *enumerate* what a login may do, and a **webhook** authorizer
+cannot: upstream's `WebhookAuthorizer.RulesFor` returns `incomplete: true`
+unconditionally, and a union of authorizers ORs that flag. So on any cluster with a
+webhook authorizer in the chain — **AKS with Azure RBAC / Microsoft Entra ID
+authorization is one setting away, and it is on by default on AKS Automatic** —
+every question comes back *k8rs could not find out*, and by
+[D229](../NOTES.md#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05)
+ruling 4 that marks nothing. **Every key stays lit and every operation still
+works** — the dry-run and the real call are what decide, exactly as they did before
+the probe existed. What you lose is the advance warning, not the safety. To check a
+cluster:
+
+```
+kubectl auth can-i --list           # answers, or says it cannot enumerate
+kubectl create -f - -o yaml <<'EOF'
+apiVersion: authorization.k8s.io/v1
+kind: SelfSubjectRulesReview
+spec: {namespace: default}
+EOF
+```
+
+`status.incomplete: true` in the answer is the condition. GKE, EKS with access
+entries and OpenShift are **unverified** — measured on neither, and the call above
+is the whole test ([reports/2026-09-26](../reports/2026-09-26-the-permission-probe.md)
+§§ 1a–1b).
 
 **The `/scale` rule is separate on purpose, and `get` is not a typo.** RBAC
 matches `resource/subresource` as one string, so a grant on `deployments` does

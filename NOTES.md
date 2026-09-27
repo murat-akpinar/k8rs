@@ -313,6 +313,8 @@ its line moving with it.
 - [D289](#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26) — the Phase 12 close review: a write guard with no caller, two screens that name a key that does nothing, and the ruling that `Changed` stays unproduced
 - [D290](#d290--the-closes-blocker-fixes-the-guard-that-decides-before-the-send-the-fixture-that-could-not-exist-and-a-store-that-must-not-answer-for-a-refused-watch-2026-09-26) — the close's blocker fixes: the guard that decides before the send, the fixture that could not exist, and a store that must not answer for a refused watch
 - [D291](#d291--the-gate-was-green-and-three-tests-on-the-new-write-path-guard-could-not-fail-2026-09-26) — the gate was green and three tests on the new write-path guard could not fail
+- [D292](#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26) — wiring the permission probe: the owner, the dead-writes gate, and the plural three existing tables refuse to give
+- [D293](#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27) — the permission probe review rounds: a clause drawn for a key the footer withholds, and the guard the dev's list could not see
 
 ## Why it exists — where the gap is
 
@@ -25824,3 +25826,307 @@ headless `k8rs ops` driver and never enters `pressed`/`over_modal`, so **no gate
 `just check` touches the confirm arm this diff changed.** The only end-to-end
 evidence for the guard and the refusal key is the two hand journeys in D290. That is
 structural and pre-existing, and it is a Phase 13 line rather than a blocker.
+
+### D292 — wiring the permission probe: the owner, the dead-writes gate, and the plural three existing tables refuse to give (2026-09-26)
+
+Phase 13's first box wires `ops::may_i_in` into the console so a key this login
+cannot use is marked before it is pressed. The premise was re-checked at HEAD and
+holds, and what it found is that **both ends are already built and only the wire
+between them is missing**: `ops::may_i_in` → `Permits::may` → `Verdict` is written
+and tested — `Permits`' own doc names this box as *"the caller this whole type
+exists for"* — and so are `views::Refused::of`, all four footer literals and the two
+`?` clauses. `src/main.rs`'s `Screen` build hands `views::Refused::default()` in,
+with a comment saying a box will wire it.
+
+**Most of what this box needs was already ruled, and is cited rather than restated.**
+[D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+**ruling 10** is this box's specification and names three things the wiring owes: a
+`Permits` **cached per namespace**, because Alerts spans namespaces and naive wiring
+is one review per cursor move; a selected **Node's `ctrl-d` that can never be marked**
+off a rules review, so it fails open and needs its own `may_i`; and **no `Box::leak`**
+to satisfy `Refused`'s `&'static str`, which would drop invariant 9 and the
+sixteen-row body budget together. **Ruling 9** holds the column budget — the longest
+plural that fits the 78-column help body is 13 columns, `statefulsets` at 77 leaves
+**one** column of headroom over the six kinds k8rs ships, and a longer one is
+*silently clipped* by a `Paragraph` with no `.wrap()`. **Ruling 11** leaves the one
+open direction fail-open can still fail, and it is not this box's to close. Only the
+three below are new.
+
+**Ruling 1 — no `ops.rs` edit, so the box is one dispatch and one owner.**
+`ops.rs` is `dev-core`'s and everything the wiring needs from it is already `pub`:
+`may_i_in`, `Permits::may`, `Asking`, `Verdict`, `scalable`, `restartable`. The box
+is `dev-ui`'s, whose tree is `main.rs`, `views.rs` and `ui.rs`. If the plural
+(ruling 3) turns out to need a new `pub fn` in `ops.rs`, that is a **stop and
+report**, not a quiet crossing — CLAUDE.md § Ownership.
+
+**Ruling 2 — the probe does not run on a dead-writes run, and that is structural
+rather than a saving.** `ui::withheld` returns `Some(Held::Off(_))` off
+`Screen::writes.why()`, `offered` then answers `Offer::Move` instead of
+`Offer::Act`, and `Offer::Act` is the one footer arm a `Refused` mark can reach;
+`ui::help`'s refusal clauses sit behind `else if heading.is_none()`, which the same
+answer closes. So under `--read-only` **nothing reads `Refused` at all** and a probe
+there is a round trip whose answer is unreadable by construction. This does not touch
+[D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+ruling 3: that keeps the headless `may-i` *question* reachable under `--read-only`,
+and it stays exactly as reachable, because it is a command the user types and not a
+probe the console fires.
+
+**Ruling 3 — the plural literal is the one open choice, and three existing tables
+each refuse to give it.** `Refused::of` and `Asking::resource` both need the API
+plural, and D261 ruling 10 has already closed the escape hatch of leaking a
+discovered one. Counted against HEAD, not recalled:
+
+- **`ui::addressed`** hands back `(group, singular)` and its *shape* is pinned by
+  `scripts/copy-guard.py`, which parses the body of `fn addressed(` and compares its
+  pairs to `rules::ObjectKind::from_api`. Changing its arity breaks a guard in
+  `tester`'s tree; a sibling function does not.
+- **`main.rs::plain_kind`** gives a correct API plural for five kinds and is
+  documented as answering for *"the five watched kinds and no others"*, with a
+  catch-all reasoned unreachable. `ops.rs`'s `DELETABLE` is **six** — it includes a
+  replicaset — so `ctrl-d` on a ReplicaSet would reach that catch-all and get
+  `them`. Reusing it without settling that falsifies its doc, which is this repo's
+  most expensive recurring defect.
+- **`ops::scalable` / `ops::restartable`** already match the kind and return an
+  `ApiResource` that *carries* the plural — but as a `String`, and it is
+  `dev-core`'s file besides.
+
+No ruling is made on which of those the wiring uses: it is inside `dev-ui`'s tree and
+it is the dev's call, reported back under CLAUDE.md's *every choice the brief did not
+decide*. What is ruled is the constraint — **no fourth kind-table, no `ops.rs` edit,
+no leaked plural** — and that whichever is chosen, the doc it falsifies is fixed in
+the same turn.
+
+**Who proves what.** The dev's red/green is unit: `Refused` is constructible from
+`Verdict`s with no cluster. The cluster proof is the **PM's**, against the restricted
+`ServiceAccount` of
+[reports/2026-09-26-the-error-state-pass.md](reports/2026-09-26-the-error-state-pass.md)
+§ 5 — a namespaced `Role` on pods, deployments and replicasets with
+`get`/`list`/`watch` and nothing else — which is the credential that produced finding
+**F6**: `?` promising all three keys unmarked, and the delete failing only after the
+name had been typed in full. The brief orders no cluster write
+([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
+
+### D293 — the permission probe review rounds: a clause drawn for a key the footer withholds, and the guard the dev's list could not see (2026-09-27)
+
+Steps 5 and 6 over
+[D292](#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26)'s
+box, run in parallel. `k8s-admin` found no blocker and eleven findings
+([reports/2026-09-26](reports/2026-09-26-the-permission-probe.md)); `tester` found
+two blockers ([step 5](reports/2026-09-26-the-permission-probe.md) is
+`k8s-admin`'s file — `tester` reported in the turn). **The two reviews disagreed
+about one finding and the one that ran it was right**, which is the whole reason
+they both happen.
+
+**Blocker 1 — `?` draws a permission clause for a key the footer withholds.**
+`refusals` asked all three operations unconditionally and passed every answer as
+`Some`, spending the *not asked* meaning that `Refused::of`'s
+`[Option<&Verdict>; N]` arguments exist to carry. `ui::key_map` then draws the
+clause off `refused.restart()` alone and takes no kind-support input, so a **bare
+Pod** card — the commonest card this product has — under a login granted
+`get,list,watch pods` drew
+`r  restart, at its own pace   (rollout restart — patch pods)` while the footer
+carried **no `r` at all**. Granting `patch pods` would change nothing: `r` never
+applies to a pod. It contradicts three written things at once —
+`views::Refused`'s own doc (*"an operation the selected kind does not support,
+**which is never asked**… withheld… and never *refused*"*),
+`screens/widgets.md` § 2a's *"`r no restart` on a bare ReplicaSet would claim a
+verdict nobody was asked"*, and
+[D261](#d261--the-refused-keys-round-a-permission-that-is-two-questions-and-was-counted-as-one-a-reason-that-did-not-fit-the-line-it-was-promised-to-and-a-row-rewritten-by-arithmetic-another-box-would-have-moved-2026-09-12)
+ruling 8. The affected set is closed and small: `Pod` and `ReplicaSet` (a Node has
+no namespace and already answers `Refused::default`; `Job`, `CronJob` and `Other`
+are refused by `known_kind`). **The fix gates the answers on the same
+`ops::restartable` / `ops::scalable` predicate `views::Offer::act` uses, group
+included, so the two cannot disagree** — no `ops.rs` edit and no fourth kind
+table, so D292 ruling 1 stands.
+
+**And this is the finding the two reviews split on.** `k8s-admin` filed the same
+wrong bit as a **nit** on the reasoning that *neither is drawn*, having traced
+`App::footer`, which reaches a `no` only through `Offer::Act { restartable: true }`
+and is therefore safe. That is true of the footer and false of `?`, which is a
+second reader with no kind gate — and `?` is the screen that answers *what may I
+press*. `tester` drew the real frame into an 80×24 backend and read the row. **A
+claim reasoned from one reader's guard is not a claim about the screen**, and no
+existing test could have caught it: `ui_tests.rs`'s width test does feed `pods`
+and `replicasets` to a refused `Refused`, but asserts only the column count, never
+whether the clause should exist.
+
+**Blocker 2 — `just check` was red on 43 lines past 100 columns, and the two steps
+behind the failing guard never ran at all.** All 43 are this box's new prose in
+`dev-ui`'s three files. `cargo deny check` and `just cross` sit *after*
+`just guards`, so a prose violation stopped the supply-chain and
+cross-compilation steps from running — a red build that also hid whether the rest
+was green.
+
+**The ruling that follows, and it is a change to this repo's own process.**
+`scripts/width-guard.py` costs **0.17 s** measured, and it is the one guard that
+fails on prose a dev writes on every single turn — which `cargo fmt` will not
+rewrap and the dev's own list (fmt, clippy, test, `mutants-diff`) cannot see. So
+it joins [CLAUDE.md § the dev runs](CLAUDE.md), and **no other guard does**: the
+reason step 5 owns the full gate is that `guards`, `cargo deny` and `cross` do not
+turn on the dev's judgement, and that stays true of every guard but this one. The
+test is not *is it cheap* but *does it fail on what this author is about to hand
+over*.
+
+**What `tester` refuted, and the PM's own claim is the one that was refuted.** The
+three surviving `console()` mutants were passed to step 5 with the PM's reasoning
+that they are *structurally unreachable*: one call site behind `at_a_keyboard`, no
+test calling it, `tests/binary.rs` piping stdio. Every one of those facts held, and
+the conclusion did not. `tester` drove `console()` in the real binary over a pty
+(`ssh -tt` plus `stty`) and got that function's own return value back, so
+`-> None` would have printed nothing and exited `0` with the suite still green.
+**It is a coverage hole, not a false positive** — a weaker and more honest sentence
+than the one it replaces, and the distinction matters because *unreachable* closes
+the question and *untested* does not. Still not this box's defect: it added three
+field initialisers to the `Console { … }` literal, all three covered, and that is
+what pulled the function into `--in-diff` scope; every future box adding a field
+there trips the same three. It needs a `libc`-scope ruling against
+[D276](#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24)
+before it can be boxed, so it is `backlog.md`'s.
+
+**Two things the reviews confirmed rather than found, and both are load-bearing.**
+No path dims a key on anything but a clean `Verdict::No` — fed `incomplete: true`,
+an `evaluationError`, an empty rule list and a **cluster-admin wildcard**, the
+probe marked nothing in every case, the wildcard being the one that would have
+been catastrophic. And the cross-cluster cache poison is closed twice over:
+`switched` clears `client`, `permits` and `wondering`, *and* `probing` is a `pump`
+local that a switch drops rather than filing under a namespace name two clusters
+share.
+
+**What D261 ruling 11 turns out to be.** `k8s-admin` settled it against upstream
+source: a **webhook** authorizer sets `incomplete: true` unconditionally and a
+union of authorizers ORs the flag, so the feared under-report is unreachable that
+way — on such a cluster every question is `CouldNotTell` and no key is ever
+marked. The reachable shape is a different authorizer entirely
+(`system-privileged-group`, appended to `authorizers` and not to `ruleResolvers`
+on every cluster), and it is unlikely in the wild because bootstrap policy
+reconciles the `cluster-admin` binding. The cost of that answer is its own entry:
+the probe is **inert on any webhook-authorizer cluster** — AKS with Azure RBAC /
+Entra ID is one setting away and it is on by default on AKS Automatic — and
+nothing on screen distinguishes it from a login that may do everything. No code:
+`docs/security.md` gains the paragraph and the `kubectl` call that settles a
+cluster, and the screen sentence is `backlog.md`'s.
+
+**The role gap this box turned from theory into the defect it exists to remove.**
+`docs/security.md` had carried `create selfsubjectrulesreviews` on the admin role
+only since 2026-09-05, recorded as *a gap rather than a policy* that would *arrive
+with the browser row that reads it*. It arrived with this box instead, which is a
+second reader and landed first — so on
+[D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)'s
+cluster a login bound only to `k8rs-readonly` and running **without**
+`--read-only` reached `Offer::Act`, had its review refused, saw no key marked, and
+was asked to type a Deployment's name in full before the cluster refused the
+delete — the exact journey of the box. `k8rs-readonly` now carries the rule, and
+the paragraph stops promising it to a box that no longer owns it.
+
+**Round 2, and the third blocker was the PM's sequencing rather than anyone's code.**
+The fixes went back for review and both earlier blockers were independently
+confirmed closed — `cargo deny check` ran **green for the first time**, the round-1
+width red having stopped the gate before it ever reached that step, and `just guards`
+and `cargo test` green with it. What was red was one character: the operator review
+found `(rollout restart — no patch deployments)` has a natural wrong reading — `A — no
+B` with a verb phrase either side parses as *does A, does not do B*, so the row says
+*this key does a rollout restart, it does not patch the deployment*, which is coherent,
+plausible and false, and for a reader who has not met `patch` as an RBAC verb it is the
+**more** natural parse. `tui-designer` ruled a middle dot, `·` being already this
+product's *two unrelated facts* separator and unreadable as *not*, at a cost of **zero
+columns** — `—` and `·` are both one display column, so every count in the section
+stands. `ctrl-d`'s `(no delete deployments)` keeps its shape: one verb phrase, no dash
+to misread.
+
+**The process finding, and it is a rule this file already has.** That re-ruling was
+dispatched **while `tester` was running the full gate**, so `screens/help.md` moved
+under it twice — and four `ui_tests` compare the *drawn block against that page*, which
+turned a screen edit into a red `cargo test` in somebody else's report. CLAUDE.md's
+concurrency table permits `one dev writing · tui-designer on a **later** phase's
+screen`; this was the **same box's** screen, beside an agent whose gate reads it. The
+word *later* in that row is doing real work and was read as scheduling advice. `tester`
+named it, re-measured `deny`, `cross` and `guards` against the tree as it finally stood
+rather than reasoning that none of them reads markdown, and labelled every result with
+the revision it was taken against — which is the only reason the round is still
+evidence. **What the PM owes when it edits beside a running gate is not an apology but
+a re-run**, and the re-run is what happened.
+
+**What round 2 confirmed rather than found, all of it measured.** The shared predicate
+is at the right seam: `views::Offer::scales` / `restarts` has two callers and one
+answer, and the **group check belongs inside it** — `k8s::browsable` keeps `apps/v1
+StatefulSet` and OpenKruise's `apps.kruise.io/v1beta1 StatefulSet` as two resources
+under one sidebar row, so a kind-word-only predicate answers `true` for the wrong one
+and no caller can forget it where it lives now. Fed all **45** (group, kind) pairs and
+all nine `ObjectKind` variants, `refusals` and `Offer::act` never disagreed, and the
+compare is correctly case-sensitive (`Apps/deployment` is false). The link-transition
+clear does not fire needlessly on `Live → Live` and clears on every real transition
+with no stale mark drawn even once. And the three width boundaries were re-derived from
+the format strings rather than carried forward: `clusterroles` at **12** columns fills
+the body exactly, `deviceclasses` at 13 overflows by one, `customresourcedefinitions`
+draws 91 — D261 ruling 9's own 13-and-90 were correct under the *pre-*`no` wording, and
+the shift is that reword's one-column cost.
+
+**Two things the round left standing on purpose.** The `backlog.md` entry on a stale
+permission answer **stays**: `tester` put a 500 on the review endpoint while the link
+held `Live` and watched the `CouldNotTell` cache with `wondering: None` across three
+frames, so the clear closes the link-drop family and not a review that fails without
+moving the link — independent confirmation of `k8s-admin`'s reading of D285 ruling 4,
+where a cut of all six connections never produced `Lost` at all. And `just cross` exits
+0 while checking **none** of the four release targets, for want of their std.
+`tester` tried to close it, installed the musl std, found `ring` then fails for want of
+`x86_64-linux-musl-gcc`, and — the part that matters — **noticed it had thereby armed a
+red gate for everyone on that host**, because the recipe skips only when the
+target-libdir is *absent*. It removed the target and re-verified the skip. So the
+recipe's own comment is now measured rather than trusted: a std is necessary and not
+sufficient, `musl-tools` would close the two musl rows, and the two darwin rows cannot
+be closed on Linux at all. Installing a system package is the user's call, not an
+agent's.
+
+**The cluster proof, and it is the PM's because the box's done-when is a run.**
+Measured 2026-09-27 on the four-node `k8rs` kind cluster, against a `ServiceAccount`
+bound to one namespaced `Role` — `get`/`list`/`watch` on `pods` and on
+`apps/deployments,replicasets`, and nothing else — carried in a `TokenRequest`
+kubeconfig. `kubectl auth can-i` confirmed the credential first: `patch deployments`
+**no**, `delete deployments` **no**, `list pods` **yes**. The header read
+`ctx: limited · ns: default · live · admin`, which is the F1 condition exactly: a
+restricted credential running **without** `--read-only`, so the keys are offered and
+the probe is what has to answer for them. The binary was built on the host and driven
+on a real pty, with each frame read back through a resize-forced full repaint
+(`scripts/picker-test.py`'s own trick — a diff renderer writes only changed cells).
+
+**The question `k8s-admin` said could not be reasoned is answered, and the answer is
+the safe one.** A namespaced `SelfSubjectRulesReview` under that identity returned
+`incomplete: false`, no `evaluationError`, and **the Role's own rules**:
+`['get','list','watch'] [''] ['pods']` and
+`['get','list','watch'] ['apps'] ['deployments','replicasets']`. Not the empty list
+beside a whole answer that would have marked every key `no` — so the false-refusal
+direction that fail-open exists to prevent is not reachable here.
+
+**Both states drew correctly, at 100 columns, from the real binary.** A **Pod** card
+(`default/broken-restarts10`) — `r` withheld because `ops::restartable` reaches no pod:
+
+```
+│ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                                                    │
+│    r       restart, at its own pace       (rollout restart)                                      │
+│    ctrl-d  delete — you type the name to confirm (no delete pods)                                │
+```
+
+and a **DaemonSet** card (`default/broken-ds · 3 pods`) — `r` supported and refused:
+
+```
+│ ↑↓ move  ⏎ open  r no restart  / filter  ? all keys  q quit                                      │
+│    r       restart, at its own pace (rollout restart · no patch daemonsets)                      │
+│    ctrl-d  delete — you type the name to confirm (no delete daemonsets)                          │
+```
+
+**That is the box's done-when, both halves.** A key the credential cannot use is
+marked before it is pressed — `r no restart` on the footer and the grant named in `?` —
+and nobody is asked to type a name they were never allowed to use, because `ctrl-d`
+carries `no delete <plural>` before the key is touched. **It is also this round's
+blocker proven dead on a cluster rather than in a backend**: the Pod rows carry no `r`
+clause at all, where the pre-fix code drew `(rollout restart — patch pods)` for a key
+the footer was not offering. And it closes the one gap `tester` named and could not
+reach — *a restartable kind, refused, end to end* was covered only for Deployment in
+the committed fixtures, because `daemonsets.json` produces no finding and therefore no
+card; a live cluster has one.
+
+**Where a PM cluster run's evidence goes.** [`reports/`](reports/README.md) is
+`k8s-admin`'s Writes cell and every path in this repo appears in exactly one of them,
+so a PM measurement does not open a file there. It lands in the box body and in this
+entry — which is the precedent `reports/README.md` itself names, the
+`docker restart` exit code that lives in `todo.md` and nowhere else.
