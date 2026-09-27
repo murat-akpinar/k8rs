@@ -2782,6 +2782,36 @@ recorded reversal and a later box rather than a dev round
   belongs to the caller and there is nothing in the type to enforce that. A doc line on `pasteable`
   saying so is `dev-core`'s whenever `ops.rs` is next open. 2026-09-24.
 
+- **A discovery answer that failed transiently is never re-asked, and the cheapest door is
+  explicitly closed.** `k8s::served` is read once inside `connect` and has one console reader;
+  `Fault::Unanswered` is the one non-standing fault reachable there, so a `503` or a dropped socket
+  on `/apis` at connect costs the whole RESOURCES section for the life of the process on a cluster
+  that is otherwise fine. The only remedies today are quitting or bouncing through another context
+  and back, because `screens/context.md` makes `⏎` on a live `(current)` row close without
+  reconnecting. **The row's permanence is deliberate and is not the thing to change**
+  ([D296](NOTES.md#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)):
+  what is missing is a retry anywhere. The picker's `(current)` rule already carries one exception,
+  so a second — *or while the discovery answer is a fault* — is a retry with no new key, no new
+  screen state and no new sentence. It also mitigates the next box's subject: an operator who can
+  re-ask discovery learns in one keypress that their RBAC was never the problem, which no banner
+  wording can do. `k8s-admin`, 2026-09-27, finding 4.
+
+- **`screens/widgets.md` § 7 declares its list of cuts closed at twelve — *"a truncation found
+  anywhere else on a screen is a bug, not a thirteenth entry"* — and the banner stack's own cut is
+  not on it.** No entry names a banner, a caveat or the stack, yet two committed mockups at `HEAD`
+  already draw one. So the closed list has been false for as long as the banner cap has existed, and
+  the declaration is what makes it a defect rather than an omission: either § 7 gains the entry or
+  the cap is named somewhere that § 7 points at. Predates the discovery box, which is why it was not
+  fixed inside it. `tester`, 2026-09-27.
+
+- **A `Status.message` of nothing but whitespace gives every `because` caller a dangling
+  attribution.** `k8s::message` guards `!is_empty()` and `k8s::text` does not trim, so
+  `message: "   "` arrives as `Some("   ")` and the reader gets `and said: .` with nothing between.
+  Cosmetic, and it needs a server that answers a failed call with a blank message; the guard belongs
+  next to the existing `is_empty()` one, in `k8s.rs`, whenever that file is next open. `tester`,
+  2026-09-27.
+
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

@@ -1981,6 +1981,502 @@ count line survives whole because it is one line and comes before the
 paragraph that is last; the rank looks for the *last* paragraph to shrink,
 never an earlier one, on this pane exactly as above it.
 
+## k8rs could not read what this cluster serves
+
+The tenth state on this page, and the only one that empties a whole section of
+the sidebar while everything else on the run keeps working. Discovery is two
+calls behind one answer — `get /apis` and `get /api` — and it is the only thing
+that tells k8rs which kinds this cluster has — so a login that may not make it gets a RESOURCES section with
+nothing under it, on a screen where the connection is working normally, Alerts
+is complete and every report is live. Measured on a cluster whose `system:discovery`
+binding had been pointed at a group nobody is in: Alerts complete and correct,
+CPU one tick per two seconds, and the sidebar still drawing all five RESOURCES
+groups with no sentence anywhere
+([reports/2026-09-26](../reports/2026-09-26-the-error-state-pass.md) § 5,
+finding F5).
+
+**The path is the only subject a sentence about it can have.** A
+`nonResourceURL` refusal carries no group and no kind in its own `Status`
+([NOTES § D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)),
+so the string this screen hands the reader is a path — and this is the one
+refusal on the page that names one where every other names a verb and a
+resource. **Both paths, and not the aggregated one alone**: the answer behind
+this sentence is `run_aggregated`'s, which is two requests, `/apis` and `/api`,
+each refusable on its own. A sentence naming only `/apis` sends a reader to
+their admin, gets obeyed, and draws again unchanged after the restart it asked
+for — k8rs wrong twice, the second time about an errand it set itself. The
+grant for `/api` is also every core kind, which is most of what the browser is
+for.
+
+**Two surfaces carry it, and the split is this product's existing one** — the
+crowded surface marks, the roomy one explains
+([widgets.md § 2a](widgets.md#2a-the-footer), § 7). A sidebar row has 18 columns
+for its text and cannot hold a sentence, so it carries the short form; the pane
+has room, so it carries the sentence. **Neither of them is the browser pane**, and that is
+the point of the ruling rather than a gap in it: the pane the fact is *about*
+cannot be opened, because there is no row left to open it with.
+
+**Two surfaces, two gates, and they are different on purpose — this is the only
+place either is stated.** The **row** follows the discovery answer and nothing
+else: it is there from the first console frame of the session to the last,
+whatever the connection does afterwards. A row that came and went with the link
+would put the five group rows back on screen under
+`⚠ disconnected, retrying` — five topics of content promised by a read that
+never happened — and it would give the row the *still finding out* reading
+[§ The two panes that draw no list at all](#the-two-panes-that-draw-no-list-at-all)
+says it does not have. The **sentence** yields while the connection itself is
+the louder problem: it is withheld under [`ui::Link`](../src/ui.rs)'s `Lost`,
+`Expired` and `Unconnected`, and drawn under `Live` and `Connecting`. Under the
+first three the pane already has a sentence of its own and *nothing here changes
+until k8rs is restarted* would be competing with *renew your login, then press
+`X`* — two next steps for one reader, which is what
+[§ Over a pane with nothing to show yet](#over-a-pane-with-nothing-to-show-yet)
+and the picker's own box both refuse. Under `Connecting` there is no such
+competition and the answer is already in hand: `served` is read inside
+`k8s::connect`, so a discovery fault is known before the first frame, which is
+why the still-loading screen below draws this sentence rather than waiting for
+`Live`.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  RESOURCES has nothing under it. k8rs asks    │
+│  RESOURCES         │  for it only at startup, so nothing here      │
+│   could not read   │  changes until k8rs is restarted. This        │
+│  ANALYSIS          │  changes nothing about the findings or the    │
+│   capacity      1 ▲│  reports. The reason: the role this           │
+│   certificates  30d│  kubeconfig uses needs to `get /apis` and     │
+│   drain safety     │  `/api`.                                      │
+│   posture          │                                               │
+│   restarts         │▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   waste            │    Containers exceeded their memory limit and │
+│   versions         │    were killed by the kernel (OOMKilled)      │
+│                    │                                               │
+│                    │  ▲ shop/api  ·  2 of 6 pods       12 min ago  │
+│                    │    Running, but not receiving traffic — the   │
+│                    │    readiness check is failing                 │
+│                    │    → check the app's /healthz endpoint        │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch                                      │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### The five group rows do not draw, and one row says why instead
+
+`workloads` `network` `storage` `config` `cluster` are
+[`views::sidebar`](../src/views.rs)'s own rule — *"a group with no kinds under
+it still draws its row"* — and that rule was written about **a cluster that
+serves nothing in `storage`**, which is a fact about the cluster. *Nothing was
+ever read* is a different fact, and the same five rows tell the reader the
+opposite of it five times: five topics of content, none of which can arrive, and
+`⏎` on each of them expanding to nothing at all. So while the discovery answer
+is a fault, the five rows are replaced by **one row, at a group row's own indent
+of 1**:
+
+```
+┌────────────────────┐
+│  RESOURCES         │
+│   could not read   │
+└────────────────────┘
+```
+
+- **`could not read`, in [`theme::DIM`](../src/theme.rs), unselectable.** Dim
+  and unselectable are one decision: it is a label and not a destination, the
+  same as `RESOURCES` and `ANALYSIS` above and below it, so `↑↓` skips it
+  exactly as it already skips those two and `⏎` is never offered on it
+  ([widgets.md § 2](widgets.md#2-element--widget)). Drawn in `theme::TEXT` it
+  would read as a group row and invite the keypress it cannot answer, which is
+  the promised-key-that-does-nothing this file's own key rule forbids
+  ([README § the five rules, item 2](README.md#the-five-rules-every-screen-obeys)).
+- **Words, and no glyph or colour of its own.** `● ▲ ○` are severities and this
+  carries none; `⚠` is a connection or trust problem and the connection here is
+  live and verified. Nor is a fifth glyph invented for it: `● ▲ ○` and `⚠` are
+  one small set taught once and read the same way on every screen since, and a
+  new one would need its own legend before a reader who had not met it knew
+  what it meant ([README § the five rules, item
+  4](README.md#the-five-rules-every-screen-obeys)). **Plain words in the tight
+  space is the choice the footer already made** for exactly this trade, where
+  `no` carries a refusal that has no room for its reason
+  ([widgets.md § 2a](widgets.md#2a-the-footer)) — and `no` itself is not the
+  word here, because `could not read` has to stay true of a `404` from a proxy
+  and an expired token as well as of a permission this login lacks.
+- **Three words, not a sentence, because 17 columns is what there is.** A
+  group row's own room is 17 columns — 20 for the sidebar, less the two the
+  selection gutter reserves on every row, less the indent
+  ([`ui::SIDEBAR`](../src/ui.rs), [widgets.md § 2](widgets.md#2-element--widget)'s
+  indent rule) — and *this kubeconfig may not `get /apis`* is 35. The row says
+  that the section was answered and answered badly; the pane says what and what
+  to do.
+- **`↑↓` therefore crosses `ALERTS` and the seven ANALYSIS reports, and nothing
+  between them.** RESOURCES has no landable row while this holds, which is the
+  literal truth: there is nothing to browse. The reader is not being kept out of
+  a working browser — one does not exist on this run.
+
+### The sentence, and why it is allowed to sit over a pane it is not about
+
+One paragraph, unmarked, left-flush, wrapped at the pane's own width — the same
+banner family [§ You can only see some namespaces](#you-can-only-see-some-namespaces)
+draws, which is also a `403` that degrades one feature and also carries no `⚠`.
+It hangs by nothing, because there is no mark to pay for
+([§ Rules that hold across every state on this page](#rules-that-hold-across-every-state-on-this-page)).
+
+```
+RESOURCES has nothing under it. k8rs asks for it only at startup, so nothing
+here changes until k8rs is restarted. This changes nothing about the findings
+or the reports. The reason: the role this kubeconfig uses needs to
+`get /apis` and `/api`.
+```
+
+**Four parts in that order, and the order is the ruling.** The subject is
+first; k8rs's own words about what happens next are second; the narrowed
+reassurance is third; and [`because`](../src/views.rs)'s clause is **last**,
+because it is the only part whose length k8rs does not choose.
+
+- **It names its own subject in its first two words, and that alone is what
+  earns it the space.** Alerts is complete and correct in the measured case, so
+  a banner that opened with anything else would read as a caveat about the cards
+  underneath it. `RESOURCES` in capitals is the same token as the sidebar label
+  two rows to its left and the eye joins them, so the first sentence does that
+  job on its own — **which is the reason it is first and the reason it is the one
+  part that can never be cut away.**
+- **The reassurance is belt-and-braces, and it claims less than it used to.**
+  *"This changes nothing about the findings or the reports"* is a claim about
+  **this refusal** and about nothing else — never that the findings are fine.
+  The earlier wording, *"are read separately and are unaffected"*, was false on
+  the ordinary scoped frame: a cluster-scoped node watch cannot be granted by a
+  namespaced `Role`, so **every** namespace-scoped run carries a permanently
+  refused node watch whose own banner two rows up says *"nothing here about them
+  can be trusted"* — two sentences in one voice, one frame apart, and one of them
+  wrong ([`vitals`](../src/main.rs)'s own doc, and `k8s::Fault::Refused` is
+  `standing`, so the snapshot still publishes and the link still reads `live`).
+  The claim now narrows to the only thing a refused discovery answer is entitled
+  to say about a list it had no part in building. **And it is a part this page is
+  content to lose**: it sits third because the two slots ahead of it belong to
+  the subject and to k8rs's own next step, and ahead of the clause only because
+  the clause is the one part whose length k8rs does not choose. On a squeezed
+  frame it goes, and the screen is still honest without it.
+- **The clause is [`views::because`](../src/views.rs)'s, is never written here,
+  and is last because it is the one part that can be 4096 bytes long.**
+  `because` answers every fault that can land in
+  [`k8s::Session::served`](../src/k8s.rs) with one plain clause, and the frame
+  above takes each of them unchanged: *the role this kubeconfig uses needs to
+  `get /apis` and `/api`* for a refusal, *this cluster no longer accepts this
+  login — it comes from `aws sso login`, so renew it there* for a token that died
+  at connect, *this server says there is no such thing when k8rs tries to
+  `get /apis` and `/api`* for a proxy answering `404`. **One frame, one clause
+  per fault** — a second wording per fault would be the generic-sentence defect
+  `because` exists to prevent, read from the other end.
+- **For one fault the clause is the server's own words, and that is why the
+  reader's next step cannot sit behind it.** `Fault::Rejected` quotes what the
+  cluster sent, and a body that is not JSON at all reaches that field **whole** —
+  so an HTML error page from a proxy in front of the API server is an ordinary
+  way into this sentence, bounded at 4096 bytes against a pane that holds about
+  500. With the clause last, the cut lands in the server's markup and every word
+  that is k8rs's own is already drawn above it: the subject, the restart, the
+  reassurance. **With the clause in the middle — where this sentence had it
+  until this round — a long enough answer pushed the reader's own next step off
+  the pane entirely**, which is
+  [D294](../NOTES.md#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27)'s
+  shape one door over, and worse here: that box could point at the audit log,
+  and **discovery is not audited at all**, so this pane is the only surface the
+  fact has. The `…` marks what was cut and there is nowhere to send the reader
+  for the rest, which is the honest state of it and the reason the parts that do
+  fit are ordered by whose words they are.
+- **The rank squeezing the whole sentence is the other cut and it is not this
+  one.** There the sentence is its ordinary length and the *share* is two or
+  three rows, so what draws is the front of it — and the front is now k8rs's
+  own words rather than the cluster's.
+  [§ Where it sits when something else is already
+  queued](#where-it-sits-when-something-else-is-already-queued) draws that frame
+  and states what it costs.
+- **Nothing here says k8rs will keep trying, because it will not.** `served` is
+  read once, at connect, and never again in a session (`../src/k8s.rs`: *a
+  kubeconfig that may not `get /apis` still watches pods*). That is why the
+  sentence names the restart in its **second** breath rather than borrowing the
+  watch banner's *"it keeps asking"* — which is true of a watch and false of
+  this one call, and is exactly the promise
+  [D295](../NOTES.md#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)
+  retired one surface over.
+- **`X switch cluster` is not promoted, and the rule it looks like it triggers
+  does not reach here.** `k8s::Fault::Refused` is `standing`, and
+  [§ Over a pane with nothing to show yet](#over-a-pane-with-nothing-to-show-yet)
+  promotes `X` under a standing fault *regardless of what else has settled* —
+  but that rule's own antecedent is *nothing on the whole run will move again*,
+  and here every watch is delivering, every badge is advancing and Alerts is
+  live. The promotion test is whether the session is dead-ended; this session is
+  not. `X` stays behind `?`, and `⏎` on the picker's own live `(current)` row
+  would not re-ask discovery anyway
+  ([context.md § The picker](context.md#the-picker)).
+- **The footer is whatever the open pane already draws — no key is added and
+  none is withheld.** A refused `/apis` costs no key: the only keys it could
+  have cost are the browser's own, and a pane with no row to open it draws no
+  footer at all. Both mockups above and below carry the ordinary Alerts line,
+  `r restart` included — `r` rides on the selected card's kind and on what this
+  login may patch, and neither of those is what discovery answers
+  ([widgets.md § The footer](widgets.md#2a-the-footer)).
+- **The list underneath is the ordinary one and scrolls the ordinary way.** The
+  sentence is above the cards, not part of them
+  ([widgets.md § 4](widgets.md#4-scrolling)) — a pane with more cards than rows
+  behaves exactly as it does under any other banner, and nothing about this
+  page's own scrolling changes for this state.
+- **On an Analysis report and inside a detail tab it is the sidebar row alone,
+  and that is the existing shape rather than an omission.** Neither of those
+  panes stacks a caveat — a report carries its own *not checked* rows
+  ([analysis.md](analysis.md)) and a detail tab is about one object — so a
+  sentence about the browser has no seat there, and the row is on screen on
+  every pane of the run regardless.
+
+### The two panes that draw no list at all
+
+`caveats` only runs ahead of a list, and the two panes that have none — Loading,
+and Ready with zero findings — reach the sentence the way the audit sentence
+already does, as one of [`Screen::note`](../src/ui.rs)'s paragraphs
+([§ On a healthy or a still-loading Alerts screen](#on-a-healthy-or-a-still-loading-alerts-screen)).
+**One string, two renderers — wrapped at 39 there instead of at the pane's own
+width** — the same one-sentence-many-renderers rule the missing-check line
+already follows. There is no third: `--once` says this in `greeting`'s own words
+on stderr and is not a screen this file draws.
+
+**Position: last, after every paragraph the caller handed over — which is the
+same rank it has on the banner path, reached by position instead of by a list
+this pane cannot read.** That is one rule for both paths and not two, and it is
+what makes this sentence the first thing to give way on either of them. Counted
+off [`notes()`](../src/main.rs), the two arms it has to be true of are not the
+same length:
+
+| Arm | What the caller hands over | With this sentence appended |
+|---|---|---|
+| Ready with zero findings | **one** paragraph — the count. `○  nothing is broken` is [`ui::note`](../src/ui.rs)'s own headline, not one of these | the count, then this |
+| Loading | **two** — the count line, then *Large clusters take a moment…* | both of those, then this |
+
+**Second-to-last was the first draft of this rule and it was wrong on the first
+of those arms, which is worth saying rather than quietly fixing**: a
+one-paragraph list has no second-to-last but the count, so it would have put
+this sentence directly under the verdict and pushed the count — the evidence for
+that verdict — below it, and made the count the paragraph that gives way. *Last*
+protects the count on that arm and keeps the two paragraphs about the read in
+progress together on the other, with the fact about a different section after
+them both.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │               ○  nothing is broken            │
+│  RESOURCES         │                                               │
+│   could not read   │        84 pods and 3 nodes checked, none of   │
+│  ANALYSIS          │        them is in trouble right now.          │
+│   capacity      1 ▲│                                               │
+│   certificates  30d│        RESOURCES has nothing under it. k8rs   │
+│   drain safety     │        asks for it only at startup, so nothing│
+│   posture          │        here changes until k8rs is restarted.  │
+│   restarts         │        This changes nothing about the findings│
+│   waste            │        or the reports. The reason: the role   │
+│   versions         │        this kubeconfig uses needs to `get     │
+│                    │        /apis` and `/api`.                     │
+│                    │                                               │
+│                    │                                               │
+│                    │                                               │
+│                    │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch                                      │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**This costs nothing, and the arithmetic is counted against the screen that is
+built rather than against the one the mockups above draw.** Headline (1) + blank
+(1) + the count (2) + blank (1) + this sentence (7) is 12 of the 13 the region
+allows — the headline and its blank are 2 of those 13, and the paragraphs use 10
+of the 11 they are left, one spare. **`Worth a look anyway → ANALYSIS → capacity` does not enter
+the sum, because `notes()` does not build it** — its own doc says so: the
+parenthesis is a sentence out of a report's own rows and *"a third that would
+have to be invented is not"*. The mockup at [§ Nothing is
+broken](#nothing-is-broken) draws that pointer and the running console does not,
+which is this page's own divergence and not this state's to close; the mockup
+above is the built screen, with no pointer in it to lose.
+
+**Still loading keeps all three whole, with nothing to spare** — the count line
+(1) + blank (1) + *Large clusters take a moment…* (3) + blank (1) + this
+sentence (7) is 13 of the 13, nothing cut:
+
+```
+ nodes …                            ctx: prod-eu · connecting… · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │        reading the cluster… 2,140 pods        │
+│  RESOURCES         │                                               │
+│   could not read   │        Large clusters take a moment. Findings │
+│  ANALYSIS          │        appear as they are found — this list   │
+│   capacity         │        fills up, it does not wait.            │
+│   certificates  30d│                                               │
+│   drain safety     │        RESOURCES has nothing under it. k8rs   │
+│   posture          │        asks for it only at startup, so nothing│
+│   restarts         │        here changes until k8rs is restarted.  │
+│   waste            │        This changes nothing about the findings│
+│   versions         │        or the reports. The reason: the role   │
+│                    │        this kubeconfig uses needs to `get     │
+│                    │        /apis` and `/api`.                     │
+│                    │                                               │
+│                    │                                               │
+│                    │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A                                              │
+├────────────────────────────────────────────────────────────────────┤
+│ ? all keys  q quit                                                 │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**The sidebar row has no *still finding out* reading, and that is worth saying
+because every badge beside it does.** The discovery answer arrives at connect,
+before the first console frame is drawn, so `could not read` is there from the
+first frame or never at all — unlike `capacity`, blank in the mockup above and
+carrying `1 ▲` in the one before it, because its own read is still in flight
+([widgets.md § 1a](widgets.md#1a-the-header-row)). Nothing about this state
+flickers, and no screen has to be drawn for a discovery answer that has not
+arrived yet.
+
+**And when the audit log could not be opened either, this sentence draws nothing
+at all — so that combination is two screens this page already has, plus the
+sidebar row.** [`ui::note`](../src/ui.rs)'s `first` slot is the audit sentence,
+prepended ahead of everything the caller handed over
+([§ On a healthy or a still-loading Alerts
+screen](#on-a-healthy-or-a-still-loading-alerts-screen)), and it is eight lines
+long. Counted both ways: on the healthy pane the paragraphs have 11 rows to
+share — 16, less the 3 the list keeps, less the headline and its blank — and
+audit (8) + blank (1) + the count (2) fills all 11, so this sentence's share is
+0 and a share of 0 draws nothing. On the loading pane they have 13, audit (8) +
+blank (1) + the count line (1) is 10, *Large clusters take a moment…* takes the
+3 that are left and is cut there exactly as that section's own mockup already
+draws it, and this sentence's share is 0 again. **Both frames are the ones drawn
+there, unchanged, with `could not read` in the sidebar** — which is the rank
+behaving as ruled rather than an omission: the fact with the most carriers is the
+one that goes, and the row is still on screen saying the section was answered
+badly.
+
+### Where it sits when something else is already queued
+
+**Fourth in the rank, last of all, and first to give way** — the rank is clock,
+then the pane's own reason, then the audit sentence, then this
+([§ Rules that hold across every state on this page](#rules-that-hold-across-every-state-on-this-page)).
+It gives way before the audit sentence because it is carried in more places than
+the audit sentence is: the sidebar row says the section was answered badly
+whatever the pane underneath does, on every pane and every frame of the run, and
+the sentence itself draws again in full the moment there is room for it. The
+audit sentence's second carriers — the footer and the header's `read-only` —
+carry only its *consequence*, never its reason. Most redundancy loses first.
+
+A namespace scope and a refused `/apis` together, cluster-live, one card left
+under them. The scope's own two paragraphs are the pane's reason and keep their
+rows; this sentence takes what is left and is cut at a word boundary behind a
+visible `…`:
+
+```
+ nodes 3/3                    ctx: prod-eu · ns: payments · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  You can't list pods across the whole         │
+│  RESOURCES         │  cluster, so k8rs is showing the namespace    │
+│   could not read   │  your kubeconfig points at: payments.         │
+│  ANALYSIS          │  Use  --namespace <name>  for a different     │
+│   capacity      1 ▲│  one, or ask for cluster-wide read access.    │
+│   certificates  30d│                                               │
+│   drain safety     │  One node check is off: spotting a node       │
+│   posture          │  someone started emptying and did not finish  │
+│   restarts         │  needs every pod in the cluster.              │
+│   waste            │                                               │
+│   versions         │  RESOURCES has nothing under it. k8rs asks    │
+│                    │  for it only at startup, so nothing here…     │
+│                    │                                               │
+│                    │▸ ● payments/web  ·  3 of 5 pods    4 min ago  │
+│                    │    Containers exceeded their memory limit and │
+│                    │    were killed by the kernel (OOMKilled)      │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -n payments --watch                             │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  r restart  / filter  ? all keys  q quit           │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The cut keeps k8rs's own words and loses the cluster's, which is the order
+  the sentence is written in.** The scope's nine lines plus a blank are 10 of the
+  13; this sentence's share is 3 — a blank and two lines — and what survives is
+  the subject whole, as its own sentence, plus the front of the restart. The
+  sidebar row is still there to say the section is not merely empty.
+- **What that costs, said rather than discovered later: on this one frame the
+  reader does not learn which permission to ask for.** The clause is last, so a
+  squeeze reaches it first. It is the cost of the order, and the order is paid
+  for by the case the clause itself overflows, where the same two lines would
+  otherwise have been two lines of somebody's HTML
+  ([§ The sentence…](#the-sentence-and-why-it-is-allowed-to-sit-over-a-pane-it-is-not-about)).
+  Two things make it bearable and neither is an inference: this frame always has
+  another banner above it already naming a permission — under a namespace scope
+  that is what the scope *is* — and `RESOURCES has nothing under it` still draws
+  whole, which is the part the reader cannot reconstruct from anywhere else on
+  screen.
+- Illustrative, not a captured run: the exact column the `…` lands on is the
+  renderer's own measurement off the spans it is about to draw, never this
+  page's ([widgets.md § 7](widgets.md#7-text-that-came-from-the-api)).
+- **`get /apis` can land across a line break at the narrowest wrap** — as it
+  does in the two `note` mockups above — and it is left that way rather than
+  given a rule of its own. Which words fall where is word-wrap over a clause
+  whose length differs per fault, so no wording can hold the token whole for all
+  of them; and the whole string is on screen either way, so a no-break rule for
+  one token would be a truncation convention of its own bought for nothing.
+- **Every clause length this ruling rests on, measured at 39 columns — the
+  narrowest of the two wraps — so the row counts above can be checked against the
+  sentence rather than taken on trust.** k8rs's own three parts are **5** lines
+  on their own; with `because`'s clause after them the whole sentence is:
+
+  | Clause | Lines at 39 | Lines at 43 |
+  |---|---|---|
+  | `Refused` · `Unanswered` · `Unfinished` · `Expired` with no program named | 7 | 7 |
+  | `Gone` | 7 | 7 |
+  | `Expired` with a renewal program named · `NoCredential` | 8 | 7 |
+  | `Rejected` quoting the server | 9 and up, unbounded | 8 and up |
+
+  **The two 8-line shapes and every `Rejected` shape are cut, and they are cut
+  in the clause**, which is what the order buys: at 39 the five lines that are
+  k8rs's own are already drawn before the first line of the clause begins.
+  **Naming both paths cost no row** — `get /apis` and `/api` in place of
+  `get /apis` alone is ten characters and every count above is the count the
+  shorter string had.
+
+### The states this is not
+
+**Discovery answered and named nothing.** `served` is `Ok` with an empty list —
+*discovery named nothing at all*, `main.rs`'s own words for it — and that is a
+fact about the cluster rather than about this login, so the five group rows draw
+as they always have and there is no row and no sentence.
+[`views::sidebar`](../src/views.rs)'s existing rule already governs it, and no
+server this product supports can produce it — a cluster exactly as
+`kind create cluster` left it answers with **51** resources, measured
+([NOTES § D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+Drawn nowhere on this page on purpose — a screen naming a state the code cannot
+reach is how that state gets built.
+
+**Connected, and then the link died or the login ran out — the sentence waits,
+the row does not.** `served` carries a fault too, so the connection's own
+sentence is the only one that draws, in the words
+[§ Over a pane with nothing to show yet](#over-a-pane-with-nothing-to-show-yet)
+already gives it: *the discovery call did not work* is not a second fact when
+nothing else worked either. **The row is untouched by any of it** — it is what
+was read at connect, and a connect that succeeded before the link died has that
+answer in hand for the rest of the run. Which `ui::Link` variants withhold the
+sentence is § *Two surfaces, two gates* above, stated there and not restated
+here.
+
+**Nothing ever connected, so there was no answer to have — and this is the one
+state with no row.** It is absent for want of a fact rather than by a gate:
+`served` is read inside `k8s::connect`, so a run that never got a session never
+learned anything about this cluster's kinds, and the row has nothing to report.
+**There is no sidebar to put it in either**, which is why no screen here is
+drawn for it: the startup picker is the first thing drawn rather than an overlay
+on a frame that already exists
+([context.md § Opening at startup](context.md#opening-at-startup)), and the
+failures below it print before there is a frame at all
+([§ Before the TUI ever starts](#before-the-tui-ever-starts)).
+
 ## Before the TUI ever starts
 
 **No kubeconfig at all** is always this — stderr, exit non-zero, no raw mode —
@@ -2275,6 +2771,13 @@ typing `k8rs` alone opens anything.
   have appeared.** Silence is the one thing it may not do: an alert list with a
   disabled rule behind it looks identical to an alert list that found nothing,
   and the second is the claim the whole product rests on.
+- **A whole section of the sidebar that could not be read says so in the
+  section itself and again in a sentence, because a sidebar row has 18 columns
+  and no reason fits in them.** The section's rows are replaced by one that says
+  it was answered badly, and the reason goes where there is room for it — never
+  the five ordinary rows left standing over content that cannot arrive
+  ([§ k8rs could not read what this cluster
+  serves](#k8rs-could-not-read-what-this-cluster-serves)).
 - **Every card this page draws under a degraded banner still carries `▸` on
   its identity line, the same reversal [alerts.md § The selected
   card](alerts.md#the-selected-card) makes for the ordinary screen** — `⏎`,
@@ -2295,14 +2798,26 @@ typing `k8rs` alone opens anything.
   go stale ([§ This sentence does not hide with the
   clock's](#this-sentence-does-not-hide-with-the-clocks)).
 - **Whatever queues above the pane's own content — the clock pointer, the
-  pane's own reason, the audit sentence — shares one 16-row body and never
-  takes more than 13 of it.** The list or the calm block beneath keeps the
-  rest. Which one gives way is a **rank**, not simply whichever is drawn
-  last: the audit sentence is always first to give, because it is the one
-  fact with a second carrier (the footer, and the header, which reads
-  `read-only` for it too);
-  clock and the pane's own reason (which namespace, what fixes a dead
-  login) have none, so between those two the draw order and the rank agree.
+  pane's own reason, the audit sentence, the discovery sentence — shares one
+  16-row body and never takes more than 13 of it.** The list or the calm block
+  beneath keeps the rest. Which one gives way is a **rank**, not simply
+  whichever is drawn last, and it is ordered by how much of the fact is carried
+  somewhere else: the **discovery sentence** gives first, because both halves of
+  it are — the sidebar's own `could not read` row for the consequence, on every
+  pane and every frame of the run, and the sentence itself again, whole, on the
+  next pane with room for it
+  ([§ k8rs could not read what this cluster
+  serves](#k8rs-could-not-read-what-this-cluster-serves)); the **audit
+  sentence** next, because its consequence alone has a second carrier (the
+  footer, and the header, which reads `read-only` for it too) while its reason
+  has none; clock and the pane's own reason (which namespace, what fixes a dead
+  login) have neither, so between those two the draw order and the rank agree.
+  **The calm-block path ranks by position rather than by this list and still puts
+  the discovery sentence first to give way, which is the one place the two
+  families agree** — the audit sentence's own position there is the reverse of
+  its rank here, and that reversal is argued in its own section; this sentence
+  needs no such carve-out, because *last* is both its position there and its
+  rank here.
   Whatever is last in the rank is wrapped as far as its own remaining budget
   allows and marked with a visible `…` at a word boundary; a share under two
   rows draws nothing at all rather than an unmarked fragment

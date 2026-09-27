@@ -2875,10 +2875,12 @@ fn unreadable(
 /// a reason to stop. Both are typed errors, so both name *what* failed and *why*
 /// (`PRIOR-ART § C1`); neither is ever a generic sentence.
 ///
-/// **`get /apis` and not `list apis`.** That refusal is the `nonResourceURL` one NOTES § D160
-/// measured on a cluster without the default `system:discovery` binding, and its `Status` carries
-/// an **empty `details`** — no group and no kind — so the path is the only true subject a
-/// sentence about it can have.
+/// **`get` and not `list`, and *both* paths.** That refusal is the `nonResourceURL` one
+/// NOTES § D160 measured on a cluster without the default `system:discovery` binding, and its
+/// `Status` carries an **empty `details`** — no group and no kind — so a path is the only true
+/// subject a sentence about it can have. **Which path is [`views::DISCOVERY`]'s to say, and it is
+/// two**: `Discovery::run_aggregated()` asks `/apis` *and* `/api`, so the clause this prints named
+/// half of what the reader has to grant (NOTES § D296).
 ///
 /// **A function so that both failures can be asserted.** `live` writes this to stderr and a test
 /// cannot read the process's own stream back, which is what left the two clauses unproven while
@@ -2939,7 +2941,7 @@ fn greeting(session: &k8s::Session) -> Vec<String> {
              tell which add-ons it has ({})",
             because(
                 k8s::fault(error),
-                "`get /apis`",
+                views::DISCOVERY,
                 renewal,
                 k8s::said(error).as_deref()
             )
@@ -5480,7 +5482,7 @@ async fn yaml_run(
                  which one {KIND} means — {}",
                 because(
                     k8s::fault(failure),
-                    "`get /apis`",
+                    views::DISCOVERY,
                     renewal,
                     k8s::said(failure).as_deref()
                 )
@@ -7418,6 +7420,10 @@ fn ending(performed: &ops::Performed) -> Ended {
 // (`k8s::Browsing`), and the four detail reads and the log stream. Each has a slot the frame
 // already fills honestly — `Pane::Loading` — and each is a box of its own.
 //
+// **The first of those is why a refused discovery call is said on somebody else's pane** (NOTES
+// § D296, [`unread`]): the pane the fact is about is the `Table` fetch, so until it exists the
+// sentence rides the panes that do, ranked last on each of them.
+//
 // **The `may_i_in` probe is wired and was the third of those** ([`refusals`], [`permitted`],
 // `Console::permits`): the marks it draws are `r no restart` on the footer and the *why not* clause
 // on `?`'s `r` and `ctrl-d` rows. Two halves of it are deliberately still out and are not slots
@@ -7519,6 +7525,13 @@ struct Console<'a> {
     clock: Option<String>,
     /// Every browsable kind the cluster said it serves, for the sidebar (invariant 12).
     kinds: Vec<k8s::Browsable>,
+    /// **Why there are none of those to draw, or `None`** — read once at connect with the answer
+    /// behind it ([`unread`], `ui::Screen::discovery`, NOTES § D296).
+    ///
+    /// **Empty [`Console::kinds`] is not this fact** and the two must not be read for one another:
+    /// a cluster that serves nothing browsable keeps its five group rows, because that is a fact
+    /// about the cluster rather than about this login. [`discovered`] is the join.
+    discovery: Option<String>,
     /// The kubeconfig's contexts, for `X` and the startup picker (`k8s::contexts`).
     ///
     /// **Re-read for the context every connect was made with** (NOTES § D265 ruling 8): the list
@@ -8010,6 +8023,7 @@ async fn console(opening: &Opening<'_>, keyboard: bool) -> Option<String> {
         context: views::Stripped::of(""),
         clock: None,
         kinds: Vec::new(),
+        discovery: None,
         contexts: Vec::new(),
         connection: views::Connection::Never,
         // **Nothing is connected yet, which is the literal truth of this frame** — the startup
@@ -8323,6 +8337,15 @@ async fn connected(
         .as_ref()
         .map(|served| served.kinds.clone())
         .unwrap_or_default();
+    // **The other answer the same field can carry, worded once and kept for the run** ([`unread`],
+    // NOTES § D296): the sidebar's row and the pane's sentence are two readers of this one
+    // `Option`. **It moves no `ui::Link`, and it is not read for one either** — this call is one
+    // round trip at connect and the watches are their own, so a refused `/apis` says nothing about
+    // whether the cluster is answering, and `ui::discovery` is where the two facts meet.
+    console.discovery = session.served.as_ref().err().map(|error| {
+        let said = k8s::said(error);
+        unread(k8s::fault(error), at.renewal.as_deref(), said.as_deref())
+    });
     // **The name as drawn, which is what a picker's `(current)` row shows** — `k8s::Session`'s
     // `None` and `k8s::Choice::name`'s `None` are one answer for one entry, and this is that entry
     // (`k8s::Session::context`'s own doc).
@@ -8427,6 +8450,10 @@ async fn switched<B: ratatui::backend::Backend>(
     console.insecure = tls_unverified(&console.contexts);
     console.clock = None;
     console.kinds = Vec::new();
+    // **With the kinds, because they are one answer** ([`discovered`], NOTES § D296): left behind,
+    // the old cluster's `could not read` row would stand under a header naming the context that was
+    // tried — a fact about a read that happened on a different cluster.
+    console.discovery = None;
     console.unconnected = false;
     // **The old cluster's answers about what this login may do go with the old cluster**
     // ([`Console::permits`]): the rules are that cluster's RBAC, and the client is that cluster's
@@ -9266,6 +9293,7 @@ fn drawn<B: ratatui::backend::Backend>(
         now: &now,
         note: &note,
         kinds: &console.kinds,
+        discovery: console.discovery.as_deref().map(views::Stripped::of),
         reports: &reports,
         log: console.log.lines(),
         // **Filled in below, after [`ui::offered`] has said whether a mark could be read at all** —
@@ -9749,6 +9777,62 @@ fn notes(
             plural(snapshot.nodes.len(), "node"),
         ))],
     }
+}
+
+/// **What the reader is told when the discovery call did not work** — the sidebar's row says the
+/// section was answered badly, and this is the sentence that says what and what to do
+/// (`screens/states.md` § The sentence, and why it is allowed to sit over a pane it is not about;
+/// NOTES § D296).
+///
+/// **Four parts, and the order is the ruling**: the subject, k8rs's own next step, the narrowed
+/// reassurance, and [`views::because`]'s clause **last**. Every part but the last is k8rs's own
+/// words, and the last is the one whose length k8rs does not choose — `k8s::Fault::Rejected` quotes
+/// the server, and a response body that is not JSON at all reaches that field whole, bounded at
+/// `k8s::FREE_TEXT` against a pane that holds about 500 characters. Ordered any other way a proxy's
+/// HTML error page pushes the reader's own next step off the pane, and discovery is audited
+/// nowhere, so this pane is the fact's only surface (`tester`, measured: the instruction was gone
+/// at a 400-character `said`).
+///
+/// **It names the restart in its second breath rather than a retry, because
+/// `k8s::Session::served` is read once at connect and never again.** *It keeps asking* is true of a
+/// watch and false of this one call.
+///
+/// **Its first two words are its subject, and that is what lets it sit over a live Alerts list**:
+/// `RESOURCES` is the same token as the sidebar label two rows to its left, so a sentence that
+/// opened with anything else would read as a caveat about the cards under it.
+///
+/// **The reassurance claims only what this refusal did, and the wider claim it used to make was
+/// false** — *"the findings and the reports are read separately and are unaffected"*. A
+/// cluster-scoped node watch cannot be granted by a namespaced `Role`, so every namespace-scoped
+/// run carries a permanently refused node watch whose own banner says *nothing here about them can
+/// be trusted*, two rows above this one, on the same frame and in the same voice (`k8s-admin`).
+///
+/// **The clause is [`views::because`]'s and there is no second wording per fault here** — the
+/// same call [`greeting`] makes on the same field, so a refusal, a login that died at connect and a
+/// proxy answering `404` each reach the reader in the clause that fault already has.
+///
+/// **It takes a [`k8s::Fault`] and not the error, which is what makes it provable without a
+/// socket** — the caller unpacks the three, exactly as [`greeting`] does on the same field.
+fn unread(fault: k8s::Fault, renewal: Option<&str>, said: Option<&str>) -> String {
+    format!(
+        "RESOURCES has nothing under it. k8rs asks for it only at startup, so nothing here changes \
+         until k8rs is restarted. This changes nothing about the findings or the reports. The \
+         reason: {}.",
+        views::because(fault, views::DISCOVERY, renewal, said)
+    )
+}
+
+/// **What discovery answered, in the two answers [`views::sidebar`] has** — the router's half of
+/// `ui::Screen::served`, which is the renderer's (NOTES § D296).
+///
+/// **Named apart from that method because `main_tests` already has a `served`** — an HTTP test
+/// server, and a shadowed product name in its own test module is a trap rather than a saving.
+///
+/// **One function because the two key handlers and the drawn frame walk the same rows**: `↑↓` and
+/// `⏎` build the nav list to step and to open it, so a third spelling of this join is how a cursor
+/// comes to land on a row the frame does not draw.
+fn discovered<'a>(console: &'a Console<'_>) -> Option<&'a [k8s::Browsable]> {
+    console.discovery.is_none().then_some(&console.kinds[..])
 }
 
 /// **What the detail slot is showing, in the terms the keys are decided in** — the same value
@@ -10253,7 +10337,7 @@ fn moved(
     }
     match console.app.focus {
         views::Panel::Sidebar => {
-            let rows = views::sidebar(&console.kinds, PANES.len(), console.app.expanded);
+            let rows = views::sidebar(discovered(console), PANES.len(), console.app.expanded);
             let picks = views::selectable(&rows, |item| item.selectable());
             let keys: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
             step(&mut console.app.nav, &keys, towards);
@@ -10375,7 +10459,7 @@ fn entered(console: &mut Console<'_>, cards: &[views::Card], open: views::Detail
         }
         views::Detailing::Closed => match console.app.focus {
             views::Panel::Sidebar => {
-                let rows = views::sidebar(&console.kinds, PANES.len(), console.app.expanded);
+                let rows = views::sidebar(discovered(console), PANES.len(), console.app.expanded);
                 let picks = views::selectable(&rows, |item| item.selectable());
                 let keys: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
                 let Some(nth) = console.app.nav.selected(&keys) else {

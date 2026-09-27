@@ -775,7 +775,25 @@ pub struct Screen<'a> {
     pub note: &'a [Stripped],
     /// Every browsable kind the cluster said it serves, for the sidebar's rows under an open
     /// group. **Never a list written here** (invariant 12).
+    ///
+    /// **Empty is *this cluster serves nothing browsable*, which is not *nothing was read*** —
+    /// that is [`Screen::discovery`]'s, and [`Screen::served`] is where the two are joined
+    /// (NOTES § D296).
     pub kinds: &'a [Browsable],
+    /// **The sentence a discovery call that did not work puts above the pane, or `None`**
+    /// (`screens/states.md` § k8rs could not read what this cluster serves, NOTES § D296).
+    ///
+    /// **It is the caller's sentence for [`Screen::clock`]'s reason** — the clause inside it is
+    /// `crate::views::because`'s answer for whichever fault landed, and the fault is the
+    /// `k8s::Session` the caller holds. One clause per fault, and never a second wording here.
+    ///
+    /// **Two surfaces read it and their gates differ, which is the whole of the ruling.** The
+    /// sidebar reads *whether it is `Some`* and nothing else, through [`Screen::served`]: the row
+    /// is a fact about what was read at connect and does not come and go with the link. The
+    /// sentence additionally yields to a link that is the louder problem, which is [`discovery`].
+    /// **One field for both, because they are one fact** — a caller that dropped this under a dead
+    /// link would put the five group rows back under `⚠ disconnected, retrying`.
+    pub discovery: Option<Stripped>,
     /// One entry per analysis report, in sidebar order: its label, and the report itself once
     /// there is one.
     ///
@@ -1224,6 +1242,13 @@ impl Screen<'_> {
     /// A foreground in one of `theme.rs`'s roles, at this terminal's depth.
     fn fg(&self, role: Colour) -> Style {
         Style::new().fg(ink(role, self.depth))
+    }
+
+    /// **What discovery answered, in the two answers the sidebar has** —
+    /// [`crate::views::sidebar`]'s own input, so the join between [`Screen::kinds`] and
+    /// [`Screen::discovery`] is spelled once (NOTES § D296).
+    fn served(&self) -> Option<&[Browsable]> {
+        self.discovery.is_none().then_some(self.kinds)
     }
 }
 
@@ -3392,10 +3417,11 @@ fn capitalised(verb: &str) -> String {
 ///
 /// The rows come from [`views::sidebar`] — which is where invariant 12's join between the
 /// cluster's kinds and k8rs's five sections lives (NOTES § D248) — and the cursor walks
-/// [`views::selectable`]'s answer, so `↑↓` skips `RESOURCES` and `ANALYSIS` without this file
-/// knowing which rows those are.
+/// [`views::selectable`]'s answer, so `↑↓` skips `RESOURCES`, `ANALYSIS` and the row that stands in
+/// for a section nothing could be read into ([`NavItem::Unread`]) without this file knowing which
+/// rows those are.
 fn sidebar(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
-    let rows = views::sidebar(screen.kinds, screen.reports.len(), app.expanded);
+    let rows = views::sidebar(screen.served(), screen.reports.len(), app.expanded);
     let picks = views::selectable(&rows, |item| item.selectable());
     // `Cursor::selected` needs one anchor slot per selectable row and reads none of them here:
     // following an object is the key handler's business, and drawing only needs the index.
@@ -3414,6 +3440,12 @@ fn sidebar(frame: &mut Frame, area: Rect, app: &App, screen: &Screen) {
                 NavItem::Alerts => (0, "ALERTS", theme::TEXT, tally(screen)),
                 NavItem::Header(name) => (0, name, theme::DIM, Vec::new()),
                 NavItem::Group(group) => (1, group.label(), theme::TEXT, Vec::new()),
+                // **Words, at a group row's own indent, in `theme::DIM` and with no glyph of its
+                // own** — the five it replaces are `theme::TEXT` and land under `↑↓`, and a row
+                // that looks like them invites the `⏎` it cannot answer (NOTES § D296,
+                // `screens/states.md` § The five group rows do not draw). 17 columns is the whole
+                // of why the reason is not here; `screens/` counts them.
+                NavItem::Unread => (1, "could not read", theme::DIM, Vec::new()),
                 NavItem::Kind(nth) => (
                     3,
                     screen
@@ -3540,7 +3572,7 @@ fn content(frame: &mut Frame, area: Rect, app: &mut App, screen: &Screen) {
     match app.view {
         View::Resources(nth) => browser(frame, area, app, screen, screen.kinds.get(nth)),
         View::Analysis(nth) => match screen.reports.get(nth).and_then(|(_, report)| *report) {
-            None => note(frame, area, screen, false, None),
+            None => note(frame, area, screen, false, None, None),
             Some(report) => analysis(frame, area, app, screen, report),
         },
         View::Alerts => match screen.alerts {
@@ -3556,7 +3588,18 @@ fn content(frame: &mut Frame, area: Rect, app: &mut App, screen: &Screen) {
             // first frame of every run said nothing about a dead write path. It is read off
             // [`Screen::writes`] and not left to the caller, because the caller is Phase 12's and
             // NOTES § D21 is a rule nothing would enforce otherwise.
-            Pane::Loading => note(frame, area, screen, false, screen.writes.said()),
+            //
+            // **[`discovery`]'s sentence is passed the same way and for the same reason, at the
+            // other end of the block** (NOTES § D296): these two arms are the only panes with no
+            // list for [`caveats`] to stack it over.
+            Pane::Loading => note(
+                frame,
+                area,
+                screen,
+                false,
+                screen.writes.said(),
+                discovery(screen),
+            ),
             Pane::Denied(said, cards) => {
                 let rest = caveats(frame, area, screen, Some(said), FLOOR);
                 alerts(frame, rest, app, screen, cards);
@@ -3568,7 +3611,14 @@ fn content(frame: &mut Frame, area: Rect, app: &mut App, screen: &Screen) {
             // the sentence that page draws is the caller's, over `Pane::Denied`, as it is for a
             // stale list.
             Pane::Ready(cards) if cards.is_empty() && screen.link == Link::Live => {
-                note(frame, area, screen, true, screen.writes.said());
+                note(
+                    frame,
+                    area,
+                    screen,
+                    true,
+                    screen.writes.said(),
+                    discovery(screen),
+                );
             }
             Pane::Ready(cards) => {
                 let rest = caveats(frame, area, screen, None, FLOOR);
@@ -3583,21 +3633,29 @@ fn content(frame: &mut Frame, area: Rect, app: &mut App, screen: &Screen) {
 ///
 /// **A rank, not a draw order that happens to cut the last one** (`screens/states.md` § Your clock
 /// and a scoped namespace together, re-ruled 2026-09-12): the clock, then the pane's own reason,
-/// then the audit sentence — and each is handed what the ones above it left, so **the audit
-/// sentence is the first to give way and neither of the other two ever gives way to feed it**. It
-/// is the one fact on the screen with a second carrier: the footer already withholds `s` and `r`,
-/// and the header will read `read-only`. The clock and the pane's reason — which namespace, which
-/// check is off, what command renews a login — are said nowhere else. The order before this put the
-/// audit sentence second, and the pane's own reason was the one cut: *"One node check is off"*
-/// beside a namespace scope, `aws sso login` beside an expired login, and with all three queued the
-/// namespace banner gone with no mark (`k8s-admin`, 2026-09-12, round two).
+/// then the audit sentence, then [`discovery`]'s — and each is handed what the ones above it left,
+/// so **the last is the first to give way and nothing above it ever gives way to feed one below**.
+/// The rank is how much of the fact is carried elsewhere. The discovery sentence is last because
+/// **both** halves of it are (NOTES § D296): the sidebar's own row, on every pane and every frame
+/// of the run, and this sentence again whole on the next pane with room for it. The audit sentence
+/// next: its consequence has a second carrier — the footer already withholds `s` and `r`, and the
+/// header will read `read-only` — and its reason has none. The clock and the pane's reason — which
+/// namespace, which check is off, what command renews a login — are said nowhere else. The order
+/// before this put the audit sentence second, and the pane's own reason was the one cut: *"One node
+/// check is off"* beside a namespace scope, `aws sso login` beside an expired login, and with all
+/// three queued the namespace banner gone with no mark (`k8s-admin`, 2026-09-12, round two).
+///
+/// **The browser stacks these too and cannot reach the fourth**, which is worth saying because the
+/// sentence is about the browser: a run whose discovery call did not work has no kind row to open a
+/// `View::Resources` with, and `crate::views::App::switched` resets the view — so the pane the fact
+/// is *about* is the one pane it never draws on.
 ///
 /// **One function because both panes stack them**, and because a second copy is how the browser and
 /// Alerts come to draw one run's caveats in two different orders.
 fn caveats(frame: &mut Frame, area: Rect, screen: &Screen, said: Option<&str>, keep: u16) -> Rect {
     let mut rest = area;
     let mut left = usize::from(area.height.saturating_sub(keep));
-    for sentence in [clock(screen), said, screen.writes.said()]
+    for sentence in [clock(screen), said, screen.writes.said(), discovery(screen)]
         .into_iter()
         .flatten()
     {
@@ -3871,6 +3929,25 @@ fn clock<'a>(screen: &'a Screen) -> Option<&'a str> {
         .map(Stripped::as_str)
 }
 
+/// **[`Screen::discovery`]'s sentence, where the connection is not the louder problem**
+/// (`screens/states.md` § Two surfaces, two gates; NOTES § D296).
+///
+/// **`Connecting` is on the drawn side and that is not an oversight**: the discovery answer is read
+/// inside `k8s::connect`, so it is in hand before the first console frame, and the still-loading
+/// pane has no next step of its own for this one to compete with. Under `Lost`, `Expired` and
+/// `Unconnected` it does — *start k8rs again once that is fixed* beside *renew your login, then
+/// press `X`* is two next steps for one reader.
+///
+/// **The sidebar's row is deliberately not filtered here** ([`Screen::served`]): it is the half of
+/// the fact that stays on screen whatever the link does.
+fn discovery<'a>(screen: &'a Screen) -> Option<&'a str> {
+    screen
+        .discovery
+        .as_ref()
+        .filter(|_| matches!(screen.link, Link::Live | Link::Connecting))
+        .map(Stripped::as_str)
+}
+
 /// The centred block an empty or still-loading pane draws (`screens/states.md`).
 ///
 /// **`○  nothing is broken` is this file's line and the paragraphs under it are the caller's**,
@@ -3890,7 +3967,20 @@ fn clock<'a>(screen: &'a Screen) -> Option<&'a str> {
 /// screen, re-ruled 2026-09-12). Every other caller either stacks its banners already or has no
 /// seat for the sentence once it answers, and appending it here for all seven drew it twice on the
 /// browser and made it flicker on every detail tab (`k8s-admin`, 2026-09-12, round two).
-fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool, first: Option<&str>) {
+///
+/// **`last` is [`discovery`]'s sentence, and it is a parameter for exactly the same reason** (NOTES
+/// § D296): the two panes that draw this block with no list are Alerts', and `screens/states.md`
+/// § The two panes that draw no list at all gives an Analysis report and a detail tab the sidebar's
+/// row alone. **Last and not second-to-last**, which is that section's own arithmetic over the two
+/// arms `crate::notes` has.
+fn note(
+    frame: &mut Frame,
+    area: Rect,
+    screen: &Screen,
+    healthy: bool,
+    first: Option<&str>,
+    last: Option<&str>,
+) {
     let mut lines: Vec<Line> = Vec::new();
     let mut budget = usize::from(area.height.saturating_sub(FLOOR));
     if healthy {
@@ -3912,7 +4002,11 @@ fn note(frame: &mut Frame, area: Rect, screen: &Screen, healthy: bool, first: Op
     // drew a line holding nothing but the mark. **Still the same 13-of-16 cap the banner path
     // keeps**: `centred` clips whatever it is handed with no mark of its own.
     let mut text: Vec<String> = Vec::new();
-    for paragraph in first.into_iter().chain(handed.iter().map(Stripped::as_str)) {
+    for paragraph in first
+        .into_iter()
+        .chain(handed.iter().map(Stripped::as_str))
+        .chain(last)
+    {
         let gap = usize::from(!text.is_empty());
         let share = budget.saturating_sub(text.len());
         if share <= gap {
@@ -4599,7 +4693,7 @@ fn browser(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, kind: Opti
     let [_, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(rest);
     match screen.browser {
         _ if vanished => hidden(frame, padded(body), screen, plural(kind), &app.filters),
-        Pane::Loading => note(frame, body, screen, false, None),
+        Pane::Loading => note(frame, body, screen, false, None, None),
         // **A refusal draws whatever did come back and never the empty sentence below**, which is
         // [`banner`]'s rule one line up: *we were not allowed to look* is not *there is nothing*.
         // A refusal that came back with no rows at all draws the banner and an empty grid.
@@ -5563,7 +5657,7 @@ fn logs(
         Pane::Loading => {
             let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
             if !leads(frame, area, &above, &said, app, screen) {
-                note(frame, area, screen, false, None);
+                note(frame, area, screen, false, None, None);
             }
         }
         Pane::Denied(said, held) => {
@@ -5681,7 +5775,7 @@ fn describe(
         Pane::Loading => {
             let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
             if !leads(frame, area, &above, &said, app, screen) {
-                note(frame, area, screen, false, None);
+                note(frame, area, screen, false, None, None);
             }
             return;
         }
@@ -5804,7 +5898,7 @@ fn events(
         Pane::Loading => {
             let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
             if !leads(frame, area, &above, &said, app, screen) {
-                note(frame, area, screen, false, None);
+                note(frame, area, screen, false, None, None);
             }
             return;
         }
@@ -5966,7 +6060,7 @@ fn yaml(
         Pane::Loading => {
             let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
             if !leads(frame, area, &above, &said, app, screen) {
-                note(frame, area, screen, false, None);
+                note(frame, area, screen, false, None, None);
             }
             return;
         }

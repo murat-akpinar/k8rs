@@ -127,6 +127,7 @@ fn screen<'a>(alerts: &'a Pane<Vec<Card>>, now: &'a Time) -> Screen<'a> {
         now,
         note: &[],
         kinds: &[],
+        discovery: None,
         reports: &[],
         log: &[],
         refused: Refused::default(),
@@ -2491,6 +2492,52 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     against(section, 6, &app(), &first_frame);
     seen.push((section, 6));
 
+    // § k8rs could not read what this cluster serves — the tenth, and the only state that empties a
+    // whole section of the sidebar while everything else on the run keeps working (NOTES § D296).
+    // **`could not read` in the sidebar is not compared here and is
+    // [`the_refused_discovery_row_outlives_the_sentence_it_shares_a_fact_with`]'s**: [`against`]
+    // reads the pane side of a mockup row and nothing on the sidebar side of it.
+    let section = "## k8rs could not read what this cluster serves";
+    let apis = joined(section, 0, 0);
+    let mut over_cards = screen(&live, &now);
+    over_cards.discovery = Some(Stripped::of(&apis));
+    against(section, 0, &app(), &over_cards);
+    seen.push((section, 0));
+
+    // The healthy pane, where the sentence is one of `ui::note`'s paragraphs instead — **appended
+    // after the count and not before it**, which is the arithmetic that section's own table sets
+    // out. The `○  nothing is broken` headline is `ui::note`'s and is dropped from what the caller
+    // is handed, as every other calm frame on this page drops it.
+    let calm = paragraphs(section, 1, 1);
+    let count: Vec<Stripped> = calm[..1].iter().map(|line| Stripped::of(line)).collect();
+    let mut healthy_too = screen(&empty, &now);
+    healthy_too.note = &count;
+    healthy_too.discovery = Some(Stripped::of(&calm[1]));
+    against(section, 1, &app(), &healthy_too);
+    seen.push((section, 1));
+
+    // Still loading — the arm whose caller hands over **two** paragraphs, and the one that proves
+    // `ui::Link::Connecting` is on the drawn side of the sentence's gate: `served` is read inside
+    // `k8s::connect`, so the answer is in hand before the first frame.
+    let waiting = paragraphs(section, 2, 0);
+    let both: Vec<Stripped> = waiting[..2].iter().map(|line| Stripped::of(line)).collect();
+    let mut first_reading = screen(&loading, &now);
+    first_reading.note = &both;
+    first_reading.discovery = Some(Stripped::of(&waiting[2]));
+    first_reading.link = Link::Connecting;
+    against(section, 2, &app(), &first_reading);
+    seen.push((section, 2));
+
+    // § Where it sits when something else is already queued — the capped frame, and the one mockup
+    // of this section [`against`] may not be pointed at: its last banner ends on `…`, which [`fed`]
+    // would hand back to the renderer as a fixture and compare the mark with itself. **The three
+    // above are drawn at 70 columns too and are compared anyway**, because [`said_above`] collapses
+    // whitespace and a sentence drawn whole reads the same at either width; a *cut* one does not —
+    // where it lands is measured off the columns there are. So what this frame draws is the rank,
+    // and that is [`the_discovery_sentence_is_the_first_of_the_stack_to_give_way`]'s, over
+    // sentences of its own length rather than this mockup's words.
+    seen.push((section, 3));
+
     // § Before the TUI ever starts — the ninth, and its claim is that it draws no footer: those
     // failures print to stderr out of `main.rs` before raw mode is on, and there is no frame to put
     // one in.
@@ -2526,8 +2573,8 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // that silently stopped parsing would make every loop above it vacuous and this whole sweep a
     // green that proves nothing.
     assert_eq!(
-        frames, 26,
-        "screens/states.md draws {frames} screens with a footer, not the 26 this sweep was \
+        frames, 30,
+        "screens/states.md draws {frames} screens with a footer, not the 30 this sweep was \
          written against — a frame was added or removed and this test has to say so"
     );
 }
@@ -2561,6 +2608,452 @@ fn dead_log() -> String {
     );
     said
 }
+
+// --- A REFUSED DISCOVERY CALL START ---
+
+/// **The sidebar's own rows, trimmed** — so a needle that also occurs in the pane cannot answer a
+/// question about the sidebar. `kubeconfig` holds `config`, and a whole-frame search for the group
+/// row therefore found the sentence beside it (measured, this file, first run).
+fn nav_labels(buffer: &Buffer) -> Vec<String> {
+    rows(buffer)[2..18]
+        .iter()
+        .map(|line| {
+            line.chars()
+                .skip(1)
+                .take(usize::from(SIDEBAR))
+                .collect::<String>()
+                .trim()
+                .to_owned()
+        })
+        .collect()
+}
+
+/// Where a label starts, in columns from the frame's left edge, and on which row — so an indent is
+/// asserted against another row's own rather than against arithmetic repeated here.
+fn starts_at(buffer: &Buffer, needle: &str) -> (usize, usize) {
+    let lines = rows(buffer);
+    let y = lines
+        .iter()
+        .position(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("no row holds {needle:?}\n{}", lines.join("\n")));
+    let byte = lines[y].find(needle).expect("the row that was just found");
+    (lines[y][..byte].chars().count(), y)
+}
+
+/// The colour a label is drawn in, read off its first cell — so *dim, like the section headers* is
+/// compared with a header on the same frame instead of with a palette value written here.
+fn ink_of(buffer: &Buffer, needle: &str) -> Color {
+    let (x, y) = starts_at(buffer, needle);
+    let at = |value: usize| u16::try_from(value).expect("a coordinate inside an 80x24 frame");
+    buffer
+        .cell((at(x), at(y)))
+        .expect("a cell inside the frame")
+        .fg
+}
+
+/// **The sentence `crate::unread` builds for a discovery call this login may not make** — the one
+/// `screens/states.md` § *k8rs could not read what this cluster serves* draws, produced rather
+/// than transcribed.
+fn refused_apis() -> String {
+    crate::unread(crate::k8s::Fault::Refused, None, None)
+}
+
+/// **What `crate::unread` produces *is* what the page draws** — the crossing with the file on one
+/// side only, [`the_empty_pane_sentences_are_the_pages_own_words`]'s reason (NOTES § D296). Every
+/// frame in the sweep above reads its fixture out of the same mockup, so without this both sides of
+/// those comparisons are the page and a producer drifting from it stays green.
+///
+/// **And that the sentence is not one wording for every fault**: the middle clause is
+/// `views::because`'s, so a `404` from a proxy and a login that died at connect reach the reader as
+/// themselves. An implementation that hard-coded the refusal's clause — the generic sentence
+/// `because` exists to prevent, read from the other end — passes the first assertion and fails this
+/// one.
+#[test]
+fn the_discovery_sentence_is_the_pages_own_words_and_carries_each_faults_own_clause() {
+    let section = "## k8rs could not read what this cluster serves";
+    let page = paragraphs(section, 0, 0);
+    assert_eq!(
+        page.len(),
+        1,
+        "the mockup handed over {} paragraph(s) — a reader that stopped parsing would compare \
+         nothing with nothing: {page:?}",
+        page.len()
+    );
+    println!("produced: {}\npage:     {}", refused_apis(), page[0]);
+    assert_eq!(
+        words(&refused_apis()),
+        page[0],
+        "`unread` and screens/states.md have come apart"
+    );
+
+    let faults = [
+        crate::k8s::Fault::Refused,
+        crate::k8s::Fault::Gone,
+        crate::k8s::Fault::Expired,
+        crate::k8s::Fault::Unanswered,
+    ];
+    let mut said: Vec<String> = faults
+        .iter()
+        .map(|fault| crate::unread(*fault, None, None))
+        .collect();
+    let drawn = said.len();
+    said.sort();
+    said.dedup();
+    assert_eq!(
+        said.len(),
+        drawn,
+        "two faults reach the reader in the same words: {said:?}"
+    );
+    // **Every part but the clause is the same in all of them, and the clause is last** — the
+    // subject earns the sentence its seat over a live list, and k8rs's own words come before the
+    // one part whose length k8rs does not choose.
+    for sentence in &said {
+        assert!(
+            sentence.starts_with(
+                "RESOURCES has nothing under it. k8rs asks for it only at startup, so nothing \
+                 here changes until k8rs is restarted. This changes nothing about the findings or \
+                 the reports. The reason: "
+            ),
+            "k8rs's own three parts are not ahead of the clause: {sentence:?}"
+        );
+    }
+}
+
+/// **The row follows the discovery answer and the sentence additionally follows the link** — the
+/// two gates, stated in `screens/states.md` § *Two surfaces, two gates* and nowhere else on that
+/// page (NOTES § D296).
+///
+/// **The row's own claim is that it does not come and go with the link**: five group rows back on
+/// screen under `⚠ disconnected, retrying` would promise five topics of content that a read which
+/// never happened cannot bring. So it is asserted on all five links, and the sentence on exactly
+/// two of them.
+///
+/// **The healthy frame first, because every absence below only means something against it**: with
+/// nothing wrong with discovery the five labels are drawn and no row is — so a renderer that had
+/// simply stopped drawing group rows would fail there rather than pass here.
+#[test]
+fn the_refused_discovery_row_outlives_the_sentence_it_shares_a_fact_with() {
+    let now = now();
+    let live = Pane::Ready(vec![oom()]);
+    let groups = ["workloads", "network", "storage", "config", "cluster"];
+
+    let answered = render(&app(), &screen(&live, &now));
+    println!("discovery answered\n{}\n", rows(&answered).join("\n"));
+    assert!(
+        !holds(&answered, "could not read"),
+        "a cluster whose discovery call worked was told it did not"
+    );
+    for group in groups {
+        assert!(
+            nav_labels(&answered).iter().any(|row| row == group),
+            "{group} is missing from the sidebar"
+        );
+    }
+    // The indent and the colour this row owes, taken off the frame it replaces rather than written.
+    let (indent, _) = starts_at(&answered, "workloads");
+    let label = ink_of(&answered, "RESOURCES");
+    let destination = ink_of(&answered, "workloads");
+    assert_ne!(
+        label, destination,
+        "a section header and a group row are drawn alike, so nothing below can tell them apart"
+    );
+
+    for link in [
+        Link::Live,
+        Link::Connecting,
+        Link::Lost,
+        Link::Expired,
+        Link::Unconnected,
+    ] {
+        let sentence = refused_apis();
+        let mut refused = screen(&live, &now);
+        refused.discovery = Some(Stripped::of(&sentence));
+        refused.link = link;
+        let drawn = render(&app(), &refused);
+        println!("{link:?}\n{}\n", rows(&drawn).join("\n"));
+
+        assert_eq!(
+            starts_at(&drawn, "could not read").0,
+            indent,
+            "{link:?}: the row is not at a group row's own indent"
+        );
+        assert_eq!(
+            ink_of(&drawn, "could not read"),
+            label,
+            "{link:?}: the row is not drawn as a label, so it invites the `⏎` it cannot answer"
+        );
+        for group in groups {
+            assert!(
+                !nav_labels(&drawn).iter().any(|row| row == group),
+                "{link:?}: {group} promised content that was never read"
+            );
+        }
+
+        let drawn_sentence = body_text(&drawn).contains(&words("RESOURCES has nothing under it"));
+        assert_eq!(
+            drawn_sentence,
+            matches!(link, Link::Live | Link::Connecting),
+            "{link:?}: the sentence is on the wrong side of the link's gate"
+        );
+    }
+}
+
+/// **Last in the rank, so it is the first to give way — and the claim is the *cut*, not the
+/// budget** (`screens/states.md` § Where it sits when something else is already queued).
+///
+/// **Both states, because a fix for one reintroduces the other one column over**: handed a pane of
+/// its own the sentence is drawn whole to its last word, and handed what a namespace scope left it
+/// is cut at a word boundary behind a visible [`CUT`] — with the scope's own two paragraphs whole
+/// either way, which is the half of the rank that says nothing above it ever gives way to feed one
+/// below.
+#[test]
+fn the_discovery_sentence_is_the_first_of_the_stack_to_give_way() {
+    let now = now();
+    let sentence = refused_apis();
+    // The tail of the clause — the last thing in the sentence, and so the first thing a squeeze
+    // reaches (`screens/states.md`: *the cut keeps k8rs's own words and loses the cluster's*).
+    let ending = "needs to `get /apis` and `/api`.";
+
+    let live = Pane::Ready(vec![oom()]);
+    let mut roomy = screen(&live, &now);
+    roomy.discovery = Some(Stripped::of(&sentence));
+    let whole = render(&app(), &roomy);
+    println!("a pane of its own\n{}\n", rows(&whole).join("\n"));
+    assert!(
+        body_text(&whole).contains(&words(&sentence)),
+        "with a pane to itself the sentence is drawn whole"
+    );
+    assert!(
+        !body(&whole).iter().any(|line| line.contains(CUT)),
+        "a sentence that fits was marked as cut"
+    );
+
+    // The scope's own reason is the pane's, and it keeps its rows — 10 of the 13, which leaves 3.
+    let scope = joined("## You can only see some namespaces", 0, 0);
+    let scoped = Pane::Denied(scope.clone(), vec![oom()]);
+    let mut squeezed = screen(&scoped, &now);
+    squeezed.discovery = Some(Stripped::of(&sentence));
+    let cut = render(&app(), &squeezed);
+    println!("behind a namespace scope\n{}\n", rows(&cut).join("\n"));
+    for paragraph in scope.split("\n\n") {
+        assert!(
+            body_text(&cut).contains(&words(paragraph)),
+            "the pane's own reason gave way to feed the sentence below it: {paragraph:?}"
+        );
+    }
+    assert!(
+        body_text(&cut).contains(&words("RESOURCES has nothing under it.")),
+        "the subject is the part the reader cannot reconstruct, so it survives the cut whole"
+    );
+    assert!(
+        !body_text(&cut).contains(&words(ending)),
+        "nothing was cut at all, so this frame proves nothing about the rank"
+    );
+    // **A word boundary behind the mark**, which is the whole of what `…` promises — asserted
+    // against the sentence that was handed over rather than against the row it ended on: what
+    // was drawn is a prefix of it, and the character the full sentence carries on with is a space,
+    // so no word was split for the reader to mis-read.
+    let drawn = body_text(&cut);
+    let from = drawn
+        .find("RESOURCES has nothing")
+        .expect("the sentence the previous assertion just found");
+    let tail = &drawn[from..];
+    let end = tail
+        .find(CUT)
+        .unwrap_or_else(|| panic!("the cut is not marked\n{}", rows(&cut).join("\n")));
+    let shown = &tail[..end];
+    let whole = words(&sentence);
+    assert!(
+        whole.starts_with(shown),
+        "what was drawn is not a prefix of the sentence: {shown:?}"
+    );
+    assert_eq!(
+        whole[shown.len()..].chars().next(),
+        Some(' '),
+        "the sentence was cut inside a word: {shown:?}"
+    );
+}
+
+/// **A dead audit log leaves this sentence no room, and a share of nothing draws nothing** — so the
+/// two frames `screens/states.md` § *On a healthy or a still-loading Alerts screen* already draws
+/// are the frames drawn here, with `could not read` in the sidebar and no second change to the pane
+/// (NOTES § D296).
+///
+/// **The pane is compared with itself, which is a stronger claim than a search for an absence**: a
+/// renderer that cut the audit sentence or the count to make room, or that drew a bare `…` where
+/// this sentence would have started, fails on the comparison rather than on a needle nobody thought
+/// to look for.
+#[test]
+fn the_audit_sentence_leaves_the_discovery_sentence_a_share_of_nothing() {
+    let now = now();
+    let dead = dead_log();
+    let sentence = refused_apis();
+    let page = "## The audit log could not be opened";
+    let empty = Pane::Ready(Vec::new());
+    let loading = Pane::Loading;
+
+    for (what, alerts, handed) in [
+        ("healthy", &empty, fed(page, 5, 2)),
+        ("still loading", &loading, fed("## Still loading", 0, 0)),
+    ] {
+        let mut unaudited = screen(alerts, &now);
+        unaudited.writes = Writes::Unaudited(&dead);
+        unaudited.note = &handed;
+        let without = render(&app(), &unaudited);
+        unaudited.discovery = Some(Stripped::of(&sentence));
+        let with = render(&app(), &unaudited);
+        println!("{what}\n{}\n", rows(&with).join("\n"));
+
+        // The canary: two panes that drew nothing at all would also compare equal.
+        assert!(
+            body_text(&without).contains(&words(&dead)),
+            "{what}: the audit sentence is not on the pane these frames are about"
+        );
+        assert_eq!(
+            body(&with),
+            body(&without),
+            "{what}: the pane changed, so something above this sentence gave way to it"
+        );
+        assert!(
+            !body_text(&with).contains(&words("RESOURCES has nothing under it")),
+            "{what}: a share of nothing drew a fragment"
+        );
+        assert!(
+            holds(&with, "could not read"),
+            "{what}: the sidebar dropped the half of the fact that always draws"
+        );
+    }
+}
+
+/// **The reader's own next step is drawn before a server message that cannot fit, on both
+/// renderers** (`screens/states.md` § The sentence…, NOTES § D296).
+///
+/// **The way in is ordinary rather than contrived.** `k8s::Fault::Rejected` quotes the server, and
+/// when a response body is not JSON at all kube puts the *whole* body in `Status.message` — so an
+/// HTML error page from a proxy in front of the API server arrives here at `k8s::FREE_TEXT`,
+/// against a pane that holds about 500 characters. [`beyond_free_text`] is that shape, already
+/// cut by the real ingest.
+///
+/// **What it asserts is the *instruction*, not the geometry**: with the clause anywhere but last a
+/// long enough answer pushes *nothing here changes until k8rs is restarted* off the pane, and
+/// discovery is audited nowhere, so there is no second surface to recover it from
+/// (`tester`, measured: gone at a 400-character `said`).
+///
+/// **Both renderers, because the wrap differs and the order must not**: the banner at the pane's
+/// own width over a list, and [`note`]'s block at [`BLOCK`] with none.
+#[test]
+fn the_readers_own_next_step_is_drawn_before_a_server_message_that_cannot_fit() {
+    let now = now();
+    let said = beyond_free_text();
+    let sentence = crate::unread(crate::k8s::Fault::Rejected, None, Some(&said));
+    assert!(
+        sentence.len() > 4000,
+        "this fixture is not the overflowing shape it is here to be: {} bytes",
+        sentence.len()
+    );
+    let cards = Pane::Ready(vec![oom()]);
+    let empty = Pane::Ready(Vec::new());
+    let counted = [Stripped::of(
+        "84 pods and 3 nodes checked, none of them is in trouble right now.",
+    )];
+
+    for (what, alerts, handed) in [
+        ("the banner over a list", &cards, &[][..]),
+        ("ui::note's own block", &empty, &counted[..]),
+    ] {
+        let mut overflowing = screen(alerts, &now);
+        overflowing.discovery = Some(Stripped::of(&sentence));
+        overflowing.note = handed;
+        let drawn = render(&app(), &overflowing);
+        println!("{what}\n{}\n", rows(&drawn).join("\n"));
+        let text = body_text(&drawn);
+
+        assert!(
+            text.contains(&words("RESOURCES has nothing under it.")),
+            "{what}: the subject was pushed off the pane"
+        );
+        assert!(
+            text.contains(&words("nothing here changes until k8rs is restarted")),
+            "{what}: the reader's own next step was pushed off the pane by the server's message"
+        );
+        // **The clause did start**, so this frame is the overflow and not a sentence that fit.
+        assert!(
+            text.contains(&words(
+                "The reason: this cluster would not accept the request"
+            )),
+            "{what}: the clause never began, so nothing here is about a cut"
+        );
+        assert!(
+            !text.contains(&words(&sentence)),
+            "{what}: the whole 4 KiB was drawn, so this frame proves nothing about the order"
+        );
+        assert!(
+            body(&drawn).iter().any(|line| line.contains(CUT)),
+            "{what}: what was dropped is not marked"
+        );
+    }
+}
+
+/// **This sentence claims only what this refusal did — never that the findings are fine** — and the
+/// frame it would be wrong on is the ordinary one (`screens/states.md` § The sentence…, the
+/// reassurance bullet; NOTES § D296).
+///
+/// **The contradiction is not hypothetical, which is why the frame is drawn rather than the string
+/// searched.** A cluster-scoped node watch cannot be granted by a namespaced `Role`, so a
+/// namespace-scoped run carries a permanently refused node watch whose own banner ends *nothing
+/// here about them can be trusted*. With the earlier wording — *"the findings and the reports are
+/// read separately and are unaffected"* — those two sentences sat one paragraph apart in one voice
+/// and one of them was false (`k8s-admin`, blocker).
+///
+/// **Both halves, because either alone passes a wrong screen**: the narrowed claim is present, and
+/// no sentence anywhere on the pane says the findings are unaffected.
+#[test]
+fn the_discovery_sentence_does_not_vouch_for_findings_a_refused_watch_has_already_doubted() {
+    let now = now();
+    // The real sentence, from the producer, so the doubt this must not contradict is the one the
+    // console actually draws (`crate::unreadable`, whose tail is true of a refusal and an outage).
+    let doubted = crate::unreadable(
+        &[crate::k8s::Trouble {
+            kind: ObjectKind::Node,
+            listed: false,
+            failure: None,
+            ended: false,
+            unfinished: false,
+            outstanding: None,
+        }],
+        None,
+        None,
+        false,
+    )
+    .remove(0);
+    let sentence = refused_apis();
+    let doubtful = Pane::Denied(doubted.clone(), vec![oom()]);
+    let mut both = screen(&doubtful, &now);
+    both.discovery = Some(Stripped::of(&sentence));
+    let drawn = render(&app(), &both);
+    println!("{}\n", rows(&drawn).join("\n"));
+    let text = body_text(&drawn);
+
+    assert!(
+        text.contains(&words("nothing here about them can be trusted")),
+        "the doubt this sentence must not contradict is not on the frame: {doubted:?}"
+    );
+    assert!(
+        text.contains(&words(
+            "This changes nothing about the findings or the reports."
+        )),
+        "the narrowed claim — about this refusal and nothing else — is not drawn"
+    );
+    for claim in ["are unaffected", "read separately"] {
+        assert!(
+            !text.contains(claim),
+            "one sentence on this frame doubts the node findings and another calls them \
+             {claim:?} — the wording this screen was re-ruled to remove"
+        );
+    }
+}
+
+// --- A REFUSED DISCOVERY CALL END ---
 
 /// **Both mutating keys on one screen, asked separately** ([`Op`]) — `(s, r)`, live exactly where
 /// the footer above them draws them.
@@ -5081,7 +5574,7 @@ fn entries<'a>(reports: &'a [(&'static str, Report)]) -> Vec<(&'a str, Option<&'
 fn opened_report(nth: usize) -> App {
     let mut app = app();
     app.view = View::Analysis(nth);
-    let rows = views::sidebar(&[], 7, None);
+    let rows = views::sidebar(Some(&[]), 7, None);
     let picks = views::selectable(&rows, |item| item.selectable());
     let anchors: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
     let at = picks

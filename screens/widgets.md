@@ -237,7 +237,7 @@ more column from the name beside it.
 | Typed-name input (delete / drain) | `Paragraph` + `Frame::set_cursor_position` | `String` + byte cursor | no input widget exists in ratatui and one line does not need one |
 | Filter / namespace typing, in the footer (Alerts, Resources) | `Paragraph` + `Frame::set_cursor_position` | the `Input` `/`/`n` already own ([`views::Filters`]) | same mechanism as the typed-name input above, not a second one — [§ 2b](#2b-typing-into-a-filter) |
 | Empty · loading · disconnected | centered `Paragraph` | — | same frame, different content pane — never a different screen |
-| Banner above a list (disconnected · namespace scope) | two to eight `Line`s above the normal list | — | one slot, two occupants: the list stays visible and the banner says what is wrong with it — stale data, or a check that could not run ([states.md](states.md)). Disconnected **while** scoped drops the scope explanation (the header still says `ns: payments`) and keeps the *"one node check is off"* line, which is the half a reader cannot infer from anywhere else |
+| Banner above a list (disconnected · namespace scope · a kind list that could not be read) | two to eight `Line`s above the normal list | — | one slot, and the occupants are counted nowhere because the count has gone stale twice: the list stays visible and the banner says what is wrong with it — stale data, a check that could not run, a whole sidebar section that could not be read ([states.md](states.md)), or the at-rest filter line ([§ 2b](#2b-typing-into-a-filter)). Disconnected **while** scoped drops the scope explanation (the header still says `ns: payments`) and keeps the *"one node check is off"* line, which is the half a reader cannot infer from anywhere else |
 
 **The sidebar's indent, stated once rather than read off which rows happen to
 be selected today.** Every row — top-level heading, nav group, kind row —
@@ -844,8 +844,8 @@ which does not fit the 57-column content pane at the 80×24 floor even
 before either filter joins it. One line trying to hold four independent
 facts is the wrong shape regardless of the filter question, so the filter
 gets the same slot [§ 2](#2-element--widget) already names for a pane-level
-fact that is not a per-row property — *"Banner above a list… one slot, two
-occupants"* — as a third occupant, drawn calm (dim, no glyph: this is
+fact that is not a per-row property — *"Banner above a list… one slot"* — as one
+more occupant of it, drawn calm (dim, no glyph: this is
 neither a severity nor a connection problem, [README rule
 4](README.md#the-five-rules-every-screen-obeys)), directly under the title
 row it is already grouped with:

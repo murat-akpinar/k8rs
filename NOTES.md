@@ -317,6 +317,7 @@ its line moving with it.
 - [D293](#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27) — the permission probe review rounds: a clause drawn for a key the footer withholds, and the guard the dev's list could not see
 - [D294](#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27) — verbatim names where verbatim lives, because a 13-row box cannot hold 4096 bytes
 - [D295](#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27) — a first launch that never reached the cluster is a third state, not either of the two the code has
+- [D296](#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27) — a refused `/apis` is two surfaces with two gates, and the row outlives the sentence
 
 ## Why it exists — where the gap is
 
@@ -26398,3 +26399,142 @@ scratch files to the scratchpad **root** and one overwrote the other's. CLAUDE.m
 one hard rule of concurrency* already says each agent works in its own subdirectory of
 it; what it does not say is that the parallel step 5 / step 6 pair is exactly where two
 writers meet, and neither brief named a directory. The brief is the place to name one.
+
+### D296 — a refused `/apis` is two surfaces with two gates, and the row outlives the sentence (2026-09-27)
+
+Phase 13's fourth box: with discovery refused, Alerts was complete and correct, CPU
+was one tick per two seconds, and the sidebar drew all five RESOURCES groups with no
+sentence anywhere — while
+[D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)'s
+own *"this kubeconfig may not `get /apis`"* reached the headless drivers and no console
+frame. Re-checked at HEAD four ways and the premise holds whole: `views::sidebar`
+pushes the five `NavItem::Group` rows unconditionally; `connected` throws the fault
+away (`session.served.as_ref().map(…).unwrap_or_default()`); the browser's `Table`
+fetch is not wired, so `UNOPENED` is `Pane::Loading` and the pane the fact is *about*
+cannot be opened at all; and `greeting` is the only place the sentence is spelled.
+
+**The box asked where the sentence goes while the pane that owns it does not exist, and
+the answer is that it does not go to a pane alone.** `screens/states.md` § *k8rs could
+not read what this cluster serves* rules two surfaces, and the split is this product's
+existing one — the crowded surface marks, the roomy one explains. A sidebar row has 18
+columns of text and a group row 17; *this kubeconfig may not `get /apis`* is 35. So the
+row carries `could not read`, dim and unselectable at a group row's own indent, and the
+five group rows do not draw while it stands; the sentence goes in the pane, unmarked
+and left-flush, with `views::because`'s clause inside one frame — **one frame per
+fault, never a screen per fault**, because every fault that can land in
+`k8s::Session::served` already has a plain clause there.
+
+**Two gates, not one, and they differ.** The **row** follows the discovery answer
+alone, first console frame to last, whatever the link does afterwards: a row that came
+and went with the link would put the five group rows back on screen under `⚠
+disconnected, retrying`, promising content from a read that never happened. The
+**sentence** is withheld under `ui::Link`'s `Lost`, `Expired` and `Unconnected` and
+drawn under `Live` and `Connecting` — under the first three the pane already carries a
+next step, and *start k8rs again once that is fixed* would compete with *renew your
+login, then press `X`*. `Connecting` draws it because `served` is read inside
+`k8s::connect`, so the fault is in hand before the first frame. **The ruling's first
+draft gated both surfaces on `Live` alone and so deleted its own still-loading
+mockup**, which is reachable: `linked` answers `Connecting` for *connected, no fault,
+no snapshot yet*.
+
+**The calm-block path takes the sentence last, and *last* is a correction.**
+`ui::note`'s two arms are not the same length — `notes()` hands over **one** paragraph
+on a healthy pane (the count; `○ nothing is broken` is `ui::note`'s own headline) and
+**two** while loading. *Second-to-last* was the first draft and is wrong on the
+one-paragraph arm: it would have put this sentence under the verdict and pushed the
+count — that verdict's own evidence — below it, and made the count the paragraph that
+gives way. *Last* is true of both arms, protects the count, and makes the rank one rule
+on both paths instead of a carve-out.
+
+**Nothing here promises a retry, which is the half
+[D295](#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)
+retired one surface over.** `served` is read once, at connect, and never again in a
+session, so the sentence names the restart. Borrowing the watch banner's *it keeps
+asking* would be true of a watch and false of this one call.
+
+**Two claims the screen round took away.** The budget arithmetic was first written
+against `Worth a look anyway → ANALYSIS → capacity`, and that paragraph is not built —
+`notes()`'s own doc says a third that would have to be invented is not — so the sum is
+counted against the screen that exists and this sentence costs nothing on a healthy
+pane. And `screens/widgets.md` § 2's *one slot, two occupants* had already gone stale
+before this box: § 2b called the at-rest filter line a third. The count is carried
+nowhere now rather than raised to four.
+
+**What this narrows, stated because a shipped doc comment is now half a rule.**
+`views::sidebar`'s *"a group with no kinds under it still draws its row"* was written
+about a cluster that serves nothing in `storage` and holds for `Ok` with an empty list
+only. Discovery answering nothing at all keeps the five rows and is drawn on no screen
+on purpose — no server this product supports can produce it, a cluster exactly as
+`kind create cluster` left it answering with 51 resources
+([D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+
+**The carrier is a session field beside `ui::Link` and not a `Pane`, which reverses what
+the brief proposed.** `dev-ui` declined `Pane<Vec<Browsable>>` and the reason is the
+screen's own: *neither carrier is a pane*. `Pane` is *what a pane was answered*; this is
+read once inside `k8s::connect` and never again, which is `ui::Link`'s stated reason for
+existing. Concretely a `Pane` here would carry a `Loading` arm no frame can reach, and
+`kinds` has read sites asking *which kind is open* rather than *what did the pane
+answer* — forcing those through D246's deliberately accessor-less three-arm match would
+have grown the `_ =>` arms that guard exists to prevent. So `Console::discovery:
+Option<String>`, `ui::Screen::discovery: Option<Stripped>`, and the join spelled once
+per layer: `discovered` for the router, `Screen::served` for the renderer.
+
+**Steps 5 and 6 found three defects in the sentence itself, and the first one moved it.**
+
+**The clause goes last, because the only unbounded part of the sentence was in the
+middle.** `tester` measured the first wording on real frames: a `said` over about 300
+characters crowded out k8rs's own instruction, and at 400 it was gone. `k8s::answer`
+maps `400 => Fault::Rejected`, and when a response body is not JSON at all kube puts
+**the whole body** in `Status.message` — `Status::failure(&text, "Failed to parse error
+data").with_code(…)`, read in `kube-client-4.2.0/src/client/mod.rs:551-558` rather than
+inferred — so a proxy answering `GET /apis` with an HTML error page is the ordinary path
+in, 4096 bytes against a pane holding about 500. That is
+[D294](#d294--verbatim-names-where-verbatim-lives-because-a-13-row-box-cannot-hold-4096-bytes-2026-09-27)'s shape one door over, and
+**here there is no second carrier at all**: the dialog could point at the audit log,
+discovery is not audited, and `greeting`'s copy is behind the alternate screen. So the
+order is subject · k8rs's own next step · reassurance · clause, and a cut can only eat
+the server's tail. No thirteenth truncation convention and no second wording per fault.
+
+**`are unaffected` was false, and on the ordinary scoped run rather than an exotic
+one.** A cluster-scoped node watch cannot be granted by a namespaced `Role`, so every
+namespace-scoped run carries a permanently refused node watch whose banner reads *"until
+that works nothing here about them can be trusted"* — two rows above a sentence claiming
+the findings are unaffected, one frame, one voice. The claim narrows to *this changes
+nothing about the findings or the reports*: about this refusal, never about the findings'
+health. With it, the ruling that the reassurance is *"the reason a run-level fact is
+allowed to sit on this pane at all"* is retired — the subject-in-the-first-two-words
+argument is the load-bearing one and the reassurance is belt-and-braces, which is what
+the cut rule already implied.
+
+**The sentence named one path and discovery makes two calls.** `k8s::served` is
+`run_aggregated()`, which `k8s.rs`'s own measured table records as **two** round trips,
+`/apis` and `/api`, at any cluster size; `docs/security.md`'s Role grants them
+separately. There is **one** `?` over the call, not one per request, so the error cannot
+say which of the two answered — which is the reason the clause must name both and not a
+detail beside it. So the reader was told *needs to `get /apis`*, granted it, did the errand
+the sentence gave them, restarted, and read the identical sentence — wrong twice, the
+second time after being obeyed, with every core kind still missing. The `asked` string
+is `` `get /apis` and `/api` `` through one constant at **three** call sites (`greeting`,
+the kind-resolution driver, `unread`); the review found two and the third came off a
+grep, which is why the fix is a constant rather than three edits.
+
+**What the reorder costs, and why nothing is owed for it.** Putting k8rs's words first
+means a *rank* squeeze now eats the clause, so on a squeezed frame the reader learns the
+section failed but not which permission to ask for. That frame is **not reachable on the
+console**: it is drawn with the namespace-scope paragraphs as co-occupant, and
+`scoped_because` is called only inside `live` and writes to stderr — `caveats`' four
+ranks have no scope slot. The question returns the day one is added, and the alternative
+then is bounding the clause's rows, which needs a cut inside a banner paragraph and so a
+ruling on `screens/widgets.md` § 7's closed list of twelve (`backlog.md`).
+
+**One prose claim this box took away.** `docs/security.md`'s discovery grant described
+*"the capability probe that decides which analysis rows can answer at all"*, and nothing
+outside `greeting` reads `Served::capabilities` — grepped over `analysis.rs`, `rules.rs`,
+`views.rs` and `ui.rs`, empty. So *the reports are unaffected* is true today **because**
+that wiring is absent, and it becomes false the day a report reads that set with no gate
+to catch it. The comment is corrected and says which way the dependency runs.
+
+Evidence: `reports/2026-09-26-the-error-state-pass.md` § 5 and F5, and
+`reports/2026-09-27-the-refused-discovery-sentence.md` for the review. The screen is
+`screens/states.md` § *k8rs could not read what this cluster serves*, with
+`screens/resources.md` § Rules and `screens/widgets.md` § 2 following it.

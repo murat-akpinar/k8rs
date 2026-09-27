@@ -4052,10 +4052,17 @@ async fn the_startup_line_says_which_question_failed_and_why() {
         ),
         "{both:?}"
     );
+    // **The whole of what was asked for, read off [`views::DISCOVERY`] rather than written here.**
+    // This assertion was a *prefix* — `…needs to \`get /apis\`` — and a prefix is satisfied by a
+    // clause naming half of what the reader has to grant, which is how the missing `/api` rode
+    // through three call sites (NOTES § D296).
     assert!(
-        both.contains("the role this kubeconfig uses needs to `get /apis`"),
-        "the discovery refusal does not name the path, which is the only thing its `Status` \
-         gives it (NOTES § D160): {both:?}"
+        both.contains(&format!(
+            "the role this kubeconfig uses needs to {}",
+            views::DISCOVERY
+        )),
+        "the discovery refusal does not name the paths, which are the only thing its `Status` \
+         gives it (NOTES § D160, § D296): {both:?}"
     );
     assert!(
         both.contains("cannot show you what is in it or tell which add-ons it has"),
@@ -10123,8 +10130,9 @@ async fn a_yaml_run_over_a_cluster_that_would_not_say_what_it_serves_reads_nothi
         refused.starts_with(
             "k8rs: this cluster would not say what kinds it serves, so k8rs cannot tell which \
              one --kind means — "
-        ) && refused.contains("get /apis"),
-        "the refusal did not name the call that was refused: {refused:?}"
+        ) && refused.contains(views::DISCOVERY),
+        "the refusal did not name the whole call that was refused — both paths, off \
+         `views::DISCOVERY` (NOTES § D296): {refused:?}"
     );
     assert!(
         asked.lock().expect("the log is never poisoned").is_empty(),
@@ -14230,6 +14238,7 @@ fn bare_console<'a>() -> Console<'a> {
         context: views::Stripped::of("ctx: k8rs"),
         clock: None,
         kinds: Vec::new(),
+        discovery: None,
         contexts: Vec::new(),
         // **Something connected, which is every run that has a store to press a key against** —
         // the startup states are `Connection::Never`, and they are driven from `console()` itself.
@@ -14253,6 +14262,50 @@ fn bare_console<'a>() -> Console<'a> {
         // own test ([`ctrl_z_does_nothing_at_all_when_the_resume_could_not_be_armed`]).
         resumable: true,
     }
+}
+
+/// **The rows `↑↓` and `⏎` walk are the rows the frame draws** — [`served`], the router's half of
+/// the join `ui::Screen::served` makes for the renderer (NOTES § D296).
+///
+/// **The defect this is about is a cursor landing on a row nobody can see.** With the two out of
+/// step, `↑↓` walks five `workloads`…`cluster` rows the sidebar does not draw, and `⏎` on one of
+/// them expands a group the reader was never offered.
+///
+/// **An empty `kinds` is asserted on the other side of it**: that is a cluster serving nothing
+/// browsable and keeps all five, so the two answers cannot be read for one another.
+#[test]
+fn the_rows_the_keys_walk_are_the_rows_the_sidebar_draws() {
+    let mut console = bare_console();
+    assert!(
+        discovered(&console).is_some(),
+        "a discovery answer that worked was withheld from the sidebar"
+    );
+    let answered = views::sidebar(discovered(&console), PANES.len(), console.app.expanded);
+    assert_eq!(
+        answered
+            .iter()
+            .filter(|item| matches!(item, views::NavItem::Group(_)))
+            .count(),
+        5,
+        "a cluster that serves nothing browsable lost its group rows: {answered:?}"
+    );
+
+    console.discovery = Some(unread(k8s::Fault::Refused, None, None));
+    assert!(
+        discovered(&console).is_none(),
+        "the keys were handed a kind list the frame will not draw"
+    );
+    let refused = views::sidebar(discovered(&console), PANES.len(), console.app.expanded);
+    assert!(
+        !refused
+            .iter()
+            .any(|item| matches!(item, views::NavItem::Group(_))),
+        "a group row the sidebar does not draw is still on the cursor's path: {refused:?}"
+    );
+    assert!(
+        refused.contains(&views::NavItem::Unread),
+        "the row that says the section was answered badly is missing: {refused:?}"
+    );
 }
 
 /// **A burst of watch events, then quiet: one frame for the burst, and the last event on it.**
@@ -20093,6 +20146,10 @@ async fn a_switch_that_cannot_connect_is_the_box_and_leaves_nothing_of_the_old_c
     console.opened = Some(Opened::Pods(pod_id("payments", "web-1")));
     console.kinds = vec![browsable("apps", "Deployment", "deployments", true)];
     console.clock = Some("the clocks disagree".to_owned());
+    // **The other half of what discovery answered** (NOTES § D296): `kinds` and this are one fact,
+    // so a switch that dropped one and kept the other would draw the old cluster's `could not read`
+    // row over the new cluster's five groups.
+    console.discovery = Some(unread(k8s::Fault::Refused, None, None));
     console.insecure = true;
     // **The strip as the running console actually leaves it when `⏎` is pressed** (`k8s-admin`,
     // NOTES § D281): both sites that build `views::Modal::ContextPick` append
@@ -20185,6 +20242,10 @@ async fn a_switch_that_cannot_connect_is_the_box_and_leaves_nothing_of_the_old_c
     assert_eq!(
         console.clock, None,
         "a skew read against the old cluster survived"
+    );
+    assert_eq!(
+        console.discovery, None,
+        "the old cluster's refused discovery call survived, so its row draws over the new sidebar"
     );
     // **The strip keeps the old cluster's last line** (NOTES § D280 item 2,
     // `screens/context.md` § When the new cluster does not work): nothing was sent for the context

@@ -158,8 +158,13 @@ kind: ClusterRole
 metadata:
   name: k8rs-readonly
 rules:
-  # API discovery — the sidebar, and the capability probe that decides which
-  # analysis rows can answer at all. `system:discovery` is bound to
+  # API discovery — the sidebar. **Two calls, not one**: `run_aggregated()`
+  # asks `/apis` and `/api`, so granting one and not the other still costs a
+  # whole section, and the core kinds are behind `/api` (NOTES § D296).
+  # The capability probe reads the same answer, and **nothing consumes its
+  # result yet** — `greeting` prints it, no report reads it, so no analysis
+  # row depends on this grant today; the line that said otherwise was false
+  # at HEAD (NOTES § D296). `system:discovery` is bound to
   # `system:authenticated` by default, so this rule looks redundant until a
   # cluster removes that binding as ordinary hardening; then every resource
   # grant below still works and `/apis` alone answers 403 (NOTES § D160)

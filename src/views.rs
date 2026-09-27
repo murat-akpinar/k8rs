@@ -855,19 +855,26 @@ pub enum NavItem {
     Kind(usize),
     /// One analysis report, by its index in the report list.
     Report(usize),
+    /// **`could not read` — the one row RESOURCES has while the discovery answer is a fault**, in
+    /// place of all five groups (NOTES § D296, `screens/states.md` § k8rs could not read what this
+    /// cluster serves). Drawn and never selected, like [`NavItem::Header`]; the indent and the
+    /// words are `ui.rs`'s, as `ALERTS`' already are.
+    Unread,
 }
 
 impl NavItem {
-    /// Whether `↑↓` may land here. The two section headers are the only rows that refuse.
+    /// Whether `↑↓` may land here. The two section headers refuse, and so does the row that stands
+    /// in for a section nothing could be read into.
     pub fn selectable(self) -> bool {
-        !matches!(self, NavItem::Header(_))
+        !matches!(self, NavItem::Header(_) | NavItem::Unread)
     }
 }
 
 /// **The sidebar, built from what the cluster said it serves** — never from a list of kinds
 /// written here (invariant 12).
 ///
-/// `kinds` is `k8s::browsable()`'s answer, already sorted and already stripped. `reports` is how
+/// `kinds` is `k8s::browsable()`'s answer, already sorted and already stripped — and `None` is
+/// *the discovery call did not work*, which is not `Some(&[])` (NOTES § D296). `reports` is how
 /// many analysis reports there are; the sidebar draws them by index because their labels and
 /// badges live on the [`crate::analysis::Report`] itself.
 ///
@@ -876,25 +883,36 @@ impl NavItem {
 /// A second open group is not a state any screen asks for, and one `Option` is how it stays
 /// unrepresentable.
 ///
-/// **A group with no kinds under it still draws its row.** A cluster serving nothing in `storage`
-/// is a fact about that cluster; a row that vanishes is a reader wondering where the section went.
+/// **A group with no kinds under it still draws its row — where discovery answered.** A cluster
+/// serving nothing in `storage` is a fact about that cluster; a row that vanishes is a reader
+/// wondering where the section went. **A `None` here is the other fact and the five rows are not
+/// it** (NOTES § D296): they draw [`NavItem::Unread`] instead.
 ///
 /// **[`NavItem::Kind`] carries the index into `kinds`, not the index within its group**, which is
 /// why the `enumerate` is before the `filter` and not after. Swapping the two opens a different
 /// kind under every group but the first, and it is invisible from any test that only opens
 /// `workloads` (NOTES § D246 ruling 6).
-pub fn sidebar(kinds: &[Browsable], reports: usize, expanded: Option<Group>) -> Vec<NavItem> {
+pub fn sidebar(
+    kinds: Option<&[Browsable]>,
+    reports: usize,
+    expanded: Option<Group>,
+) -> Vec<NavItem> {
     let mut nav = vec![NavItem::Alerts, NavItem::Header("RESOURCES")];
-    for group in Group::ALL {
-        nav.push(NavItem::Group(group));
-        if expanded == Some(group) {
-            nav.extend(
-                kinds
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, kind)| Group::of(kind) == group)
-                    .map(|(at, _)| NavItem::Kind(at)),
-            );
+    match kinds {
+        None => nav.push(NavItem::Unread),
+        Some(kinds) => {
+            for group in Group::ALL {
+                nav.push(NavItem::Group(group));
+                if expanded == Some(group) {
+                    nav.extend(
+                        kinds
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, kind)| Group::of(kind) == group)
+                            .map(|(at, _)| NavItem::Kind(at)),
+                    );
+                }
+            }
         }
     }
     nav.push(NavItem::Header("ANALYSIS"));
@@ -3416,9 +3434,9 @@ impl App {
     /// another one is not this** — Detail, Help, every dialog and the container picker keep both
     /// fields, because none of them is a different list and none of them comes through here.
     ///
-    /// A [`NavItem::Header`] cannot be passed here by a cursor that only ever walks
-    /// [`selectable`]'s answer; it is matched anyway, doing nothing, because *unreachable* and
-    /// *ignored* draw the same screen and only one of them needs a `panic!`.
+    /// A [`NavItem::Header`] — or a [`NavItem::Unread`] — cannot be passed here by a cursor that
+    /// only ever walks [`selectable`]'s answer; both are matched anyway, doing nothing, because
+    /// *unreachable* and *ignored* draw the same screen and only one of them needs a `panic!`.
     pub fn open(&mut self, item: NavItem) {
         let before = self.view;
         match item {
@@ -3428,7 +3446,7 @@ impl App {
             }
             NavItem::Kind(at) => self.view = View::Resources(at),
             NavItem::Report(at) => self.view = View::Analysis(at),
-            NavItem::Header(_) => {}
+            NavItem::Header(_) | NavItem::Unread => {}
         }
         if self.view != before {
             self.content = Cursor::default();
@@ -3848,6 +3866,25 @@ pub const CONTEXT: &str = "--context";
 /// **What a connection that sent nothing was trying to do** — a `k8s::NotConnected`, whose client
 /// was never built, framed for [`because`] (NOTES § D264 ruling 1).
 pub const REACH: &str = "reach this cluster";
+
+/// **What the discovery call asks for, framed for [`because`] — and it is two paths, not one**
+/// (NOTES § D296).
+///
+/// **The count is `k8s.rs`'s own measured table, counted off the calls rather than off a doc
+/// comment**: `Discovery::run_aggregated()` is **2** round trips, `/apis` and `/api`, at any
+/// cluster size. One `?` covers both, so a `k8s::Session::served` error is an answer about
+/// *either* and this clause cannot know which — and `docs/security.md`'s read-only Role grants the
+/// two as separate `nonResourceURLs`.
+///
+/// **One spelling because naming only `/apis` sent the reader round the loop twice**: told *needs
+/// to `get /apis`*, they grant `/apis`, restart, and read the identical sentence — k8rs wrong the
+/// second time after being obeyed. And `/api` is the core group, so what the missing half costs is
+/// every pod, service and node row in the sidebar.
+///
+/// **`get` and not `list`, for [`crate::greeting`]'s reason, which is about the verb and not the
+/// count**: the refusal is a `nonResourceURL` one whose `Status` carries an empty `details`, so a
+/// path is the only true subject a sentence about it has (NOTES § D160).
+pub const DISCOVERY: &str = "`get /apis` and `/api`";
 
 /// **What a watch asks for, in the words a `Role` spells** — `` `list` and `watch` pods `` — framed
 /// for [`because`]. `resource` is the API's own plural.

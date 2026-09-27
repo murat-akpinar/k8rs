@@ -5008,7 +5008,7 @@ behaves as specified.
       for a standing fault that waiting cannot clear, one surface over, and the
       browser's own loading pane still draws the retired sentence — both in
       [`backlog.md`](backlog.md)
-- [ ] **A refused `get /apis` is invisible on the screen the reader is looking
+- [x] **A refused `get /apis` is invisible on the screen the reader is looking
       at.** With discovery refused (`cannot get path "/apis"`) Alerts was
       complete and correct and CPU was 1 tick per 2 s — and the sidebar still
       drew all five RESOURCES groups with no sentence anywhere.
@@ -5016,7 +5016,36 @@ behaves as specified.
       *"this kubeconfig may not `get /apis`"* reaches the headless drivers and
       no console frame. The pane that would carry it is the `Table` fetch, which
       is not wired — so the box is: where the sentence goes while the pane that
-      owns it does not exist yet
+      owns it does not exist yet.
+      **Done 2026-09-27**
+      ([D296](NOTES.md#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)).
+      **Two surfaces with two different gates**, which is the answer to *where*:
+      the sidebar's five group rows are replaced by one unselectable dim
+      `could not read` row that follows the discovery answer alone — first
+      console frame to last, whatever the link does — and the sentence rides
+      whichever pane is open, ranked last so it gives way first, withheld under
+      `Link::Lost`, `Expired` and `Unconnected` because those panes already carry
+      a next step. Neither carrier is the browser pane, and that is the ruling
+      rather than a gap in it: with no kind row there is nothing to open it with.
+      Measured on the real binary on an 80×24 pty against a server that refuses
+      `/apis`, in all three link states — under `Lost` the sentence is gone and
+      the row is still there, which is the two gates seen at once.
+      **Three defects the reviews found in the sentence, all fixed in this box:**
+      a server message over ~300 characters crowded k8rs's own next step off the
+      pane (a non-JSON body becomes the whole `Status.message` and `400` is
+      `Fault::Rejected`, so a gateway's HTML error page is the ordinary path in),
+      so `because`'s clause now draws **last** and a cut can only eat the
+      server's tail; *"are unaffected"* was false two rows under the refused node
+      watch every namespace-scoped run carries, so the claim narrowed to *this*
+      refusal; and the clause named `/apis` while `run_aggregated()` asks `/apis`
+      **and** `/api`, so a reader could grant what it named, restart as it said,
+      and read the identical sentence — now one `views::DISCOVERY` constant at
+      all three call sites, two of which had loose substring tests that let the
+      half-named path ride.
+      **What this box did not take**: a transient discovery failure is still
+      never re-asked, and `widgets.md` § 7's closed list of twelve cuts still
+      omits the banner-stack cut two committed mockups already draw — both in
+      [`backlog.md`](backlog.md)
 - [ ] **A watch that stops delivering without erroring is read as delivering, so
       the header says `live` over data that stopped arriving.** Measured with a
       relay blackholing the socket — open, every byte dropped — rather than

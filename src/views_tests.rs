@@ -1154,7 +1154,7 @@ fn a_crd_nobody_has_heard_of_is_placed_and_never_dropped() {
     );
 
     let kinds = [browsable("example.com", "widgets", true)];
-    let nav = sidebar(&kinds, 0, Some(Group::Workloads));
+    let nav = sidebar(Some(&kinds), 0, Some(Group::Workloads));
     assert!(
         nav.contains(&NavItem::Kind(0)),
         "an unknown CRD was dropped from the sidebar"
@@ -1163,7 +1163,7 @@ fn a_crd_nobody_has_heard_of_is_placed_and_never_dropped() {
 
 #[test]
 fn the_sidebar_draws_all_five_groups_even_on_a_cluster_that_serves_nothing() {
-    let nav = sidebar(&[], 0, None);
+    let nav = sidebar(Some(&[]), 0, None);
     for group in Group::ALL {
         assert!(
             nav.contains(&NavItem::Group(group)),
@@ -1174,19 +1174,117 @@ fn the_sidebar_draws_all_five_groups_even_on_a_cluster_that_serves_nothing() {
     assert_eq!(nav.first(), Some(&NavItem::Alerts), "ALERTS is not first");
 }
 
+/// **A discovery call that did not work replaces the five group rows, and an empty answer does
+/// not** (NOTES § D296, `screens/states.md` § The states this is not).
+///
+/// **The two halves are one test because collapsing them is the defect**: `Some(&[])` is a fact
+/// about the cluster and keeps five rows promising five topics; `None` is a fact about this login
+/// and each of those rows would promise content that cannot arrive, with `⏎` on it expanding to
+/// nothing at all.
+/// **The discovery clause names both paths, because the call is two round trips** — `k8s.rs`'s own
+/// measured table: `Discovery::run_aggregated()` is **2**, `/apis` and `/api`, at any cluster size,
+/// under one `?` that cannot say which of them answered (NOTES § D296).
+///
+/// **The loop it closes is concrete and was shipped at three call sites**: told *needs to
+/// `get /apis`*, a reader grants `/apis`, restarts, and reads the identical sentence — k8rs wrong
+/// the second time after being obeyed. `/api` is the core group, so the half that was missing is
+/// every pod, service and node row in the sidebar.
+///
+/// **Asserted through [`because`] and not on the constant alone**, because what has to read
+/// correctly is the clause the reader sees, in each frame that quotes `asked`.
+#[test]
+fn the_discovery_clause_names_both_paths_the_call_asks_for() {
+    assert!(
+        DISCOVERY.contains("`get /apis`") && DISCOVERY.contains("`/api`"),
+        "the clause names one path where the discovery call makes two requests: {DISCOVERY:?}"
+    );
+    for fault in [Fault::Refused, Fault::Gone, Fault::Unanswered] {
+        let clause = because(fault, DISCOVERY, None, None);
+        println!("{fault:?}: {clause}");
+        assert!(
+            clause.contains(DISCOVERY),
+            "{fault:?} did not carry the whole of what was asked for: {clause:?}"
+        );
+    }
+}
+
+#[test]
+fn a_refused_discovery_call_replaces_the_five_groups_and_an_empty_answer_does_not() {
+    let unread = sidebar(None, 7, Some(Group::Workloads));
+    assert!(
+        !unread.iter().any(|item| matches!(item, NavItem::Group(_))),
+        "a group row drew over content that was never read: {unread:?}"
+    );
+    assert_eq!(
+        unread
+            .iter()
+            .filter(|item| **item == NavItem::Unread)
+            .count(),
+        1,
+        "RESOURCES says the section was answered badly exactly once: {unread:?}"
+    );
+    // **Where it sits is the claim, not merely that it is there**: between the two headers, so the
+    // row is inside RESOURCES and not floating above ANALYSIS.
+    assert_eq!(
+        unread.iter().position(|item| *item == NavItem::Unread),
+        unread
+            .iter()
+            .position(|item| *item == NavItem::Header("RESOURCES"))
+            .map(|at| at + 1),
+        "the row is not the first thing under RESOURCES: {unread:?}"
+    );
+    assert!(
+        !NavItem::Unread.selectable(),
+        "`⏎` is offered on a row that cannot answer it"
+    );
+    // **`↑↓` crosses ALERTS and the seven reports and nothing between them** — three unselectable
+    // rows out of eleven, counted rather than described: the two headers and this one.
+    let landable = selectable(&unread, |item| item.selectable());
+    assert_eq!(
+        landable.len(),
+        unread.len() - 3,
+        "the cursor was offered a row it cannot open: {landable:?} of {unread:?}"
+    );
+    assert_eq!(
+        landable.len(),
+        8,
+        "ALERTS and the seven reports are what is left"
+    );
+    // **An open group cannot leak a kind row in through the other arm** — `expanded` is `Workloads`
+    // above, and the kinds it would list are the ones no read produced.
+    assert!(
+        !unread.iter().any(|item| matches!(item, NavItem::Kind(_))),
+        "a kind row drew under a section nothing was read into: {unread:?}"
+    );
+
+    let answered = sidebar(Some(&[]), 7, None);
+    assert!(
+        !answered.contains(&NavItem::Unread),
+        "a cluster that serves nothing browsable was told its discovery call failed"
+    );
+    assert_eq!(
+        answered
+            .iter()
+            .filter(|item| matches!(item, NavItem::Group(_)))
+            .count(),
+        Group::ALL.len(),
+        "the empty answer lost a group row"
+    );
+}
+
 #[test]
 fn only_the_open_group_lists_its_kinds() {
     let kinds = [
         browsable("apps", "deployments", true),
         browsable("", "services", true),
     ];
-    let closed = sidebar(&kinds, 0, None);
+    let closed = sidebar(Some(&kinds), 0, None);
     assert!(
         !closed.iter().any(|item| matches!(item, NavItem::Kind(_))),
         "a closed sidebar listed kinds"
     );
 
-    let open = sidebar(&kinds, 0, Some(Group::Workloads));
+    let open = sidebar(Some(&kinds), 0, Some(Group::Workloads));
     assert!(open.contains(&NavItem::Kind(0)), "deployments is missing");
     assert!(
         !open.contains(&NavItem::Kind(1)),
@@ -1207,14 +1305,14 @@ fn an_open_group_names_its_kinds_by_their_place_in_the_whole_discovery_list() {
         browsable("storage.k8s.io", "storageclasses", false),
     ];
 
-    let network = sidebar(&kinds, 0, Some(Group::Network));
+    let network = sidebar(Some(&kinds), 0, Some(Group::Network));
     assert!(
         network.contains(&NavItem::Kind(1)),
         "the open group's kind was numbered within its group, so it would open `deployments`"
     );
     assert!(!network.contains(&NavItem::Kind(0)));
 
-    let storage = sidebar(&kinds, 0, Some(Group::Storage));
+    let storage = sidebar(Some(&kinds), 0, Some(Group::Storage));
     assert!(
         storage.contains(&NavItem::Kind(2)),
         "the third kind in the discovery list was not numbered 2"
@@ -1223,7 +1321,7 @@ fn an_open_group_names_its_kinds_by_their_place_in_the_whole_discovery_list() {
 
 #[test]
 fn the_reports_are_appended_under_their_own_header() {
-    let nav = sidebar(&[], 7, None);
+    let nav = sidebar(Some(&[]), 7, None);
     let analysis = nav
         .iter()
         .position(|item| *item == NavItem::Header("ANALYSIS"))
@@ -1235,7 +1333,7 @@ fn the_reports_are_appended_under_their_own_header() {
 /// `screens/widgets.md` § 2: group headers are unselectable rows and `↑↓` skips them.
 #[test]
 fn the_cursor_walks_past_the_section_headers() {
-    let nav = sidebar(&[], 2, None);
+    let nav = sidebar(Some(&[]), 2, None);
     let landable = selectable(&nav, |item| item.selectable());
     assert!(
         landable

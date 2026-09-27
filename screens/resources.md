@@ -134,6 +134,13 @@ own `Table` printing — the exact columns `kubectl get` would show.
   Forty permanent streams is the problem this architecture exists to avoid.
 - Operations live here, on the selected object — see [dialogs.md](dialogs.md).
   Nothing is ever applied to a selection of more than one object.
+- **A cluster whose kind list could not be read has no browser at all, and the
+  sidebar says so instead of drawing five empty groups.** The five RESOURCES
+  rows exist to hold what `kube::discovery` answered, so a discovery answer that
+  is a fault leaves them with nothing to be about — they are replaced by one
+  unselectable row, and no row in this section is landable while that holds
+  ([states.md § k8rs could not read what this cluster
+  serves](states.md#k8rs-could-not-read-what-this-cluster-serves)).
 - **A kind with zero rows is not a finding.** It draws its own dim, centred
   sentence — deliberately not the Alerts `○ nothing is broken` claim, because
   an empty list of one kind carries no severity — covering all three ways the
