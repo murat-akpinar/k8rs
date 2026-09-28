@@ -6,6 +6,33 @@ two different claims: the gate proves the code does what its tests say, and
 nothing in it has ever opened the console, pressed a key, or watched a pane
 answer. This file is the other half.
 
+## Where this stands — read this first
+
+**Say *continue from `test.md`* and this is the file to pick up.** It is the pass
+over the shipped binary, and it is **not** the box work: the next *box* is still
+[`todo.md`](todo.md)'s first unchecked one, which today routes to
+§ *What the v0.1 close still owes*. The two run side by side — a failing row here
+becomes a finding, and a finding becomes either a fix or a `backlog.md` line.
+
+| | |
+|---|---|
+| **Run so far** | § A (part) · § B · § C · § D · § E · § F · § G (part) · § H (part) · § M (part) · § N (part) |
+| **Not started** | **§ I** (Analysis, partly seen) · **§ J** (the browser — its fix landed 2026-09-28, so every row is now re-runnable) · **§ K** (the four detail tabs) · **§ L** (keys, footer, `?`) |
+| **Findings** | 10, in § Findings at the end. F1/F2/F4 fixed; F3, F5, F6, F8, F9, F10 are `backlog.md` rulings; F7 judged and closed |
+| **Binary** | `cargo install k8rs` → `0.1.0` on the test host. The working-tree build is what a re-run after a fix uses |
+| **Cluster** | the four-node `k8rs` kind cluster is up. `scripts/cluster.sh reset` to re-break; never stand a second one up |
+
+**The cheapest next step is § J**, because the fix it was blocked on has landed and
+nothing there has been run against it: open a kind, press `esc`, read the footer.
+Then § L, whose one row — *every key the help screen names either works or is marked
+not built yet* — is what F2 existed for and has never been checked as a whole.
+
+**What a run costs and where it goes.** Every row is driven on the test host, the
+console rows inside `tmux` (see below), and the result is written back into its own
+row — `[x]` with what it printed, or `[ ]` with why it could not run. An unrun row
+that says nothing is worse than an open one that says *needs a restricted
+kubeconfig*.
+
 **It holds checks, not boxes.** The next task is still the first unchecked box in
 the lowest open phase of [`todo.md`](todo.md) *and nowhere else*
 ([CLAUDE.md § What to do next](CLAUDE.md#what-to-do-next)) — a row here is never
