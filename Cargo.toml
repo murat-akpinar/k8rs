@@ -1,17 +1,21 @@
 [package]
 name = "k8rs"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 # 1.85 until 2026-08-14, when C1's certificate parser forced it up: the only
 # `time` release that fixes RUSTSEC-2026-0009 needs 1.88 (NOTES § D86).
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
-# **It said "The Kubernetes TUI in Rust" until 2026-08-30 and there is no TUI**
-# (NOTES § D193). This is the most public string this project owns — crates.io's
-# front page for everyone who searches "kubernetes tui" — and it was describing
-# Phase 11 while the binary shipped a headless report. What ships today is the
-# report; the console is named as coming, not as here.
-description = "Says what is broken in your Kubernetes cluster and why, in plain English — a single binary that prints a report and exits. The TUI console is coming."
+# **This is the most public string this project owns** — crates.io's front page
+# for everyone who searches "kubernetes tui" — and it has now been wrong in both
+# directions. It said "The Kubernetes TUI in Rust" until 2026-08-30, describing a
+# Phase 11 console while the binary shipped a headless report (NOTES § D193); the
+# sentence that replaced it ended "The TUI console is coming", and that went
+# stale the moment Phase 12 closed on 2026-09-26. Rewritten 2026-09-28 for the
+# v0.1.0 release, against what the binary does rather than against what the plan
+# said — and deliberately naming neither the resource browser nor the detail
+# tabs, whose reads are not wired (docs/architecture.md § Status).
+description = "Says what is broken in your Kubernetes cluster and why, in plain English — a terminal console for Kubernetes that shows you the kubectl command for everything it does, plus a one-shot report for CI."
 repository = "https://github.com/murat-akpinar/k8rs"
 keywords = ["kubernetes", "tui", "k8s", "cluster", "terminal"]
 categories = ["command-line-utilities"]

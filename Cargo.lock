@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "k8rs"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "futures-util",
  "k8s-openapi",
