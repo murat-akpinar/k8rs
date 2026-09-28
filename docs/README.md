@@ -12,10 +12,13 @@
 > detail tabs are not yet fetched and say so on screen — and `k8rs --once` prints
 > the findings and exits
 > ([architecture § The command line](architecture.md#the-command-line)).
-> Phase 13 has landed the permission probe, the driver-flag removal and
-> [`README.md`](../README.md) with its Turkish translation. **What is left is the
-> release workflow and the publish itself**, which needs the maintainer's
-> crates.io credential and no agent can run · Last updated: 2026-09-28
+> Phase 13 has landed the permission probe, the driver-flag removal,
+> [`README.md`](../README.md) with its Turkish translation, and the release
+> workflow. **The manifest is at `0.1.0` and what is left is the release
+> itself** — pushing the tag and running `cargo publish`, which need the
+> maintainer's account and no agent can run. v0.0.1 is skipped
+> ([NOTES § D306](../NOTES.md#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28))
+> · Last updated: 2026-09-28
 
 This directory is the **built** state: what is true of the shipped tool, written
 for humans outside this repo. The reasoning behind any of it lives one level up,

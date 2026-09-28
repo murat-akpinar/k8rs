@@ -5335,9 +5335,19 @@ behaves as specified.
       Every shell body in it was run against real inputs and `just check` is
       green, **but the workflow has never run** and no target has ever been
       built with `--release` on any machine.
+      **The manifest is release-ready as of 2026-09-28**: `Cargo.toml` and
+      `Cargo.lock` are at `0.1.0` (one line each, `Cargo.lock` unmoved at 319
+      packages), `CHANGELOG.md` is regenerated with `--tag v0.1.0`, and the
+      workflow's own notes cut was run against it here — 329 lines for
+      `## [0.1.0]`. **The crate description was rewritten in the same change**:
+      it still ended *"The TUI console is coming"*, written 2026-08-30 and false
+      since Phase 12 closed, which is [D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)'s
+      defect in the other direction on the most public string this project owns.
       **Done when** a real `v0.1.0` tag has produced a GitHub release carrying
-      four binaries and a verified `SHA256SUMS`, and `cargo publish` has put
-      that version on crates.io. Both need the maintainer's account, so this
+      four binaries and a verified `SHA256SUMS`, `cargo publish` has put that
+      version on crates.io, **and both READMEs' install line has moved from
+      *build from source* to `cargo install k8rs`** — which only becomes true
+      once the publish lands. All three need the maintainer's account, so this
       is one of [§ The boxes no agent can run](CLAUDE.md) — the PM prints the
       commands and waits for the real output
 
