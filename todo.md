@@ -5264,10 +5264,34 @@ behaves as specified.
       get a live caller. In [`backlog.md`](backlog.md), with two behaviours that
       lost their only cover when `--live` went and the expired
       `expect(dead_code)` reason that hid all of this
-- [ ] `README.md` (EN): what/why, screenshot or asciinema, install, **both**
+- [x] `README.md` (EN): what/why, screenshot or asciinema, install, **both**
       RBAC examples, the `--read-only` flag, "no telemetry" statement, and an
       honest paragraph on what k8rs can change in your cluster ·
-      `README_TR.md` translation
+      `README_TR.md` translation.
+      **Done 2026-09-28.** The screenshot is a **real frame**, not a mockup and
+      not an asciinema cast: the built binary against the four-node `k8rs` kind
+      cluster with `broken.yaml` applied, captured with `tmux capture-pane -p`
+      at 100×32, which renders the pty into plain text a README can hold. Both
+      RBAC roles are copied from
+      [docs/security.md § RBAC](docs/security.md#rbac) **mechanically, with the
+      annotations stripped by a script rather than by hand** — a role retyped
+      into a README is a role that stops matching the one that was measured.
+      **Two claims the writing itself falsified**: the license is
+      `GPL-3.0-or-later` and the first draft said MIT, and *fifteen rules* is
+      not a number the source supports — counted off `analyze`, it runs
+      **nineteen** checks (eleven direct plus the eight a container gets through
+      `one_card_per_action`), one of which is W2's second pass — so the sentence
+      names the families instead of a count that would go stale like the flag
+      list did five times.
+      **The install line does not say `cargo install k8rs`**, because the name
+      on crates.io is the 0.0.0 placeholder published 2026-08-12 and that
+      command gets a stranger nothing; it says build from source until the
+      first release, which is the box below.
+      **And the honest paragraph is honest about the browser**: the Resources
+      rows are drawn and open a pane that stays empty. **That is a close
+      blocker, measured while writing this box** and recorded in
+      [`backlog.md`](backlog.md) — `esc` does not come back from it either, so
+      a reader who opens a kind can only quit
 - [ ] `docs/` refreshed against the code as built
 - [ ] Release workflow: tag `v0.1.0` → git-cliff CHANGELOG → musl/darwin
       binaries + `SHA256SUMS` → GitHub release; crates.io publish over v0.0.1

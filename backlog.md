@@ -4075,3 +4075,26 @@ Phase 12 close triage fixes them; the rest are notes.
   Neither is a defect today; both are what a reader of
   [D303](NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)
   would otherwise have to rediscover.
+- **BLOCKER FOR THE PHASE 13 CLOSE — opening a kind in the Resources browser is a dead end on
+  the real binary.** Measured 2026-09-28 on the four-node `k8rs` kind cluster, `tmux` at
+  100×32, the built binary against `--context kind-k8rs`: `Tab` to the sidebar, `⏎` on
+  *network*, `⏎` on `servicecidrs` — the pane draws the kind's name over
+  `reading the cluster…`, and it still draws it **30 s later**. Nothing is reading: `drawn`
+  hands `browser: &UNOPENED`, a `static views::Pane::Loading`, and the browser's `Table` fetch
+  is not wired — `src/main.rs:7386` says so in the code itself, *"what is not wired yet, said
+  here rather than left to be found"*. **And there is no way back**: the footer collapses to
+  `? all keys  q quit`, and `esc` does **not** return — measured, the pane is unchanged after
+  it. A reader who opens a kind can only quit the program.
+  **Why it is a blocker and not a later box**: the sidebar draws five RESOURCES groups, every
+  group expands, every kind row is selectable, and each one traps the reader — on the surface a
+  stranger meets in their first minute, on a binary Phase 13 exists to publish. It is the class
+  this phase has spent itself on (a screen promising what the code does not do), reached
+  through the one door nobody opened.
+  **The machinery exists**, which is what makes this cheap: `k8s::Fetch::table` with its two
+  committed fixtures, the decode, the watch lifecycle and `ui.rs`'s browser renderer all landed
+  in Phase 5 and 11 (todo.md 2435, 2447). What is missing is the console calling the fetch and
+  a key that comes back. **Three ways out, and the choice is the user's**: wire the fetch
+  (one `dev-ui` turn against machinery that is already proven), give `esc` the way back and
+  leave the pane honest about not being wired, or stop drawing kind rows until the fetch lands
+  — which is the shape [D296](NOTES.md#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)
+  already built for a refused discovery. PM, measured while writing the README.
