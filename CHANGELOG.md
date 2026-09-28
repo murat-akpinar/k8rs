@@ -3,6 +3,7 @@
 ### 🐛 Bug Fixes
 
 - *(ui)* The browser's kind pane says what it cannot do, and a flag stops being read as a file ([1270675](https://github.com/murat-akpinar/k8rs/commit/12706757cbbbeb075472b6c4917e8b133e50cf1a)) — Opening a kind in the Resources browser was a dead end on the released binary. The pane drew "reading the cluster..." for a fetch nothing issues, esc did nothing, and the only key that got out was on no footer. Measured on the registry-installed 0.1.0 against a four-node kind cluster, unchanged after 20 seconds.
+- *(ui)* The four detail tabs say what they cannot do, and esc leaves in one press ([e40aa8a](https://github.com/murat-akpinar/k8rs/commit/e40aa8af8025f0c86770139239e7e23ced942295)) — A user running the shipped binary reported panes that never answer, saying "reading the cluster...". Two defects produce that sentence. The browser's kind pane was fixed yesterday and is in no released binary - v0.1.0 is tagged before the fix. The four detail tabs were still drawing it at HEAD, for a fetch nothing issues, and one keypress on the first card a reader selects reaches it.
 
 ### 📚 Documentation
 
