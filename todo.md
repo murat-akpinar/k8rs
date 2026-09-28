@@ -5343,6 +5343,21 @@ behaves as specified.
       it still ended *"The TUI console is coming"*, written 2026-08-30 and false
       since Phase 12 closed, which is [D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)'s
       defect in the other direction on the most public string this project owns.
+      **State as of 2026-09-28 08:28 — the tag is pushed and the release run is
+      in flight, so a cold session picks up from here.** `v0.1.0` is on the
+      remote at `5dc4b24`; `git tag -l` and `gh release list` are the two
+      commands that say where it got to. **The first tag failed and that is how
+      the 125k body cap was found** — `gh release create` answered
+      `HTTP 422: body is too long`, no release was created, the tag was moved
+      onto the fix and re-pushed
+      ([D305](NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)
+      ruling 8). **If the run failed again**: the release stays a **draft**, so
+      nothing is public — read `gh run view <id> --log-failed`, fix, then
+      `gh release delete v0.1.0 --yes` before re-pushing the tag, because
+      `gh release create` is deliberately not idempotent. **If it went green**:
+      four tarballs and a verified `SHA256SUMS` are on a published release, and
+      what is left is the two `cargo publish` commands and the README install
+      line below.
       **Done when** a real `v0.1.0` tag has produced a GitHub release carrying
       four binaries and a verified `SHA256SUMS`, `cargo publish` has put that
       version on crates.io, **and both READMEs' install line has moved from
