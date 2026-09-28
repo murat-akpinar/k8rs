@@ -296,15 +296,114 @@ page's own readability
 stricter 66 on the line they draw — never the real ceiling, only a narrower
 one a mockup's own text almost always clears anyway.
 
-**The gap before an outcome word is three columns** — `→ rejected`,
-`→ not sent`, `→ refused`, `→ not allowed`, `→ login expired` all sit three
-spaces after the command they answer, a beat the eye can find the same way
-on every screen that draws one. [dialogs.md](dialogs.md)'s own rejected-scale
-line is the one exception, at two: that row already fills all 68 columns of
-its 70-column-page pane with the command and the verdict, and there is no
-column left to spend on a third space. It is the exception because its pane
-is drawn narrower than the real floor above, not because the rule bends —
-read the other five as the pattern, not this one.
+**The gap before an outcome word is three columns** — `→ rejected`
+([dialogs.md § The command log's own line](dialogs.md#the-command-logs-own-line-while-a-call-is-running-or-just-after))
+and `→ refused`
+([detail.md § The events fetch could not be completed](detail.md#the-events-fetch-could-not-be-completed)),
+the two this directory draws, sit three spaces after the command they answer,
+a beat the eye can find the same way on every screen that draws one. **There
+is no exception.** A two-column line was the carve-out, and `c4df59d` removed
+the rows it was about; nothing here draws one now. **What gives way instead is
+the command:** `→ rejected` is nine columns wider than the `…` it replaces, so
+the line re-cuts to what is left — dropping more of a trailing flag's value
+than it had while running, never a column of the gap.
+
+**This rule is about the gap, and the words are illustrations of it — the
+vocabulary is not defined here and never was.** Where it lives:
+[`views::Log::outcome`](../src/views.rs) is the slot — it writes `→ ` and one
+word onto the line that was waiting, once, and never removes it — and
+[`outcome_word`](../src/main.rs) is the whole of what can go in it, **ten
+words**: `not recorded`, `done`, `started`, `cancelled`, `already gone`,
+`changed first`, `not sent`, `refused`, `login expired`, and `rejected` for
+every other fault ([NOTES § D285 ruling 2](../NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)).
+The other eight are producible and undrawn, which is the ordinary state of
+affairs for an outcome no mockup has had a reason to put on screen yet —
+[dialogs.md § The object went away](dialogs.md#the-object-went-away-while-the-dialog-was-open)
+took `→ not sent` off a mockup and left the word standing, and
+[context.md](context.md#when-the-new-cluster-does-not-work) cites that removal
+as the precedent it follows.
+
+**`not allowed` was in this list from 2026-09-07 and is not one of them.** It
+belongs to the other vocabulary, the one that answers *what may this login do*
+rather than *what became of this call*: `may_i`'s own verdict, drawn as `no`
+beside the key it withholds — `r no restart`, [§ 2a](#2a-the-footer) — and
+`⚠ not allowed`, which [`theme.rs`](../src/theme.rs) names among the strings
+its alarm colour is for and which no screen in this directory draws. On the
+strip a `403` is `refused`, and the two must not trade places: a reader who
+learned `not allowed` from an illustration here would look for it on the strip
+and find `refused`. **Naming a word nothing implements is how the word gets
+implemented** — [D285 ruling 2](../NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+run backwards — so a new word reaches this page only after `outcome_word` can
+say it (`tester`, 2026-09-26).
+
+**Which lines can carry a mark at all: the ones a keypress put there, and
+never a manifest line.** The strip holds three kinds of line
+([`views::Log`](../src/views.rs), [NOTES § D233](../NOTES.md#d233--the-dialogs--line-and-the-command-logs-are-not-the-same-line-and-the-read-side-is-a-manifest-rather-than-a-feed-2026-09-05),
+[§ D257](../NOTES.md#d257--the-command-logs-third-kind-of-line-a-read-the-user-asked-for-is-not-the-read-path-instrumenting-itself-2026-09-07))
+and only the first two below are ever annotated:
+
+- a **mutation**, appended the instant the reader agreed to it, and answered
+  by `Log::outcome` the instant the cluster answers —
+  [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running);
+- a **read the reader opened**, same shape —
+  [detail.md § The events fetch could not be completed](detail.md#the-events-fetch-could-not-be-completed);
+- the **manifest** — the streams this run opened, computed up front before any
+  of them was sent. **It is drawn bare, in every state, and gains nothing
+  later.**
+
+Two reasons, and the first settles every mark on its own. **The line is not on
+screen.** This strip is two rows (`ui::LOG_LINES`, the last two of the log),
+and `main.rs`'s `command_log` appends the five watches last, in this order:
+pods, nodes, deployments, statefulsets, daemonsets. So at connect the strip
+holds *statefulsets* and *daemonsets*, and the pods watch line is
+fourth-from-last — off the window before the reader has pressed anything, with
+no scrollback to bring it back (`views::KEPT` is a bound, not a history). A
+mark on it is invisible however the code came to write it. **And a *retrying*
+mark is not one-shot, which rules out the one suffix this strip has ever been
+drawn with.** An outcome is final by construction — `→ ` replaces the `…` once
+and is never removed. That fits a token that has run out; it does not fit a
+link that is retrying, because that mark would have to come **off** again when
+the watch recovers, and a log that only ever appends — and drops its oldest to
+stay bounded — cannot take a mark back. `Fault::standing` is the predicate that splits the two
+([NOTES § D295](../NOTES.md#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)),
+and it is why reason one has to carry both: without it, *retrying* is refused
+for its own reason and *expired* would still be drawable.
+
+What the reader loses is nothing, because the frame already carries the fact,
+in the place that never goes missing plus one more where there is a pane to
+say it: the **header** word (`⚠ disconnected, retrying`, `⚠ login expired`,
+§1a — asserted in `ui_tests.rs`) and, where a pane is degraded, the **banner**
+naming the kind that is not arriving ([states.md](states.md) — asserted in
+`main_tests.rs`). A third copy of one fact on the one panel whose job
+is *what k8rs ran* rather than *what is true now* is also a third place it can
+go stale — measured at 412 seconds on a quiet cluster
+([NOTES § D297](../NOTES.md#d297--the-frozen-file-opens-for-a-wedged-watch-and-the-timeout-has-five-seconds-of-room-to-land-in-2026-09-27),
+[`backlog.md`](../backlog.md)).
+
+**One row covers all six states of a watch, which is the point of the rule
+rather than a shortcut past it.** Live, dropped and retrying, dropped and
+standing, refused from the first `LIST`, a token that ran out, and the moment
+the line has aged past `views::KEPT` and is not in the log at all: the strip
+draws the same bare command in every one, and the difference reaches the
+reader through the header and the pane. The last of the six is the one that
+would be unanswerable otherwise — a mark can be promised only for as long as
+the line exists, and this log drops its oldest to stay bounded, so a rule that
+marks the manifest is a rule that stops holding on a long session with no
+screen able to say it has.
+
+**Which two lines a mockup draws in the strip is not uniform across this
+directory, and that is a divergence rather than this rule.** The honest pair
+at connect is the last two `command_log` writes — the statefulsets and
+daemonsets watches — and that is what [alerts.md](alerts.md),
+[help.md](help.md) and
+[states.md § The filter hides every row](states.md#the-filter-hides-every-row)
+draw. Most of [states.md](states.md)'s own degraded and empty mockups draw a
+single `$ kubectl get pods -A --watch` instead, the line a reader recognises,
+and three of them a plain `$ kubectl get pods -A` for a `LIST` that has not
+become a watch yet. It is named here so the next reader does not take a
+stand-in for the console's own strip; closing it is not this rule's to do, and
+none of it changes what the strip may **mark**, which is the same answer for
+every one of those lines.
 
 Nothing here is a custom widget. If a screen seems to need one, the screen is
 wrong before the widget set is.

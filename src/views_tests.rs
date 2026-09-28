@@ -2482,8 +2482,8 @@ fn an_outcome_with_nothing_running_writes_nothing() {
 /// NOTES § D257 and `screens/detail.md` § The events fetch could not be completed: **a read the
 /// reader asked for carries an outcome exactly the way a mutation does.** The property this panel
 /// needs is *does this line get an outcome*, not *is this a mutation* — and until 2026-09-07 the
-/// only method that reserved one was documented as mutation-only, which left three approved
-/// mockups undrawable (`k8s-admin`, 2026-09-07).
+/// only method that reserved one was documented as mutation-only, which left that mockup
+/// undrawable (`k8s-admin`, 2026-09-07).
 #[test]
 fn a_read_the_reader_asked_for_carries_its_outcome() {
     let mut log = Log::default();
@@ -2499,18 +2499,26 @@ fn a_read_the_reader_asked_for_carries_its_outcome() {
     );
 }
 
-/// And so does a manifest line — `screens/states.md` § Your login expired draws the pods watch
-/// answering `→ login expired` long after the manifest was handed over.
+/// NOTES § D301 and `screens/widgets.md` § 2 (*which lines can carry a mark at all*): the manifest
+/// is drawn bare in every state, so the only line in this log that gains a mark is the one a
+/// keypress put there. The word is `login expired` — one of the eight `main.rs`'s `outcome_word`
+/// can say that no mockup spells, and this panel holds it exactly as it holds the two a mockup
+/// does.
 #[test]
-fn a_manifest_line_carries_an_outcome_too() {
+fn a_manifest_line_stays_bare_while_the_mutation_beside_it_resolves() {
     let mut log = Log::default();
-    log.sent("$ kubectl get pods -A --watch".to_owned());
+    log.ran("$ kubectl get pods -A --watch".to_owned());
+    log.sent("$ kubectl scale deployment/web --replicas=3 -n payments".to_owned());
+    // **A manifest line after the one that is running, so the mark's seat is pinned here and not
+    // by a neighbour.** With the mutation last, *the line that was running* and *the last line*
+    // are one sentence and this test passes either way (`tester`, 2026-09-28).
     log.ran("$ kubectl get nodes --watch".to_owned());
     log.outcome("login expired");
     assert_eq!(
         log.lines(),
         [
-            "$ kubectl get pods -A --watch   → login expired",
+            "$ kubectl get pods -A --watch",
+            "$ kubectl scale deployment/web --replicas=3 -n payments   → login expired",
             "$ kubectl get nodes --watch",
         ]
     );

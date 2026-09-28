@@ -314,14 +314,13 @@ empty:
   with the shorter `esc clears it`), so one of `X`, `esc clear filter` and
   the cursor pair had to give way. `X` is the one that gives: on an expired
   login — the one state its absence here would actually cost something —
-  that fact already has four carriers on this exact screen, none of them
+  that fact already has three carriers on this exact screen, none of them
   this footer. The header's own `⚠ login expired`
   ([widgets.md § 1a](widgets.md#1a-the-header-row)) is true on every
   degraded page regardless of what this section draws; the banner
   [states.md § Your login expired](#your-login-expired) puts above the
   sentence spells out the fix in full — *"Renew it, then press X and pick
-  this cluster again"*; the command-log strip carries `→ login expired` on
-  its own line; and `?`'s own *Changing things* heading already reads
+  this cluster again"*; and `?`'s own *Changing things* heading already reads
   *"paused — renew your login, then press X"*
   ([help.md § While the link is down…](help.md#while-the-link-is-down-still-connecting-the-login-has-expired-or-the-clock-is-off)).
   `esc clear filter` and `↑↓ move`/`⏎ open` have no such second carrier —
@@ -331,7 +330,7 @@ empty:
   **One residual, measured rather than closed by the argument above**:
   `Link::Expired` can briefly coexist with `Pane::Ready`, in the window
   before the next watch failure turns the pane `Denied` — the banner is not
-  drawn there, leaving two carriers instead of four. The header is the
+  drawn there, leaving two carriers instead of three. The header is the
   right one to have left standing: it is already the fact this product
   treats as unable to go missing on a degraded page, the same claim
   [§ Over a pane with nothing to show yet](#over-a-pane-with-nothing-to-show-yet)
@@ -437,7 +436,7 @@ forbidden.
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch   (reconnecting)                     │
+│ $ kubectl get pods -A --watch                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
@@ -452,6 +451,25 @@ forbidden.
   cannot ask, and drawing `s no scale` would claim a verdict nobody gave. So
   the key is withheld outright, the same way it is under `--read-only` —
   structurally unreachable reads the same as never drawn.
+- **The command log strip draws the watch line bare, and that is true in every
+  state on this page.** It used to carry `(reconnecting)` here, and that suffix
+  is gone: the strip records what k8rs *ran*, and a manifest line is neither
+  annotated when it is written nor annotated later
+  ([widgets.md § 2](widgets.md#2-element--widget), *"which lines can carry a
+  mark at all"*). Two things make it not a loss. A mark that says *retrying*
+  would have to come **off** again when the watch recovers, and an outcome on
+  this strip is one-shot by construction — `→ ` replaces the `…` once and is
+  never removed — so the one suffix this state could want is the one shape the
+  panel cannot draw. And the line is not on screen anyway: the strip is two
+  rows, and `command_log` appends the five watches last — pods, nodes,
+  deployments, statefulsets, daemonsets — so the pods watch is fourth-from-last
+  and scrolls off the window at connect, before the reader has pressed
+  anything. What the reader reads instead is one row up and two places over:
+  the header's own `⚠ disconnected, retrying`, and the banner where a pane is
+  degraded. The same holds for `→ login expired` under
+  [§ Your login expired](#your-login-expired) — on the first of those two
+  reasons, since an expired token *is* final, plus one that is only true there:
+  that fact already has three carriers on that screen.
 
 ### Refused by a cluster that is not answering anything else
 
@@ -468,8 +486,8 @@ plane draws this — `kubeadm upgrade`, a certificate rotation, a managed
 cluster's maintenance window.
 
 **What changes is one clause, and nothing about the link.** A refusal is still
-not a connection state; the header word, the withheld `r restart` and the
-`(reconnecting)` suffix below are all the ones
+not a connection state; the header word, the withheld `r restart` and the bare
+watch line in the strip below are all the ones
 [The connection dropped](#the-connection-dropped) already draws, unchanged.
 The banner's **middle clause** is the whole of this state.
 
@@ -492,7 +510,7 @@ The banner's **middle clause** is the whole of this state.
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch   (reconnecting)                     │
+│ $ kubectl get pods -A --watch                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
@@ -653,10 +671,12 @@ The banner's **middle clause** is the whole of this state.
   with ([§ Lost](#lost-nothing-is-currently-answering-and-the-retry-may-still-clear-it)'s
   own `Fault::standing` test).
 - **Three things in these frames are borrowed and not ruled here.** The command
-  strip's `(reconnecting)` is
-  [The connection dropped](#the-connection-dropped)'s, drawn because this
-  watch had been running before it started answering `403` — what the strip
-  marks for a *failing* watch is its own open question and not this state's.
+  strip's bare watch line is
+  [The connection dropped](#the-connection-dropped)'s, and the question it used
+  to leave open — *what does the strip mark for a failing watch?* — is answered
+  there and not here: **nothing**, in this state and in every other. This
+  frame drew `(reconnecting)` until that ruling, which is the one change these
+  two mockups took from it.
   The `▲` is [`unreadable`](../src/main.rs)'s severity glyph for a degraded
   read, and that it shares a glyph with a finding's warning is a collision
   already recorded in [`backlog.md`](../backlog.md), not reopened by this
@@ -692,7 +712,7 @@ and no list beneath it.
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch   (reconnecting)                     │
+│ $ kubectl get pods -A --watch                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
@@ -769,7 +789,7 @@ out mid-session ([NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kub
 │   versions         │                                               │
 │                    │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch   → login expired                    │
+│ $ kubectl get pods -A --watch                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  X switch cluster  / filter  ? all keys  q quit    │
 └────────────────────────────────────────────────────────────────────┘
@@ -796,6 +816,20 @@ out mid-session ([NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kub
   banner keeps.
 - Stale data stays visible and stays labelled, exactly as on the disconnected
   screen. k8rs does not clear the screen because it lost its token.
+- **The strip's watch line is bare, and this screen drew `→ login expired` on
+  it until 2026-09-28.** The word is real — `outcome_word` says it for
+  `Fault::Expired` and `Fault::NoCredential` — but it is a *mutation's*
+  outcome, and the manifest is not annotated on this strip in any state
+  ([The connection dropped](#the-connection-dropped),
+  [widgets.md § 2](widgets.md#2-element--widget)). Of all the facts on this
+  page this is the worst one to have wanted a fourth carrier for: it already
+  has three, two of them on this very frame — the header's `⚠ login expired`
+  and the banner spelling out the renewal — and the third behind `?`, whose
+  *Changing things* heading reads *"paused — renew your login, then press
+  X"*. The strip's job here is the opposite one: it
+  still says what k8rs ran while the token was good, which is the record a
+  reader compares against, and a line that gained a verdict would be the one
+  thing on the screen claiming k8rs asked a question it never asked.
 - **The footer keeps `↑↓ move` and `⏎ open`, for the reason the line above
   gives them a job to do.** The explanation this state needs is long enough
   to spend the whole content pane on it, so no card is drawn under it here —
@@ -856,7 +890,7 @@ confirmed, before the link went:
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch   (reconnecting)                     │
+│ $ kubectl get pods -A --watch                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  / filter  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
@@ -881,7 +915,7 @@ confirmed, before the link went:
 │   waste            │    time k8rs could check.                     │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch   → login expired                    │
+│ $ kubectl get pods -A --watch                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  X switch cluster  / filter  ? all keys  q quit    │
 └────────────────────────────────────────────────────────────────────┘
@@ -1111,10 +1145,12 @@ present, not the past:
   number that may never finish arriving if the address is wrong.
 - **The command log carries one line, unmarked** — `$ kubectl get pods -A`,
   the same line [Still loading](#still-loading) draws for the same reason:
-  this is the `LIST` k8rs is still trying to run, never confirmed as a
-  watch, so it carries none of `(reconnecting)`'s suffix
-  ([The connection dropped](#the-connection-dropped)) — that suffix marks a
-  watch that *was* running and then dropped, which is not this trigger.
+  this is the `LIST` k8rs is still trying to run, never confirmed as a watch,
+  so the line does not spell `--watch` yet. **Unmarked is not this state's
+  ruling and never was** — no manifest line carries a mark, in any state on
+  this page ([The connection dropped](#the-connection-dropped),
+  [widgets.md § 2](widgets.md#2-element--widget)). What is this state's is the
+  *command*: a stream k8rs has not yet confirmed is not written down as one.
 - **No 403 wording reaches this pane, and it is the pane that keeps it out
   rather than the classification.** *This* watch is unanswered — it has
   never heard back, so it is neither refused nor expired, and unanswered is
@@ -2084,7 +2120,7 @@ which sentence gives way, only how much of the losing one survives.
 │   versions         │                                               │
 │                    │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
-│ $ kubectl get pods -A --watch   → login expired                    │
+│ $ kubectl get pods -A --watch                                      │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  X switch cluster  / filter  ? all keys  q quit    │
 └────────────────────────────────────────────────────────────────────┘

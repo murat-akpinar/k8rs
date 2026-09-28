@@ -5133,7 +5133,7 @@ behaves as specified.
       `said_above` still reads a `▲ ` banner as the first card, so half of the
       screen sweep is vacuous wherever `unreadable` draws. All four in
       [`backlog.md`](backlog.md)
-- [ ] **`screens/widgets.md` illustrates the command log's outcome words with
+- [x] **`screens/widgets.md` illustrates the command log's outcome words with
       one the code cannot produce.** Line 300's gap rule names
       `→ not sent`, `→ refused`, `→ not allowed`, `→ login expired` — and
       `not allowed` is in neither `views::Log::outcome`'s four nor
@@ -5144,12 +5144,40 @@ behaves as specified.
       [D285](NOTES.md#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
       ruling 2 run backwards — a screen naming a word nothing implements, which
       is how the word gets implemented. `screens/` is `tui-designer`'s, which is
-      why this is a box and not a one-line edit. Found by `tester`, 2026-09-26
-- [ ] **The command log never marks a failing watch.** `screens/states.md`
+      why this is a box and not a one-line edit. Found by `tester`, 2026-09-26.
+      **Done 2026-09-28**
+      ([D301](NOTES.md#d301--the-command-log-draws-the-manifest-bare-because-that-line-is-not-on-screen-2026-09-28)),
+      as the first half of one family with the box below. The row was
+      illustrative and now says so: it lists the two words this directory draws
+      — `→ rejected` and `→ refused` — and names where the vocabulary lives,
+      `views::Log::outcome` for the slot and `main.rs`'s `outcome_word` for the
+      **ten** words that may go in it, eight producible and undrawn. `not
+      allowed` belongs to the other vocabulary, `may_i`'s `no` beside a
+      withheld key, and **the premise this box states about it is wrong**: it is
+      not the header's mark — no screen in `screens/` draws it, and the string
+      lives only among `theme.rs`'s examples of what its alarm colour is for
+      (`tui-designer`, which checked the directory rather than the brief)
+- [x] **The command log never marks a failing watch.** `screens/states.md`
       draws `(reconnecting)` and `→ login expired` on the manifest line; through
       the console those lines are logged at connect and never gain an outcome —
       in the drop, the 410 and the 401 journeys alike. A nit against a written
-      screen, and the smallest of the five
+      screen, and the smallest of the five.
+      **Done 2026-09-28, and it was not a nit**
+      ([D301](NOTES.md#d301--the-command-log-draws-the-manifest-bare-because-that-line-is-not-on-screen-2026-09-28)).
+      **The screens gave the marks up, and the deciding fact is that the line is
+      not on screen**: `ui::LOG_LINES` is 2 and `command_log` appends the five
+      watches pods-first, so at connect the strip holds *statefulsets* and
+      *daemonsets* and the pods watch line every one of those mockups marked is
+      fourth-from-last, gone before the reader presses anything, with no
+      scrollback. A second reason covers only half of it — an outcome is
+      one-shot by construction, so a *retrying* mark could never come back off —
+      which is why the first has to carry both. Seven rows changed, not the four
+      this box implies: `(reconnecting)` in four mockups and `→ login expired`
+      in three. Nothing in Rust changed; what the code owed was seven doc
+      sentences citing a mockup that no longer exists, two of which had been
+      stale since their own earlier rulings. **What it did not take**: the same
+      page draws a strip line nothing produces in ~23 mockups, in
+      [`backlog.md`](backlog.md)
 
 - [ ] **No automated gate reaches the confirmation arm, so give one a route to it.**
       `scripts/e2e.sh` drives the headless `k8rs ops` driver with a confirmation off

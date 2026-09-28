@@ -322,6 +322,7 @@ its line moving with it.
 - [D298](#d298--the-second-guard-joins-the-devs-per-turn-list-and-it-costs-41-s-rather-than-the-017-s-the-first-one-did-2026-09-27) — the second guard joins the dev's per-turn list, and it costs 4.1 s rather than the 0.17 s the first one did
 - [D299](#d299--the-scope-list-went-stale-a-fifth-time-because-the-command-that-counts-it-cannot-see-a-digit-2026-09-27) — the scope list went stale a fifth time because the command that counts it cannot see a digit
 - [D300](#d300--a-403-while-nothing-else-is-answering-is-not-an-rbac-errand-and-the-detector-is-the-contradiction-itself-2026-09-28) — a `403` while nothing else is answering is not an RBAC errand, and the detector is the contradiction itself
+- [D301](#d301--the-command-log-draws-the-manifest-bare-because-that-line-is-not-on-screen-2026-09-28) — the command log draws the manifest bare, because that line is not on screen
 
 ## Why it exists — where the gap is
 
@@ -27024,3 +27025,103 @@ but only one of them may hold the host.
 the refused row `listed: false` beside four dropped neighbours `listed: true`,
 under a doc comment saying *measured*. It is a defect in the box being landed
 and was fixed in it, which is D285 ruling 5's own precedent one box later.
+
+### D301 — the command log draws the manifest bare, because that line is not on screen (2026-09-28)
+
+Phase 13's next two boxes, briefed as one family: `screens/widgets.md`'s gap
+rule named `→ not allowed`, a word nothing implements, and `screens/states.md`
+drew `(reconnecting)` and `→ login expired` on the manifest line, marks nothing
+produces. One question — *which marks the strip draws, and which of them
+anything can produce* — and **both halves were settled in `screens/` with no
+Rust behaviour changed at all.**
+
+**Ruling 1 — the gap rule is about the gap, and the vocabulary is not defined
+there.** It lists the two words this directory actually draws — `→ rejected`
+(`dialogs.md`) and `→ refused` (`detail.md`) — and names the home: `Log::outcome`
+is the slot, `main.rs`'s `outcome_word` is the whole of what may go in it, **ten
+words counted off the match arms**, eight of them producible and undrawn, which
+is the ordinary state of affairs. `not allowed` belongs to the other vocabulary,
+the one answering *what may this login do* rather than *what became of this
+call*: `may_i`'s verdict, drawn as `no` beside the key it withholds. **A new word
+reaches a screen only after `outcome_word` can say it** —
+[D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+ruling 2 read backwards, which is how a word nothing implements gets
+implemented.
+
+**And the PM's own framing of that word was wrong.** The brief called
+`⚠ not allowed` *the header's permission mark*; `tui-designer` checked the
+directory and no screen draws it anywhere — the string exists only among
+`theme.rs`'s examples of what its alarm colour is for. A ruling handed down with
+a false premise, caught because the agent read the object instead of the brief.
+
+**Ruling 2 — the manifest line is drawn bare in every state, and the reason is
+not about vocabulary at all: the line is not on screen.** Measured on the code
+rather than argued from the mockups: `ui::LOG_LINES` is **2** and `main.rs`'s
+`command_log` appends the five watches last, in order — pods, nodes,
+deployments, statefulsets, daemonsets — so at connect the strip holds
+*statefulsets* and *daemonsets*, and the pods watch line every one of those
+mockups marked is **fourth-from-last**, off the window before the reader has
+pressed anything, with no scrollback to bring it back (`views::KEPT` is a bound,
+and its own doc says it is not a history). A mark on it is invisible however the
+code came to write it.
+
+**The second reason only covers half, which is why the first has to carry
+both.** An outcome is final by construction — `Log::outcome` replaces the `…`
+with `→ {word}` once and never removes it — so *retrying* is a mark that would
+have to come **off** again on recovery, and an append-only ring that drops its
+oldest cannot take one back. `Fault::standing` is the splitter
+([D295](#d295--a-first-launch-that-never-reached-the-cluster-is-a-third-state-not-either-of-the-two-the-code-has-2026-09-27)),
+and an expired token is on its standing side — so without ruling 2's first
+reason, `→ login expired` would still have been drawable.
+
+**What the reader loses is nothing, and that was checked rather than asserted.**
+The header word is asserted in `ui_tests.rs` (`disconnected, retrying` five
+times, `login expired` twenty-two) and the banner naming the kind in
+`main_tests.rs` (eight). On § Your login expired the fact had three other
+carriers, two of them on the same frame. **A third copy on the one panel whose
+job is *what k8rs ran* rather than *what is true now* is also a third place it
+can go stale** — measured at 412 s on a quiet cluster
+([D297](#d297--the-frozen-file-opens-for-a-wedged-watch-and-the-timeout-has-five-seconds-of-room-to-land-in-2026-09-27)).
+
+**Seven rows, not four, and one neighbouring arithmetic.** `(reconnecting)` was
+in four mockups and `→ login expired` in three; the PM's brief said three and
+one, because the count came from a `grep` truncated by `head` — the same class
+as [D299](#d299--the-scope-list-went-stale-a-fifth-time-because-the-command-that-counts-it-cannot-see-a-digit-2026-09-27)'s
+digit-blind counter, one command along. The designer counted them itself and
+said so. It also fixed what the removal falsified two sections away: § The
+filter hides every row justified giving up `X` on *four carriers*, one of which
+was the strip mark, and now says three.
+
+**The code half was eleven doc sentences and no behaviour** — the seven the
+brief named and **four more `dev-ui` found by grepping for the same pattern
+instead of re-reading**: `OUTCOME_GAP`'s list of drawing sites, `Log`'s *all
+three kinds reach `sent`*, its *a single `401` resolves one line here*,
+`Log::sent`'s *both mockups*, `SAID`'s claim about the longest word a mockup
+draws (`SAID = 32` is D217's security bound and does not move; only the
+derivation), `outcome_word`'s citation, a test's own name, `Log::outcome`'s own
+illustration, `Log::waiting`'s and `Log::ran`'s *whichever of the three kinds*,
+and a sibling test's *three approved mockups*. **Two entries of that first list
+were already stale before this box**, removed by their own rulings and never
+followed up — a list that went stale twice without anything noticing, because no
+gate in `just check` can read a comment that has stopped being true. The one
+test that changed was rewritten rather than renamed: it had asserted a manifest
+line *gaining* an outcome, which is the state this ruling says cannot exist, so
+it now asserts the manifest staying bare while the mutation beside it resolves.
+
+**And the rule's own carve-out had outlived the rows it was about, which is the
+same failure a third time.** § 2 named a two-column exception for a
+`dialogs.md` scale line; `c4df59d` removed those rows, and the paragraph — read,
+strengthened and re-committed in this very family's first round — still pointed
+at them. `grep -rnE '[^ ]  → '` over the directory finds no two-column outcome
+anywhere. **The rule is three columns with no exception**, and what that section
+actually demonstrates is the rule's consequence: when the outcome is wider than
+the `…` it replaces, the **command** re-cuts and the gap never does.
+
+**What this box did not take.** `screens/states.md` draws a strip line nothing
+produces in roughly twenty-three mockups — `$ kubectl get pods -A --watch` is
+not in the two-row window at connect, and `$ kubectl get pods -A` is a line no
+builder writes at all, since `connect_log` writes
+`get --raw '/api/v1/pods?limit=1'`, `get --raw /version` and
+`api-resources --verbs=list`. Box 1's disease at twenty-three times the scale,
+named on the page as a divergence and boxed in [`backlog.md`](backlog.md) rather
+than rewritten inside a family that was ruling two rows.

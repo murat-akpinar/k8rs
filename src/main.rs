@@ -10772,9 +10772,10 @@ fn installed(console: &mut Console<'_>, asked: Published) {
 /// `login expired` unreachable from the console, so `views::Log::outcome` documented a vocabulary
 /// half of which nothing could produce.
 ///
-/// **`screens/dialogs.md` draws `→ rejected` and `screens/states.md` draws `login expired`; the
-/// other eight are written to that shape** and were flagged for a screen's blessing rather than
-/// assumed.
+/// **`screens/dialogs.md` draws `→ rejected` and `screens/detail.md` draws `→ refused`; the other
+/// eight are written to that shape** and were flagged for a screen's blessing rather than assumed.
+/// Producible and undrawn is the ordinary state for a word no mockup has had a reason to spell
+/// yet, and no manifest line carries one at all (`screens/widgets.md` § 2, NOTES § D301).
 fn outcome_word(outcome: Option<&ops::Outcome>) -> &'static str {
     match outcome {
         // NOTES § D21 — nothing was sent, because the attempt could not be written down.

@@ -3998,3 +3998,20 @@ Phase 12 close triage fixes them; the rest are notes.
   `▲ ` *banner* from a `▲` *finding band* is one predicate, and it is a change to a helper all
   thirty-two frames parse through, which is why it is not a line in somebody's box. `tester`
   finding F3/F4, `dev-ui`'s own note, 2026-09-28.
+- **Roughly twenty-three mockups draw a command-log line the code never writes.** Two
+  shapes, and
+  [D301](NOTES.md#d301--the-command-log-draws-the-manifest-bare-because-that-line-is-not-on-screen-2026-09-28)
+  is the small version of both: `$ kubectl get pods -A --watch` is a real line
+  `command_log` builds, but the strip is two rows (`ui::LOG_LINES`) and the five watches are
+  appended pods-first, so at connect the window holds *statefulsets* and *daemonsets* and no
+  mockup drawing the pods line is showing what a reader would see; and
+  `$ kubectl get pods -A`, without `--watch` (`screens/states.md` § Still loading and
+  § Lost), is a line **no builder writes at all** — `connect_log` writes
+  `get --raw '/api/v1/pods?limit=1'`, `get --raw /version` and `api-resources --verbs=list`.
+  Found by `tui-designer` while ruling the manifest marks, and named on the page as a
+  divergence rather than rewritten, because twenty-three strips is not a clause inside a
+  family that was ruling two rows. **What makes it worth a box rather than a sweep**: the
+  right line per state is a question about what `command_log` and `connect_log` actually emit
+  in what order, so the answer is one measurement against the binary and then every strip at
+  once — and `ui_tests.rs` feeds every mockup `log: &[]`, so nothing has ever held these rows
+  honest. `tui-designer` finding 2, 2026-09-28.

@@ -1653,16 +1653,16 @@ impl Dialog {
 const KEPT: usize = 100;
 
 /// **The gap between a command and what became of it** — three columns, ruled in
-/// `screens/widgets.md` § 2 (*the gap before an outcome word is three columns*) and drawn by
-/// `screens/states.md` § Your login expired, `screens/context.md`, `screens/detail.md` § The
-/// events fetch could not be completed and `screens/dialogs.md` § The object went away.
+/// `screens/widgets.md` § 2 (*the gap before an outcome word is three columns*).
 ///
-/// **This said *as every mockup that draws one uses* until 2026-09-07 and that was not measured**
-/// — six mockups drew an outcome and two of them used two columns (`k8s-admin`, 2026-09-07). One
-/// was a mistake and was corrected; the other is `screens/dialogs.md` § The cluster said no,
-/// which that section now names as **the** exception, at two, because its command and its verdict
-/// already fill the pane it is drawn in. A screen file's acknowledged exception is not a second
-/// constant here: the rule is three.
+/// **What draws it, counted off `screens/` rather than recalled** (NOTES § D301): an outcome word
+/// on `screens/dialogs.md` § The command log's own line (`→ rejected`), `screens/detail.md` § The
+/// events fetch could not be completed (`→ refused`), and [`RUNNING`] on `screens/dialogs.md`
+/// § While the call is running and § Drain, which takes minutes. **A manifest line is drawn bare
+/// in every state and is never among them** (`screens/widgets.md` § 2, *which lines can carry a
+/// mark at all*).
+///
+/// **A screen file's acknowledged exception is not a second constant here: the rule is three.**
 const OUTCOME_GAP: &str = "   ";
 
 /// **D20's `…`** — a call that takes time is a state, and this is the whole of what the line says
@@ -1680,8 +1680,10 @@ const RUNNING: &str = "…";
 /// the gate's *a Secret value never enters the command log* row is exactly what an unbounded
 /// `said` walks through.
 ///
-/// **Thirteen is the longest any mockup draws** — `login expired`, `screens/states.md`. Double it
-/// and round: 32 is past every word `screens/` spells and nothing a cluster's sentence survives.
+/// **Eight columns is the longest any mockup draws** — `rejected`, `screens/dialogs.md` § The
+/// command log's own line. **32 does not move with it** (NOTES § D301): it is a bound on what a
+/// caller may hand over, set past every word `main.rs`'s `outcome_word` can say — 13 bytes at the
+/// longest — and short of anything a cluster's sentence survives.
 /// **The bound is not the guard on its own** — a word cut to 32 bytes is still the cluster's
 /// words, which is why [`Log::outcome`]'s doc says what the argument is and why the short form is
 /// the dialog's to build (NOTES § D233).
@@ -1714,20 +1716,22 @@ const SAID: usize = 32;
 ///   publishes a command that was never run — invariant 4's *neither record may lie*, reached by
 ///   reusing a string rather than by writing a wrong one (NOTES § D233 ruling 1).
 ///
-/// **Which method a line goes to is decided by whether an outcome is still coming, and never by
-/// which of the three it is.** [`Log::ran`] is a line nothing more will be said about;
-/// [`Log::sent`] is a line [`Log::outcome`] will finish. **All three kinds reach `sent`** — a
-/// mutation on the wire (`screens/dialogs.md` § While the call is running), a **read** that was
-/// refused (`screens/detail.md` § The events fetch could not be completed), a **manifest** watch
-/// whose token ran out (`screens/states.md` § Your login expired). Splitting on the kind instead —
-/// which is what this type did until 2026-09-07, under a method called `started` documented as
-/// mutation-only — is a panel three approved mockups cannot be drawn from.
+/// **Which method a line goes to is decided by whether an outcome is still coming, and this type
+/// does not branch on which of the three kinds it is.** [`Log::ran`] is a line nothing more will
+/// be said about; [`Log::sent`] is a line [`Log::outcome`] will finish. **A mutation and a read
+/// the reader opened both reach `sent`** — a mutation on the wire (`screens/dialogs.md` § While
+/// the call is running) and a **read** that was refused (`screens/detail.md` § The events fetch
+/// could not be completed). Splitting on the kind instead — which is what this type did until
+/// 2026-09-07, under a method called `started` documented as mutation-only — is a panel that
+/// refused read cannot be drawn from. **A manifest line's answer to that question is always no**,
+/// so it takes [`Log::ran`] in every state (NOTES § D301).
 ///
 /// **One line at a time, said rather than left implied by an `Option`.** `waiting` is a single
 /// index because no screen draws two outcomes at once, and because the honest answer to *what
-/// became of it* is per call. A single `401` that kills five watches therefore resolves **one**
-/// line here and says the rest in the pane above it, which is where `screens/states.md` § Your
-/// login expired puts that sentence anyway. Widening it is a screen ruling first, not a `Vec`.
+/// became of it* is per call. A single `401` that kills five watches resolves **no** line here —
+/// those five are manifest lines (NOTES § D301) — and says it in the pane above it, which is where
+/// `screens/states.md` § Your login expired puts that sentence anyway. Widening it is a screen
+/// ruling first, not a `Vec`.
 ///
 /// **What is forbidden is a line implying k8rs saw a call it never saw.** `k8s.rs`'s internals —
 /// a watch reconnecting, a report's five fetches, a ReplicaSet resolved behind an owner chain —
@@ -1759,7 +1763,8 @@ pub struct Log {
     /// to be last would put a scale's outcome onto a `kubectl logs`, which is the same record
     /// lying this whole type is shaped to prevent.
     ///
-    /// **Set by [`Log::sent`] and by nothing else, whichever of the three kinds that line is.**
+    /// **Set by [`Log::sent`] and by nothing else, whichever of the two annotated kinds that
+    /// line is** (NOTES § D301).
     waiting: Option<usize>,
 }
 
@@ -1776,7 +1781,7 @@ impl Log {
     /// 2026-09-07 and was never true of the manifest**: `command_log` computes those lines
     /// *before* the calls, from what the run is going to do (NOTES § D233 ruling 3). The only
     /// thing true of every line here is that no [`Log::outcome`] is coming for it. A line that
-    /// expects one goes to [`Log::sent`], whichever of the three kinds it is.
+    /// expects one goes to [`Log::sent`], and a manifest line never does (NOTES § D301).
     ///
     /// **The whole display line, `$ ` and all**, because that is what every builder feeding this
     /// already produces: `main.rs`'s `command_log`, [`crate::k8s::LogRequest::kubectl`], and the
@@ -1788,12 +1793,12 @@ impl Log {
     /// **A call whose outcome has not arrived** — appended with [`RUNNING`], which
     /// [`Log::outcome`] replaces when the answer comes (NOTES § D20).
     ///
-    /// **Any of the three kinds, and that is the whole reason this is not called `started`.** A
-    /// mutation on the wire is the case D20 was written for, and it is not the only one: a read
-    /// the reader opened can be refused (`screens/detail.md` § The events fetch could not be
-    /// completed) and a manifest watch can outlive its token (`screens/states.md` § Your login
-    /// expired). Both mockups draw an outcome on a line that is not a mutation, and a method
-    /// reserved for mutations is what made them undrawable (`k8s-admin`, 2026-09-07).
+    /// **A mutation or a read the reader opened, and that is the whole reason this is not called
+    /// `started`.** A mutation on the wire is the case D20 was written for, and it is not the only
+    /// one: a read the reader opened can be refused (`screens/detail.md` § The events fetch could
+    /// not be completed). **That mockup draws an outcome on a line that is not a mutation, and a
+    /// method reserved for mutations is what made it undrawable** (`k8s-admin`, 2026-09-07). A
+    /// manifest line never arrives here — it is drawn bare in every state (NOTES § D301).
     ///
     /// **The caller writes the `$ `**, because `ops::Shown::kubectl` carries none: the same
     /// `format!("$ {}", shown.kubectl)` the headless dialog already prints, so the panel and the
@@ -1823,9 +1828,10 @@ impl Log {
         self.waiting = Some(self.lines.len() - 1);
     }
 
-    /// **What became of the call that is running, onto the line it belongs to** — `→ rejected`,
-    /// `→ not sent`, `→ login expired` (`screens/dialogs.md`, `screens/states.md` § Your login
-    /// expired). The `…` is replaced, never removed.
+    /// **What became of the call that is running, onto the line it belongs to** — `→ rejected`
+    /// (`screens/dialogs.md` § The command log's own line) and `→ refused` (`screens/detail.md`
+    /// § The events fetch could not be completed), the two `screens/` draws. The `…` is replaced,
+    /// never removed.
     ///
     /// **The word is the caller's, and that is a deferral rather than a design.** `screens/` has
     /// spelled a short form for some of what `ops::Outcome` can say and not for all of it, so a
