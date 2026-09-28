@@ -32,6 +32,7 @@ Bumping is deliberate, which is the whole point: change `RUST_TOOLCHAIN`, run
 
 Usage:
     toolchain-guard.py              # the real run
+    toolchain-guard.py --print-pin  # the pinned version, for a second workflow
     toolchain-guard.py --self-test  # prove the guard fails when it should
 """
 import contextlib, io, re, subprocess, sys
@@ -64,6 +65,14 @@ def normalise(value: str) -> str:
 
 
 EXPECTED = "${{ env.RUST_TOOLCHAIN }}"
+# The one way a second workflow may name a toolchain: it asks *this file* for
+# ci.yml's pin at run time and puts the answer in its own `$GITHUB_ENV`.
+# Workflows cannot share an `env:` block, so the alternative is a second literal
+# version — the exact thing the pin exists to prevent, one file along. Matched
+# as an invocation of this script rather than as "a line that mentions
+# RUST_TOOLCHAIN", so a step that writes the variable from anywhere else does
+# not satisfy it.
+BORROWS = re.compile(r"toolchain-guard\.py\s+--print-pin")
 # `clippy 0.1.97` and `clippy 0.1.98 (48a229ceae 2026-09-01)` — the distro build
 # carries no hash, so the minor is the only field both spellings share.
 CLIPPY = re.compile(r"^clippy 0\.1\.(\d+)")
@@ -272,11 +281,54 @@ def self_test():
             "jobs:\n  x:\n    steps:\n"
             "      - uses: dtolnay/rust-toolchain@e97e2d8c\n"
             "        with:\n          toolchain: stable\n")
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc = only_workflow(d, "ci.yml")
-        assert rc == 1 and "release.yml" in buf.getvalue(), buf.getvalue()
-        assert "decided once" in buf.getvalue(), buf.getvalue()
+
+        def second(body, want, why, expect=None):
+            (d / "release.yml").write_text(body)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = only_workflow(d, "ci.yml")
+            out = buf.getvalue()
+            assert rc == want, f"{why}: expected {want}, got {rc}\n{out}"
+            if expect:
+                assert expect in out, f"{why}: {expect!r} not in\n{out}"
+            return out
+
+        out = second((d / "release.yml").read_text(), 1, "a second workflow on a channel",
+                     "release.yml")
+        assert "decided once" in out, out
+        # THE SHAPE PHASE 13 ACTUALLY LANDED: no pin of its own, the input reads
+        # the variable, and a step fills it from ci.yml through this file.
+        borrowed = ("jobs:\n  x:\n    steps:\n"
+                    "      - run: echo \"RUST_TOOLCHAIN=$(python3 "
+                    "scripts/toolchain-guard.py --print-pin)\" >> \"$GITHUB_ENV\"\n"
+                    "      - uses: dtolnay/rust-toolchain@e97e2d8c\n"
+                    "        with:\n          toolchain: ${{ env.RUST_TOOLCHAIN }}\n")
+        second(borrowed, 0, "a second workflow borrowing ci.yml's pin", "1 of them borrowing")
+        # …and each clause of that permission, taken away one at a time.
+        second(borrowed.replace("      - run: echo \"RUST_TOOLCHAIN=$(python3 "
+                                "scripts/toolchain-guard.py --print-pin)\" >> "
+                                "\"$GITHUB_ENV\"\n", ""),
+               1, "the input read but never filled", "never fills it")
+        second("env:\n  RUST_TOOLCHAIN: \"1.97.1\"\n" + borrowed, 1,
+               "a second workflow with a pin of its own", "second copy")
+        second(borrowed.replace("          toolchain: ${{ env.RUST_TOOLCHAIN }}\n", ""), 1,
+               "a borrowing workflow whose step names no toolchain", "action's default")
+
+        # `--print-pin`, the half that second workflow depends on. A refusal must
+        # never reach stdout: it would be captured as the version.
+        for text, want in ((workflow(), 0), (workflow(pin=""), 1),
+                           (workflow(pin='  RUST_TOOLCHAIN: "stable"'), 1),
+                           (workflow(pin='  RUST_TOOLCHAIN: "1.97.1"\n'
+                                         '  RUST_TOOLCHAIN: "1.98.1"'), 1)):
+            buf, noise = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(noise):
+                rc = print_pin(text)
+            assert rc == want, f"print_pin: expected {want}, got {rc}"
+            assert (want == 0) or "FAIL" in noise.getvalue(), \
+                "a print_pin refusal must say why, on stderr"
+            assert buf.getvalue() == ("1.97.1\n" if want == 0 else ""), \
+                f"print_pin wrote {buf.getvalue()!r} to stdout on rc={rc}"
+
         # A workflow that names no toolchain at all is fine — cargo-deny's shape.
         (d / "release.yml").unlink()
         (d / "docs.yml").write_text("jobs:\n  x:\n    steps:\n      - run: echo hi\n")
@@ -300,40 +352,110 @@ def self_test():
           "another toolchain; a two-part version, an unquoted pin and a "
           "trailing comment are not failures; and no pin, a doubled pin, a workflow that "
           "dropped the action and an empty file each fail as *vetted nothing* rather than "
-          "passing as agreement; and a second workflow naming a toolchain of its own is refused "
-          "while one naming none is not")
+          "passing as agreement; a second workflow naming a toolchain of its own is refused "
+          "while one naming none is not, and one that borrows the pin through --print-pin is "
+          "allowed but refused the moment it keeps its own copy, stops filling the variable "
+          "or lets a step default; and --print-pin itself writes a version to stdout or "
+          "nothing at all")
+
+
+def print_pin(text: str) -> int:
+    """Print ci.yml's pinned version on stdout, or refuse on stderr.
+
+    Pure over the text for the same reason `run` is: the self-test feeds it the
+    shapes no file here has. It repeats `run`'s two checks rather than calling
+    it because `run` prints a report a `$(…)` would swallow into a shell
+    variable — and a "version" that is really a report is a toolchain nobody
+    chose, installed without a word.
+    """
+    pins = PIN.findall(text)
+    if len(pins) != 1:
+        print(f"FAIL: the workflow declares RUST_TOOLCHAIN {len(pins)} time(s), expected 1",
+              file=sys.stderr)
+        return 1
+    if not VERSION.match(pins[0]):
+        print(f"FAIL: RUST_TOOLCHAIN is {pins[0]!r}, which is a channel and not a version",
+              file=sys.stderr)
+        return 1
+    print(pins[0])
+    return 0
+
+
+def borrows_the_pin(text: str) -> str | None:
+    """`None` if this workflow may name a toolchain, else the reason it may not.
+
+    Phase 13's release workflow is the second workflow this guard's ceiling was
+    written for, and it has to compile something. The shape it is allowed is the
+    one that keeps the version single: no pin of its own, every `toolchain:`
+    input reading `${{ env.RUST_TOOLCHAIN }}`, and a step that fills that
+    variable from ci.yml through `--print-pin`.
+
+    All four clauses are needed and none is decoration. Without the last one the
+    input expands to the empty string and the action picks a toolchain of its
+    own — a release built by a compiler nobody chose, which is louder to reason
+    about than `stable` and just as unpinned.
+    """
+    if PIN.search(text):
+        return ("declares a RUST_TOOLCHAIN of its own — that is the second copy of the "
+                "version, and a second copy is what `stable` moving under CI already "
+                "cost seven days")
+    uses = ACTION.findall(text)
+    inputs = [normalise(v) for v in INPUT.findall(text)]
+    if len(inputs) != len(uses):
+        return (f"has {len(uses)} `dtolnay/rust-toolchain` step(s) but {len(inputs)} "
+                f"`toolchain:` input(s) — a step with no explicit toolchain takes the "
+                f"action's default")
+    stray = sorted({v for v in inputs if v != EXPECTED})
+    if stray:
+        return ("has `toolchain:` input(s) that do not read the pin: "
+                + " · ".join(repr(v) for v in stray))
+    if not BORROWS.search(text):
+        return ("reads `${{ env.RUST_TOOLCHAIN }}` but never fills it — a workflow has "
+                "no access to another's `env:`, so the input expands to nothing. Add the "
+                "step that reads the pin: `echo \"RUST_TOOLCHAIN=$(python3 "
+                "scripts/toolchain-guard.py --print-pin)\" >> \"$GITHUB_ENV\"`")
+    return None
 
 
 def only_workflow(folder: Path = None, keep: str = None) -> int:
-    """Fail if any workflow but `ci.yml` decides a toolchain.
+    """Fail if any workflow but `ci.yml` decides a toolchain of its own.
 
     `run` above reads one file, so a *second* workflow could set
-    `toolchain: stable` and drift with nothing watching it — and Phase 13 adds a
-    release workflow. It cannot simply read this one's `env`, either: workflows
+    `toolchain: stable` and drift with nothing watching it — and Phase 13's
+    release workflow is here. It cannot simply read this one's `env`: workflows
     do not share one, so a second pin would be a second copy of the one value
     this guard exists to keep single.
 
-    So the ceiling is made loud instead of guessed at. When that workflow lands
-    this goes red, and whoever lands it decides where the pin lives — rather
-    than a release built by an unpinned compiler nobody chose.
+    That ceiling used to be *no other workflow may name a toolchain at all*.
+    What lifted it is `--print-pin`: a second workflow may compile, provided it
+    asks this file for ci.yml's version at run time rather than writing one
+    down. `borrows_the_pin` is that provision, clause by clause.
     """
     folder = folder or WORKFLOW.parent
     keep = keep or WORKFLOW.name
     others = sorted(p for p in folder.glob("*.y*ml") if p.name != keep) \
         if folder.is_dir() else []
-    problems = []
+    problems, borrowers = [], 0
     for other in others:
         text = other.read_text(encoding="utf-8")
-        if ACTION.search(text) or INPUT.search(text):
-            problems.append(f"{other.name} names a toolchain of its own")
+        if not (ACTION.search(text) or INPUT.search(text)):
+            continue
+        why = borrows_the_pin(text)
+        if why:
+            problems.append(f"{other.name} {why}")
+        else:
+            borrowers += 1
     if problems:
         print("FAIL: " + " · ".join(problems))
-        print(f"       the toolchain is decided once, in {keep}'s RUST_TOOLCHAIN, and "
-              f"this guard only reads that file. A second workflow cannot share its `env:`, so "
-              f"decide where the pin lives and teach this guard about it — do not leave a job "
-              f"compiling with whatever `stable` is that day")
+        print(f"       the toolchain is decided once, in {keep}'s RUST_TOOLCHAIN. A second "
+              f"workflow cannot share its `env:`, so the one shape allowed is to read that "
+              f"pin at run time — `echo \"RUST_TOOLCHAIN=$(python3 "
+              f"scripts/toolchain-guard.py --print-pin)\" >> \"$GITHUB_ENV\"`, then "
+              f"`toolchain: {EXPECTED}`. Do not leave a job compiling with whatever "
+              f"`stable` is that day")
         return 1
-    print(f"toolchain-guard: {len(others)} other workflow(s), none naming a toolchain")
+    print(f"toolchain-guard: {len(others)} other workflow(s), {borrowers} of them "
+          f"borrowing {keep}'s pin and none naming one of its own")
     return 0
 
 
@@ -344,5 +466,13 @@ if "--self-test" in sys.argv:
 if not WORKFLOW.exists():
     print(f"FAIL: {WORKFLOW} does not exist — this guard was about to vet nothing")
     sys.exit(1)
+
+if "--print-pin" in sys.argv:
+    # The pin, and nothing else, on stdout: a second workflow captures this into
+    # its own `$GITHUB_ENV` (see `borrows_the_pin`). Every refusal goes to stderr
+    # and exits non-zero, so a broken read cannot be mistaken for an empty
+    # version and silently hand a job to the action's default.
+    sys.exit(print_pin(WORKFLOW.read_text(encoding="utf-8")))
+
 local, why = installed()
 sys.exit(max(run(WORKFLOW.read_text(encoding="utf-8"), local, why), only_workflow()))

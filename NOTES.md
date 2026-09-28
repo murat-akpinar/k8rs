@@ -326,6 +326,8 @@ its line moving with it.
 - [D302](#d302--the-confirmation-arm-gets-a-gate-and-four-of-its-first-sixty-needles-asked-for-something-nothing-draws-2026-09-28) — the confirmation arm gets a gate, and four of its first sixty needles asked for something nothing draws
 - [D303](#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28) — the ten scaffolding flags were one flag, and every leg of the rationale for the other nine was false
 - [D304](#d304--the-documented-admin-role-grants-three-capabilities-the-binary-cannot-use-and-a-grant-nothing-uses-is-not-least-privilege-2026-09-28) — the documented admin role grants three capabilities the binary cannot use, and a grant nothing uses is not least privilege
+- [D305](#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28) — the release workflow: seven rulings, and the target list that is derived rather than copied
+- [D306](#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28) — v0.0.1 is skipped, because both halves of the reason for it are spent
 
 ## Why it exists — where the gap is
 
@@ -27370,3 +27372,120 @@ the `authorization.k8s.io` rule added 2026-09-26 — so **that rule has never be
 exercised under either role**. Both are recorded in
 [`backlog.md`](backlog.md); neither blocks this removal, because removing an
 unreachable grant cannot break a call that does not exist.
+
+
+### D305 — the release workflow: seven rulings, and the target list that is derived rather than copied (2026-09-28)
+
+`.github/workflows/release.yml`, written by `tester` for Phase 13's last box.
+Three jobs — `draft` → `build` (matrix) → `publish` — on a pushed `v*` tag.
+Top-level `permissions: contents: read`, with `contents: write` elevated per
+job and never at file level. Both actions reuse SHAs this repo already pins;
+**no new third-party action was trusted.** The seven calls the brief did not
+make:
+
+1. **The matrix is derived at run time, not copied.** `ci.yml`'s `cross` matrix
+   is *the one list of release targets* — its own comment says so, and
+   `just cross` has parsed the `- target:` lines straight out of it ever since
+   [D67](#d67--the-cross-compile-row-closed-with-a-skip-and-what-the-skip-costs-2026-08-13)
+   closed [D66](#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13)'s
+   gap by putting `just cross` inside `just check`. A second
+   matrix in `release.yml` — even with a guard comparing the two — would have
+   left **three** parsers of `ci.yml`. Instead `scripts/ci-targets.py` is the
+   single parser, `just cross` now calls it too, and the release job reads
+   `fromJSON` off a job output. The repo went from one parser to one parser and
+   gained a reader. The release needs the **runner** as well as the triple, which
+   is why the justfile's old `sed` could not simply be pasted into YAML: a matrix
+   that loses the `os:` column builds `aarch64-unknown-linux-musl` on amd64 and
+   dies in `ring`'s build script, which is [D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03)'s
+   seven red days over again. Both of the justfile's canaries moved into the
+   parser, so they now fire for the release path and on **every `just check`**
+   rather than first at tag time.
+2. **`toolchain-guard.py`'s `only_workflow` ceiling is lifted, not dodged.** The
+   guard was written to go red on exactly this file and to say *decide where the
+   pin lives and teach this guard about it*. Spelling the install as a bare
+   `rustup` line would have passed by being invisible to the regexes, which is
+   the silent defeat. One shape is now permitted: **no pin of its own, every
+   `toolchain:` input exactly `${{ env.RUST_TOOLCHAIN }}`, as many inputs as
+   steps, and a step that fills the variable through
+   `toolchain-guard.py --print-pin`.** Each clause was proved by taking it away
+   one at a time — a pin of its own, a literal in place of `--print-pin`, an
+   input back on `stable`, the input deleted — four reds against the real file,
+   not planted strings. `--print-pin` writes refusals to **stderr**, because a
+   refusal reaching stdout would be captured as the version. One literal version
+   still exists in the repo, in `ci.yml`.
+3. **git-cliff does not run in the workflow.** The release body is cut out of the
+   **committed** `CHANGELOG.md` section for the tag. Generating a second text on
+   the runner can differ from the file everyone else reads, and would cost either
+   a fourth third-party action or a `cargo install`. The cut doubles as a gate: it
+   fails, naming the recovery commands, if the changelog was not regenerated
+   **with the tag** before tagging. Proved against five tag shapes — first,
+   middle and last section cut correctly; `v0.1` (a prefix of `0.1.0`) and an
+   absent `v1.0.0` both refused.
+4. **`cargo publish` is deliberately not in the workflow.** A registry push is
+   irreversible, and a tag trigger would mean a crates.io token in repo secrets
+   plus a mistyped tag publishing permanently. The maintainer runs two commands;
+   the file says so where someone would look for the missing step. Automating it
+   is a box, not a quiet line.
+5. **No artifact actions.** The matrix uploads straight onto the **draft** with
+   `gh`, which is preinstalled, so nothing is visible until all four tarballs and
+   `SHA256SUMS` are on it. Cost: three jobs instead of two. Benefit: no new
+   supply-chain surface and no SHA to look up.
+6. **`gh release create` is deliberately not idempotent** — a re-run stops rather
+   than writing into a release it did not make, and the recovery command is in
+   the comment beside it.
+7. **No `RUSTFLAGS: -D warnings` in this file.** A release that refuses to build
+   on a newer lint is a broken release for a non-defect; `ci.yml` is the lint
+   gate and it keeps `-D warnings`.
+
+**What is unexercised, stated rather than implied: the workflow has never run.**
+Every *shell body* inside it was extracted with `yaml.safe_load` — not retyped —
+and run against real inputs, including the notes cut, the tarball-count canary
+and `sha256sum -c`. What is unproven is the GitHub glue: `fromJSON` over a job
+output, `$GITHUB_OUTPUT`/`$GITHUB_ENV` propagation, the three `permissions`
+elevations, `gh release create/upload/download/edit` against a real release,
+`--verify-tag`, and the `endsWith(matrix.target, '-linux-musl')` condition. The
+first thing that exercises those is a real `v*` tag — and the draft-first design
+means a failure there leaves an unlisted draft rather than a broken public
+release. Also unproven: `cargo build --release` for any of the four targets, on
+any machine. The dev machine does not build
+([D267](#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17))
+and the test host has no cross std, so `ci.yml`'s `cargo check` is the most any
+target has had; a `--release` LTO link is proven for none. And `python3` on the
+`macos-latest` runner is assumed, not measured — two steps call it.
+
+**One defect the author's own second pass found: `security-guard.py` went red on
+a comment**, because the line explaining that `pull_request_target` is not used
+contains the literal string and the guard reads every line of every workflow.
+The comment was reworded rather than the guard loosened.
+
+### D306 — v0.0.1 is skipped, because both halves of the reason for it are spent (2026-09-28)
+
+[D10](#d10--m1-ships-publicly-as-v001) put a v0.0.1 on crates.io — `k8rs --once`
+— and gave two reasons in one sentence: the diagnosis engine reaches people
+**"months before the TUI"**, and the feedback arrives **"while the rules can
+still change cheaply"**. Phase 5's box has stayed open ever since, blocked first
+on the credential and then on a README that is now written.
+
+**Neither half is available any more, and it is the decision's own stated reason
+that says so.** The TUI closed on 2026-09-26, so there are no months before it;
+`rules.rs` froze at Phase 3's close, so the rules are not cheap to change. What
+v0.0.1 would ship today is a strict subset of v0.1.0, days apart, buying neither
+thing it was for — and it would put a second version on a public registry that
+nobody would have a reason to install. This is the same narrowing
+[D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)
+and [D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)
+did to [D17](#d17--the---once-output): a decision read against the object it was
+written about, after the object moved.
+
+**So the first real release is `v0.1.0`, over the `0.0.0` placeholder published
+2026-08-12.** Phase 5's release box closes as *superseded* rather than done, and
+its close is what finally runs Phase 5's owed close ritual
+([D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
+Phase 13's own box carried the parenthetical *"the placeholder was replaced back
+in Phase 5"*, which was false at HEAD — `Cargo.toml` still says `0.0.0` — and is
+corrected with this entry.
+
+**This one is the maintainer's to reverse.** It decides what appears under their
+name on a public registry, and they run the `cargo publish` either way; it is
+recorded here rather than asked because the workflow does not depend on the
+answer — it releases whatever is tagged.

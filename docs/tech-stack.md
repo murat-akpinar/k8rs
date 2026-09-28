@@ -131,7 +131,7 @@ NOTES.md with the reason.
 | **git-cliff** | CHANGELOG from conventional commits (`feat:` / `fix:`) |
 | **cargo-deny** | advisories, license policy, source policy (CI) |
 | **clippy** | `-D warnings` + `disallowed-methods` ban on K8s write calls |
-| **GitHub Actions** | One workflow, [`ci.yml`](../.github/workflows/ci.yml), three jobs: fmt/clippy/test plus `bash scripts/guards.sh`, `cargo-deny`, and the cross-compile check matrix. Also the honest-test guards: a run with zero tests, or an unexplained `#[ignore]`, fails the build. **There is no release workflow yet** — tagging, the binaries and `SHA256SUMS` are Phase 13's last unchecked box |
+| **GitHub Actions** | Two workflows. [`ci.yml`](../.github/workflows/ci.yml) is three jobs: fmt/clippy/test plus `bash scripts/guards.sh`, `cargo-deny`, and the cross-compile check matrix — also the honest-test guards, where a run with zero tests or an unexplained `#[ignore]` fails the build. [`release.yml`](../.github/workflows/release.yml) fires on a `v*` tag: it builds the four targets, attaches them with `SHA256SUMS` to a draft release, and cuts the notes out of the committed `CHANGELOG.md`. **It has never run, and it does not publish to crates.io** — that is two commands the maintainer runs ([D305](../NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)) |
 
 ## The test cluster — reproducing it yourself
 

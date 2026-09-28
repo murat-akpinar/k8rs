@@ -179,11 +179,19 @@ session's box in flight
 **not committed**. The whole of `.claude/` is `exclude`d from the published
 crate.
 
-`.github/workflows/` holds one file, [`ci.yml`](../.github/workflows/ci.yml),
-`tester`'s. Three jobs — fmt/clippy/test plus `scripts/guards.sh`, `cargo-deny`,
-and the cross-compile matrix. Workflows default to `permissions: contents: read`,
-third-party actions pinned to commit SHAs. **There is no release workflow yet**;
-it is Phase 13's last unchecked box.
+`.github/workflows/` holds two files, both `tester`'s.
+[`ci.yml`](../.github/workflows/ci.yml) is three jobs — fmt/clippy/test plus
+`scripts/guards.sh`, `cargo-deny`, and the cross-compile matrix whose `- target:`
+lines are **the one list of release targets**.
+[`release.yml`](../.github/workflows/release.yml) fires on a pushed `v*` tag and
+is `draft` → `build` → `publish`: it *derives* that matrix at run time through
+[`ci-targets.py`](../scripts/ci-targets.py) rather than keeping a second copy,
+and it deliberately does **not** run `cargo publish`
+([D305](../NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)).
+Both default to `permissions: contents: read`, with `contents: write` elevated
+per job and never at file level; third-party actions pinned to commit SHAs.
+**`release.yml` has never run** — a real tag is the first thing that exercises
+it.
 
 ---
 

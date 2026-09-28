@@ -96,17 +96,14 @@ cross:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    targets=$(sed -n 's/^[[:space:]]*- target:[[:space:]]*//p' .github/workflows/ci.yml)
-    # "extracted nothing" and "nothing to extract" print the same line, so the
-    # derived list is asserted and not trusted (CLAUDE.md § A derived list
-    # asserts it found something). Rename the matrix key upstream and this
-    # recipe would otherwise pass by checking nothing at all. The canary is the
-    # one target REQUIREMENTS names as the primary release artifact, so it is
-    # also the one whose removal should stop and be looked at rather than
-    # silently shrink the gate — if it went on purpose, move this line to
-    # whatever replaced it.
-    echo "$targets" | grep -qx x86_64-unknown-linux-musl \
-      || { echo "cross: x86_64-unknown-linux-musl is not in .github/workflows/ci.yml's matrix — either the matrix moved and this recipe was about to check nothing, or the target was dropped on purpose and this line has to move with it" >&2; exit 1; }
+    # The matrix used to be read here by a `sed` of its own, and the release
+    # workflow would have made that two parsers of one list — the drift
+    # NOTES § D305 ruling 1 refused. Both readers go through this script
+    # now, and both canaries moved into it with the parse: an empty read and a
+    # matrix that no longer names the primary release target each fail there,
+    # loudly, rather than shrinking the gate in silence (CLAUDE.md § A derived
+    # list asserts it found something).
+    targets=$(python3 scripts/ci-targets.py --targets)
 
     skipped=
     for t in $targets; do

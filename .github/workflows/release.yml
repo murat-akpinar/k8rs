@@ -1,0 +1,248 @@
+name: Release
+
+# **A pushed `v*` tag is the whole trigger.** Nothing here runs on a branch
+# push or a pull request: this workflow ends in a public release page and the
+# bytes people download from it, which is not something a mistaken push to
+# `development` should reach. The standard fork-PR trap — a fork's code run
+# with this repository's secrets — is not opened here, and
+# `scripts/security-guard.py` refuses that trigger by name in every workflow,
+# including this comment if it named it (REQUIREMENTS § CI security).
+on:
+  push:
+    tags: ["v*"]
+
+# Read by default, exactly as `ci.yml` is. All three jobs below write to the
+# release, so each elevates *itself* to `contents: write`; the file never grants
+# it (CLAUDE.md § Security gate, REQUIREMENTS § CI security).
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # **No `RUSTFLAGS: -D warnings` here, and that is deliberate.** Every commit
+  # a tag can land on has already been through `ci.yml`, which runs on pushes to
+  # both `main` and `development` and denies warnings there. A release that
+  # refuses to build because a newer lint fired is a broken release for
+  # something that is not a defect: the lint gate is `ci.yml`'s job, and this
+  # file's job is bytes.
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. The target list, the release notes, and the draft they go onto.
+  # ---------------------------------------------------------------------------
+  draft:
+    name: draft the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # **The release targets are CI's matrix, read and never copied**
+      # (NOTES § D305 ruling 1). `scripts/ci-targets.py` is the one parser for
+      # that list — `just cross` goes through it too — so a renamed matrix key
+      # is a red `just check` at somebody's desk rather than a release that
+      # quietly ships three binaries out of four. It refuses an empty read and a
+      # matrix that no longer names the primary target, which is why nothing
+      # here re-checks the output.
+      - name: the release targets, out of ci.yml's matrix (NOTES § D305)
+        id: targets
+        run: echo "matrix=$(python3 scripts/ci-targets.py --matrix)" >> "$GITHUB_OUTPUT"
+
+      # **The release body is the committed CHANGELOG's section for this tag,
+      # not a second changelog generated here.** git-cliff is how that section
+      # is written (CLAUDE.md § Git rules) and the PM runs it before tagging;
+      # running it again on the runner would produce a *second* text that can
+      # differ from the file everybody else reads, and would need git-cliff
+      # installed — a fourth third-party action, or two minutes of
+      # `cargo install`, for a paragraph already in the repository.
+      #
+      # So the cut doubles as the gate that the changelog was regenerated
+      # **with the tag** before the tag was pushed. `git cliff -o CHANGELOG.md`
+      # alone writes `## [unreleased]`, because at that moment the tag does not
+      # exist yet; the failure below names the command that does not.
+      - name: the release notes, cut out of the committed CHANGELOG
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          awk -v want="## [${TAG#v}]" '
+            index($0, want) == 1 { found = 1; next }
+            found && /^## \[/    { exit }
+            found                { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no '## [${TAG#v}]' section, so this tag would be" >&2
+            echo "released with empty notes. The changelog is regenerated whole and" >&2
+            echo "with the tag named, then committed, and only then is the tag moved" >&2
+            echo "onto that commit:" >&2
+            echo >&2
+            echo "    git cliff --tag ${TAG} -o CHANGELOG.md" >&2
+            echo "    git commit -am 'chore(changelog): update'" >&2
+            echo "    git tag ${TAG} && git push origin ${TAG}" >&2
+            exit 1
+          fi
+          echo "release notes: $(wc -l < notes.md) line(s) for ${TAG}"
+
+      # **A draft, so nothing is visible until every binary and the checksums
+      # are on it.** A matrix row that fails leaves an unlisted draft rather
+      # than a half-populated release people are already downloading.
+      #
+      # It is deliberately not idempotent: a re-run stops here, because a
+      # release that already exists was either made by a previous run whose
+      # state nobody has looked at, or by hand. Delete it and push again —
+      # `gh release delete <tag> --yes` — rather than having this job write into
+      # something it did not create.
+      - name: create the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file notes.md
+
+  # ---------------------------------------------------------------------------
+  # 2. One binary per target in CI's matrix.
+  # ---------------------------------------------------------------------------
+  build:
+    name: build ${{ matrix.target }}
+    needs: draft
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      # Not fail-fast: a broken darwin row should not delete the evidence that
+      # the three others built. The release stays a draft either way, because
+      # the job below needs all of them.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.draft.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # **The toolchain is `ci.yml`'s `RUST_TOOLCHAIN` and there is no second
+      # copy of it here** (NOTES § D211). Workflows cannot share an `env:`
+      # block, so the pin is read at run time by the guard that owns it;
+      # `scripts/toolchain-guard.py` refuses this file any other shape —
+      # a pin of its own, an input that does not read the variable, or this step
+      # missing while the input still expects it.
+      - name: the toolchain pin, read out of ci.yml (NOTES § D211)
+        run: echo "RUST_TOOLCHAIN=$(python3 scripts/toolchain-guard.py --print-pin)" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      # `ring`'s build script asks cc-rs for `<arch>-linux-musl-gcc` by that
+      # exact name, which is why the matrix pairs each musl target with a runner
+      # of its own architecture — the reasoning is on `ci.yml`'s matrix and is
+      # not repeated here. The darwin rows never reach a musl libc.
+      - name: musl C toolchain for ring's build script
+        if: endsWith(matrix.target, '-linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --locked --release --target "$TARGET"
+
+      # A directory inside the tarball rather than a bare binary, and the
+      # licence travels with it: the binary is GPL-3.0-or-later and a download
+      # that arrives without its terms is the one packaging mistake that is not
+      # merely untidy.
+      #
+      # `gh release upload` straight onto the draft, so no artifact action is
+      # needed between the jobs — two more third-party actions to pin and audit
+      # for a file that is going to the same place anyway. `gh` is on every
+      # runner image.
+      - name: package and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          name="k8rs-${TAG}-${TARGET}"
+          mkdir "$name"
+          cp "target/${TARGET}/release/k8rs" README.md README_TR.md LICENSE "$name/"
+          tar -czf "${name}.tar.gz" "$name"
+          gh release upload "$TAG" "${name}.tar.gz"
+
+  # ---------------------------------------------------------------------------
+  # 3. SHA256SUMS over what actually landed, then publish.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: SHA256SUMS and publish
+    needs: [draft, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The sums are taken over the assets **as the draft holds them**, not over
+      # a local copy of what was built: those are the bytes a reader will
+      # download, and a checksum of anything else is a checksum of the wrong
+      # thing. No checkout — `gh` needs only the repository name.
+      - name: gather what the matrix uploaded
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          MATRIX: ${{ needs.draft.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$REPO" --pattern '*.tar.gz' --dir dist
+          # "downloaded nothing" and "there was nothing to download" print the
+          # same empty SHA256SUMS (CLAUDE.md § A derived list asserts it found
+          # something), so the count is checked against the matrix this run
+          # built rather than against a number written here.
+          want=$(printf '%s' "$MATRIX" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["include"]))')
+          got=$(find dist -name '*.tar.gz' -type f | wc -l)
+          if [ "$got" -ne "$want" ]; then
+            echo "the draft holds $got tarball(s) but the matrix built $want — the" >&2
+            echo "release is left as a draft; look at it before publishing." >&2
+            exit 1
+          fi
+          echo "$got tarball(s), one per target in ci.yml's matrix"
+
+      # One `SHA256SUMS` for the whole release, in the format `sha256sum -c`
+      # reads, so verifying is one command and not a per-file ritual
+      # (CLAUDE.md § Supply chain, REQUIREMENTS § DevSecOps — signing is
+      # deliberately out of v1, docs/security.md § Supply chain).
+      - name: SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --repo "$REPO"
+
+      # Last, and only now: everything the release promises is on it.
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: gh release edit "$TAG" --repo "$REPO" --draft=false
+
+      # **`cargo publish` is not here, and that is a decision rather than an
+      # omission.** Pushing to crates.io is irreversible — a version can be
+      # yanked, never replaced — and putting it behind a tag push means a
+      # registry token lives in this repository's secrets and a mistyped tag
+      # publishes permanently. It is one command the maintainer runs from a
+      # machine that already holds the credential, after this release is up and
+      # the binaries have been looked at:
+      #
+      #     cargo publish --locked --dry-run
+      #     cargo publish --locked
+      #
+      # The bytes themselves have already been looked at: `just check` runs
+      # `scripts/package-check.sh`, which packs the crate and then unpacks and
+      # compiles it — the step `cargo publish` does not do. So the dry run above
+      # re-checks the registry's view of the package, not the package.
+      #
+      # If that is ever wanted here, it is a box and a NOTES entry, not a line
+      # added quietly to this file.

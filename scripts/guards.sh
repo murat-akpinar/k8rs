@@ -60,6 +60,14 @@ set -x
 # (NOTES § D211). On the runner this asserts the action honoured the pin.
 python3 scripts/toolchain-guard.py --self-test
 python3 scripts/toolchain-guard.py
+# The other list ci.yml owns and two readers need — the release targets
+# (NOTES § D305 ruling 1). `just cross` and `.github/workflows/release.yml` both parse the
+# matrix through this one script, so a renamed key is a red run here rather than
+# a release that built three binaries out of four and said nothing. The real run
+# and not only the self-test: the planted shapes say nothing about the matrix
+# that is actually in the file.
+python3 scripts/ci-targets.py --self-test
+python3 scripts/ci-targets.py --targets
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
 python3 scripts/todo-guard.py --self-test

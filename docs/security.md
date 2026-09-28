@@ -705,7 +705,7 @@ a wall of refusals, not a full disk in 2036
 - `Cargo.lock` is committed.
 - CI runs `cargo deny check` (advisories, licenses, sources); non-crates.io
   sources are forbidden.
-- **No Dependabot yet** — `.github/` holds one file, `ci.yml`. kube-rs and
+- **No Dependabot yet** — `.github/` holds two workflows and no `dependabot.yml`. kube-rs and
   k8s-openapi are upgraded together by hand, never separately
   ([tech-stack](tech-stack.md#core-choices)); a `dependabot.yml` grouping them
   is in [backlog.md](../backlog.md). This line claimed the robot was watching
@@ -714,9 +714,13 @@ a wall of refusals, not a full disk in 2036
   third-party actions are pinned to commit SHAs; `pull_request_target` with
   secrets is forbidden.
 - Releases will ship with a `SHA256SUMS` file — **future tense on purpose**:
-  the release workflow is Phase 13's last unchecked box, so no release has
-  shipped anything yet. Binary signing is deferred until there is an audience to
-  verify it.
+  [`release.yml`](../.github/workflows/release.yml) builds it and `sha256sum -c`
+  verifies it on the runner before anything is attached, but **the workflow has
+  never run**, so no release has shipped anything yet. It also does not push to
+  crates.io: that is irreversible, so no registry token lives in repo secrets
+  and the maintainer runs `cargo publish` by hand
+  ([NOTES § D305](../NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)).
+  Binary signing is deferred until there is an audience to verify it.
 
 ## Future trust-boundary changes (recorded now, on purpose)
 

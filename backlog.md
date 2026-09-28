@@ -70,6 +70,16 @@ missing feature
   removal; and `PRIOR-ART.md`, `.claude/session-check.sh` and
   `.claude/settings.json` are in no **Writes** cell — the entry further down
   records `PRIOR-ART.md`; the two `.claude/` paths join it here.
+- **`ci.yml`'s matrix comment cites `NOTES § D66` for a rule D66 does not
+  state.** The comment calls the `cross` matrix *the one list of release
+  targets* and cites D66, which is actually *`just check` is not quite the whole
+  of CI* — the gap; [D67](NOTES.md#d67--the-cross-compile-row-closed-with-a-skip-and-what-the-skip-costs-2026-08-13)
+  is the closure, and the single-source rule is now stated in
+  [D305](NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)
+  ruling 1. `release.yml` inherited the same mis-citation and was fixed in its
+  own turn; `ci.yml` was not opened by that box, so it still carries it. One
+  `tester` edit whenever that file is next touched. 2026-09-28
+
 - **`ops` ships as a subcommand and `clap`'s stated threshold names subcommands.**
   [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)
   restated the threshold as *subcommands, generated help, or a mutual-exclusion

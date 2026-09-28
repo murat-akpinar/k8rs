@@ -5319,9 +5319,27 @@ behaves as specified.
       [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)'s
       `clap` threshold names subcommands — a ruling, not a docs edit.
       `just check` green on the test host, `EXIT=0`, over the corrected tree
-- [ ] Release workflow: tag `v0.1.0` → git-cliff CHANGELOG → musl/darwin
-      binaries + `SHA256SUMS` → GitHub release; crates.io publish over v0.0.1
-      (the placeholder was replaced back in Phase 5)
+- [ ] Release workflow: tag `v0.1.0` → CHANGELOG → musl/darwin binaries +
+      `SHA256SUMS` → GitHub release; crates.io publish over the **`0.0.0`
+      placeholder**. **This box said *over v0.0.1 (the placeholder was replaced
+      back in Phase 5)* and that was false at HEAD** — Phase 5's box never ran,
+      `Cargo.toml` still says `0.0.0`, and v0.0.1 is now skipped outright
+      because both halves of D10's reason for it are spent
+      ([D306](NOTES.md#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28)).
+      **The file landed 2026-09-28 and the box stays open, on purpose.**
+      [`.github/workflows/release.yml`](.github/workflows/release.yml) —
+      `draft` → `build` → `publish`, on a pushed `v*` tag, deriving the target
+      matrix from `ci.yml` at run time rather than copying it, with `cargo
+      publish` deliberately left out
+      ([D305](NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)).
+      Every shell body in it was run against real inputs and `just check` is
+      green, **but the workflow has never run** and no target has ever been
+      built with `--release` on any machine.
+      **Done when** a real `v0.1.0` tag has produced a GitHub release carrying
+      four binaries and a verified `SHA256SUMS`, and `cargo publish` has put
+      that version on crates.io. Both need the maintainer's account, so this
+      is one of [§ The boxes no agent can run](CLAUDE.md) — the PM prints the
+      commands and waits for the real output
 
 **🔒 Security gate:** `strings` the release binary — no path from the build
 machine that leaks a username, no embedded credential. `SHA256SUMS` published.
