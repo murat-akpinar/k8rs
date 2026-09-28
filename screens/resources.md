@@ -147,6 +147,15 @@ own `Table` printing — the exact columns `kubectl get` would show.
   pane can be empty: scoped, unscoped, and when the kind that was selected has
   dropped out of the sidebar's own list
   ([states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser)).
+- **A kind that cannot be listed yet is not the same claim as a kind with zero
+  rows, and does not borrow [Still loading](states.md#still-loading)'s
+  words either.** Until the `Table` fetch is wired, opening any kind hands the
+  pane the same `Pane::Loading` it would show mid-read — with one difference
+  this pane may not paper over: this read will never finish on its own, so it
+  says so instead of promising one, and `esc` comes back rather than sitting
+  inert
+  ([states.md § A kind the browser cannot list yet](states.md#a-kind-the-browser-cannot-list-yet),
+  [NOTES § D310](../NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)).
 
 ## The line under the table
 

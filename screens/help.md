@@ -3,31 +3,39 @@
 The footer always shows the keys valid *right now*; `?` shows all of them. A
 tool for beginners may not hide its verbs behind memory.
 
+**Drawn at the real 80-column floor, not this file's usual 70-column page —
+the same move [§ When a key is refused](#when-a-key-is-refused) already
+makes, and for the same reason: `y`'s own row has nowhere left to give once
+it carries its own *not built yet* (below), and 70 columns is a page-fitting
+convention, never a limit on what the real `HELP` string may hold** (its
+widest row today, unrefused, is still 74 — four short of the 78-column
+ceiling a body row has at the floor):
+
 ```
- nodes 3/3                      k8rs     ctx: prod-eu · live · admin
-┌ Keys ──────────────────────────────────────────────────────────────┐
-│  Moving around                                                     │
-│    ↑ ↓ / j k    move            ⏎     open the selected thing      │
-│    tab          next panel      esc   back / close                 │
-│    X            switch cluster                                     │
-│    [ ]          detail tabs     / n   filter · namespace           │
-│  Looking at things (always available)                              │
-│    l  logs, with the log from before a crash                       │
-│       log tab:  f follow · not built yet: c container, ⇧p previous │
-│    d  describe — the object and what happened to it                │
-│    y  view as YAML            ctrl-z  back to your shell — type fg │
-│  Changing things (each one asks first, and shows the command)      │
-│    s       not built yet — there is no way yet to type a copy count│
-│            works on a deployment, a statefulset and a replicaset   │
-│    r       restart, at its own pace       (rollout restart)        │
-│            works on a deployment, a statefulset and a daemonset    │
-│    ctrl-d  delete — you type the name to confirm                   │
-├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl get statefulsets -A --watch                              │
-│ $ kubectl get daemonsets -A --watch                                │
-├────────────────────────────────────────────────────────────────────┤
-│ ? or esc to close                                          q quit  │
-└────────────────────────────────────────────────────────────────────┘
+ nodes 3/3                            k8rs           ctx: prod-eu · live · admin
+┌ Keys ────────────────────────────────────────────────────────────────────────┐
+│  Moving around                                                               │
+│    ↑ ↓ / j k    move            ⏎     open the selected thing                │
+│    tab          next panel      esc   back / close                           │
+│    X            switch cluster                                               │
+│    [ ]          detail tabs     / n   filter · namespace                     │
+│  Looking at things                                                           │
+│    l  logs, with the log from before a crash (not built yet)                 │
+│       log tab: not built yet — f follow, c container, ⇧p previous            │
+│    d  describe — the object and what happened to it (not built yet)          │
+│    y  view as YAML (not built yet)   ctrl-z  back to your shell — type fg    │
+│  Changing things (each one asks first, and shows the command)                │
+│    s       not built yet — there is no way yet to type a copy count          │
+│            works on a deployment, a statefulset and a replicaset             │
+│    r       restart, at its own pace       (rollout restart)                  │
+│            works on a deployment, a statefulset and a daemonset              │
+│    ctrl-d  delete — you type the name to confirm                             │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                                        │
+│ $ kubectl get daemonsets -A --watch                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ? or esc to close                                                     q quit │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **The command log strip is not covered, and it is not cleared.** Opening
@@ -114,21 +122,36 @@ Rules:
   `works on …` line is unaffected too, for the same reason the sentence
   above stays fixed regardless of what is selected: it still answers a
   future *what kind*, not *is this built*.
-- **`c` and `⇧p` are not built either, and the row names both anyway.**
-  Neither is bound in any state and no product code constructs a container
-  picker, so a row that read `c container · ⇧p previous` beside a working
-  `f follow` promised two keys that do nothing
-  ([D289 ruling 3](../NOTES.md#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26)). **Both labels stay** rather than collapsing to
-  bare keys: `l`'s row above still offers *"the log from before a crash"*, and
-  `⇧p previous` is the only thing on this screen that ties that offer to the
-  key it waits on — drop the label and the promise stays on screen with
-  nothing left pointing at why it is not kept. **Neither key gets a *why* of
-  its own, and that is the column budget and not a change of voice**: `not
-  built yet` plus both labels plus this row's own `in the log tab:` is 74
-  columns, against the 68 a body row has here, so `in the` gave way rather
-  than the phrase `s`'s row already uses — one wording for one fact,
-  the same reason [§ When a key is refused](#when-a-key-is-refused) gives for
-  not softening *"Missing permission"*. The row is 67.
+- **`l`, `d` and `y` carry their own `(not built yet)` now, the same mark `s`
+  already wears, and the group header stops claiming what is no longer true
+  of it** — the third of the three things
+  [NOTES § D310](../NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)
+  rules. Pressing any of the three today opens a pane that can never
+  finish reading — [states.md § A kind the browser cannot list
+  yet](states.md#a-kind-the-browser-cannot-list-yet) is the browser's own
+  version of the same gap, and Detail's four tabs have not been wired to a
+  live object either. `Looking at things (always available)` was true of
+  none of `l`, `d` or `y` the moment that stopped being so, and it is a lie a
+  reader discovers the first time one of the three does nothing — so the
+  heading drops the claim rather than keep repeating it over three keys it no
+  longer describes, the same way *Moving around* carries no such heading of
+  its own. **It does not drop to `(not built yet)` either** — `ctrl-z` still
+  shares this group and still works, so a group-level claim in either
+  direction would be false about one of its four keys; only a row can say
+  what is true of the key on that row, which is why the mark moved onto `l`,
+  `d` and `y` themselves rather than onto the heading that used to speak for
+  all four.
+- **The log tab's own sub-row no longer draws a working `f follow` beside a
+  broken `c container` and `⇧p previous`, because there is no tab to reach at
+  all while `l` itself does nothing.** The old row —
+  `f follow · not built yet: c container, ⇧p previous` — was honest about a
+  screen a reader could actually open; once opening it is itself not built,
+  singling out two of its three keys as the broken ones implies the third
+  still works on its own, which nothing on this build can prove. The row now
+  reads `not built yet — f follow, c container, ⇧p previous`, the same lead
+  words `s`'s own row already uses, naming what the tab would eventually
+  offer rather than which fraction of it currently does — because right now
+  that fraction is the same for all three: none.
 - **`ctrl-z` is answered above the filter and above an open modal, with two
   exceptions — and each is the right one.** The router checks it before
   a filter has focus and before a modal's own keys are read, because a shell
@@ -180,26 +203,34 @@ Rules:
   exact row to append `(paused while a change is running)` after `switch
   cluster`, and the row is 66 characters once it does — of the row's
   68-column content width ([§1's own budget](widgets.md#1-the-frame)) — with
-  no room left for a second key. `y`'s row is never rewritten anywhere on
-  this page, so it is the one home a later state cannot collide with.
-  **Recount, not adjustment: still sixteen rows, seventy and eighty
-  columns.** `y`'s row had 49 blank columns after `view as YAML`. `ctrl-z`
-  and its label use 36 of them: six for the key, a two-column gap — the same
-  gap `ctrl-d` already takes for its own six-character key, above, rather
-  than the wider gap a shorter key like `esc` leaves — and 28 for `back to
-  your shell — type fg`, one short of the 29 that remain once that gap is
-  spent. Its label still opens under the same column every other right-hand
-  label on this page already opens under; only the key's own field starts
-  two columns earlier than theirs, because the key itself is longer, not
-  because the label moved. Twelve blank columns stay between `view as YAML`
-  and `ctrl-z`, and one stays blank after the label, before the border — the
-  49 columns this row had to spend are still fully accounted for. The
-  80-column mockup under [§ Under a dead-writes
-  run](#under-a-dead-writes-run) carries the identical text with ten more
-  blank columns before its own border, never a longer sentence — the two
-  mockups draw one fixed script at two widths, not two different ones. Every
-  row in both mockups is still exactly 70 and 80 columns
-  (`scripts/screens-check.py`), the body is still the sixteen rows
+  no room left for a second key. `y`'s row is never rewritten *by a state*
+  anywhere on this page, so it is still the one home a session-level change
+  cannot collide with — the distinction now worth drawing, because `y`'s own
+  text did change once, permanently, when it gained its own `(not built
+  yet)` (above). That is a fact about the build, true in every state, not a
+  state contending for the row the way `X`'s rewrite is.
+  **Recount, not adjustment: still sixteen rows, and both full mockups now
+  drawn at 80.** `y`'s row is 74 columns whole, the row's own `    y  ` lead-in
+  counted in: `view as YAML (not built yet)` (35 including that lead-in), a
+  three-column gap, `ctrl-z` (6), a two-column gap matching `ctrl-d`'s own for
+  a six-character key, and `back to your shell — type fg` (28) — four short
+  of the 78-column ceiling
+  a body row has at the floor, the same four this page's own intro paragraph
+  above counts against `HELP`'s widest row today. **The label no longer opens
+  under the same column every other right-hand label on this page opens
+  under** — it cannot: `(not built yet)` is 16 columns with nowhere left to
+  come from on this one row, so `ctrl-z` and its label both shift right
+  rather than crowd the mark that has to stay. This is the cost of drawing
+  the mark and `ctrl-z` on one row for as long as `y` carries it — once a
+  later box wires `y` and the mark comes off, `view as YAML` is short again,
+  the row has its old room back, and the label returns to the column it left.
+  The 80-column mockup under [§ Under a dead-writes
+  run](#under-a-dead-writes-run) is redrawn to match, for the same reason it
+  already had to widen once for `read-only`
+  ([§ Under a dead-writes run](#under-a-dead-writes-run)'s own reasoning,
+  unchanged) — two mockups, two separate reasons, sharing one width rather
+  than each inventing its own. Every row in both mockups is still exactly 80
+  columns (`scripts/screens-check.py`), the body is still the sixteen rows
   [§1's own budget](widgets.md#1-the-frame) already fixed, and the 24-row
   floor above is unchanged.
 - v0.2+ operations join this screen as they land (cordon, drain, rollout undo,
@@ -226,11 +257,11 @@ command log strip, the same `?`/`q` footer this file draws everywhere else.
 │    tab          next panel      esc   back / close                           │
 │    X            switch cluster                                               │
 │    [ ]          detail tabs     / n   filter · namespace                     │
-│  Looking at things (always available)                                        │
-│    l  logs, with the log from before a crash                                 │
-│       log tab:  f follow · not built yet: c container, ⇧p previous           │
-│    d  describe — the object and what happened to it                          │
-│    y  view as YAML            ctrl-z  back to your shell — type fg           │
+│  Looking at things                                                           │
+│    l  logs, with the log from before a crash (not built yet)                 │
+│       log tab: not built yet — f follow, c container, ⇧p previous            │
+│    d  describe — the object and what happened to it (not built yet)          │
+│    y  view as YAML (not built yet)   ctrl-z  back to your shell — type fg    │
 │  Changing things (off for this whole run)                                    │
 │    k8rs was started with --read-only — quit and start it again without it    │
 │                                                                              │

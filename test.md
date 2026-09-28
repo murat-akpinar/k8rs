@@ -131,129 +131,288 @@ temporary driver: `--logs` `--describe` `--yaml` `--object` `--kind`
 
 ## B. Door 2 — the file-driven report
 
-- [ ] `k8rs tests/fixtures/crashloop.json` — a card, in plain language, no jargon
-      left unexplained (invariant 14). Read it as someone who does not know
-      `CrashLoopBackOff`
-- [ ] `k8rs tests/fixtures/healthy.json` — says nothing is broken, and says it in
-      a sentence rather than by printing nothing
-- [ ] `k8rs tests/fixtures/oom.json` — *exceeded its memory limit*, not `OOMKilled`
-- [ ] a fixture per rule family: `pending.json` `init.json` `image.json`
-      `probe0.json` `hostpath.json` `nodes.json` `deployments.json`
-      `csr-pending.json` — each draws the finding its name promises
-- [ ] two files on one line — both are read, and the cards are not double-counted
-- [ ] a file holding a **list** of objects, and a file holding **one** — both work
-- [ ] `k8rs --analysis tests/fixtures/nodes.json` — the seven panes, and a pane
-      with nothing to say says so
-- [ ] a file that is not JSON · an empty file · a JSON file holding `{}` — three
-      different sentences, none of them a panic
-- [ ] a 0-byte file and a directory passed as a path
-- [ ] exit codes: `0` for a report drawn, `2` for a refusal. Nothing else
-- [ ] **the timestamps read as English** — *4 min ago*, and never a raw RFC3339
+**Run 2026-09-28 on the released `0.1.0`, test host, fixtures copied outside the
+mirror.** Every row below passed except the one that was wrong, which is marked.
+
+- [x] `crashloop.json` — plain language, and `CrashLoopBackOff` is explained not
+      printed: *"Container keeps crashing, and each restart waits longer"*, with
+      `exit 1 (the application's own error)` and a next step naming `--previous`.
+      Two cards for one container, and the second earns its place — it carries the
+      panic line Kubernetes recorded
+- [x] `healthy.json` — `○ nothing is broken`, a sentence, not silence
+- [x] `oom.json` — *"Container used more memory than it was allowed and the kernel
+      killed it (OOMKilled)"*. The jargon is in parentheses behind the explanation,
+      which is the right way round
+- [x] a fixture per rule family — `pending` *no machine will take this pod* ·
+      `init` · `image` *image is not usable* · `probe0` · `hostpath` *a container
+      can drive the container runtime* · `nodes` *stopped responding* ·
+      `deployments` *this rollout gave up*. All seven draw the finding their name
+      promises
+- [x] **`csr-pending.json` does not, and the row was wrong, not the code.** The
+      fixture is deliberately a *human* asking for a kubeconfig —
+      `signerName: kubernetes.io/kube-apiserver-client` — and C3 answers only for
+      `…-client-kubelet`, a node trying to join
+      ([D40](NOTES.md#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12), `src/analysis.rs:3285`). The two tests that
+      cover C3 take this fixture and override the signer, and
+      `src/analysis_tests/certificates.rs:47` says so in as many words. So
+      `[certificates]` printing *"no machine is waiting to be let in"* over it is
+      correct. **A fixture's name is not a promise about which rule it fires** —
+      this row assumed it was
+- [x] two files on one line — `2 pods · 0 nodes`, nothing double-counted
+- [x] a file holding a **list** and a file holding **one** — both read
+- [x] `--analysis` — all seven panes drew. A pane with nothing to say says which
+      thing it lacks: `[capacity]` *"Not checked. Reading what a node has needs
+      permission to list nodes"*, `[posture]` *"Nothing here mounts a path from the
+      node it runs on"*. Run over `csr-pending.json`, not `nodes.json`
+- [x] not JSON · empty · `{}` — three answers, no panic. `bad.txt` *not JSON —
+      expected ident at line 1 column 2*; a 0-byte file *not JSON — EOF while
+      parsing a value*; `{}` exits `0` and says *"1 object no rule reads"*, which is
+      the honest answer rather than a refusal
+- [x] a 0-byte file and a directory — the directory is *"Is a directory (os error
+      21)"*, a missing path *"No such file or directory"*
+- [x] exit codes: `0` for every report drawn, `2` for every refusal, nothing else
+- [x] the timestamps read as English — *38 days ago* off an old capture, never an
+      RFC3339 string
 
 ## C. Door 3 — `--once` against the cluster
 
-- [ ] `k8rs --once --context kind-k8rs` — the same cards, off a live cluster,
-      exit `0`
-- [ ] `k8rs --once --analysis --context kind-k8rs` — seven panes, exit `0`
-- [ ] `k8rs --once -n kube-system` — scoped, and the scope is *stated on the
-      output* rather than silently applied
-- [ ] `k8rs --once` against a cluster with nothing broken — the healthy sentence
-- [ ] after `scripts/cluster.sh reset`, every broken pod the script plants shows up
-- [ ] **the run has a deadline** — unplug the cluster (`--context` at a dead
-      endpoint) and it names the failure and exits rather than hanging
-- [ ] `--once` with a kubeconfig that cannot `get /apis` — *this kubeconfig may not
-      `get /apis`*, naming the path
-      ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26))
+**Run 2026-09-28 on the released `0.1.0` against the four-node `kind-k8rs`.**
+
+- [x] `--once --context kind-k8rs` — exit `0`, `66 pods · 4 nodes`, 158 lines of
+      findings on stdout and 9 lines of connection story on stderr, which is the
+      split `screens/once.md` promises. First card: *"Container needs a ConfigMap
+      or Secret that does not exist"* naming the missing object
+- [x] `--once --analysis` — all seven panes drew, with real numbers rather than
+      refusals: `[capacity]` gave `k8rs-control-plane   0.95 of 4 cpu · 290Mi of
+      3.8Gi` for each of the four nodes
+- [x] `--once -n kube-system` — scoped, and **the scope is on stdout, not only in
+      the kubectl line on stderr**: `ns: kube-system · 14 pods · 4 nodes`, then
+      *nothing is broken in kube-system*. A reader who pipes stdout to a file still
+      sees which namespace it is about
+- [x] **a dead endpoint names the failure and exits rather than hanging** — an
+      unknown context exits `2` in **0.006 s** with *"no cluster to watch — this
+      kubeconfig has no such context — check the `current-context` line in the
+      file, and any `--context` on the command line"*, which names both places to
+      look
+- [x] the broken pods the cluster carries all show up — `broken-config`,
+      `broken-crashloop`, `broken-exit0`, `broken-probe0`, `broken-sigterm`
+- [ ] `--once` against a cluster with nothing broken — this cluster is
+      deliberately broken, so it needs `scripts/cluster.sh unbreak` and a trip of
+      its own
+- [ ] `scripts/cluster.sh reset` and re-run — not run; the pods above are from the
+      standing break
+- [ ] a kubeconfig that cannot `get /apis` — needs a restricted kubeconfig built
+      for it, which is its own errand
+- [x] **F8: `-n <a namespace that does not exist>` answers `○ nothing is broken in
+      nope-not-here`, exit `0`.** `0 pods` is on the line above it, and Kubernetes
+      returns an empty list rather than a `404`, so *not there* and *cannot see it*
+      are indistinguishable without a call RBAC may refuse. Ruled a backlog item,
+      not a blocker — see § Findings
 
 ## D. Door 4 — `--logs`
 
-- [ ] `--logs --object <ns>/<pod>` — the log, control characters stripped
-      (invariant 9)
-- [ ] `--previous` on a pod that has crashed — the log from before the crash
-- [ ] `--previous` on a pod that never crashed — says so, not an empty success
-- [ ] `--container` on a multi-container pod · a container name that does not exist
-- [ ] `--follow` — streams, and `ctrl-c` leaves the terminal usable
-- [ ] `--object` with no namespace, against a kubeconfig that names none
-- [ ] a pod name with `../` in it — no path escapes anything (security gate)
-- [ ] an endless log line — bounded, not held whole in memory (security gate)
+**Run 2026-09-28, released `0.1.0` against `kind-k8rs`.** Every message names what
+is wrong *and* what to do, and every one prints its kubectl equivalent.
+
+- [x] `--logs --object default/broken-crashloop` — the log, and
+      `$ kubectl logs broken-crashloop -n default -c quitter` beside it
+- [x] `--previous` on a crashed pod — same line plus `--previous`
+- [x] `--previous` on a pod that never restarted — *"app hasn't restarted, so
+      there's no previous run to show. Showing the current run instead."* Then the
+      current run also failed, for its own reason, and said so: *"this cluster would
+      not accept the request k8rs made to get pods/log in default, and said:
+      container "app" ... is waiting to start: CreateContainerConfigError"*. Two
+      sentences, both true, the server's own words quoted. Exit `2`
+- [x] `--container bystander` on a two-container pod — works. A container that does
+      not exist: *"this pod has no container named nope — it has trigger,
+      bystander"*, which names the choices
+- [x] a multi-container pod with no `--container` — refuses and lists them with
+      their state: *"trigger (running, 3 restarts), bysta…"*
+- [x] a pod that does not exist — *"there is no pod named no-such-pod in default —
+      check the name an…"*
+- [x] **`--object "default/../../etc/passwd"`** — refused on the shape before any
+      path is built: *"--object names one pod, written as `<namespace>/<name>` or
+      just `<…`"*. Security gate row
+- [ ] `--follow` and `ctrl-c` — needs an interactive terminal, not run
+- [ ] an endless log line held whole in memory — needs a pod built to emit one
 
 ## E. Door 5 — `--describe` and `--yaml`
 
-- [ ] `--describe --object <ns>/<pod>` — the object and what happened to it
-- [ ] `--yaml --object <ns>/<pod>` — the manifest, `managedFields` gone
-- [ ] `--kind deployment --object <ns>/<name>` — a kind other than Pod
-- [ ] `--kind` with a kind the cluster does not serve — named, refused
-- [ ] **a Secret through `--yaml`** — values do not appear (security gate). If they
-      do, that is a blocker and it is fixed in the same turn
-- [ ] `--describe` on an object that has just been deleted — *gone*, not a panic
+- [x] `--describe --object default/broken-crashloop` — works, with
+      `$ kubectl describe pod broken-crashloop -n default`
+- [x] `--yaml --object …` — works, with
+      `$ kubectl get pod … -o yaml --show-managed-fields`
+- [x] **`managedFields` is in the output on purpose and that is checked, not
+      assumed.** 88 of 217 lines are the `managedFields` block. `main.rs:5342`
+      carries the reason — without the flag the *taught line* would produce a
+      different, shorter document, which `main_tests.rs:10779` measured — so
+      invariant 4's *the command log shows the equivalent command* is literally
+      true. Invariant 6's prune is the watch path's, not this read's. **No finding**;
+      whether the console's `y` should prune is that box's question
+- [x] `--kind` — **it is not pod-only, and the earlier reading of this row was
+      wrong.** `--yaml` takes `secret`, `configmap`, `node`, `deployment` (resolved
+      to `deployment.apps` in the kubectl line) and `service`. Only `--describe` is
+      pod-only, and it says so: *"--describe only knows how to read a pod right
+      now"*
+- [x] **A Secret through `--yaml` does not leak, measured with a planted canary.**
+      A `k8rs-probe` Secret carrying `password=SUPERSECRETCANARY123` was created,
+      read back, and **the canary appears 0 times in plaintext and 0 times
+      base64-encoded**. What is drawn is `password: <hidden — 20 bytes>` — the size,
+      which is the 20 characters the canary is. And the tool says so rather than
+      hiding the hiding: *"a Secret's values are hidden here and shown as their
+      sizes — the command above prints them in full"*, which is the one honest
+      sentence available when the teaching command is less safe than the tool.
+      The planted Secret was deleted and its absence confirmed (`NotFound`)
+- [ ] `--describe` on an object that has just been deleted — not run
 
 ## F. Doors 6 and 7 — `ops` and `ops may-i`
 
-**`ops.rs` is never batched** ([CLAUDE.md § The cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it)
-step 6), so each row here is read on its own, and any finding on this page is a
-per-box fix and not a family one.
+**Run 2026-09-28 against `kind-k8rs`, on a throwaway `k8rs-probe` deployment the PM
+created for it — never on the cluster's broken fixtures.** Cleanup verified: zero
+`k8rs-probe` objects left, 42 broken fixture pods intact.
 
-- [ ] `k8rs ops` with no operation — the usage lists `scale`, `restart`, `delete`
-      and what each one asks for
-- [ ] `ops restart deployment/<name> -n <ns>` — confirmation first, in plain
-      language, naming the consequence; then the command log line and the audit line
-- [ ] `ops delete pod/<name> -n <ns>` — **the name must be typed**, and a wrong
-      typing refuses
-- [ ] `ops scale deployment/<name> 3 -n <ns>` — the value is read, and no
-      precondition is put on a field that moves
-      ([D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05))
-- [ ] `--read-only ops restart …` — **structurally refused**, and the refusal says
-      why rather than looking like a failure
-- [ ] every operation declines or performs a `dryRun=All` **as its own box ruled**;
-      `delete` is the one that declines
-      ([D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04))
-- [ ] an operation on an object that does not exist · on a kind that cannot take it
-      (`restart` a Pod) — both named, neither a panic
-- [ ] **the audit log**: mode `0600`, append-only, and it carries the verb, the
-      path, the resourceVersion sent, the dry-run verdict and the result
-- [ ] the command log line is the kubectl a human would have typed — and k8rs does
-      not run it (invariant 4)
-- [ ] a `409` offers a re-read and never a blind overwrite
-- [ ] `ops may-i get pods` · `may-i create pods.apps/x` · `may-i get
-      pods/log --subresource log` — each answers, and a refusal is an answer
-- [ ] `may-i` under `--read-only` — still reachable, because it writes nothing
-      ([D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05))
-- [ ] **no bulk anything** — there is no way to point an operation at two objects
+- [x] `k8rs ops` with no operation — the usage names all four, what each asks for,
+      and closes with *"There is no flag that means yes."*
+- [x] **`scale`, answering yes — every row of invariant 2 visible in one screen.**
+      The object (`deployment/k8rs-probe in default`), the consequence in plain
+      language (*"This starts 1 more copy of your app. Right now: 2 copies. After: 3
+      copies."*), the taught line (`$ kubectl --context kind-k8rs scale … -n
+      default`), the server-side dry-run (*"the cluster checked it first and
+      accepted it"*), the prompt, then *"the change was made"*. Replicas really
+      became 3
+- [x] **answering `no` changes nothing** — *"nobody confirmed it, so nothing was
+      changed"*, replicas still 3
+- [x] `restart` — the consequence carries what an operator actually needs: *"How
+      many stop at the same time is a setting on this deployment … A paused
+      deployment will not start until you resume it."*
+- [x] **`delete` requires the typed name.** `not-the-name` → refused, the object
+      still there. `k8rs-probe` → deleted. And **the declined dry-run is said out
+      loud**: *"k8rs did not check this one with the cluster first"*
+      ([D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04) ruling 1)
+- [x] `--read-only ops restart` — *"--read-only was asked for, so k8rs will not
+      change anything"*. The flag is filtered out before the line is parsed at all
+      ([D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) ruling 3)
+- [x] `ops may-i` — two lines, the question in English then the answer: *"may this
+      login get pods in default?"* → *"yes — this login is allowed to do that"*.
+      `delete pods.`, `create pods.apps` and a `--subresource` form all answer
+- [x] **`may-i` still works under `--read-only`**, because it writes nothing
+      ([D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) ruling 3)
+- [x] **no bulk mutation, in three shapes.** `deployment/a deployment/b` →
+      *"`ops restart` does not know what to do with …"*; a comma list and a `*` glob
+      each → *"is not the name of an object — a name is letters …"*
+- [x] **the audit log: mode `0600`, directory `0700`, and every attempt in it.**
+      `~/.local/state/k8rs/audit.log`. Each attempt pairs with a result keyed on the
+      attempt's own timestamp, and carries the context, the server URL, the uid with
+      an honest qualifier (*"what k8rs read, not what it changed"*), the taught
+      kubectl line **and** the real call — `PATCH
+      /apis/apps/v1/namespaces/default/deployments/k8rs-probe/scale`, `DELETE …` —
+      plus `resourceVersion not sent` and the dry-run verdict. **Refusals are in
+      there too**: *"nobody confirmed it, so nothing was changed"*. Invariant 4's two
+      records differ correctly and neither lies
+- [x] an operation on an object that does not exist, and `restart` on a Pod — both
+      refused before anything is sent
+- [x] `resourceVersion` — `not sent` for `scale` and `restart`, which is
+      [D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)'s ruling: they are absolute intent, not a read-modify-write. The
+      only read-modify-write is v0.4's `edit` and it does not exist, so the
+      409-offers-a-re-read row has nothing to exercise yet
+- [x] **F9: `ops` takes no `--context`** — `k8rs --context kind-k8rs ops …` answers
+      *"`ops` has to be the first word on the line"*, so an operation can only ever
+      reach the kubeconfig's current context, while the console can write to any
+      context it switched to with `X`. Recorded, not a bug — see § Findings
 
 ## G. Door 1 — the console, launch and the ways it can go wrong
 
-Every row in tmux, read with `capture-pane`.
+**Run 2026-09-28 in `tmux` on the test host, released `0.1.0`, read with
+`capture-pane`.** Crafted kubeconfigs live outside the mirror.
 
-- [ ] no kubeconfig at all — a sentence a newcomer can act on, not a stack trace
-- [ ] a kubeconfig naming a dead API server
-- [ ] a kubeconfig whose token has expired
-- [ ] a context the kubeconfig does not have
-- [ ] `403` on the pod watch — one feature degrades, names the missing verb and
-      resource, does not crash and does not retry in a loop
-- [ ] `insecure-skip-tls-verify` in the kubeconfig — honoured **and shown in the
-      header** (security gate; no script can see the header)
-- [ ] the clock more than five minutes off the cluster's — both directions
-- [ ] a kubeconfig that can see one namespace only
-- [ ] the audit log cannot be opened — says so, and the run continues
-- [ ] a terminal smaller than 80×24
-- [ ] `ctrl-c` and `q` both leave the terminal usable — and so does a **panic**:
-      no credential in the backtrace, terminal restored (invariant 8)
-- [ ] `ctrl-z` then `fg` — suspends and comes back drawing
+- [x] **no kubeconfig at all** — *"no cluster to watch — the kubeconfig itself could
+      not be read — it is missing, unreadable, or not valid YAML"*. Three
+      possibilities named, no stack trace
+- [x] **a kubeconfig naming a dead API server** — the console **draws** rather than
+      dying. Header `ctx: dead · ⚠ disconnected, retrying`; the pane says *"⚠ Nothing
+      is coming back from the cluster. It keeps asking, on its own — nothing for you
+      to do. Press X for a different cluster."* — the state, that the tool is
+      handling it, and the one action there is. The sidebar drops its five groups for
+      a single `could not read` row, which is [D296](NOTES.md#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)'s shape, and the footer
+      offers `X switch cluster`
+- [x] a context the kubeconfig does not have — exit `2`, naming both the
+      `current-context` line and `--context` (§ C)
+- [x] **`insecure-skip-tls-verify: true` is honoured *and shown in the header*** —
+      `ctx: ins · live · admin · ⚠ TLS not verified`, with the console working
+      normally behind it (21 findings drawn). This is the security-gate row marked
+      *yours* because no script can see a header. **Measured, passes**
+- [x] **a terminal smaller than 80×24** — *"k8rs needs a terminal at least 80×24.
+      This one is 60×20."* Names the requirement and the actual size; no garbled frame
+- [x] **the audit log cannot be opened** — the path, where the path came from
+      (*"under your home directory"*), the OS error, **and the policy**: *"every
+      change k8rs makes is written to that log before it is sent, so k8rs will not
+      change anything until that is fixed, and reading your cluster still works"*.
+      Writes stop, reads degrade gracefully. Directory mode restored to `700` after
+- [x] `q` leaves the terminal usable — the shell after it ran and printed
+- [ ] **`ctrl-z` then `fg`** — not run, and **no finding is filed from it**: the
+      harness was wrong, not the product. `tmux new-session "k8rs; …"` runs under
+      `sh -c`, which has no job control, so there was no shell to `fg` into. The repo
+      has `just suspend` and `scripts/handover-guard.py` for exactly this; it needs
+      the mirror, which `tester` was holding
+- [x] **a `403` degrades one feature, names the missing verb *and* resource, does not
+      crash and does not loop.** Built a `k8rs-narrow` ServiceAccount that may
+      `get/list/watch` pods and nothing else (plus the `nonResourceURLs` discovery
+      needs), and ran under its token. `--once` exits `0` and leads with four
+      warnings, one per blinded input: *"▲ k8rs is not getting nodes from this
+      cluster: the role this kubeconfig uses needs to `list` and `watch` nodes.
+      Nothing here about them can be trusted"* — then `66 pods` and the pod findings
+      it *can* make. The console says the same with the retry named: *"It keeps
+      asking, and until that works nothing here about them can be trusted"*. **No
+      loop**: 8 kubectl lines and 9 stderr lines for the whole run
+- [x] **the permission probe marks the right row, and only the right row.** Under that
+      role `?` draws `ctrl-d  delete — you type the name to confirm **(no delete
+      pods)**` — the *why not* clause on the key the login may not use
+      ([D292](NOTES.md#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26)). `r` carries no clause and is absent from the footer for a
+      **different** reason — the selected object is a Pod and `r` applies to
+      deployments, statefulsets and daemonsets — so kind and permission are not
+      conflated
+- [x] **a kubeconfig with no usable user degrades to anonymous rather than crashing** —
+      it draws, says it is not getting pods, and the sidebar's five groups collapse to
+      one `could not read` row, which is [D296](NOTES.md#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)'s shape
+- [ ] an expired token · a kubeconfig that can see one namespace only — each needs its
+      own restricted credential; the `403` row above covers the degradation path
+- [ ] the clock more than five minutes off the cluster's — needs the host clock
+      moved, too invasive to do beside a running gate
+- [ ] a **panic** leaves no credential in the backtrace and restores the terminal —
+      needs a way to force a panic; not run
 
 ## H. The console — Alerts
 
-- [ ] the view draws at all, against the broken cluster
-- [ ] `↑ ↓ / j k` move · `⏎` opens · `tab` changes panel · `esc` comes back
-- [ ] **idle CPU is 0%** — `top` on the host while nothing moves (invariant 7)
-- [ ] break a pod by hand and watch the screen answer without a keypress
-- [ ] `/` filter — narrows, `esc` clears, and every printable key is text while it
-      has focus
-- [ ] `n` namespace — scopes, and the header says so
-- [ ] the cursor stays on the same object across a watch update
-- [ ] a pod name carrying control characters does not rewrite the terminal
-      (invariant 9)
-- [ ] `X` switch cluster — the picker, a context that fails to connect, and `esc`
-      out of it
+**Run 2026-09-28 in `tmux` on the test host against `kind-k8rs`.**
+
+- [x] the view draws against the broken cluster — 21 findings, `21 ● 4 ▲` on the
+      sidebar, cards in plain language with a next step under each
+- [x] `↑ ↓` move · `⏎` opens · `tab` changes panel
+- [x] **invariant 7, measured rather than reasoned: `1` jiffy of `2000` over 20
+      seconds untouched** — read off `/proc/<pid>/stat`, so 0.05% of one core. *No
+      fixed FPS · block when idle* holds on the real binary
+- [x] **the watch drives the frame with no keypress** — `49 restarts` on one card,
+      `78 restarts` 35 s later, nothing pressed in between
+- [x] **`/` filter** — the footer is *fully replaced*, not curated
+      (`screens/widgets.md § 2b`): `filter:   ⏎ done  esc cancel`. Typing `sigterm`
+      took the cards from 2 to 1, and **the footer's own label changed with what the
+      press would reach** — `esc cancel` while the buffer is empty, `esc clear
+      filter` once it has text. `esc` restored both cards
+- [x] **`n` namespace, and it is a filter rather than a scope — drawn as one.**
+      `namespace like:   ⏎ done  esc cancel`, then `esc clear namespace`. Committed,
+      the pane says *"No problems match a namespace like "kube-system"."* — the
+      filter and the result in one sentence — and the footer carries `esc clear
+      namespace` beside the keys that came back. **The header shows no `ns:`
+      segment, and that is right**: `ns:` means a scope the watch narrowed, which is
+      `--namespace`'s (measured on stdout in § C). Two different facts, two
+      different renderings. No finding
+- [ ] the cursor stays on the same object across a watch update — needs a watched
+      object to move under a held cursor; not run
+- [ ] a pod name carrying control characters — needs a pod named to carry them,
+      which is a cluster write of its own
+- [ ] `X` switch cluster, a context that fails to connect, and `esc` out of it —
+      partially seen (the dead-server run offers `X` on its footer, § G); the picker
+      itself not driven
 
 ## I. The console — Analysis
 
@@ -269,6 +428,9 @@ Every row in tmux, read with `capture-pane`.
 see F1 in § Findings. Re-run every row below after that fix lands.
 
 - [ ] the five groups draw: workloads · network · storage · config · cluster
+- [ ] **a kind row's count** — every mockup draws one, no code does (F5). Either
+      the ruling built it or the mockups lost it; check which, and check the page
+      and the screen now agree
 - [ ] every group expands, and a CRD gets a row with no code written for it
       (invariant 12)
 - [ ] `⏎` on a kind — the pane says honestly that it cannot be listed yet
@@ -297,36 +459,76 @@ see F1 in § Findings. Re-run every row below after that fix lands.
 
 ## M. The write path, from the console
 
-- [ ] `r` restart — selected object, keypress, confirmation naming the consequence,
-      dry-run, audit line. All five, in that order (invariant 2)
-- [ ] `ctrl-d` delete — the typed name, and a wrong one refuses
-- [ ] `s` — withheld, and `?` says not built yet rather than promising `(scale)`
-- [ ] `esc` on a confirmation whose check has not answered — the one modal `esc`
-      does not close ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04))
-- [ ] the object stopped existing between the keypress and the confirm — *gone*
-- [ ] a refused write — the refusal box, `esc` dismisses, `⏎` opens the object
-- [ ] the attempt reaches the audit log **whether it succeeded, failed or was
-      refused**
-- [ ] `--read-only`: no key on this page is bound at all
+**Run 2026-09-28 in `tmux` against `kind-k8rs`, on throwaway `k8rs-probe2`/`probe3`
+deployments the PM created — never on the cluster's broken fixtures.** Both deleted
+after, 42 fixture pods intact.
+
+- [x] **no selected object means no mutating key, proved by absence.** A *healthy*
+      throwaway draws no card at all — the Alerts view shows findings — and the footer
+      was `↑↓ move  ⏎ open  / filter  esc clear filter  ? all keys  q quit`, with no
+      `r`. Break the same object (a bad image) and `r restart` appears
+- [x] the card reads in plain language: `● default/k8rs-probe3  ·  1 of 1 pods`, then
+      *"Container image is not usable, so the container never started (ErrImagePull)"*,
+      then the server's own error quoted whole
+- [x] the committed filter is drawn at rest — `filter: "probe3"   esc clears it`
+      (`screens/widgets.md § 2b`'s own section)
+- [x] **`r` — every element of invariant 2 on one screen.** `┌ Restart
+      default/k8rs-probe3 ─┐` names the object; the consequence in plain language
+      carries what an operator needs (*"it can be a few, or all of them at once"*, *"A
+      paused deployment will not start until you resume it."*); **`The cluster checked
+      it first and accepted it.`** — the dry-run ran *before* the button was offered;
+      the kubectl line; `[ ⏎ do it ]    [ esc cancel ]`; and the footer **fully
+      replaced** with `⏎ do it  esc cancel`
+- [x] **declining with `esc` reaches the audit log.** The dialog went, and **two lines
+      were appended** — the attempt and its result. The security gate's *every
+      attempt, success failure or refusal* row, measured on a refusal
+- [x] **confirming with `⏎`: the command log strip holds the line whole** —
+      `$ kubectl --context kind-k8rs rollout restart deployment/k8rs-probe3 -n default
+      → done`. The dialog's own cut is cosmetic; the strip is where a reader copies
+      from, and it is complete. Invariant 4's teaching device works
+- [x] `resourceVersion` is `not sent`, which is [D228](NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)'s
+      ruling for absolute intent, and the audit pair records it
+- [ ] `ctrl-d` delete from the console, and the typed name in the dialog — not run
+- [ ] `s` withheld on every footer — not driven (`views::SCALE_IS_BUILT` is `false`,
+      so there is nothing to press)
+- [ ] `esc` on a confirmation whose check has not answered — needs a slow dry-run
+- [ ] the object stopped existing between the keypress and the confirm — needs a race
+- [ ] the refusal box, `esc` dismisses and `⏎` opens the object — needs a refused write
+- [ ] `--read-only`: no key on this page is bound at all — the flag's refusal was
+      measured headlessly (§ F); the console's footer under it was not read
 
 ## N. Security rows that only a running binary can answer
 
 The `[auto]` rows of
 [CLAUDE.md § Security gate](CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions)
 are `scripts/security-guard.py`'s and are not re-read here. These are the ones no
-script can see:
+script can see.
 
-- [ ] no environment variable **value** appears anywhere on any surface
-- [ ] a Secret needs an explicit reveal, and its value never reaches the command
-      log, the audit log, or `y`
-- [ ] a `fieldValidation=Strict` rejection hands back the whole object in
-      `Status.message`, and that is what the audit line quotes — check what that
-      means for a Secret
+- [x] **a Secret's value never reaches the YAML** — measured with a planted canary in
+      § E: `password=SUPERSECRETCANARY123` read back through `--yaml` gives
+      `password: <hidden — 20 bytes>`, and the canary appears **0 times** plaintext
+      and **0 times** base64
+- [x] **and it never reached the audit log either** — 0 plaintext, 0 base64, and the
+      whole log holds no `password`/`token`/`secret`/`key`-shaped substring at all
+- [x] **the only outbound connection is the API server in the kubeconfig** — `ss -tnp`
+      against the running console's pid shows six sockets and every one goes to
+      `127.0.0.1:6443`, the kind cluster's own API server. No other host, no telemetry
+- [x] **TLS verification off in the kubeconfig is honoured *and shown*** — `⚠ TLS not
+      verified` in the header (§ G)
+- [x] **the audit log is mode `0600` in a `0700` directory**, and when it cannot be
+      opened, writes stop and reads continue, with the policy stated (§ F, § G)
+- [x] **an object name cannot escape the temp directory** —
+      `--object "default/../../etc/passwd"` is refused on its shape before a path is
+      built (§ D)
+- [ ] no environment variable **value** appears on any surface — needs a pod carrying
+      one and the detail tabs, which are not wired
+- [ ] a Secret reveal on a surface that offers one — no surface offers it yet
+- [ ] a `fieldValidation=Strict` rejection quoting the whole object in the audit line
       ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04))
-- [ ] a 50MB annotation does not blow up the renderer or get held whole
-- [ ] `strings` the installed binary — no personal username, no credential shape
-- [ ] the only outbound connection is the API server in the kubeconfig — watch it
-      with `ss -tnp` while the console runs
+      — only a read-modify-write can reach it, and the only one is v0.4's `edit`
+- [ ] a 50MB annotation does not blow up the renderer — needs an object built to carry one
+- [ ] `strings` the installed binary — done at the release and recorded in the phase's
+      own gate; not re-run here
 
 ---
 
@@ -344,6 +546,21 @@ an open phase.
 | F3 | The sidebar cuts a kind's **front**, and five of `storage`'s eight rows are cut in its twenty columns: `…ributesclasses` `…ragecapacities` `…ntvolumeclaims` `…sistentvolumes` `…umeattachments`. `ui::front` keeps the tail deliberately — the front-cut alternative collapses `persistentvolumes` and `persistentvolumeclaims` — so neither cut is right and `screens/widgets.md § 7`'s *still reads as itself* is not true of `…ributesclasses` | 2026-09-28, this file's first pass | no | [`backlog.md`](backlog.md), for a screen ruling ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
 | F4 | `k8rs -h` answers `k8rs: -h: No such file or directory (os error 2)` — a flag read as a path. The same binary answers `-h is not a flag k8rs has` for `k8rs --once -h`; `-x` and `-v` behave like `-h`. The unknown-flag test is `arg.starts_with("--")`, so no single-dash word reaches it and the default door reads it as a file | 2026-09-28, row A of this file | yes | **fix in flight**, folded into D310's turn ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
 
-**Four rows of § A have been run, and nothing else has.** F1 and F2 came out of the
-Phase 13 close review; F1 was re-measured here against the released binary, and F3
-and F4 came out of this file. Every other row is unrun and says so.
+| F5 | Every sidebar mockup draws a per-kind count (`deployments  12`, `pods  84`) that no code draws — eight mockups across `resources.md`, `widgets.md`, `states.md`, against `screens/README.md`'s own *the code has to match them*. `ui.rs:3470` hands `NavItem::Kind` an empty badge under a comment asserting the opposite of the spec and citing no decision; no `§ Rules` on any page explains the count | 2026-09-28, reviewing the screen spec | no | [`backlog.md`](backlog.md), one ruling over the whole page ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
+
+| F6 | `k8rs --help` and `--version` answer *"is not a flag k8rs has"* on stderr with exit `2`. The usage is printed, so nobody is stranded — but the first command typed against a fresh `cargo install` is answered as an error, and `--version` is how a bug report names its version | 2026-09-28, row A of this file | no | [`backlog.md`](backlog.md) — it lands on invariant 10's *generated help* threshold, so it is a ruling ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
+
+| F7 | `k8rs <file holding `{}`>` prints `1 object no rule reads ((no kind))` — the `(no kind)` label (`main.rs:712`, deliberate) lands inside the `no rule reads (…)` fragment's own parentheses (`main.rs:1318`, also deliberate). Cosmetic, malformed-input path only, unambiguous to a reader | 2026-09-28, § B of this file | no | **judged, no action** — neither half is wrong and nesting them costs a reader nothing; recorded so the next pass does not re-investigate |
+
+| F8 | `--once -n <namespace that does not exist>` answers `○ nothing is broken in <that name>`, exit `0` — an affirmative claim about a scope that is not there. Same silent-wrong-scope class the `--context` arms already refuse. Kubernetes returns an empty list rather than a `404`, so *not there* and *cannot see it* are the identical `0 pods` | 2026-09-28, § C of this file | no | [`backlog.md`](backlog.md), for a ruling — the alternative costs a `get namespaces` RBAC may refuse ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
+
+| F9 | `ops` takes no `--context` — it must be the first word on the line, so a headless operation can only reach the kubeconfig's **current** context, while the console can write to whichever context `X switch cluster` moved it to. `--read-only` got an explicit carve-out before the parse ([D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) ruling 3); `--context` did not, and no decision records the choice | 2026-09-28, § F of this file | no | [`backlog.md`](backlog.md), to be decided with the ruling already open there on `ops`'s status as a shipped subcommand ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
+
+| F10 | **k8rs reads a kubeconfig `kubectl` refuses.** An unquoted `n` as a cluster/user/context name is a *boolean* in YAML 1.1, which Go's parser follows — `kubectl` answers *"cannot unmarshal bool into Go struct field NamedCluster.clusters.name"* — while `serde_yaml_ng` follows YAML 1.2 and reads it as the string `n`. So k8rs connects and teaches `$ kubectl --context narrow …` lines **that cannot run for that user**, which is invariant 4's teaching device pointing at a command the reader's own `kubectl` rejects. Narrow (needs an unquoted `n`/`y`/`yes`/`no`/`on`/`off` name) | 2026-09-28, § G of this file | no | [`backlog.md`](backlog.md), for a ruling — matching Go's YAML 1.1 booleans is a parser decision, not a patch |
+
+**§ A–H, M and N have been run in whole or part; § I, J, K and L have not.** F1 and F2 came out of the
+Phase 13 close review; F1 was re-measured here against the released binary. F3 and
+F4 came out of this file, F6 out of § A and F7 out of § B, and F5 out of reviewing the fix for F1 — which is worth
+noting, because it is the only one no row below would have caught: the count is
+missing from the screen, and a reader with no mockup beside them sees nothing
+wrong. Every other row is unrun and says so.

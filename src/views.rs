@@ -2549,6 +2549,22 @@ pub enum Offer {
     Nothing {
         /// `X switch cluster`, promoted onto the line.
         switch: bool,
+        /// **`↑↓ move`, `⏎ open` and `esc back`, on the one pane whose read will never finish on
+        /// its own** — the browser's kind pane, whose `Table` fetch no box has written yet
+        /// (NOTES § D310, § D312, `screens/states.md` § A kind the browser cannot list yet,
+        /// `screens/widgets.md` § 2a).
+        ///
+        /// **The two moving keys are the point and they were withheld by mistake.** A kind pane
+        /// can only be entered while [`App::focus`] is [`Panel::Sidebar`] and [`App::open`] never
+        /// moves it, so the sidebar's rows are still under the cursor: `↑↓` walks them and `⏎`
+        /// opens one, exactly as on [`Offer::Move`]'s own line. Withholding them and then naming
+        /// an `esc` that did nothing is what made the pane read as a dead end (NOTES § D312).
+        ///
+        /// **A field and not a second variant, because § Still loading answers the same variant
+        /// and must keep its own footer untouched** — that read resolves on its own, a reader who
+        /// waits there is never wrong to, and its sidebar has not settled either, so none of these
+        /// three keys is true of it. [`crate::ui::offered`] is the one place this is set.
+        back: bool,
     },
     /// **A list that came back with no rows.** `/ filter` stays — a pane-level control, not an
     /// operation on an object — and the cursor keys go with the rows
@@ -2783,6 +2799,13 @@ impl Offer {
             | Offer::Hidden { .. }
             | Offer::Move { .. } => false,
         }
+    }
+
+    /// **Whether the footer this offer drew named `esc back`** ([`Offer::Nothing::back`], NOTES
+    /// § D310, § D312) — the one thing [`App::escape`]'s callers need out of an [`Offer`], so no
+    /// caller matches the variant itself and the flag can only ever be read where it was set.
+    pub fn hands_back(self) -> bool {
+        matches!(self, Offer::Nothing { back: true, .. })
     }
 }
 
@@ -3174,8 +3197,29 @@ impl App {
             (Detailing::Closed, _, View::Alerts | View::Resources(_)) => match offer {
                 // **`s` and `r` are on none of the lines before [`Offer::Act`] and are never
                 // marked `no` on one** ([`Offer`]): nothing here asked `may_i` anything.
-                Offer::Nothing { switch: false } => "? all keys  q quit",
-                Offer::Nothing { switch: true } => "X switch cluster  ? all keys  q quit",
+                Offer::Nothing {
+                    switch: false,
+                    back: false,
+                } => "? all keys  q quit",
+                Offer::Nothing {
+                    switch: true,
+                    back: false,
+                } => "X switch cluster  ? all keys  q quit",
+                // **Two more literals, and they carry `↑↓ move` and `⏎ open`, which § Still
+                // loading's two above may not** ([`Offer::Nothing::back`], NOTES § D312 ruling 1).
+                // Both are live on this pane: `⏎` opened it while `focus` was on the sidebar and
+                // nothing moved `focus` off, so the sidebar's own rows are still under the cursor
+                // — which is the whole of why the pane was never the dead end it read as. `X`
+                // first and `esc` last before the anchor, the ordering [`Offer::Hidden`]'s own
+                // four browser lines already draw.
+                Offer::Nothing {
+                    switch: false,
+                    back: true,
+                } => "↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+                Offer::Nothing {
+                    switch: true,
+                    back: true,
+                } => "X switch cluster  ↑↓ move  ⏎ open  esc back  ? all keys  q quit",
                 Offer::Filter { switch: false } => "/ filter  ? all keys  q quit",
                 Offer::Filter { switch: true } => "X switch cluster  / filter  ? all keys  q quit",
                 // **Six more literals** (`screens/states.md` § The filter hides every row). Two
@@ -3345,8 +3389,13 @@ impl App {
     /// [`picking`] is, and it is `pub` for exactly this: **ask it before the press**, and close
     /// the detail tab only where it answered `false`. A caller that read `modal` instead closes
     /// the tab out from under a picker the reader had just cancelled.
+    /// **`back` is [`Offer::Nothing::back`] off the offer the frame drew, and every caller passes
+    /// the same expression rather than judging per press** ([`App::footer`]'s own ladder decides
+    /// whether it matters at all: a filter with focus and every modal answer above the arm that
+    /// reads it). It is the flag and not the whole [`Offer`] because one bool is the whole of what
+    /// this method can act on.
     #[must_use = "`true` is the startup picker's `esc`, which ends the run"]
-    pub fn escape(&mut self, open: Detailing) -> bool {
+    pub fn escape(&mut self, open: Detailing, back: bool) -> bool {
         if matches!(self.modal, Some(Modal::ContainerPick(_))) && !picking(open) {
             self.modal = None;
         }
@@ -3385,6 +3434,32 @@ impl App {
             // view, not instead of one, so `esc` goes back to a list whose filter is still the one
             // the reader typed (`screens/detail.md` § Picking a pod).
             None if open != Detailing::Closed => {}
+            // **`esc back` on the browser's pane whose fetch was never wired — one step back,
+            // whichever step the reader is on** ([`Offer::Nothing::back`], NOTES § D312's
+            // amendment, `screens/states.md` § A kind the browser cannot list yet). The two cases
+            // are the two states the router can put a reader in, and each has an effect the other
+            // would not:
+            //
+            // - **`Panel::Content`, reached by `tab`** — the one real trap on this pane: `moved`
+            //   answers `Did::Nothing` off Alerts, so the sidebar's marker freezes and no arrow
+            //   moves it. Focus goes back, and the next arrow moves again.
+            // - **`Panel::Sidebar`, which is every reader's entry state** — `⏎` opened the pane
+            //   without touching `focus`, so there is no focus to hand back and assigning it again
+            //   is the no-op this arm shipped as (NOTES § D312). The view closes instead, which is
+            //   what *back* means everywhere else here and the only visible answer available:
+            //   focus is drawn with no mark anywhere, so a correct handoff shows nothing until the
+            //   next keypress. **Alerts and not a kindless browser** — `View::Resources` carries
+            //   the kind index, so there is no such state to return to.
+            //
+            // **The press is spent on this and never on a filter**, because that footer names
+            // `esc back` and not `esc clear filter`. A filter typed *on this pane* is the only
+            // reachable one — [`App::open`] empties them on every view change, so one committed on
+            // Alerts is already gone when the kind opens — and it goes with the view by that same
+            // rule rather than by anything this arm does.
+            None if back => match self.focus {
+                Panel::Content => self.focus = Panel::Sidebar,
+                Panel::Sidebar => self.open(NavItem::Alerts),
+            },
             // **Narrow to wide, and the order is [`Filters::clears`]'s so the footer that names
             // the field and the key that empties it are one answer** (`screens/states.md` § The
             // filter hides every row).

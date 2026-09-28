@@ -410,16 +410,21 @@ const TITLE: &str = " Keys ";
 /// plainly that it is *not built* — so the key is withheld from every footer
 /// (`crate::views::Offer::act`) and `?` may not repeat `(scale)` as if it did something. The row is
 /// fixed: no kind, no login and no run changes it, which is why it takes no refusal clause below.
+///
+/// **`l`, `d` and `y` carry their own `(not built yet)` and the group heading drops *(always
+/// available)*** (NOTES § D310, `screens/help.md` § Rules). The log tab's sub-row takes the same
+/// lead words for the same reason — none of its three keys is reachable while `l` itself opens
+/// nothing. Still sixteen rows, and both of that file's full mockups are now drawn at 80.
 const HELP: &str = "  Moving around
     ↑ ↓ / j k    move            ⏎     open the selected thing
     tab          next panel      esc   back / close
     X            switch cluster
     [ ]          detail tabs     / n   filter · namespace
-  Looking at things (always available)
-    l  logs, with the log from before a crash
-       log tab:  f follow · not built yet: c container, ⇧p previous
-    d  describe — the object and what happened to it
-    y  view as YAML            ctrl-z  back to your shell — type fg
+  Looking at things
+    l  logs, with the log from before a crash (not built yet)
+       log tab: not built yet — f follow, c container, ⇧p previous
+    d  describe — the object and what happened to it (not built yet)
+    y  view as YAML (not built yet)   ctrl-z  back to your shell — type fg
   Changing things (each one asks first, and shows the command)
     s       not built yet — there is no way yet to type a copy count
             works on a deployment, a statefulset and a replicaset
@@ -1647,7 +1652,15 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
     let selected: Option<(&str, Cow<'_, str>)> = match app.view {
         View::Analysis(_) => return Offer::Move { switch: false },
         View::Alerts => match screen.alerts {
-            Pane::Loading => return Offer::Nothing { switch: stranded },
+            // **`back: false`, and it stays false** (`screens/states.md` § Still loading): this
+            // read resolves on its own, so a reader who waits is never wrong to and the footer
+            // names no way out of a pane that is about to fill.
+            Pane::Loading => {
+                return Offer::Nothing {
+                    switch: stranded,
+                    back: false,
+                };
+            }
             // **Alerts' own empty pane keeps the cursor keys where the browser's loses them**, and
             // that is each section's own wording rather than a rule derived here: *the sidebar's
             // own rows are still there to move across and open* once its badges have settled
@@ -1682,7 +1695,18 @@ pub fn offered(app: &App, screen: &Screen) -> Offer {
             }
         },
         View::Resources(at) => match screen.browser {
-            Pane::Loading => return Offer::Nothing { switch: stranded },
+            // **`back: true` — the one pane on this product whose read will never finish on its
+            // own** (`crate::ui::unwired`, NOTES § D310, § D312, `screens/states.md` § A kind the
+            // browser cannot list yet). **This arm is the only place it is set**, so the identical
+            // shape one arm up cannot gain the three keys by accident: `↑↓`, `⏎` and `esc` are
+            // live here because `focus` never left the sidebar, and none of the three is true of
+            // an Alerts pane whose own sidebar has not settled.
+            Pane::Loading => {
+                return Offer::Nothing {
+                    switch: stranded,
+                    back: true,
+                };
+            }
             // **Zero rows is zero rows whichever answer holds them** — a 403 on `list jobs` that
             // came back with nothing promised `⏎ open` over fourteen blank rows until this arm
             // read both (`k8s-admin`, 2026-09-12).
@@ -4683,8 +4707,9 @@ fn browser(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, kind: Opti
     // said twice. **A pane with nothing under it draws none either**, which is the same rule read
     // the other way (`tester`, 2026-09-18): a filter set while the first LIST is still in flight
     // drew `filter: "web"   esc clears it` over *reading the cluster…*, claiming a list had been
-    // narrowed when no list had arrived — and under a footer that names no `esc`, because
-    // `Offer::Nothing` is what a pane with nothing to show answers.
+    // narrowed when no list had arrived — over a footer that names `esc` for something else
+    // entirely, since `Offer::Nothing` is what a pane with nothing to show answers and on this
+    // pane that line reads `esc back` (NOTES § D310).
     let rest = if vanished || left.is_empty() {
         rest
     } else {
@@ -4693,7 +4718,9 @@ fn browser(frame: &mut Frame, area: Rect, app: &App, screen: &Screen, kind: Opti
     let [_, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(rest);
     match screen.browser {
         _ if vanished => hidden(frame, padded(body), screen, plural(kind), &app.filters),
-        Pane::Loading => note(frame, body, screen, false, None, None),
+        // **[`unwired`] and not [`note`], because nothing is reading** (NOTES § D310): this pane's
+        // `Loading` is a fetch no box has written yet, not one in flight.
+        Pane::Loading => unwired(frame, body, screen, kind),
         // **A refusal draws whatever did come back and never the empty sentence below**, which is
         // [`banner`]'s rule one line up: *we were not allowed to look* is not *there is nothing*.
         // A refusal that came back with no rows at all draws the banner and an empty grid.
@@ -4758,14 +4785,45 @@ fn empty(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable
         (plural, Some(namespace)) => format!("no {plural} in {namespace}"),
         (plural, None) => format!("no {plural} in this cluster"),
     };
+    dimly(frame, area, screen, &said);
+}
+
+/// **The kind's `Table` fetch has never been wired, so the pane says so rather than claiming
+/// something is reading** (NOTES § D310, `screens/states.md` § A kind the browser cannot list
+/// yet). **The browser's alone**: [`WAITING`] still serves the Alerts pane, whose read is real and
+/// does finish.
+///
+/// **One spelling, and it is that file's** — the same construction `s`'s own [`HELP`] row and the
+/// log tab's sub-row already use. **A stale index has no kind to name, so it hands straight to
+/// [`empty`]** rather than keeping a second copy of that sentence: the cause is the one `empty`'s
+/// third arm already answers — the row this view points at is gone — and *pick another kind* is
+/// what is true of it whether or not the fetch behind it exists.
+fn unwired(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable>) {
+    match plural(kind) {
+        "" => empty(frame, area, screen, kind),
+        plural => dimly(
+            frame,
+            area,
+            screen,
+            &format!("not built yet — k8rs cannot list {plural}"),
+        ),
+    }
+}
+
+/// **One line of dim text in the middle of a pane** — [`empty`]'s and [`unwired`]'s shared block,
+/// so the two sentences a reader can meet from the same sidebar row cannot come to sit in
+/// different places (`screens/states.md` § An empty kind in the browser, § A kind the browser
+/// cannot list yet).
+///
+/// **The measure is the pane, not [`BLOCK`]** — each of these is one line of dim text, and `BLOCK`
+/// is the width the *Alerts* pane's several paragraphs of prose are set to. At `BLOCK` it breaks
+/// [`empty`]'s third sentence in half — 41 columns against 39. The pane still bounds it, so one
+/// too narrow for the sentence wraps rather than overruns; the shorter sentences are inside
+/// `BLOCK`, which [`centred`] keeps as its floor, so their block is `BLOCK` wide and centred in
+/// the pane.
+fn dimly(frame: &mut Frame, area: Rect, screen: &Screen, said: &str) {
     let dim = screen.fg(theme::DIM);
-    // **The measure is the pane, not [`BLOCK`]** — every row of that table is one line of dim
-    // text, and `BLOCK` is the width the *Alerts* pane's several paragraphs of prose are set to.
-    // At `BLOCK` it breaks the third sentence in half — 41 columns against 39. The pane still
-    // bounds it, so one too narrow for the sentence wraps rather than overruns; the two scoped
-    // sentences are shorter than `BLOCK`, which [`centred`] keeps as its floor, so their block is
-    // `BLOCK` wide and centred in the pane.
-    let lines = wrapped(&said, usize::from(area.width))
+    let lines = wrapped(said, usize::from(area.width))
         .into_iter()
         .map(|line| Line::styled(line, dim).centered())
         .collect();

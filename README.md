@@ -76,12 +76,13 @@ Two rules hold everywhere in it:
   and such a run opens no audit log at all, because a run that can change
   nothing owes no record.
 
-**Not wired yet:** the **Resources** browser lists what your cluster serves,
-but opening a kind lands on a pane that says *reading the cluster…* and stays
-there — the row is drawn, the fetch behind it is not connected, and `esc` does
-not come back from it. `tab` moves the focus away, which does. The four detail
-tabs behind a card — `l` logs, `d` describe, `y` YAML — say the same thing and
-never fill, though `esc` does close those. Until v0.2 wires them,
+**Not wired yet:** the **Resources** browser lists what your cluster serves, and
+opening a kind says so rather than pretending to load — *not built yet — k8rs
+cannot list csidrivers* — with `↑↓ move`, `⏎ open` and `esc back` on the footer, so
+the keys that pick another kind and the key that leaves are both named. The four
+detail tabs behind a card — `l` logs, `d` describe, `y` YAML — are each marked
+*not built yet* on the `?` key map, and opening one still draws *reading the
+cluster…* and never fills, though `esc` closes those. Until v0.2 wires them,
 `k8rs --logs`, `k8rs --describe` and `k8rs --yaml` are how you read a log, a
 description or a YAML out of a cluster.
 

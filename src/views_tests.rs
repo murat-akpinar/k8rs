@@ -1505,7 +1505,7 @@ fn escape_is_inert_on_a_confirmation_whose_check_has_not_answered() {
     }
 
     assert!(
-        !app.escape(Detailing::Closed),
+        !app.escape(Detailing::Closed, false),
         "an esc with no startup picker open ended the run"
     );
     assert!(
@@ -1525,7 +1525,7 @@ fn escape_is_inert_on_a_confirmation_whose_check_has_not_answered() {
     app.modal = Some(Modal::Confirm(answered));
 
     assert!(
-        !app.escape(Detailing::Closed),
+        !app.escape(Detailing::Closed, false),
         "an esc with no startup picker open ended the run"
     );
     assert!(
@@ -1563,7 +1563,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     app.modal = Some(Modal::Confirm(answered));
 
     assert!(
-        !app.escape(Detailing::Closed),
+        !app.escape(Detailing::Closed, false),
         "an esc with no startup picker open ended the run"
     );
     assert!(app.modal.is_none(), "esc did not close the modal");
@@ -1574,7 +1574,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     );
 
     assert!(
-        !app.escape(Detailing::Closed),
+        !app.escape(Detailing::Closed, false),
         "an esc with no startup picker open ended the run"
     );
     assert!(
@@ -1588,7 +1588,7 @@ fn escape_closes_one_level_per_press_and_never_two() {
     );
 
     assert!(
-        !app.escape(Detailing::Closed),
+        !app.escape(Detailing::Closed, false),
         "an esc with no startup picker open ended the run"
     );
     assert!(
@@ -1606,7 +1606,7 @@ fn escape_clears_the_namespace_scope_when_no_text_filter_is_set() {
         app.filters.namespace.push(character);
     }
     assert!(
-        !app.escape(Detailing::Closed),
+        !app.escape(Detailing::Closed, false),
         "an esc with no startup picker open ended the run"
     );
     assert!(app.filters.namespace.is_empty());
@@ -2131,7 +2131,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
         if let Some(Modal::ContextPick(picker)) = &mut switching.modal {
             picker.filter.push('s');
         }
-        assert!(!switching.escape(Detailing::Closed));
+        assert!(!switching.escape(Detailing::Closed, false));
         assert!(
             matches!(
                 &switching.modal,
@@ -2140,7 +2140,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
             "{connection:?}: esc closed the picker with a filter still typed into it"
         );
         assert!(
-            !switching.escape(Detailing::Closed),
+            !switching.escape(Detailing::Closed, false),
             "{connection:?}: esc on X's picker ended the run"
         );
         assert!(switching.modal.is_none(), "esc did not cancel the picker");
@@ -2154,12 +2154,12 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
         picker.filter.push('s');
     }
     assert!(
-        !starting.escape(Detailing::Closed),
+        !starting.escape(Detailing::Closed, false),
         "esc over a typed filter quit at startup"
     );
     let before = starting.clone();
     assert!(
-        starting.escape(Detailing::Closed),
+        starting.escape(Detailing::Closed, false),
         "esc on the startup picker did not end the run"
     );
     assert_eq!(
@@ -2188,7 +2188,7 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
     };
     let mut app = failed(Connection::Never);
     assert!(
-        !app.escape(Detailing::Closed),
+        !app.escape(Detailing::Closed, false),
         "esc on a failure ended the run"
     );
     assert!(
@@ -2203,7 +2203,10 @@ fn escape_clears_the_filter_then_cancels_or_quits_and_a_failure_goes_back_where_
     // or a switch had already failed** (NOTES § D264 ruling 15) — the way back is `X`.
     for connection in [live(), dropped()] {
         let mut dismissed = failed(connection.clone());
-        assert!(!dismissed.escape(Detailing::Closed), "{connection:?}");
+        assert!(
+            !dismissed.escape(Detailing::Closed, false),
+            "{connection:?}"
+        );
         assert!(
             dismissed.modal.is_none(),
             "{connection:?}: esc did not dismiss the failure"
@@ -2847,7 +2850,7 @@ fn esc_while_typing_empties_the_focused_field_then_closes_the_session() {
         ..App::default()
     };
 
-    assert!(!app.escape(Detailing::Closed));
+    assert!(!app.escape(Detailing::Closed, false));
     assert!(app.filters.namespace.is_empty(), "`n` was not emptied");
     assert_eq!(
         app.filters.text.text(),
@@ -2856,13 +2859,231 @@ fn esc_while_typing_empties_the_focused_field_then_closes_the_session() {
     );
     assert_eq!(app.typing, Some(Typing::Namespace), "typing closed early");
 
-    assert!(!app.escape(Detailing::Closed));
+    assert!(!app.escape(Detailing::Closed, false));
     assert_eq!(app.typing, None, "typing stayed open over an empty buffer");
     assert_eq!(
         app.filters.text.text(),
         "web",
         "closing the session cleared the other field"
     );
+}
+
+/// **`esc` on the browser's unwired kind pane takes one step back, whichever step the reader is
+/// on** (NOTES § D312's amendment, `screens/states.md` § A kind the browser cannot list yet).
+///
+/// **The two cases are the two states the router can put a reader in, and the first is the one this
+/// test's predecessor could not see.** A reader arrives with `focus` on [`Panel::Sidebar`] — a kind
+/// pane can only be entered from there and [`App::open`] never moves it — so an arm that assigned
+/// `Sidebar` was an identity write, and the assertion that exercised it read the no-op as the
+/// property (D312). The view closes there instead. `Panel::Content`, reached only by `tab`, is the
+/// one state where handing focus back is the effect.
+///
+/// **The entry state is driven through the router in
+/// [`crate::tests::the_unwired_kind_pane_is_not_a_dead_end_and_esc_steps_back_from_where_it_is`]**,
+/// which is where *what the router actually leaves `focus` as* is proved. This test is about
+/// [`App::escape`]'s own ladder over both values, which no router drive can enumerate as cheaply.
+///
+/// **And every press `esc` already owned still answers first** — a typing buffer, a modal, an open
+/// detail slot — because this is one more rung on that ladder and not a second mechanism.
+#[test]
+fn esc_steps_back_one_step_from_whichever_step_the_reader_is_on() {
+    let browsing = |focus| App {
+        view: View::Resources(3),
+        focus,
+        ..App::default()
+    };
+
+    // **Focus on the sidebar — the entry state — closes the view.** Alerts and not a kindless
+    // browser: `View::Resources` carries the kind index, so there is no such state to go back to.
+    let mut arrived = browsing(Panel::Sidebar);
+    assert!(!arrived.escape(Detailing::Closed, true));
+    assert_eq!(
+        arrived.view,
+        View::Alerts,
+        "`esc back` from the state every reader arrives in changed nothing a reader can see"
+    );
+    assert_eq!(
+        arrived.focus,
+        Panel::Sidebar,
+        "closing the view also moved focus, which is two effects for one press"
+    );
+
+    // **Focus on the content pane — reached by `tab`, and the one real trap** — hands focus back
+    // and leaves the view where it is, because the pane is what the reader is still looking at.
+    let mut trapped = browsing(Panel::Content);
+    assert!(!trapped.escape(Detailing::Closed, true));
+    assert_eq!(trapped.focus, Panel::Sidebar, "the trap did not open");
+    assert_eq!(
+        trapped.view,
+        View::Resources(3),
+        "the press spent both steps at once, so the reader lost the pane as well as the trap"
+    );
+
+    // **`back: false` is § Still loading's own shape and neither step is taken** — that read
+    // resolves on its own, its footer names no `esc`, and the press is the filter's again.
+    let mut loading = App {
+        filters: Filters {
+            text: buffer("web"),
+            namespace: Input::default(),
+        },
+        ..browsing(Panel::Content)
+    };
+    assert!(!loading.escape(Detailing::Closed, false));
+    assert_eq!(
+        loading.focus,
+        Panel::Content,
+        "a pane whose read does resolve gained a way out it does not draw"
+    );
+    assert_eq!(
+        loading.view,
+        View::Resources(3),
+        "a pane whose read does resolve closed itself"
+    );
+    assert!(
+        loading.filters.text.is_empty(),
+        "the press stopped being the filter's where no `esc back` is drawn"
+    );
+
+    // **The one reachable filter, and it goes with the view rather than with this arm.** A filter
+    // committed on Alerts cannot reach here at all — [`App::open`] empties them on every view
+    // change — so the only one that exists on this pane was typed *on* it, and `esc` from the entry
+    // state closes the view, which is what clears it (D312 finding 4, whose premise this test had
+    // backwards).
+    let mut typed_here = App {
+        filters: Filters {
+            text: buffer("web"),
+            namespace: Input::default(),
+        },
+        ..browsing(Panel::Sidebar)
+    };
+    assert!(!typed_here.escape(Detailing::Closed, true));
+    assert_eq!(typed_here.view, View::Alerts);
+    assert_eq!(
+        typed_here.filters,
+        Filters::default(),
+        "the filter outlived the view change, which `App::open` empties on"
+    );
+    // From the content pane the view does not change, so neither does the filter.
+    let mut typed_and_tabbed = App {
+        filters: Filters {
+            text: buffer("web"),
+            namespace: Input::default(),
+        },
+        ..browsing(Panel::Content)
+    };
+    assert!(!typed_and_tabbed.escape(Detailing::Closed, true));
+    assert_eq!(
+        typed_and_tabbed.filters.text.text(),
+        "web",
+        "the step that only moves focus threw away a filter as well"
+    );
+
+    // **Every press `esc` already owned still answers first**, so neither step can reach past a
+    // modal, a filter with focus, or an open detail tab — each of which draws its own footer.
+    let mut helped = App {
+        modal: Some(Modal::Help),
+        ..browsing(Panel::Sidebar)
+    };
+    assert!(!helped.escape(Detailing::Closed, true));
+    assert_eq!(helped.modal, None, "`esc` stopped closing Help");
+    assert_eq!(
+        helped.view,
+        View::Resources(3),
+        "the handoff fired under a modal that had named `esc` for itself"
+    );
+
+    let mut typing = App {
+        typing: Some(Typing::Text),
+        filters: Filters {
+            text: buffer("web"),
+            namespace: Input::default(),
+        },
+        ..browsing(Panel::Sidebar)
+    };
+    assert!(!typing.escape(Detailing::Closed, true));
+    assert!(
+        typing.filters.text.is_empty(),
+        "`esc` stopped clearing text"
+    );
+    assert_eq!(
+        typing.view,
+        View::Resources(3),
+        "the handoff fired while a filter had the keyboard"
+    );
+
+    let mut tabbed = browsing(Panel::Content);
+    assert!(!tabbed.escape(
+        Detailing::Tabs {
+            containers: 0,
+            from_step: false
+        },
+        true
+    ));
+    assert_eq!(
+        tabbed.focus,
+        Panel::Content,
+        "the handoff fired under a detail tab, whose own `esc back` closes the tab"
+    );
+    assert_eq!(
+        tabbed.view,
+        View::Resources(3),
+        "a detail tab's `esc` closed the view underneath it"
+    );
+}
+
+/// **The two footers the unwired kind pane draws, and the two § Still loading keeps**
+/// (`screens/states.md` § A kind the browser cannot list yet, `screens/widgets.md` § 2a's own row).
+///
+/// **`↑↓ move` and `⏎ open` are on the pane's two and on neither of Still loading's**, which is
+/// NOTES § D312 ruling 1 and the half that stops the pane reading as a dead end: `focus` never left
+/// the sidebar, so both keys work — while Still loading's sidebar has not settled and neither does.
+///
+/// **The four strings are typed off `screens/states.md`'s own six mockups**, the convention
+/// [`every_mode_draws_the_footer_its_own_screen_file_draws`] already follows; what compares them
+/// mechanically with the page, frame by frame, is
+/// `ui_tests::every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it`.
+///
+/// **The `switch` axis is walked on both**, because `X`'s promotion is the run's and these keys are
+/// the pane's — an expired login over a kind that will never answer draws all four, which is that
+/// section's second mockup and the one footer literal here no other screen file pins.
+#[test]
+fn the_unwired_kind_pane_is_the_only_nothing_that_names_a_way_out() {
+    for (switch, back, expected) in [
+        (false, false, "? all keys  q quit"),
+        (true, false, "X switch cluster  ? all keys  q quit"),
+        (false, true, "↑↓ move  ⏎ open  esc back  ? all keys  q quit"),
+        (
+            true,
+            true,
+            "X switch cluster  ↑↓ move  ⏎ open  esc back  ? all keys  q quit",
+        ),
+    ] {
+        let offer = Offer::Nothing { switch, back };
+        for view in [View::Alerts, View::Resources(0)] {
+            let app = App {
+                view,
+                ..App::default()
+            };
+            let (keys, quit) = app.footer(Detailing::Closed, offer, Refused::default(), "", &[]);
+            assert_eq!(
+                (keys.as_ref(), quit),
+                (expected, ""),
+                "{view:?} · switch {switch} · back {back}"
+            );
+        }
+        assert_eq!(
+            offer.hands_back(),
+            back,
+            "the predicate `App::escape`'s callers read and the word the footer draws disagree"
+        );
+    }
+    for offer in every_offer() {
+        assert_eq!(
+            offer.hands_back(),
+            matches!(offer, Offer::Nothing { back: true, .. }),
+            "{offer:?} answered `hands_back` and draws no `esc back`"
+        );
+    }
 }
 
 /// **A filter does not survive into a view that cannot draw it** (`screens/widgets.md` § 2b): the
@@ -3083,7 +3304,9 @@ fn every_offer() -> Vec<Offer> {
         }
     }
     for switch in [false, true] {
-        all.push(Offer::Nothing { switch });
+        for back in [false, true] {
+            all.push(Offer::Nothing { switch, back });
+        }
         all.push(Offer::Filter { switch });
         all.push(Offer::Move { switch });
         for namespace in [false, true] {
@@ -3362,7 +3585,7 @@ fn closing_help_hands_the_footer_back_to_the_mode_underneath() {
         "? or esc to close"
     );
     assert!(
-        !app.escape(Detailing::Closed),
+        !app.escape(Detailing::Closed, false),
         "an esc with no startup picker open ended the run"
     );
     assert_eq!(
@@ -3947,7 +4170,7 @@ fn the_list_footer_marks_the_keys_this_login_may_not_use() {
 /// its `s` is not, and a press of `s` there must reach nothing.
 ///
 /// **And every shape that is not [`Offer::Act`] refuses both**, whichever key is named — the
-/// catch-all in `Offer::offers` is the safe direction, and this is what says so for all fourteen
+/// catch-all in `Offer::offers` is the safe direction, and this is what says so for all sixteen
 /// of them rather than for the one a reader thought of.
 #[test]
 fn a_key_the_selected_kind_cannot_use_is_not_pressable() {
@@ -3975,7 +4198,7 @@ fn a_key_the_selected_kind_cannot_use_is_not_pressable() {
         withheld += 1;
     }
     assert_eq!(
-        withheld, 14,
+        withheld, 16,
         "a shape that offers no mutating key stopped being walked"
     );
 }
@@ -4450,10 +4673,13 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
     };
 
     let mut app = picking();
-    assert!(!app.escape(Detailing::Tabs {
-        containers: 3,
-        from_step: false,
-    }));
+    assert!(!app.escape(
+        Detailing::Tabs {
+            containers: 3,
+            from_step: false,
+        },
+        false
+    ));
     assert_eq!(app.modal, None);
     assert_eq!(
         app.filters.text.text(),
@@ -4476,7 +4702,7 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
         },
     ] {
         let mut app = picking();
-        assert!(!app.escape(containers));
+        assert!(!app.escape(containers, false));
         assert_eq!(app.modal, None, "{containers:?}");
         assert_eq!(
             app.filters.text.text(),
@@ -4486,7 +4712,7 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
     }
 
     let mut app = picking();
-    assert!(!app.escape(Detailing::Closed));
+    assert!(!app.escape(Detailing::Closed, false));
     assert_eq!(app.modal, None);
     assert!(
         app.filters.text.is_empty(),
@@ -4557,7 +4783,7 @@ fn only_picking_tells_a_cancelled_picker_from_a_dropped_one() {
     ] {
         let mut app = open();
         assert!(app.modal.is_some(), "both rows start with a modal open");
-        assert!(!app.escape(containers));
+        assert!(!app.escape(containers, false));
         assert_eq!(
             app.modal, None,
             "{containers:?}: `modal` is the same after both rows, which is the whole finding"
@@ -4602,7 +4828,7 @@ fn esc_out_of_a_detail_tab_leaves_the_filter_where_it_was() {
         },
     ] {
         let mut app = filtered();
-        assert!(!app.escape(containers));
+        assert!(!app.escape(containers, false));
         assert_eq!(
             app.filters,
             filtered().filters,
@@ -4612,9 +4838,9 @@ fn esc_out_of_a_detail_tab_leaves_the_filter_where_it_was() {
 
     // And with no tab open it is the ordinary at-rest `esc`, narrow to wide.
     let mut app = filtered();
-    assert!(!app.escape(Detailing::Closed));
+    assert!(!app.escape(Detailing::Closed, false));
     assert!(app.filters.text.is_empty() && !app.filters.namespace.is_empty());
-    assert!(!app.escape(Detailing::Closed));
+    assert!(!app.escape(Detailing::Closed, false));
     assert!(app.filters.namespace.is_empty());
 }
 
@@ -5675,7 +5901,7 @@ fn esc_out_of_the_which_pods_step_leaves_the_filter_where_it_was() {
     };
 
     let mut app = filtered();
-    assert!(!app.escape(Detailing::Pods));
+    assert!(!app.escape(Detailing::Pods, false));
     assert_eq!(
         app.filters,
         filtered().filters,
@@ -5684,7 +5910,7 @@ fn esc_out_of_the_which_pods_step_leaves_the_filter_where_it_was() {
 
     // And with the step closed it is the ordinary at-rest `esc`, narrow to wide.
     let mut app = filtered();
-    assert!(!app.escape(Detailing::Closed));
+    assert!(!app.escape(Detailing::Closed, false));
     assert!(app.filters.text.is_empty() && !app.filters.namespace.is_empty());
 }
 

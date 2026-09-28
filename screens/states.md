@@ -156,6 +156,325 @@ to put in a sentence:
   sidebar, which is why the sentence sends them there instead of explaining
   the mechanism.
 
+## A kind the browser cannot list yet
+
+**Not `nothing is broken` and not an empty kind — a fetch that has never been
+wired to run**
+([NOTES § D310](../NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)).
+Opening any kind from the sidebar hands the pane `Pane::Loading` and nothing
+else ever arrives — the row is real and the count beside it in the sidebar may
+be real, but the fetch that would turn either into a table does not exist yet.
+`reading the cluster… N pods` is [Still loading](#still-loading)'s own
+sentence, and it is a *promise*: something is reading, and the read will
+finish. Nothing here is reading, and nothing here will ever finish on its own,
+so the pane says the one thing that is actually true instead:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  jobs                                         │
+│  RESOURCES         │                                               │
+│▸  workloads        │                                               │
+│     deployments  12│                                               │
+│     statefulsets  3│                                               │
+│     daemonsets    5│     not built yet — k8rs cannot list jobs     │
+│     pods         84│                                               │
+│     jobs          7│                                               │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │                                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **One spelling for this fact, and this is it: lowercase, joined by an
+  em-dash, no trailing period** — `not built yet — k8rs cannot list jobs`,
+  the same construction `s`'s own row already uses
+  (`not built yet — there is no way yet to type a copy count`,
+  [`HELP`](../src/ui.rs)) and the log tab's own sub-row now uses too
+  (`not built yet — f follow, c container, ⇧p previous`,
+  [help.md](help.md)). This pane sits in the exact screen position
+  `no jobs in this cluster` already occupies, one section up on this same
+  page — lowercase, no period — so a capital and a full stop here would be a
+  second register for one page to hold, inches from a neighbour that has
+  neither. Anywhere else this fact needs saying reuses this spelling; it is
+  not a fourth one to invent.
+- **Dim, centred, no glyph** — the same borrowed shape [An empty kind in the
+  browser](#an-empty-kind-in-the-browser) uses, and for the identical reason:
+  `● ▲ ○` are severities and this carries none, `⚠` is a connection or trust
+  problem and this is neither — the connection is live, the login is fine, and
+  the cluster answered everything it was asked. Nothing is wrong *out there*;
+  the gap is here.
+- **Kept apart from its two neighbours on purpose, since a reader can land on
+  any of the three from the same sidebar row:**
+  - Against [Still loading](#still-loading) — no ellipsis, no pod count, no
+    *"Large clusters take a moment"*, because none of those are honest about a
+    fetch that was never sent. Both states can draw the sidebar's own
+    still-settling badges (`capacity` with nothing beside it, and so on) —
+    that half is [Still loading](#still-loading)'s own and is not redrawn
+    here.
+  - Against [An empty kind in the browser](#an-empty-kind-in-the-browser) —
+    the two sentences carry the whole distinction themselves, because nothing
+    else on the pane does: `no jobs in this cluster` is a claim about the
+    cluster, `not built yet — k8rs cannot list jobs` is a claim about this
+    build, and neither may read as the other worn down a different way. (The
+    sidebar's own kind-row count is this page's own convention and not yet
+    something the code draws at all, so it is not a signal this bullet leans
+    on.)
+- **The command log strip carries over unchanged, and gains no line for this
+  kind at all** — the same rule
+  [detail.md § Picking a pod, before Detail has one](detail.md#picking-a-pod-before-detail-has-one)
+  already states for a pane with no `kubectl` command behind it: *"no
+  `kubectl` command exists for 'look at a list k8rs already holds'"*. Opening
+  `jobs` here is that shape once more — the fetch simply is not issued — so a
+  line reading `$ kubectl get jobs -A` would be exactly the lie this whole
+  state exists to retire, one region lower on the same screen. The strip shows
+  whatever last ran: blank on a fresh session, or — as drawn above, matching
+  [help.md](help.md)'s own default mockup — the last two of the permanent
+  watches that were already running when the session connected.
+- **The footer names `↑↓ move`, `⏎ open` and `esc back`, and all three are
+  genuinely live in the state every reader arrives in — a rewrite from the
+  first draft of this section, which had the trap backwards**
+  ([NOTES § D312](../NOTES.md#d312--esc-back-was-an-identity-write-and-the-key-that-got-the-reader-out-was-never-on-the-footer-2026-09-28)).
+  Opening a kind from the sidebar never moves focus off it — a kind pane can
+  only be *entered* while `focus == Panel::Sidebar`, and opening one never
+  touches `focus`, so it is still `Panel::Sidebar` the instant the pane is on
+  screen. The reader who opens `jobs` for the first time can still move the
+  cursor over `ALERTS`, `RESOURCES`, another kind or `ANALYSIS` and press `⏎`
+  on any of them — [Alerts](alerts.md)'s own mechanism for its own sidebar,
+  [Nothing is broken](#nothing-is-broken)'s reasoning stated once and true
+  here too — and the first draft's *"there is no row here to move across"*
+  was false about the one panel actually holding the keyboard.
+  - **`esc back` takes one step back, whichever step the reader is on — not a
+    single fixed destination.** Focus on `Panel::Content` — reached by `tab`,
+    silently, with no mark anywhere on screen: [`FOCUS`](../src/theme.rs) is
+    `Signal::Reverse` and no mockup on this page draws it — hands focus back
+    to the sidebar. Focus already on the sidebar, the state this section's
+    own mockup draws, leaves the view to Alerts instead: the same *back*
+    every other `esc` on this product already means, and `?`'s own standing
+    `esc back / close` promise. One arm, two cases, the same ladder
+    [`App::escape`](../src/views.rs) already walks for a typing buffer, then
+    a modal, then a detail slot — one step further down it.
+  - **`tab` is what creates the one real trap here, and this pane cannot
+    withhold it.** Moving focus onto `Panel::Content` over a kind with
+    nothing to move a cursor across leaves the sidebar's own marker frozen —
+    measured directly: `▸ endpoints` sits unchanged across two presses of
+    `↓` once focus has moved to Content, and only moves again after `esc`
+    hands focus back and a further `↓` is pressed. `esc` is the only key
+    that opens that trap, which is the whole reason the arm exists — not the
+    trap this section's first draft described, which never existed.
+  - `/ filter` stays off, and for a reason the sidebar does not touch: no
+    list is ever going to arrive on this pane to narrow — `/` finds nothing
+    behind it either way, so offering it would promise a second thing this
+    pane cannot do, the same reasoning [The filter hides every
+    row](#the-filter-hides-every-row) has no cause to disturb.
+  - **Under an expired login, the same footer promotes `X switch cluster`** —
+    the closed pair this product's footer already uses for it
+    ([§ Over a pane with nothing to show yet](#over-a-pane-with-nothing-to-show-yet)),
+    ahead of the keys that still work rather than instead of them, because
+    the sidebar's own read settled before the token died and nothing here
+    stops being true because of it. **Drawn by the code and by no other
+    screen file** (`tester` finding, D312's amendment) — the mockup is owed:
+
+```
+ nodes 3/3                      ctx: prod-eu · ⚠ login expired · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  jobs                                         │
+│  RESOURCES         │                                               │
+│▸  workloads        │                                               │
+│     deployments  12│                                               │
+│     statefulsets  3│                                               │
+│     daemonsets    5│     not built yet — k8rs cannot list jobs     │
+│     pods         84│                                               │
+│     jobs          7│                                               │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │                                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
+├────────────────────────────────────────────────────────────────────┤
+│ X switch cluster  ↑↓ move  ⏎ open  esc back  ? all keys  q quit    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The sentence does not change with a namespace scope in effect**, because
+  the fact it states does not: whether the fetch is wired has nothing to do
+  with which namespace it would have been scoped to. Only the title changes,
+  the way it already does for every other state on this page:
+
+```
+┌───────────────────────────────────────────────┐
+│  jobs          ns: payments                   │
+│                                               │
+│     not built yet — k8rs cannot list jobs     │
+│                                               │
+└───────────────────────────────────────────────┘
+```
+
+- **It stacks under a caveat banner exactly the way every other pane on this
+  page does** — `caveats` runs ahead of the title regardless of what the pane
+  itself is about to draw
+  ([resources.md § Rules](resources.md#rules), *"above the title, where this
+  pane already puts its own banner"*). Read-only or an audit log that would
+  not open, and a clock warning, both take their rows first; this sentence is
+  whatever is left of the pane once they have:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · read-only
+┌────────────────────┬───────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  k8rs could not open its audit log at         │
+│  RESOURCES         │  /home/you/.local/state/k8rs/audit.log (under │
+│▸  workloads        │  your home directory): Permission denied (os  │
+│     deployments  12│  error 13) — every change k8rs makes is       │
+│     statefulsets  3│  written to that log before it is sent, so    │
+│     daemonsets    5│  k8rs will not change anything until that is  │
+│     pods         84│  fixed, and reading your cluster still works  │
+│     jobs          7│                                               │
+│   network          │  jobs                                         │
+│   storage          │                                               │
+│   config           │                                               │
+│   cluster          │     not built yet — k8rs cannot list jobs     │
+│  ANALYSIS          │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+  - **Never alongside `k8rs could not read what this cluster serves`**
+    ([§ above](#k8rs-could-not-read-what-this-cluster-serves)) — that
+    banner's whole point is a discovery answer that never arrived, so the
+    sidebar it would have populated has no kind rows to open at all, `jobs`
+    included. A reader cannot reach this pane and that one on the same run.
+    The audit-log banner above is drawn here because it genuinely can sit
+    over a kind pane, byte for byte the sentence
+    [The audit log could not be opened](#the-audit-log-could-not-be-opened)
+    already draws — not reworded for this pane, and not
+    [D296](../NOTES.md#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)'s
+    sentence borrowed either, which is a different fact about a different
+    pane.
+- **The sentence wraps, and it is not shortened when it does — measured false
+  in the first draft, which claimed one line always.** The fixed part,
+  `not built yet — k8rs cannot list `, is 33 columns; a kind whose plural
+  pushes the total past the pane's width wraps at the word boundary in front
+  of it, the same `wrapped()` every other pane-width sentence on this page
+  already goes through. `persistentvolumeclaims` (55 columns whole) is one of
+  five real built-ins this happens to at the 70-column page's 47-column pane —
+  drawn here rather than asserted, and illustrative only in that the sidebar
+  keeps `workloads` open rather than the `storage` group this kind actually
+  lives under, since only the content pane's own wrap is this bullet's point:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  persistentvolumeclaims                       │
+│  RESOURCES         │                                               │
+│▸  workloads        │                                               │
+│     deployments  12│                                               │
+│     statefulsets  3│                                               │
+│     daemonsets    5│       not built yet — k8rs cannot list        │
+│     pods         84│            persistentvolumeclaims             │
+│     jobs          7│                                               │
+│   network          │                                               │
+│   storage          │                                               │
+│   config           │                                               │
+│   cluster          │                                               │
+│  ANALYSIS          │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                              │
+│ $ kubectl get daemonsets -A --watch                                │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+  Read cleanly, centred, on the real binary at the 80-column floor —
+  `tester`'s own capture, not asserted here.
+- **At the 80-column floor an ordinary kind still fits on one line, with more
+  room, never less** — the content pane grows from 47 to 57 columns and
+  `jobs` stays 37, so the frame is the one above, wider, its header corrected
+  to end at the frame's own right edge the way every other 80-column mockup
+  on this page already does (the first draft of this mockup kept the
+  70-column block's 68-column header, which `screens-check.py` cannot see —
+  it does not compare an unbordered row to anything):
+
+```
+ nodes 3/3                            k8rs           ctx: prod-eu · live · admin
+┌────────────────────┬─────────────────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  jobs                                                   │
+│  RESOURCES         │                                                         │
+│▸  workloads        │                                                         │
+│     deployments  12│                                                         │
+│     statefulsets  3│                                                         │
+│     daemonsets    5│          not built yet — k8rs cannot list jobs          │
+│     pods         84│                                                         │
+│     jobs          7│                                                         │
+│   network          │                                                         │
+│   storage          │                                                         │
+│   config           │                                                         │
+│   cluster          │                                                         │
+│  ANALYSIS          │                                                         │
+├────────────────────┴─────────────────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                                        │
+│ $ kubectl get daemonsets -A --watch                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+  A terminal wider than 80 grows the content pane further still — the sidebar
+  never does ([widgets.md § 1](widgets.md#1-the-frame)).
+- **The extra room does not make wrapping a narrow-pane fact.** Four more
+  built-ins — `customresourcedefinitions` (58), `mutatingwebhookconfigurations`
+  (62), `validatingwebhookconfigurations` (64) and
+  `validatingadmissionpolicybindings` (66) — all pass the 57-column pane the
+  80-column floor gives this sentence too, so the mockup just above is not the
+  wide case, only the common one:
+
+```
+ nodes 3/3                            k8rs           ctx: prod-eu · live · admin
+┌────────────────────┬─────────────────────────────────────────────────────────┐
+│  ALERTS     3 ● 7 ▲│  customresourcedefinitions                              │
+│  RESOURCES         │                                                         │
+│▸  workloads        │                                                         │
+│     deployments  12│                                                         │
+│     statefulsets  3│                                                         │
+│     daemonsets    5│            not built yet — k8rs cannot list             │
+│     pods         84│                customresourcedefinitions                │
+│     jobs          7│                                                         │
+│   network          │                                                         │
+│   storage          │                                                         │
+│   config           │                                                         │
+│   cluster          │                                                         │
+│  ANALYSIS          │                                                         │
+├────────────────────┴─────────────────────────────────────────────────────────┤
+│ $ kubectl get statefulsets -A --watch                                        │
+│ $ kubectl get daemonsets -A --watch                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+  **Nothing here needs a shorter sentence or a size limit invented for it.**
+  `Browsable::plural` goes through the same 512-byte `IDENTIFIER` bound every
+  other discovery-supplied string does (`impl Bounded for Browsable`,
+  `src/k8s.rs`), so even a hostile CRD advertising a plural built to overflow
+  the pane wraps across more lines and clips against the `Rect` there, the
+  same bound every other pane-width string on this page already answers to —
+  never a crash, and never this sentence's own problem to solve a second
+  time.
+
 ## The filter hides every row
 
 A third reason a list can be empty, next to *nothing is broken* and *an

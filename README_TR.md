@@ -79,11 +79,13 @@ söylemez. k8rs, kümenin zaten bildiği şeyi okuyup o kısmı yüksek sesle s�
   hiçbir şeyi değiştiremeyen bir çalışmanın kaydı da olmaz.
 
 **Henüz bağlanmadı:** **Resources** tarayıcısı kümenizin sunduğu türleri
-listeler, ama bir tür açtığınızda *reading the cluster…* yazıp orada kalan bir
-panele düşersiniz — satır çiziliyor, arkasındaki okuma bağlı değil, ve `esc`
-oradan geri getirmiyor. `tab` odağı başka yere taşır, o çalışır. Bir kartın
-arkasındaki dört detay sekmesi — `l` logs, `d` describe, `y` YAML — aynı şeyi
-yazıp hiç dolmuyor, ama onları `esc` kapatıyor. v0.2 bunları bağlayana kadar bir
+listeler, ve bir tür açtığınızda yükleniyormuş gibi yapmak yerine durumu
+söyler — *not built yet — k8rs cannot list csidrivers* — ve footer'da `↑↓ move`,
+`⏎ open` ve `esc back` yazar: başka bir tür seçmenizi sağlayan tuşlar da,
+çıkışı sağlayan tuş da adlandırılmış. Bir kartın arkasındaki dört detay sekmesi — `l` logs,
+`d` describe, `y` YAML — `?` tuş haritasında tek tek *not built yet* olarak
+işaretlidir, ve biri açıldığında hâlâ *reading the cluster…* yazıp hiç dolmaz,
+ama onları `esc` kapatır. v0.2 bunları bağlayana kadar bir
 log'u, bir açıklamayı veya bir YAML'ı kümeden okumanın yolu `k8rs --logs`,
 `k8rs --describe` ve `k8rs --yaml`.
 

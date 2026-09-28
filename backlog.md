@@ -4206,3 +4206,128 @@ Phase 12 close triage fixes them; the rest are notes.
   not a blocker and kept out of the Phase 13 close
   ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)).
   PM, measured while reproducing the user's *the browser's screens come up empty*.
+
+- **Every sidebar mockup draws a per-kind count and no code draws one.** `deployments  12`,
+  `pods  84` — `resources.md:13,16`, `widgets.md:959,962`, `states.md:88,91,178,181,275,278`. Eight
+  mockups, three files, and `screens/README.md`'s own contract is *"the code has to match them"*. The
+  code does not: `ui.rs:3470` hands `NavItem::Kind` a `Vec::new()` badge where `NavItem::Alerts` gets
+  `tally(screen)`, under a comment asserting the opposite of the spec — *"A kind row carries no
+  badge"* — and citing no decision for it. Measured on the released `0.1.0`: `storage` expanded draws
+  bare kind names, no numbers. **No `§ Rules` on any of the three pages explains the count**, which
+  is how it survived — nothing contradicted it. **Two ways out and both are rulings, not code fixes**:
+  the count is real and a box builds it (a per-kind tally the browser does not fetch today, so it
+  needs a source), or it was never meant and eight mockups lose a column. Ruled not a blocker and
+  kept out of the Phase 13 close
+  ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)).
+  It already cost something: the browser's new *cannot list yet* state had to stop using the count to
+  tell itself apart from *an empty kind*. PM, reviewing the screen spec the close dispatched.
+
+- **`k8rs --help` answers *"--help is not a flag k8rs has"*, on stderr, exit 2.** So does
+  `--version`. Measured on the released `0.1.0`. The usage *is* printed, so a newcomer is not
+  stranded — which is why this is a gap and not F4's lie — but the first command anyone types against
+  a freshly `cargo install`ed binary is answered as an error, and `--version` is how a bug report
+  names its version. **It is a ruling and not a fix, because it lands on invariant 10's threshold**:
+  *generated help* is one of the three things that would mean it is time for `clap`, and the question
+  is whether printing the `USAGE` const to **stdout** with exit `0` is that, or is just a flag that
+  takes no value — which
+  [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)
+  already settled is below the threshold. `--version` has a second half: nothing in the binary reads
+  `CARGO_PKG_VERSION` today, so it is a line of code and not only a match arm. Kept out of the Phase
+  13 close as a feature ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)). PM, row A of [`test.md`](test.md).
+
+- **`k8rs --once -n <a namespace that does not exist>` prints `○ nothing is broken in <that name>`
+  and exits `0`.** Measured on the released `0.1.0` against `kind-k8rs`:
+  `ns: nope-not-here · 0 pods · 4 nodes`, then the healthy sentence, naming the namespace back. **It
+  is the silent-wrong-scope class one level down from the one this binary already refuses** — the
+  `--context` arms exist because `k8rs --once --context "$CTX" && kubectl apply -f prod/` with `CTX`
+  unset was *"a green light about the wrong cluster, in silence"* (`main.rs:2222-2232`,
+  [D189](NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)) — and `-n prodd` in the same pipeline buys the same green light
+  about the same kind of typo. **Why it is a ruling and not a fix**: Kubernetes answers a list in a
+  namespace that does not exist with an empty list and not a `404`, so *the namespace is not there*
+  and *this login cannot see it* arrive as the identical `0 pods`, and telling them apart costs a
+  `get namespaces` that RBAC may refuse — which is the whole subject of
+  `screens/states.md § You can only see some namespaces`. So the options are a sentence that stops
+  short of *nothing is broken* when the scope matched zero pods, or an extra call that may be
+  refused, or leaving it. **Not a blocker**: `0 pods` is on the same line a reader is already looking
+  at. Ruled out of the Phase 13 close ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)). PM, row C of [`test.md`](test.md).
+
+- **`ops` takes no `--context`, so a headless operation can only reach the current context.**
+  Measured on the released `0.1.0`: `k8rs --context kind-k8rs ops may-i get pods. -n default` answers
+  *"`ops` has to be the first word on the line"* and prints the `ops` usage. Meanwhile the **console**
+  can mutate whichever context `X switch cluster` moved it to, so one binary holds two different
+  answers to *which cluster may a write reach*. **`--read-only` got an explicit carve-out** — it is
+  filtered out of the line before `ops_at` runs, with its reason written down
+  ([D230](NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05)
+  ruling 3) — and `--context` did not, and nothing records whether that was a safety choice or an
+  omission. **Two readings, both defensible**: refusing the flag means an operation cannot be aimed at
+  the wrong cluster by a typo, which is the class the `--context` arms already exist for, and the
+  taught kubectl line does name the context it acted on; or it is simply missing, and an operator who
+  wants to restart something in another cluster has to edit their kubeconfig first. **Not a bug** — the
+  refusal is honest, exits `2`, and names the fix for the line as typed. **It belongs with the ruling
+  already open in this file on `ops` shipping as a subcommand against
+  [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)'s
+  `clap` threshold** — same subject, one decision, and deciding them apart is how two half-answers
+  ship. Ruled out of the Phase 13 close
+  ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)).
+  PM, row F of [`test.md`](test.md).
+
+- **The header row's right edge is spelled six ways for one frame width, and nothing checks it.**
+  Counted in `screens/states.md`: over a 70-column frame the unbordered header above it measures
+  **66, 68, 69, 70, 72 and 73** columns across the file's mockups, and over an 80-column frame it
+  measures 79 or 80. Two of them overrun the frame they sit above, which cannot happen on a real
+  terminal — the header spans the same width the frame does. **Nothing catches it**:
+  `screens-check.py` only asks whether a mockup fits 80×24, and `ui_tests.rs`'s `mockups()` slices a
+  block on `│` and `├`, so the header line is never in a compared block. The one test that does read
+  headers (`the_header_of_every_link_state_is_the_pages_own`) compares their *words*, not their width.
+  **It needs one ruling and then a guard, not six edits**: either the header is right-aligned to the
+  frame's right edge (and `screens-check.py` grows a check), or it is illustrative and the page says
+  so once. **The PM extended the inconsistency while relaying an unverified number**: `k8s-admin`
+  reported *"the page's other two 80-column mockups draw a 79-column header"* from two samples, the
+  brief passed that on as the convention without re-deriving it, and the two 80-column blocks now
+  draw 80. That is the proxy-for-object error this repo keeps paying for, one column wide. PM, while
+  re-deriving the block indices for a dev brief, 2026-09-28.
+
+- **k8rs reads a kubeconfig `kubectl` refuses, so the command log can teach a line the reader's own
+  `kubectl` cannot run.** Measured 2026-09-28 while building a restricted credential: an unquoted `n`
+  as a cluster, user or context name is the **boolean** `false` in YAML 1.1, which Go's parser
+  follows — `kubectl` answers *"json: cannot unmarshal bool into Go struct field
+  NamedCluster.clusters.name of type string"* and loads nothing — while `serde_yaml_ng` follows YAML
+  1.2 and reads it as the string `n`, so k8rs connects and runs normally. **Why it matters more than
+  the exotic name suggests**: every line the command log teaches is `$ kubectl --context <name> …`,
+  and for that user those lines are unrunnable — invariant 4's teaching device pointing at a command
+  the reader's own tool rejects, which is the one failure that record is not allowed to have. **Not a
+  bug and not a patch**: the plain six (`n` `y` `yes` `no` `on` `off`, in any case) are a *parser*
+  decision — matching Go means treating them as booleans, which YAML 1.2 says they are not, and
+  `serde_yaml_ng` is the crate invariant 10 pins. **Three shapes to choose between**: leave it, warn
+  when a kubeconfig name is one of the six, or refuse such a name the way `kubectl` effectively does.
+  Narrow enough to wait; recorded because nobody would find it twice. PM, row G of
+  [`test.md`](test.md).
+
+- **The footer describes the pane, nothing draws which panel holds the keyboard, and on Alerts that
+  puts a *mutating* key under a footer naming it live.** Found by `k8s-admin` answering a question
+  about the browser's new footer, and the browser is the least of it. `Offer` is deliberately a fact
+  about the pane's content rather than about what the reader navigated to
+  ([D259](NOTES.md#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+  ruling 5), and **`app.focus` appears nowhere in `ui.rs`** — no footer this product draws has ever
+  described the keyboard. The consequences, measured from source:
+  **On the browser's unwired pane** with focus on Content, `↑↓ move` is `Did::Nothing` (`moved()`'s
+  catch-all) and `⏎ open` is too (`entered()`'s Content arm goes through `selected()`, which returns
+  `None` off Alerts) — two of three footer keys dead, and the third shows nothing on the press. That
+  one is accepted and ruled in
+  [D312](NOTES.md#d312--esc-back-was-an-identity-write-and-the-key-that-got-the-reader-out-was-never-on-the-footer-2026-09-28).
+  **On Alerts, which is where it is serious**: with focus on the sidebar, `↑↓` walks `app.nav` and not
+  the cards the footer's `↑↓ move` is about, `⏎` opens a sidebar row and not the card — and `wanting()`
+  guards on `view` and never on `focus`, so **`s`, `r` and `ctrl-d` aim at the card under `app.content`
+  while the cursor the reader is watching is somewhere else entirely.** A mutating key, under a footer
+  that names it live, pointed at an object the reader is not looking at. Invariant 2 still holds — the
+  confirmation names the object and a delete takes its typed name — so nothing fires blind; what is
+  wrong is that the reader's eye and the key's target can be on different rows with nothing on screen
+  saying so.
+  **A focus condition in `ui::offered` is the wrong fix** and would reverse D259 ruling 5 for a third
+  of one pane while leaving the Alerts instance standing. **What closes the class is a focus mark**,
+  which the product already has and draws nowhere: `theme::FOCUS` is `Signal::Reverse`,
+  `signal-guard.py` knows it, and `grep -rlF FOCUS screens/` returns nothing. **One screen ruling,
+  product-wide, then a guard** — after which every footer's subject is visible instead of guessable.
+  Related and smaller, from the same read: after `esc` leaves a kind pane for Alerts the sidebar marker
+  stays on the kind row nobody moved, and Alerts' own `⏎ open` then re-opens the pane just left — so
+  `esc` `⏎` is a loop. `k8s-admin`, second read, answering question 3.

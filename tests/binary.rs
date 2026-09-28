@@ -508,7 +508,9 @@ fn a_crafted_namespace_never_reaches_the_terminal_at_all() {
 /// below silently true at once and this test passes over a binary that still reads `--read-only`
 /// as a path; the second is the sentence the rows here must **not** get, and it is asserted
 /// producible so that *not getting it* stays a fact about the flags and not about the message
-/// having moved (CLAUDE.md § A derived list asserts it found something).
+/// having moved (CLAUDE.md § A derived list asserts it found something). **The *console* rows, and
+/// not every row** — since NOTES § D311 the two dashed words at the end of this test are asserted
+/// to get that sentence, which is the same canary read as a positive.
 ///
 /// **And a console line still never dials.** [`CONNECT_CANARY`]'s absence is asserted on every
 /// row: `at_a_keyboard` is the whole of what stands between a console line in this harness and a
@@ -588,15 +590,12 @@ fn a_console_flag_line_with_no_terminal_is_the_usage_and_nothing_else() {
     }
 
     // **A line with no console flag on it is still a path, which is the half that could have been
-    // taken away by mistake** (`src/main.rs`'s `NAMESPACE_SHORT`, whose doc promises it). `-x` is
-    // a one-dash word this build does not have and `file.json` is a positional beside it; with no
-    // cluster and no console flag there is nothing for either to be ambiguous with.
+    // taken away by mistake.** What that half is has narrowed: a *positional* is still a path, and
+    // a word with a dash on the front is not one on any line since NOTES § D311. `-x file.json`
+    // was a row here for as long as `src/main.rs`'s `NAMESPACE_SHORT` promised it, and it is
+    // asserted below as the refusal it now is rather than dropped.
     let missing = fixture("no-such-fixture.json");
-    for args in [
-        vec!["-x", "file.json"],
-        vec![missing.as_str()],
-        vec!["--analysis", missing.as_str()],
-    ] {
+    for args in [vec![missing.as_str()], vec!["--analysis", missing.as_str()]] {
         let stderr = text(k8rs(&args).stderr);
         assert_ne!(
             stderr, usage,
@@ -606,6 +605,34 @@ fn a_console_flag_line_with_no_terminal_is_the_usage_and_nothing_else() {
             stderr.contains("No such file or directory"),
             "{args:?} is not a path any more: {stderr:?}"
         );
+    }
+
+    // **And the dashed words that door used to swallow** (NOTES § D311). `k8rs -h` came back
+    // `k8rs: -h: No such file or directory (os error 2)` — errno jargon about a file nobody named,
+    // on the first thing a stranger types — because the unknown-flag check tested `--` and the
+    // file-driven driver is the door a bare word takes. **Only a process can say which door a line
+    // took**, which is why the claim is here and not only in `src/main_tests.rs`'s
+    // `a_one_dash_word_gets_one_answer_whatever_else_is_on_the_line`; the console half of it is
+    // `-o` beside `--read-only` in the test below. **`-x file.json` is the row the block above
+    // lost**, positional still beside it, because what changed is the answer and not the shape.
+    for args in [vec!["-h"], vec!["-x", "file.json"]] {
+        let out = k8rs(&args);
+        assert_eq!(out.status.code(), Some(2), "{args:?} {out:?}");
+        assert!(
+            out.stdout.is_empty(),
+            "{args:?} put a refusal where a report goes: {:?}",
+            text(out.stdout.clone())
+        );
+        let stderr = text(out.stderr);
+        assert!(
+            stderr.starts_with(&format!("k8rs: {} is not a flag k8rs has", args[0])),
+            "{args:?} was read as a path: {stderr:?}"
+        );
+        assert!(
+            !stderr.contains("No such file or directory"),
+            "{args:?} was answered as a file nobody named: {stderr:?}"
+        );
+        assert!(stderr.contains("usage: k8rs "), "{args:?}: {stderr:?}");
     }
 
     // **A committed capture beside no flag at all still prints its report**, which is the one row

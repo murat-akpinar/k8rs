@@ -8,14 +8,18 @@
 > marks a key this login may not use before it is pressed
 > ([NOTES § D292](../NOTES.md#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26)).
 > **Three reads are not**: the browser's server-side `Table`, the four detail
-> tabs, and the log stream. Each draws `ui::WAITING` — *reading the cluster…* —
-> for a fetch nothing issues, which is not a waiting state but the wrong one of
-> the three `PRIOR-ART § C2` names, and `esc` does not leave an opened browser
-> kind ([backlog](../backlog.md)).
-> `ui.rs` is frozen; `views.rs` is frozen against new behaviour, and the probe's
-> box reached it for one mechanical edit only — deleting the two
+> tabs, and the log stream. **The browser says so rather than drawing a waiting
+> state it cannot leave** — `ui::unwired` draws *not built yet — k8rs cannot list
+> <kind>* and the footer names `↑↓ move`, `⏎ open` and `esc back` ([NOTES § D310](../NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)). The other two
+> still draw `ui::WAITING` — *reading the cluster…* — for a fetch nothing issues,
+> which is not a waiting state but the wrong one of the three `PRIOR-ART § C2`
+> names ([backlog](../backlog.md)).
+> `ui.rs` and `views.rs` are frozen; `main.rs` is the top of the pyramid and the
+> one file never frozen. The probe's box reached `views.rs` for one mechanical edit — deleting the two
 > `expect(dead_code)` attributes that existed to say the probe was unwired, which
-> `-D warnings` turns into a red build the moment it is. Phase 13 has shipped
+> `-D warnings` turns into a red build the moment it is — and the close's blocker
+> fix reached both of them under a reversal recorded before it was acted on
+> ([NOTES § D310](../NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)), which re-froze them as it landed. Phase 13 has shipped
 > `v0.1.0` — on crates.io and on the release page — over a README in both
 > languages and the one driver flag that came out of the ten
 > ([The command line](#the-command-line) states which flags this build accepts

@@ -1745,16 +1745,17 @@ const READ_ONLY: &str = "--read-only";
 /// **cluster-wide** with nothing on screen — the silent wider scope this spelling was rejected to
 /// avoid, arrived at by refusing to read it.
 ///
-/// **The `--` check is still the reason `k8rs -x file.json` is a path** and not a usage error,
-/// exactly as it was before this flag existed; what is refused is this one prefix and nothing
-/// else. What *reads* `-n` is [`namespace_arg`], and its value is checked in [`mistyped`] beside
-/// the refusal above.
+/// **This spelling and `-n=` are the only one-dash words [`mistyped`] accepts**, which is why both
+/// are in its `known` list: every other word with a dash on the front is a flag k8rs does not have,
+/// and is told so (NOTES § D311). The `--`-only version of that check is what let `k8rs -h` come
+/// back as a missing file. What *reads* `-n` is [`namespace_arg`], and its value is checked in
+/// [`mistyped`] beside the refusal above.
 ///
-/// **What that costs is a file literally named `-notes.json`**, which is now a usage error rather
-/// than a path — the price of the prefix being refused at all. It is worth naming and it is not
-/// worth an escape hatch: a leading `-` already makes a filename unusable with most tools, `./`
-/// in front of it works here as it works everywhere, and Phase 12's real flag parsing is where a
-/// `--` separator belongs.
+/// **What that costs is a file literally named `-notes.json`** — a usage error rather than a path,
+/// and since D311 that price is every leading-dash filename's and not this prefix's alone. It is
+/// worth naming and it is not worth an escape hatch: a leading `-` already makes a filename
+/// unusable with most tools, `./` in front of it works here as it works everywhere, and a `--`
+/// separator belongs with real flag parsing.
 const NAMESPACE_SHORT: &str = "-n";
 
 /// **Which cluster this run reads, or `None` when it reads files.**
@@ -2176,10 +2177,12 @@ fn named_thing(args: &[String]) -> &'static str {
 /// about the typo: the same silent-wrong-cluster failure [`live_context`] accepts `--context=`
 /// to avoid, arriving through the other door. Found by running the binary, not by a test.
 ///
-/// **A `--` word is never a path.** `k8rs --live=true` used to be read as one and came back
-/// `--live=true: No such file or directory (os error 2)` — errno jargon about a file nobody
-/// named (invariant 14). The cost is that a file genuinely called `--x` cannot be read, which is
-/// an escape hatch this scaffolding already declined to owe anybody.
+/// **A word with a dash on the front is never a path.** `k8rs --live=true` used to be read as one
+/// and came back `--live=true: No such file or directory (os error 2)` — errno jargon about a file
+/// nobody named (invariant 14) — and `k8rs -h` came back the same way for as long as this check
+/// tested `--` alone (NOTES § D311). The cost is that a file genuinely called `--x` or `-x` cannot
+/// be read, which is an escape hatch this scaffolding already declined to owe anybody; `./-x`
+/// works here as it works everywhere.
 ///
 /// **A flag that is real but useless in this mode is *not* refused** — `--container`, `--previous`
 /// or `--follow` beside [`DESCRIBE`], and [`KIND`] beside [`LOGS`] (`screens/detail.md` § Printed
@@ -2404,11 +2407,37 @@ fn mistyped(args: &[String]) -> Option<String> {
             || arg == KIND
             || arg == PREVIOUS
             || arg == FOLLOW
-            || [CONTEXT, NAMESPACE, OBJECT, CONTAINER, KIND]
+            || arg == NAMESPACE_SHORT
+            || [CONTEXT, NAMESPACE, NAMESPACE_SHORT, OBJECT, CONTAINER, KIND]
                 .iter()
                 .any(|flag| arg.strip_prefix(flag).is_some_and(|r| r.starts_with('=')))
     };
-    if let Some(unknown) = args.iter().find(|arg| arg.starts_with(FLAG) && !known(arg)) {
+    // **Every word with a dash on the front, not only the `--` ones** (NOTES § D311). The test was
+    // `starts_with(FLAG)`, so no one-dash word reached it and the file-driven door — the default
+    // one, which a bare `k8rs <word>` takes — answered `k8rs -h: No such file or directory (os
+    // error 2)`: errno jargon about a file nobody named, on the first thing a stranger types. The
+    // sentence a mode flag on the line already got is now the sentence for the word itself, so
+    // `k8rs -h` and `k8rs --once -h` cannot differ.
+    //
+    // **[`NAMESPACE_SHORT`] is the one one-dash word this build has**, in both its spellings, and
+    // it joins `known` above for that reason. `-npayments` keeps its own sentence because its own
+    // check is above this one.
+    //
+    // **It reads every word and not only the ones in a flag position, so a flag *value* starting
+    // with a dash is refused too** (NOTES § D311, `k8s-admin` finding 10). For the four
+    // value-taking flags whose value is a DNS-1123 name that costs nothing — a leading `-` is not
+    // a legal name and each already has its own check above — but a **kubeconfig context name is
+    // unconstrained**, so `k8rs --context -foo` is refused here. That is the same answer a `--`
+    // value already got (`k8rs --context --lgos` has always been refused by this line), and
+    // `--context=-foo` is the escape hatch, exactly as `--context=--live` already is.
+    //
+    // **One situation, two sentences a dash apart, and both are true**: `k8rs --context --once`
+    // comes back *`--context` needs the name of a context, and `--once` is a flag* from the pair
+    // check at the top of this function, which tests [`FLAG`]; `k8rs --context -o` comes back *`-o`
+    // is not a flag k8rs has* from here. Both refuse, both print [`USAGE`], and the pair check is
+    // deliberately not widened — it names the flag whose value is missing, which is the better
+    // sentence and is only available where the word after it is a flag this build has.
+    if let Some(unknown) = args.iter().find(|arg| arg.starts_with('-') && !known(arg)) {
         return Some(format!(
             "k8rs: {}\n{USAGE}",
             as_typed("flag", unknown, k8s::NAME_MAX, |word| format!(
@@ -2486,11 +2515,11 @@ fn mistyped(args: &[String]) -> Option<String> {
     // **A one-dash word this build does not have is a usage error and not a silently dropped
     // one** (`k8s-admin`, 2026-08-30). `k8rs --once -o json` came back *"--once and --live read a
     // cluster, so k8rs cannot also read json"*, and **neither half of that is true**: `-o` was
-    // skipped without a word because the `known` check above only tests `--` words, and `json`
-    // then fell through as a stray positional. `screens/once.md` § What `--once` does not do lists
-    // `-o json` by name as a shape readers will try, so it gets the same sentence every other
-    // flag k8rs does not have gets. `-n=payments` is the one one-dash word that is real, and
-    // `-nginx` was refused further up.
+    // skipped without a word, and `json` then fell through as a stray positional.
+    // `screens/once.md` § What `--once` does not do lists `-o json` by name as a shape readers
+    // will try. **That refusal now lives in `known` above and is no longer split between the two
+    // checks** (NOTES § D311): this walk skips a dashed word rather than judging it, because by
+    // the time a line reaches here every dashed word on it is one this build has.
     //
     // **A console flag is one of the flags this applies to, since the flags box** (todo.md
     // § Phase 12). `k8rs --read-only pod.json` passed every check above, missed the console arm
@@ -2499,9 +2528,10 @@ fn mistyped(args: &[String]) -> Option<String> {
     // worst flag to drop without a word. [`cluster_reader`] is both the gate and the subject of
     // the sentence, so a flag that opens a console cannot be in one and missing from the other.
     //
-    // **Only on a line that reaches a cluster.** With neither a cluster flag nor a console flag
-    // there is no ambiguity and `k8rs -x file.json` stays a path, which is what
-    // [`NAMESPACE_SHORT`]'s doc promises and what the `--` test in `known` above is for.
+    // **Only on a line that reaches a cluster**, which is now the whole of what this gate is
+    // about: with neither a cluster flag nor a console flag there is nothing for a path to
+    // conflict with. It no longer decides whether a *flag* is refused — `known` above answers that
+    // for every dashed word on every line (NOTES § D311).
     if let Some(reads) = cluster_reader(args) {
         let mut rest = args.iter();
         while let Some(arg) = rest.next() {
@@ -2515,23 +2545,12 @@ fn mistyped(args: &[String]) -> Option<String> {
                 rest.next();
                 continue;
             }
+            // **Every dashed word left on the line is a flag this build has** — `known` above
+            // refuses the rest, whatever else is on the line, so there is nothing to judge here
+            // and no second answer for one word to get (NOTES § D311). It is skipped so that a
+            // flag is never read as the path this loop is looking for.
             if arg.starts_with('-') {
-                // A `--` word was already vetted by `known` above, and `-n=payments` is the one
-                // one-dash word this build has. Everything else with a dash on the front is a
-                // flag k8rs does not have.
-                if arg.starts_with(FLAG)
-                    || arg
-                        .strip_prefix(NAMESPACE_SHORT)
-                        .is_some_and(|rest| rest.starts_with('='))
-                {
-                    continue;
-                }
-                return Some(format!(
-                    "k8rs: {}\n{USAGE}",
-                    as_typed("flag", arg, k8s::NAME_MAX, |word| format!(
-                        "{word} is not a flag k8rs has"
-                    ))
-                ));
+                continue;
             }
             // **The sentence names the mode that is on the line and not the two it used to
             // name always.** `k8rs --logs --object default/web pod.json` came back *"--once and
@@ -7385,7 +7404,12 @@ fn ending(performed: &ops::Performed) -> Ended {
 //
 // **What is not wired yet, said here rather than left to be found**: the browser's `Table` fetch
 // (`k8s::Browsing`), and the four detail reads and the log stream. Each has a slot the frame
-// already fills honestly — `Pane::Loading` — and each is a box of its own.
+// already fills — `Pane::Loading` — and each is a box of its own.
+//
+// **The browser's slot is the one that now says so on the screen rather than only here** (NOTES
+// § D310, `ui::unwired`): a pane that draws *reading the cluster…* for a fetch nothing issues is a
+// promise with no subject, and `esc` had no way out of it either. The detail tabs are the same
+// shape and are a separate box; the words come off the browser's pane the day this item does.
 //
 // **The first of those is why a refused discovery call is said on somebody else's pane** (NOTES
 // § D296, [`unread`]): the pane the fact is about is the `Table` fetch, so until it exists the
@@ -7998,7 +8022,10 @@ async fn console(opening: &Opening<'_>, keyboard: bool) -> Option<String> {
         unconnected: true,
         link: ui::Link::Connecting,
         opened: None,
-        offer: views::Offer::Nothing { switch: false },
+        offer: views::Offer::Nothing {
+            switch: false,
+            back: false,
+        },
         carried: None,
         // **Nothing to ask and nobody to ask it of** — both arrive with the first connection
         // ([`connected`]), and a run that never gets one marks no key, which is the fail-open state
@@ -9913,7 +9940,7 @@ fn pressed(
                 // that here** — a filter has focus, so no picker is open — but the value is
                 // `#[must_use]` and honouring it costs a line at every call site rather than a
                 // judgement at each.
-                if console.app.escape(open) {
+                if console.app.escape(open, console.offer.hands_back()) {
                     return Did::Quit;
                 }
                 Did::Changed
@@ -9979,7 +10006,7 @@ fn pressed(
         // `views::App::escape`'s own contract, because `App` holds no field for what is open. The
         // four offsets go with it (`screens/widgets.md` § 4).
         KeyCode::Esc => {
-            if console.app.escape(open) {
+            if console.app.escape(open, console.offer.hands_back()) {
                 return Did::Quit;
             }
             if open != views::Detailing::Closed {
@@ -10120,7 +10147,7 @@ fn over_modal(
             // the box offers no key while a check is out, and the wait itself is bounded inside
             // `ops::perform` (NOTES § D273), so nothing here needs a way out of it.
             KeyCode::Esc if !dialog.waiting() => {
-                if console.app.escape(open) {
+                if console.app.escape(open, console.offer.hands_back()) {
                     return Did::Quit;
                 }
                 Did::Answered(Reply::No)
@@ -10157,7 +10184,7 @@ fn over_modal(
                 }),
             },
             KeyCode::Esc => {
-                if console.app.escape(open) {
+                if console.app.escape(open, console.offer.hands_back()) {
                     Did::Quit
                 } else {
                     Did::Changed
@@ -10201,7 +10228,7 @@ fn over_modal(
         // every key but the `⏎` its own footer names, above.
         Some(_) => match key.code {
             KeyCode::Esc => {
-                if console.app.escape(open) {
+                if console.app.escape(open, console.offer.hands_back()) {
                     Did::Quit
                 } else {
                     Did::Changed

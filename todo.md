@@ -5421,12 +5421,63 @@ new box, because a phase close is not a box:
    dispatch. The same entry carries the half the close review added: `?`
    advertises `l logs`, `d describe` and `y view as YAML` under *always
    available* on a screen that marks *not built yet* on `s`.
-2. **Close steps 1–5 again over what that fix could have broken** — always the
+   **Where it stands, so nothing here is dispatched twice.** The reversal is
+   recorded and the docs are already synced against the landed code
+   ([D310](NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28); `README.md`, `README_TR.md`, `docs/README.md`,
+   `docs/architecture.md`, `docs/maps.md` — the six stale passages are done, not
+   pending). The screen spec is written and **lands in the same commit as the
+   code, never before it**. `k8rs -h` answering *no such file or directory* for a
+   word the same binary calls a flag is folded in as a third finding, ruled a
+   blocker ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)).
+   **The first round came back with two blockers and the mechanism was re-ruled**
+   ([D312](NOTES.md#d312--esc-back-was-an-identity-write-and-the-key-that-got-the-reader-out-was-never-on-the-footer-2026-09-28)): `esc back` was an *identity write* — a kind pane can only be
+   entered with focus already on the sidebar, so the new arm assigned what was
+   already there, and 1,610 tests passed over it because both helpers built a state
+   the router cannot produce. The root cause was never `esc`: `↑`, `↓` and `⏎`
+   already work there, and the footer withheld them. So the footer names those two,
+   `esc` leaves the view to Alerts, and seven lesser findings ride along — read
+   D312 before briefing, it carries all ten and which are not this box's.
+   **Round 2 landed and the box is still open on three should-fixes, none a blocker.**
+   `k8s-admin`'s second read says *no blockers*; what it asked for after it is in
+   [D312](NOTES.md#d312--esc-back-was-an-identity-write-and-the-key-that-got-the-reader-out-was-never-on-the-footer-2026-09-28)'s second amendment and is owed:
+   **(a)** `App::escape`'s arm collapses to one case — `None if back =>
+   self.open(NavItem::Alerts)` — because `Panel::Content => focus = Sidebar` draws a
+   byte-identical frame and the rung has no future (`back` is `false` once the `Table`
+   fetch lands). **(b)** *"`esc` is the only key that opens that trap"* is false —
+   `tab` is a two-way toggle — and the true sentence is *the only key **on the
+   footer***, in `screens/states.md`'s `tab` bullet (`tui-designer`'s), D312's
+   amendment (the PM's, already corrected) and a `main_tests.rs` comment
+   (`dev-ui`'s). **(c)** the sweep comment's block ordinal: the footerless block is
+   the **third**, index 2, not the second. `screens/` is `tui-designer`'s and must be
+   edited **alone**, before the dev, because `cargo test` compares drawn blocks
+   against it.
+   **The commit that landed this was taken without `tester`'s completion
+   notification** — its host work was finished (`tests/binary.rs` written, the host
+   idle, `just check` green in its report at `EXIT=0`) but the report had not arrived,
+   so anything it wrote afterwards is uncommitted and belongs to whoever reads this
+   next ([CLAUDE.md § Where a leak would actually happen](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)).
+   **Three findings the same pass raised are `backlog.md`'s and not this item's**:
+   the sidebar's front-cut, the per-kind count every mockup draws and no code does,
+   and `--help` / `--version`. **Six more joined them this round** — `ops` taking no
+   `--context`, `--once -n <a namespace that does not exist>` answering *nothing is
+   broken*, a kubeconfig k8rs accepts and `kubectl` rejects, the header row's right
+   edge spelled six ways, the footer describing the pane while nothing draws which
+   panel holds the keyboard, and the two identical `events` rows.
+2. **No whole mutation sweep is owed, and that is answered rather than assumed.**
+   `just mutants` mutates `rules.rs` and `analysis.rs` only, and `git log` over
+   those two plus their tests is **empty for this phase** — the last touch to
+   either is `e1db3b4` (2026-08-30), one string literal in `analysis.rs`, which
+   belongs to an earlier phase's range. So this close cites
+   [D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)
+   and runs no shards; the whole-sweep debt D210 records rolls forward to the next
+   close that does touch one of them. Per-turn `just mutants-diff` still gates
+   every diff.
+3. **Close steps 1–5 again over what that fix could have broken** — always the
    run and the security pass, and the family review too if it touched a shared
    helper.
-3. **Phase 5's own close ritual**, owed from the moment its release box closed as
+4. **Phase 5's own close ritual**, owed from the moment its release box closed as
    superseded above.
-4. **Then the rest of this ritual**: the phase's security gate, the whole-phase
+5. **Then the rest of this ritual**: the phase's security gate, the whole-phase
    second pass, `docs/`, the CHANGELOG, and the PR to `main`.
 
 **What is already true and is not re-done.** `just check` green on the test host

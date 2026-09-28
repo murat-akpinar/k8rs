@@ -11,9 +11,10 @@
 > view, the seven analysis panes, the confirmation dialogs, the write path, the
 > cluster picker and the permission probe that marks a key this login may not use
 > are wired into one binary, while the reads behind the resource browser and the
-> detail tabs are not fetched at all: both panes draw *reading the cluster…* and
-> never fill, and `esc` does not leave an opened browser kind
-> ([backlog](../backlog.md)) — and `k8rs --once` prints
+> detail tabs are not fetched at all: the browser's kind pane says so — *not built
+> yet — k8rs cannot list <kind>*, with `↑↓ move`, `⏎ open` and `esc back` on its footer
+> ([NOTES § D310](../NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)) — and the detail tabs still draw *reading the cluster…*
+> and never fill, though `esc` closes those — and `k8rs --once` prints
 > the findings and exits
 > ([architecture § The command line](architecture.md#the-command-line)).
 > Phase 13 landed the permission probe, the driver-flag removal,

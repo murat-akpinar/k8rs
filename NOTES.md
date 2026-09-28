@@ -333,6 +333,7 @@ its line moving with it.
 - [D309](#d309--the-cratesio-page-keeps-a-readme-that-says-the-crate-is-not-published-and-the-maintainer-will-not-spend-a-version-number-on-it-2026-09-28) — the crates.io page keeps a README that says the crate is not published, and the maintainer will not spend a version number on it
 - [D310](#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28) — the browser's kind pane is made honest rather than wired, and that reverses the freeze on three top-layer files
 - [D311](#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28) — the A-to-Z pass gets a file, and its first four rows found a binary that calls a flag a missing file
+- [D312](#d312--esc-back-was-an-identity-write-and-the-key-that-got-the-reader-out-was-never-on-the-footer-2026-09-28) — `esc back` was an identity write, and the key that got the reader out was never on the footer
 
 ## Why it exists — where the gap is
 
@@ -27622,9 +27623,16 @@ from drawing was refused** too: it empties five sidebar groups, so a stranger ne
 at all, and [D296](#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)'s
 shape is for a discovery that was *refused*, not one that answered.
 
-**The reversal, which is the part the pyramid rule asks for in writing.** `main.rs`, `ui.rs` and
-`views.rs` were all finished in Phase 12 and are frozen, and this fix reaches all three: the `Esc`
-arm, the browser's `Pane::Loading` arm and `HELP`, and whatever decides the browser's footer. The
+**The reversal, which is the part the pyramid rule asks for in writing.** **Two files need it, not
+three** — `ui.rs` and `views.rs` froze at Phase 12's close
+([D266](#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13)
+ruling 2), while `main.rs` is the top of the pyramid and the one file never frozen
+([docs/maps.md](docs/maps.md)). **This heading says *three top-layer files* and that count is the
+PM's own error** — caught at the docs sync, by reading the freeze table it was about to edit. The
+heading keeps its wording because the anchor is cited from four files; this sentence is the
+correction. The fix reaches all three files — the `Esc` arm and the flag refusal in `main.rs`, the
+browser's `Pane::Loading` arm and `HELP` in `ui.rs`, the footer and `escape` in `views.rs` — and only
+two of them were frozen. The
 plan is not wrong and the order is not being fixed — the boxes that built these files were correct
 and a *later* box (the `Table` fetch) is what will remove these words again. **What is being repaired
 is the box that is landing**, which CLAUDE.md's *one exception* already allows, and the freeze is
@@ -27685,3 +27693,191 @@ against a contract and not a blocker** — but `screens/widgets.md § 7`'s claim
 *still reads as itself* is not true of `…ributesclasses`, and neither cut is right. The fix is a
 screen decision — a wider sidebar, a second line, or a cut that keeps both ends — so it goes to
 [`backlog.md`](backlog.md) for a ruling and not into this close.
+
+**A third, found reviewing the screen spec this close dispatched: every sidebar mockup draws a
+per-kind count the code does not draw.** `deployments  12` and `pods  84` are in `resources.md`,
+`widgets.md` and `states.md` — eight mockups across three files — and `screens/README.md` says
+plainly *"the code has to match them"*, so the count is a specified thing nobody built. `ui.rs`'s
+`NavItem::Kind` is handed `Vec::new()` where `NavItem::Alerts` gets `tally(screen)`, under a comment
+that states the opposite of the spec without citing a decision: *"A kind row carries no badge, so its
+room is the column less its indent."* Measured on the released binary — `storage` expanded draws bare
+`csidrivers`, `csinodes`, `…ragecapacities`, no numbers. **No `§ Rules` on any of the three pages
+explains the count**, which is why it survived: there was nothing to contradict. **Not a blocker** —
+nothing a reader sees is wrong, and the missing half is a feature, which is what this close already
+refused to build for the `Table` fetch. It goes to [`backlog.md`](backlog.md) as one ruling over the
+whole page, and the mockups keep their counts until that ruling lands, because half a page carrying
+them is worse than all of it. **What it cost immediately**: the new state's spec argued *the count
+beside `jobs` is not zero here* as its way of separating *cannot list* from *empty*, and on the built
+screen that signal does not exist, so the two sentences had to be made to carry it alone.
+
+### D312 — `esc back` was an identity write, and the key that got the reader out was never on the footer (2026-09-28)
+
+**The blocker, verified by the PM rather than taken from the review.** `App::focus` is written in
+exactly two places in the product — `views.rs`'s new `None if back => self.focus = Panel::Sidebar`
+and `main.rs`'s `tab`. A kind pane can only be *entered* through
+`views::Detailing::Closed => match console.app.focus { views::Panel::Sidebar => … app.open(item) }`,
+and `App::open` never touches `focus`. So the entry state is `focus == Panel::Sidebar` always, and the
+new arm assigns what is already there. **`esc` on the unwired pane does nothing**, which is
+[D310](#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)'s
+measured symptom reproduced exactly, now under a footer that names the key. `Panel::default` is
+`Content`, and both new test helpers build `focus: Panel::Content` — **a state the router cannot
+produce for this pane** — which is why a suite of 1,610 tests went green over a no-op. Found by
+`k8s-admin`, findings 1 and 2.
+
+**The second half is worse than the first and is why the mechanism cannot be patched.** `Panel`'s own
+doc says *"what it does not do is change what anything draws … so which panel has focus is not
+visible on screen"*, and `ui::offered` does not read `app.focus`. So even a *working* handoff would
+move nothing a reader can see: same body, same sidebar, same footer still offering `esc back`. And the
+word is already spoken for — `screens/widgets.md` states the rule that `esc`'s label names what the
+press reaches (`esc clears it`, `esc dismiss`, `esc back to the list`), and in this product `esc back`
+means the thing in front of you goes away. `states.md` says on purpose that the view is not left.
+
+**The ruling: the mechanism is reversed, and the root cause was never `esc`.** `k8s-admin`'s finding 3
+is the one that settles it — **`↑`, `↓` and `⏎` already work on that pane.** `moved()` routes on
+`app.focus`, its `Panel::Sidebar` arm steps `app.nav` without consulting `screen.browser`, and
+`entered()`'s Sidebar arm calls `app.open`, so a reader can move the sidebar cursor and press `⏎` on
+`ALERTS` to go home. **The pane was never trapped; the footer withheld the two keys that get out and
+then named a third that does not.** That is the defect, and the section's stated reason for
+withholding them — *"there is no row here to move across"* — is false about the panel holding the
+keyboard, and contradicts the Alerts arm's own reasoning two arms up.
+
+So, in order of what matters:
+
+1. **The footer names `↑↓ move` and `⏎ open`.** Non-negotiable and sufficient on its own: it is what
+   stops the pane being a dead end, it is true today, and it needs no new behaviour.
+2. **`esc` leaves the view, back to Alerts**, rather than shuffling focus. That is what *back* means
+   everywhere else here, it is visible, and it answers `?`'s standing `esc back / close` promise
+   instead of letting this pane be the one screen where that row is a lie. There is no
+   *browser-with-no-kind-open* state to return to — `View::Resources(at)` carries the kind index — so
+   the view is the thing that closes.
+3. **The `back: bool` on `Offer::Nothing` and `hands_back()` are not reverted**, because the footer
+   still has to differ between this pane and Alerts' honest *still loading* — which must keep its
+   footer exactly as it is, since it resolves on its own and a reader who waits there is never wrong.
+   What changes is what the flag *draws* and what the key *does*.
+
+**The user's ruling stands and is not being reversed.** They chose *`esc` comes back and the pane says
+plainly it cannot be listed yet* (D310). The pane half is sound — `k8s-admin` checked it against
+invariant 13 and found the sentence puts the subject on the tool. The `esc` half is being implemented
+the way the word already works here instead of the way the smallest diff suggested; the PM approved
+that smaller reading, and it produced a no-op.
+
+**The lesson is the test, not the arm.** A helper that builds `App::default()` and a helper that sets
+`focus: Panel::Content` both model an unreachable entry state, and the one assertion that did exercise
+the reachable one — *idempotent from the sidebar* — asserted the no-op and read it as the property.
+**The fix's tests must enter the pane the way the router does**: `focus = Sidebar`, `⏎` through
+`entered()`, never a hand-built `App`.
+
+**The seven lesser findings, ruled.** Fixed in the same turn, none boxed: the arm's comment and its
+test justify themselves with *a filter typed on Alerts and carried into a kind*, which `App::open`'s
+own `filters = Filters::default()` makes impossible (4) — and the reachable case, a `/` filter typed
+on that pane, is a behaviour change nothing in the diff names; `screens/states.md` claims the sentence
+never wraps, and measured it wraps at 47 columns for `persistentvolumeclaims` and at 57 for
+`customresourcedefinitions` and four more built-ins (5) — the spec stops claiming one line, and the
+sentence stays, because it is the only place on screen the five kinds D311 found front-cut appear in
+full; the new flag test took the previous test's doc block, leaving the test that explains
+`--live=true` with none (6); the new 80-column mockup kept the 70-column block's 68-column header,
+which `screens-check.py` structurally cannot see (7); a sweep comment names the fourth fenced block
+where it means the second (8); two stray `println!`s (9); and F4 refuses one class more than its doc
+admits — any *flag value* starting with `-`, which for an unconstrained kubeconfig context name means
+`--context -foo` — plus it splits one situation into two sentences a dash apart (10), which takes a
+clause in the doc and not a change.
+
+**Amended the same day, by `tester`'s measurement, and the amendment reverses this entry's second
+ruling.** `k8s-admin` reasoned the arm dead; `tester` drove the binary and found **two states, not
+one**, and the arm is alive in the second:
+
+- **The entry state** — `⏎` on a sidebar kind row leaves `focus` on `Panel::Sidebar`, so `↑`, `↓` and
+  `⏎` all work and `esc` assigns what is already assigned. Measured byte-identical frames across the
+  press. This is the state every reader arrives in, and it is where the footer's `esc back` is a lie.
+- **After `tab`** — `focus` becomes `Panel::Content`, and on a non-Alerts view `moved()` answers
+  `Did::Nothing`, so **the sidebar marker freezes and no arrow moves it.** Measured: `▸ endpoints`
+  unchanged across two `Down` presses, then `esc`, then `Down` moved it. **That is the real dead end,
+  and the landed arm is the only key that opens it** — so it stays.
+
+**So ruling 2 above is wrong and is replaced: `esc` does not simply leave the view, and it does not
+simply shuffle focus — it takes one step back, whichever step the reader is on.** Focus on
+`Panel::Content` hands it to the sidebar (the measured need); focus already on the sidebar leaves the
+view to Alerts (the visible *back* the word promises, and the answer to `?`'s standing
+`esc back / close` row). One arm, two cases, an effect a reader can see in both, and the same ladder
+`App::escape` already walks for a typing buffer, then a modal, then a detail slot. **Ruling 1 stands
+unchanged and is still the part that matters**: the footer names `↑↓ move` and `⏎ open`, which are
+true in the state every reader arrives in.
+
+**And `screens/states.md`'s paragraph has the trap backwards** — it argues the reader *"is stuck until
+they happen to remember that `tab` already moves focus back"*, when `tab` is what creates the freeze
+and they were never taken off the sidebar. It is rewritten, not patched. **One thing no fix reaches:**
+focus is drawn with no mark anywhere (`signal-guard` has `FOCUS` as `Signal::Reverse`, in no mockup),
+so even the working handoff shows nothing until the next arrow — which is why `esc` must have a
+*visible* effect in the entry state rather than a correct invisible one.
+
+**The mutation gate exits 2 with three survivors, and that red is pre-ruled rather than new.**
+`replace console -> Option<String> with None / Some("") / Some("xyzzy")`, measured twice on the tree
+that will be committed — and `backlog.md` already carries them, with the prediction spelled out:
+*"Every future box adding a field there trips the same three."* This box added `back: false` to that
+`Console { … }` literal, which is exactly the shape predicted. They are a recorded coverage hole
+(`console()` has one call site behind `at_a_keyboard`; a `tester` drove it over a pty and proved
+`-> None` would print nothing and exit 0 undetected) whose fix needs `libc::openpty`/`forkpty` against
+invariant 10's *"`raise` and three signal constants and nothing else"*
+([D276](#d276--the-thirteenth-crate-was-already-compiled-and-the-terminal-handover-is-one-family-2026-09-24)).
+**Nothing new survived**, and every mutant of this box's own change was caught: `escape`'s `match guard
+back` both ways, `hands_back -> false/true` both, `unwired`/`dimly`/`empty`/`browser -> ()` all,
+`mistyped -> None/Some(…)` all. **The dev's 44/41/0 does not reproduce and is not the number** — it
+was measured on a copy with a test row deleted, which the dev disclosed.
+
+**Three more of `tester`'s findings, ruled.** The footer literal
+`X switch cluster  esc back  ? all keys  q quit` is drawn by the code and by **no** screen file, while
+the other three are pinned by `states.md` — the mockup is owed, because a drawn literal no page holds
+is how `screens/` and the code drift. The sweep comment naming the *fourth* fenced block where it
+means the second is fixed in prose. And the sidebar's **two identical `events` rows** — core `v1` and
+`events.k8s.io`, deliberate in `k8s::browsable` — now both draw *not built yet — k8rs cannot list
+events* with no group shown, so a reader cannot tell them apart: that is reader-visible for the first
+time and goes to [`backlog.md`](backlog.md), not into this close.
+
+**One defect in this round was the PM's own and reached a gate.** `test.md` shipped an unfilled `%s`
+where a `D296` link belonged, which `check-docs.py` caught as `missing file -> %s` and reddened
+`just check` in `tester`'s run. A markdown edit made while an agent held the gate, exactly the cost
+[CLAUDE.md § The one hard rule of concurrency](CLAUDE.md#the-one-hard-rule-of-concurrency) warns
+of. Fixed; the lesson is that the PM's own files go through the same verification as the agents', and
+a formatting placeholder is a broken link that no anchor check can name helpfully.
+
+**Amended a second time, and the ladder collapses to one rung.** The operator review took the
+amendment's own closing rule — *`esc` must have a visible effect rather than a correct invisible
+one* — and pointed it at the rung the amendment had just added. `Panel::Content => focus = Sidebar`
+draws a **byte-identical frame**: the body is unchanged, the sidebar has no focus mark to move, and
+`offered` does not read `focus`, so the footer still offers `esc back`. A reader whose arrows just
+froze presses the key the footer names, sees nothing, and reaches exactly F1's original conclusion.
+
+**And the trapped state is worse than this entry said.** `entered()`'s `Panel::Content` arm routes
+through `selected()`, whose first line returns `None` when the view is not Alerts — so **`⏎ open` is
+dead there too**, not only the arrows. All three keys the new literal adds are dead or invisible in
+that one state.
+
+**What settles it is that the rung has no future either.** The arm runs only while
+`screen.browser == Pane::Loading` with `back: true` — a pane with zero rows, where `Panel::Content`
+is focus on nothing. When the `Table` fetch lands, `back` is `false` and the arm never runs, so
+*hand focus back to a pane that has rows* is never this arm's job. **So it collapses:**
+`None if back => self.open(NavItem::Alerts)`, one case, one press, visible from both states, and the
+freeze is moot because the reader has left the pane. Smaller than what landed, which is the right
+direction for a fix that had already grown a mechanism.
+
+**The footer stays dishonest in the trapped state and that is accepted, for a structural reason
+rather than a cost.** `Offer` is deliberately a fact about the pane's content and not about what the
+reader navigated to ([D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+ruling 5), and **no footer in this product has ever described the keyboard** — `app.focus` appears
+nowhere in `ui.rs`. Conditioning this one pane's footer on focus would fix a third of one pane and
+leave the worse pre-existing instance standing: **on Alerts today, with focus on the sidebar, `s`,
+`r` and `ctrl-d` aim at the card under `app.content` while the cursor the reader is moving is on the
+sidebar** — a *mutating* key under a footer that names it live. That is the class, it is bigger than
+this box, and what closes it is the focus mark this entry already noticed is drawn nowhere
+(`theme::FOCUS` is `Signal::Reverse`; `screens/` never mentions it). It goes to
+[`backlog.md`](backlog.md) as one product-wide screen ruling, with the Alerts mutating-key instance
+named so nobody files it as cosmetic.
+
+**And a third *only* claim in this box did not survive checking.** *"`esc` is the only key that opens
+that trap"* is false: `Panel::next` is a two-way toggle and `tab` is its only caller, so a second
+`tab` restores the arrows in one press. The true sentence is *the only key **on the footer***, and it
+is corrected in the three places that carry it. The first two were *"this arm is the only place
+`back` is set"* (true, checked) and *"a filter typed on Alerts and carried into a kind"*
+(impossible). **Three *only* / *never* sentences in one box, two of them wrong** — the pattern is the
+finding, and it is the same shape as a count taken from a proxy: an exhaustiveness claim is evidence
+and needs deriving, not asserting.

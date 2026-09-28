@@ -2008,7 +2008,11 @@ fn a_cluster_flag_a_verb_or_a_file_never_opens_a_console() {
         (vec!["pod.json"], false),
         (vec!["--analysis", "pod.json"], false),
         (vec!["--analysis"], false),
-        (vec!["-x", "file.json"], false),
+        // **`-x file.json` used to be a row here and is not one since NOTES § D311**: `mistyped`
+        // now names every dashed word this build does not have, so the line no longer reaches the
+        // file door at all and the last assertion below — *nothing on these lines is refused on the
+        // way* — is exactly what stopped being true of it.
+        // `a_one_dash_word_gets_one_answer_whatever_else_is_on_the_line` is where it went.
     ] {
         let typed = line(&words);
         assert!(
@@ -2257,9 +2261,14 @@ fn a_path_beside_a_console_flag_is_refused_rather_than_read_with_the_flag_droppe
         "{problem}"
     );
 
-    // **`k8rs -x file.json` with no console flag on it is still a path** — [`NAMESPACE_SHORT`]'s
-    // doc promises it, and the flags box does not take it away.
-    assert_eq!(mistyped(&line(&["-x", "file.json"])), None);
+    // **`k8rs -x file.json` is a flag k8rs does not have and is told so, whatever else is on the
+    // line** (NOTES § D311): the same sentence the console line above gets, because one word may
+    // not get two answers depending on which other flags happen to be there.
+    let stray = mistyped(&line(&["-x", "file.json"])).expect("-x is not a flag k8rs has");
+    assert!(
+        stray.starts_with("k8rs: -x is not a flag k8rs has"),
+        "{stray}"
+    );
     assert_eq!(mistyped(&line(&["pod.json"])), None);
     assert_eq!(mistyped(&line(&["--analysis", "pod.json"])), None);
     // A console line with no path on it is not refused either.
@@ -2528,19 +2537,94 @@ fn a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error() {
         vec!["--once"],
         vec!["--once", "--context", "kind-k8rs"],
         vec!["--once", "--context=kind-k8rs"],
-        // One dash is not the shape this refuses: it is a path like any other, and *no such
-        // file* is the true thing to say about it.
-        vec!["-live"],
         vec!["pod.json"],
     ] {
         assert_eq!(mistyped(&line(&good)), None, "{good:?}");
     }
+    // **One dash is the shape this refuses too, since NOTES § D311** — it used to fall through as a
+    // path and come back *no such file*, which is a sentence about a file nobody named.
+    let one_dash = mistyped(&line(&["-live"])).expect("-live is not a flag k8rs has");
+    assert!(
+        one_dash.starts_with("k8rs: -live is not a flag k8rs has"),
+        "{one_dash}"
+    );
+    // **[`run`] itself is unchanged and is not the gate**: handed the word directly it still tries
+    // to open it, which is why the refusal has to happen above it and does.
     assert!(
         run(&line(&["-live"])).is_err_and(|problem| problem.contains("No such file")),
-        "a one-dash word stopped being read as a path"
+        "the file reader stopped being what `mistyped` protects the reader from"
     );
     // The flag this build does have still works, and a file beside it is still read.
     assert!(run(&[ANALYSIS.to_string(), fixture("healthy.json")]).is_ok());
+}
+
+/// **One word, one answer, whichever door the line takes** (NOTES § D311). `k8rs -h` came back
+/// `k8rs: -h: No such file or directory (os error 2)` — a missing file, for a word nobody meant as
+/// a path — while `k8rs --once -h` came back `k8rs: -h is not a flag k8rs has`, because the
+/// unknown-flag check tested `--` and only the walk behind `cluster_reader` saw a single dash.
+/// Measured on the released binary, five spellings.
+///
+/// **`-h` is still not a flag this build has**, and that is not what this test is about
+/// (`backlog.md`'s own `--help`/`--version` ruling, which is invariant 10's threshold and not this
+/// turn's): what it is about is the *sentence*, which now names the mistake instead of a file.
+///
+/// **The three shapes that must not be swallowed by it**, each with its own answer: `-n <name>` and
+/// `-n=<name>` are the two spellings [`NAMESPACE_SHORT`] accepts and stay accepted; `-npayments`
+/// keeps its own longer sentence, because its own check is above this one and a reader who wrote
+/// the namespace onto the flag needs to be told how to write it and not that `-npayments` is
+/// unknown.
+#[test]
+fn a_one_dash_word_gets_one_answer_whatever_else_is_on_the_line() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    // **Every mode flag that used to change the answer**, and the bare line that did not have one.
+    for typed in ["-h", "-x", "-v", "-", "-3", "-o"] {
+        for ahead in [
+            vec![],
+            vec!["--once"],
+            vec!["--once", "--analysis"],
+            vec!["--read-only"],
+            vec!["--logs", "--object", "default/web"],
+        ] {
+            let mut words = ahead.clone();
+            words.push(typed);
+            let problem = mistyped(&line(&words)).unwrap_or_else(|| {
+                panic!("{words:?} was read as something other than a flag k8rs does not have")
+            });
+            assert!(
+                problem.starts_with(&format!("k8rs: {typed} is not a flag k8rs has")),
+                "{words:?} → {problem}"
+            );
+            assert!(
+                !problem.contains("No such file"),
+                "a flag was answered as a missing file: {words:?} → {problem}"
+            );
+            assert!(problem.contains("usage: k8rs "), "{words:?} → {problem}");
+        }
+    }
+
+    // **The two real spellings stay real**, on the file door as well as the cluster one — the check
+    // that refuses every other dashed word runs on every line, so `known` has to carry both.
+    for accepted in [vec!["-n", "payments"], vec!["-n=payments"]] {
+        assert_eq!(mistyped(&line(&accepted)), None, "{accepted:?}");
+        let mut with_mode = vec!["--once"];
+        with_mode.extend(accepted.iter().copied());
+        assert_eq!(mistyped(&line(&with_mode)), None, "{with_mode:?}");
+    }
+
+    // **`-npayments` keeps its own sentence**, which is a different fact about a different mistake.
+    for words in [vec!["-npayments"], vec!["--once", "-npayments"]] {
+        let problem = mistyped(&line(&words)).unwrap_or_else(|| panic!("{words:?} was accepted"));
+        assert!(
+            problem.contains("has to be separate from -n"),
+            "{words:?} → {problem}"
+        );
+        assert!(
+            !problem.contains("is not a flag k8rs has"),
+            "the shorter sentence swallowed the one that says how to write it: {words:?} → \
+             {problem}"
+        );
+    }
 }
 
 /// **A runtime that would not start names the reason the operating system gave**, exactly as a
@@ -6785,10 +6869,18 @@ fn the_flags_this_build_accepts_and_the_ones_it_now_names_instead_of_dropping() 
         );
     }
 
-    // **The file-driven path is untouched.** With no cluster flag there is no ambiguity, and
-    // `k8rs -x file.json` stays a path exactly as `NAMESPACE_SHORT`'s doc promises.
-    assert_eq!(mistyped(&args(&["-x", "pod.json"])), None);
-    assert_eq!(mistyped(&args(&["-o", "pod.json"])), None);
+    // **The file-driven path gets the same answer as the cluster ones, and that is the fix**
+    // (NOTES § D311): a one-dash word this build does not have is named on every line, so `k8rs -x
+    // pod.json` is a usage error rather than an attempt to open a file called `-x`. What the two
+    // doors used to disagree about is
+    // `a_one_dash_word_gets_one_answer_whatever_else_is_on_the_line`.
+    for stray in [vec!["-x", "pod.json"], vec!["-o", "pod.json"]] {
+        let problem = mistyped(&args(&stray)).unwrap_or_else(|| panic!("{stray:?} was accepted"));
+        assert!(
+            problem.starts_with(&format!("k8rs: {} is not a flag k8rs has", stray[0])),
+            "{stray:?} → {problem}"
+        );
+    }
 }
 
 /// **A `--once` run that reached the cluster and printed a report ends at exit `0` — whether or
@@ -14371,7 +14463,10 @@ fn bare_console<'a>() -> Console<'a> {
         // **What the *last frame* offered, which for a console that has drawn none is nothing** —
         // the same value `console()` starts with, so a test that presses a mutating key has to draw
         // a frame first, exactly as a reader does.
-        offer: views::Offer::Nothing { switch: false },
+        offer: views::Offer::Nothing {
+            switch: false,
+            back: false,
+        },
         carried: None,
         // **No client, so no frame of these tests puts a `SelfSubjectRulesReview` on a wire** — and
         // no answer either, so every key draws unmarked, which is the fail-open state a run whose
@@ -18990,6 +19085,194 @@ fn a_crafted_name_the_wiring_hands_a_dialog_reaches_no_cell() {
         // report should be able to see rather than take on the assertions above.
         println!("{what}:\n{frame}");
     }
+}
+
+/// **The sidebar cursor walked to one row and `⏎` pressed on it, each press over a frame that was
+/// actually drawn** — the only way to reach a state the router can really produce
+/// (NOTES § D312: *"the fix's tests must enter the pane the way the router does"*).
+///
+/// **A frame before every press**, because the value a key answers is the value the last frame
+/// offered ([`Console::offer`]) — the same reason
+/// [`a_mutating_key_is_refused_wherever_the_drawn_footer_withholds_it`] draws first.
+fn walked_to(console: &mut Console<'_>, store: &k8s::Store, want: &views::NavItem) {
+    let rows = views::sidebar(discovered(console), PANES.len(), console.app.expanded);
+    let picks = views::selectable(&rows, |item| item.selectable());
+    let keys: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+    let at = picks
+        .iter()
+        .position(|nth| rows[*nth] == *want)
+        .unwrap_or_else(|| panic!("the sidebar draws no {want:?} to walk to"));
+    let from = console
+        .app
+        .nav
+        .selected(&keys)
+        .expect("a cursor on the sidebar");
+    assert!(
+        at >= from,
+        "{want:?} is above the cursor and `↓` cannot reach it"
+    );
+    for _ in from..at {
+        let _ = framed(console, store);
+        let _ = keyed(
+            console,
+            key(ratatui::crossterm::event::KeyCode::Down),
+            store,
+        );
+    }
+    let _ = framed(console, store);
+    let _ = keyed(
+        console,
+        key(ratatui::crossterm::event::KeyCode::Enter),
+        store,
+    );
+}
+
+/// **The unwired kind pane is not a dead end, and `esc` steps back from wherever the reader is** —
+/// driven through the router from a bare console, the way a reader reaches it
+/// (NOTES § D310, § D312 and its amendment; `screens/states.md` § A kind the browser cannot list
+/// yet).
+///
+/// **Every press here goes through [`keyed`] over a frame [`framed`] drew**, so the footer under
+/// test and the key under test are the same value — and the state the arm is exercised in is one
+/// the router produced rather than one a test constructed. A hand-built `App` with
+/// `focus: Panel::Content` is what made a 1,610-test suite go green over an identity write: the
+/// router cannot enter this pane in that state.
+///
+/// **Four claims, in the order a reader meets them:**
+///
+/// 1. **The entry state is `Panel::Sidebar`** — `⏎` opened the pane and never touched `focus`. This
+///    is the fact the whole of D312 turns on and nothing asserted it.
+/// 2. **`↑↓` and `⏎` work there**, which is why the footer names them (D312 ruling 1): the cursor
+///    moves over the sidebar's own rows and `⏎` on `ALERTS` goes home.
+/// 3. **`esc` from that state closes the view to Alerts** — the visible *back*, since focus is
+///    drawn with no mark anywhere and a correct handoff would show nothing.
+/// 4. **`tab` freezes the sidebar marker and `esc` unfreezes it** — the one real trap, measured:
+///    `↓` answers `Did::Nothing` off Alerts, so the cursor does not move until `esc` hands focus
+///    back and the next `↓` is pressed.
+#[test]
+fn the_unwired_kind_pane_is_not_a_dead_end_and_esc_steps_back_from_where_it_is() {
+    use ratatui::crossterm::event::KeyCode;
+    let store = a_cluster_with_cards();
+    let listed = browsable("apps", "Deployment", "deployments", true);
+    let group = views::Group::of(&listed);
+    let opened = |console: &mut Console<'_>, store: &k8s::Store| {
+        let _ = framed(console, store);
+        let _ = keyed(console, key(KeyCode::Tab), store);
+        walked_to(console, store, &views::NavItem::Group(group));
+        walked_to(console, store, &views::NavItem::Kind(0));
+    };
+    let cursor = |console: &Console<'_>| {
+        let rows = views::sidebar(discovered(console), PANES.len(), console.app.expanded);
+        let picks = views::selectable(&rows, |item| item.selectable());
+        let keys: Vec<Option<&str>> = picks.iter().map(|_| None).collect();
+        console
+            .app
+            .nav
+            .selected(&keys)
+            .expect("a cursor on the sidebar")
+    };
+
+    // 1. Entry — and the footer the frame drew is the pane's own, which is what makes 2 and 3 about
+    //    keys a reader was actually offered.
+    let mut console = bare_console();
+    console.kinds = vec![listed.clone()];
+    opened(&mut console, &store);
+    assert_eq!(
+        console.app.view,
+        views::View::Resources(0),
+        "the walk did not open a kind"
+    );
+    assert_eq!(
+        console.app.focus,
+        views::Panel::Sidebar,
+        "the router left focus somewhere the pane cannot be entered from, so D312's premise is gone"
+    );
+    let _ = framed(&mut console, &store);
+    assert_eq!(
+        console.offer,
+        views::Offer::Nothing {
+            switch: false,
+            back: true
+        },
+        "the frame did not offer the unwired pane's own footer"
+    );
+
+    // 2. `↑↓` and `⏎` are live in that state — the half the first draft withheld.
+    let was = cursor(&console);
+    assert!(matches!(
+        keyed(&mut console, key(KeyCode::Down), &store),
+        Did::Changed
+    ));
+    assert_eq!(
+        cursor(&console),
+        was + 1,
+        "`↓` moved nothing on the pane whose footer now names it"
+    );
+    let _ = framed(&mut console, &store);
+    let _ = keyed(&mut console, key(KeyCode::Up), &store);
+    assert_eq!(cursor(&console), was, "`↑` moved nothing either");
+
+    // 3. `esc` from the entry state closes the view. **Alerts, not a kindless browser.**
+    let _ = framed(&mut console, &store);
+    assert!(matches!(
+        keyed(&mut console, key(KeyCode::Esc), &store),
+        Did::Changed
+    ));
+    assert_eq!(
+        console.app.view,
+        views::View::Alerts,
+        "`esc back` from the entry state changed nothing a reader can see — the identity write"
+    );
+
+    // 4. `tab` is what traps, and `esc` is the only key that opens it.
+    let mut trapped = bare_console();
+    trapped.kinds = vec![listed];
+    opened(&mut trapped, &store);
+    let _ = framed(&mut trapped, &store);
+    let _ = keyed(&mut trapped, key(KeyCode::Tab), &store);
+    assert_eq!(
+        trapped.app.focus,
+        views::Panel::Content,
+        "`tab` did not move focus off the sidebar"
+    );
+    let frozen = cursor(&trapped);
+    for _ in 0..2 {
+        let _ = framed(&mut trapped, &store);
+        assert!(
+            matches!(
+                keyed(&mut trapped, key(KeyCode::Down), &store),
+                Did::Nothing
+            ),
+            "`↓` over the content pane of a kind with no rows answered something"
+        );
+    }
+    assert_eq!(
+        cursor(&trapped),
+        frozen,
+        "the trap this arm exists for is gone, so the arm has nothing to open"
+    );
+    let _ = framed(&mut trapped, &store);
+    assert!(matches!(
+        keyed(&mut trapped, key(KeyCode::Esc), &store),
+        Did::Changed
+    ));
+    assert_eq!(
+        trapped.app.focus,
+        views::Panel::Sidebar,
+        "`esc` did not hand focus back out of the trap"
+    );
+    assert_eq!(
+        trapped.app.view,
+        views::View::Resources(0),
+        "the press spent both steps at once and took the pane away too"
+    );
+    let _ = framed(&mut trapped, &store);
+    let _ = keyed(&mut trapped, key(KeyCode::Down), &store);
+    assert_eq!(
+        cursor(&trapped),
+        frozen + 1,
+        "the marker stayed frozen after `esc`, so nothing was handed back"
+    );
 }
 
 /// **A mutating key is refused wherever the footer that was drawn does not offer it** — invariant

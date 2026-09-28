@@ -2337,6 +2337,10 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     let now = now();
     let mut seen: Vec<(&str, usize)> = Vec::new();
     let live_cards = Pane::Ready(vec![oom()]);
+    // The audit refusal `ops::audit_log` returns, needed before § *The audit log could not be
+    // opened*'s own frame because a kind pane stacks the same banner (§ A kind the browser cannot
+    // list yet, third bullet from the end).
+    let unopened_log = dead_log();
 
     // § Still loading — nothing has arrived, so there is nothing to move across, open or narrow.
     // The count in the sentence is the store's; `reading the cluster…` is `ui::note`'s own.
@@ -2375,6 +2379,46 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     let none = Pane::Ready(crate::k8s::Table::default());
     against(section, 0, &opened(), &browsing(&none, &kinds, &now));
     seen.push((section, 0));
+
+    // § A kind the browser cannot list yet — the pane whose `Table` fetch no box has written, so
+    // the sentence is about this build and not about the cluster, and the only footer on this page
+    // that names `esc back` (NOTES § D310, § D312). **The kind is read out of each mockup's own
+    // title row**, as § An empty kind in the browser's is, so `ui::unwired` composes the sentence
+    // from the file's word and it is compared with the file's sentence.
+    //
+    // **Six frames, and the section draws seven fenced blocks.** The one [`mockups`] does not index
+    // is the **second** — the cropped namespace-scoped title, which carries no footer — so the six
+    // here are that section's blocks 0, 1, 3, 4, 5 and 6, and this comment named the fourth for the
+    // second until `tester` caught it (D312 finding 8).
+    //
+    // **What each of the six is fed, and why the three that need something are the three that get
+    // it**: mockup 1 is the expired login, whose `X switch cluster` is the one footer literal on
+    // this pane that no *other* screen file pins (D312's amendment), so this is where the page
+    // holds it; mockup 2 stacks the audit banner, the one caveat that genuinely sits over a kind
+    // pane, byte for byte the sentence [`dead_log`] hands over; the other four are the pane alone.
+    //
+    // **Mockups 3 and 5 are the two the sentence wraps on** (D312 finding 5) — but
+    // [`said_above`] joins consecutive rows with a single space, so what this sweep proves for them
+    // is the sentence and the footer and *not where the break lands*. The break itself is
+    // [`the_unwired_sentence_wraps_at_the_pane_and_is_never_shortened`]'s, at both pane widths.
+    let section = "## A kind the browser cannot list yet";
+    for nth in 0..6 {
+        let titled = said_above(&mockups(section)[nth].pane);
+        let named = titled
+            .iter()
+            .rev()
+            .nth(1)
+            .expect("the mockup draws a title row above the sentence");
+        let kinds = [browsable(named, true)];
+        let mut unlisted = browsing(&UNOPENED, &kinds, &now);
+        match nth {
+            1 => unlisted.link = Link::Expired,
+            2 => unlisted.writes = Writes::Unaudited(&unopened_log),
+            _ => {}
+        }
+        against(section, nth, &opened(), &unlisted);
+        seen.push((section, nth));
+    }
 
     // § The filter hides every row — the third reason a list can be empty, and the only state on
     // this page whose sentence is about what the *reader* typed rather than about the cluster.
@@ -2689,8 +2733,8 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // that silently stopped parsing would make every loop above it vacuous and this whole sweep a
     // green that proves nothing.
     assert_eq!(
-        frames, 32,
-        "screens/states.md draws {frames} screens with a footer, not the 32 this sweep was \
+        frames, 38,
+        "screens/states.md draws {frames} screens with a footer, not the 38 this sweep was \
          written against — a frame was added or removed and this test has to say so"
     );
 }
@@ -4874,21 +4918,34 @@ fn the_name_gives_way_and_leaves_a_blank_column_before_the_next_cell() {
     assert_eq!(at[4] - at[3], width("3 (34h ago)") + GAP, "{header:?}");
 }
 
-/// **Still loading · nothing there · refused** — the same three the Alerts pane has, and none of
-/// them says `403` or the word RBAC.
+/// **Nothing wired yet · nothing there · refused** — the browser's three answers, and none of them
+/// says `403` or the word RBAC.
+///
+/// **The first is no longer the Alerts pane's** (NOTES § D310): a `Loading` browser pane is a fetch
+/// no box has written, so it says so instead of claiming something is reading — which is what the
+/// two panes used to have in common and what this test used to assert.
+/// [`only_the_alerts_pane_is_still_reading_and_the_browser_says_what_it_cannot_do`] is the crossing
+/// of the two sentences; what this one keeps is that the three answers stay three.
 ///
 /// **An empty list of deployments is not `nothing is broken`**: that sentence is Alerts' claim
 /// about the whole cluster, and a kind with no objects in it has no severity at all. **A refusal
 /// never reaches the empty sentence either** — *we were not allowed to look* is not *there is
 /// nothing*.
 #[test]
-fn the_browser_has_the_same_three_answers_the_alerts_pane_has() {
+fn the_browser_has_three_answers_and_the_unanswered_one_is_its_own() {
     let now = now();
     let kinds = [browsable("deployments", true)];
 
     let loading = Pane::Loading;
     let still = render(&opened(), &browsing(&loading, &kinds, &now));
-    assert!(holds(&still, "reading the cluster…"));
+    assert!(holds(
+        &still,
+        "not built yet — k8rs cannot list deployments"
+    ));
+    assert!(
+        !holds(&still, "reading the cluster…"),
+        "a fetch nothing issues promised that something is reading"
+    );
     assert!(!holds(&still, "no deployments"));
 
     let none = Pane::Ready(crate::k8s::Table::default());
@@ -15092,12 +15149,193 @@ fn the_unreachable_zero_match_sentence_claims_nothing_nobody_did() {
     );
 }
 
+/// **The browser's unanswered pane says the fetch is not built and the Alerts pane still says it is
+/// reading** (NOTES § D310, `screens/states.md` § A kind the browser cannot list yet, § Still
+/// loading) — one `Pane::Loading` apiece, two sentences, and neither may drift into the other's
+/// pane.
+///
+/// **This is the crossing the states sweep cannot make.** That sweep compares each pane with its
+/// own mockup and would stay green if the browser's sentence appeared on Alerts' pane as well: the
+/// two are read out of two sections and never against each other. Here both are drawn from one
+/// value and each is asserted to carry its own words *and not the other's*.
+///
+/// **[`WAITING`] still has a live reader**, which is the half a fix that reached too far would take
+/// away: `note` draws it for the Alerts pane and for a detail tab whose read has not answered, and
+/// only the browser's arm stopped calling it.
+#[test]
+fn only_the_alerts_pane_is_still_reading_and_the_browser_says_what_it_cannot_do() {
+    let now = now();
+    let kinds = [browsable("jobs", true)];
+    let unlisted = render(&opened(), &browsing(&UNOPENED, &kinds, &now));
+    assert!(
+        holds(&unlisted, "not built yet — k8rs cannot list jobs"),
+        "the browser's pane does not say what it cannot do:\n{}",
+        rows(&unlisted).join("\n")
+    );
+    assert!(
+        !holds(&unlisted, WAITING),
+        "the browser's pane still promises that something is reading:\n{}",
+        rows(&unlisted).join("\n")
+    );
+
+    let loading: Pane<Vec<Card>> = Pane::Loading;
+    let reading = render(&app(), &screen(&loading, &now));
+    assert!(
+        holds(&reading, WAITING),
+        "the Alerts pane stopped saying it is reading, and its read is real:\n{}",
+        rows(&reading).join("\n")
+    );
+    assert!(
+        !holds(&reading, "not built yet"),
+        "the browser's sentence reached a pane whose fetch does run:\n{}",
+        rows(&reading).join("\n")
+    );
+
+    // **A kind the sidebar no longer has is [`empty`]'s third sentence and not a sentence with no
+    // kind in it** — the view's index outlived the discovery list it points into, which is a fact
+    // about the list and not about what is wired.
+    let stale = render(&opened(), &browsing(&UNOPENED, &[], &now));
+    assert!(
+        holds(&stale, "no longer in the list — pick another kind"),
+        "a stale index drew the unwired sentence with no kind in it:\n{}",
+        rows(&stale).join("\n")
+    );
+    assert!(
+        !holds(&stale, "not built yet"),
+        "a stale index claimed something about what is built:\n{}",
+        rows(&stale).join("\n")
+    );
+}
+
+/// **The sentence wraps at the pane's own width and is never shortened to fit**
+/// (`screens/states.md` § A kind the browser cannot list yet's own two wrapped mockups,
+/// NOTES § D312 finding 5, which measured the first draft's *"never wraps"* false).
+///
+/// **The sweep cannot make this claim, which is why it is here.** [`against`] compares
+/// [`said_above`]'s paragraphs, and that helper joins consecutive rows with a single space — so a
+/// sentence drawn on one row and a sentence drawn on two read identically to it. What is asserted
+/// here is the row count on the drawn buffer.
+///
+/// **Only at widths the renderer will actually draw, and the page's 47-column pane is not one.**
+/// Below `MIN_WIDTH`×`MIN_HEIGHT` [`too_small`]'s screen replaces the frame entirely, so the
+/// 70-column page that section draws `persistentvolumeclaims` wrapped on is a page-drawing
+/// convention and nothing a run can reach — which that mockup's own bullet already says in as many
+/// words (*"drawn here rather than asserted, and illustrative only"*). The floor's 57-column pane
+/// is the narrowest a reader can have, and it is where the real wrap starts.
+///
+/// **Both directions, and the axis is the pane and not the string**: `customresourcedefinitions` is
+/// 58 columns whole, so it wraps at the floor's 57 and fits on one row at 120, where the pane is
+/// 97. A test that only ever wrapped would pass a renderer that wrapped everything.
+#[test]
+fn the_unwired_sentence_wraps_at_the_pane_and_is_never_shortened() {
+    let now = now();
+    let fixed = "not built yet — k8rs cannot list ";
+    // **The pane is the frame less the 20-column sidebar and the three border columns**
+    // (`screens/widgets.md` § 1, counted off this page's own two frame widths: 80 → 57, 70 → 47).
+    for (columns, room) in [(MIN_WIDTH, 57_usize), (120, 97)] {
+        for plural in [
+            "jobs",
+            "customresourcedefinitions",
+            "validatingadmissionpolicybindings",
+        ] {
+            let whole = fixed.chars().count() + plural.chars().count();
+            let wanted = if whole > room { 2 } else { 1 };
+            let kinds = [browsable(plural, true)];
+            let drawn = render_at(
+                columns,
+                MIN_HEIGHT,
+                &opened(),
+                &browsing(&UNOPENED, &kinds, &now),
+            );
+            let body: Vec<String> = rows(&drawn)
+                .iter()
+                .map(|row| pane(row).trim_end_matches('│').trim().to_owned())
+                .collect();
+            println!(
+                "{columns} columns / {plural} ({whole} columns):\n{}",
+                rows(&drawn).join("\n")
+            );
+            // **The title row is the canary** — it carries the plural too, and without it a dump
+            // that drew nothing at all would satisfy every count below.
+            assert!(
+                body.iter().any(|row| row == plural),
+                "{columns}/{plural}: no title row, so this dump proves nothing"
+            );
+            // **The sentence is the run of non-blank rows that starts on `not built yet`**, which
+            // is how a wrap shows up: one row, or two with the break at a word boundary.
+            let said: Vec<&String> = body
+                .iter()
+                .skip_while(|row| !row.starts_with("not built yet"))
+                .take_while(|row| !row.is_empty())
+                .collect();
+            assert_eq!(
+                said.len(),
+                wanted,
+                "{columns}/{plural}: the sentence took {} rows, not {wanted}",
+                said.len()
+            );
+            // **Nothing is shortened and nothing is marked** — [`CUT`] is the mark for a string
+            // that had to give way, and this one never does: the plural arrives whole at both
+            // widths.
+            let joined = said
+                .iter()
+                .map(|row| row.as_str())
+                .collect::<Vec<&str>>()
+                .join(" ");
+            assert_eq!(
+                joined,
+                format!("{fixed}{plural}"),
+                "{columns}/{plural}: the sentence was shortened, marked or broken mid-word"
+            );
+            assert!(
+                !joined.contains(CUT),
+                "{columns}/{plural}: {joined:?} carries a cut mark"
+            );
+        }
+    }
+}
+
+/// **`esc back` is offered by the browser's unanswered pane and by nothing else that answers
+/// [`Offer::Nothing`]** (NOTES § D310) — the flag, read off [`offered`] rather than off the footer,
+/// because this is the one place it is set and § Still loading's identical shape must not gain it.
+///
+/// **The `X` promotion is crossed with it**, since the two are decided by different things: the
+/// link's own state against the pane's. An expired login over a kind that will never answer draws
+/// both words.
+#[test]
+fn only_the_browsers_unanswered_pane_offers_a_way_back() {
+    let now = now();
+    let kinds = [browsable("jobs", true)];
+    let cards: Pane<Vec<Card>> = Pane::Loading;
+    for (link, switch) in [(Link::Live, false), (Link::Expired, true)] {
+        let mut browser = browsing(&UNOPENED, &kinds, &now);
+        browser.link = link;
+        assert_eq!(
+            offered(&opened(), &browser),
+            crate::views::Offer::Nothing { switch, back: true },
+            "the browser's unanswered pane, {link:?}"
+        );
+
+        let mut alerts = screen(&cards, &now);
+        alerts.link = link;
+        assert_eq!(
+            offered(&app(), &alerts),
+            crate::views::Offer::Nothing {
+                switch,
+                back: false
+            },
+            "§ Still loading gained a way out of a pane that resolves on its own, {link:?}"
+        );
+    }
+}
+
 /// `screens/widgets.md` § A committed filter is drawn at rest, too — **the line says a list was
 /// narrowed, so it is drawn only where there is a list.**
 ///
 /// A filter set while the first LIST is still in flight drew `filter: "web"   esc clears it` over
-/// *reading the cluster…* — a claim about rows that had not arrived, under a footer that names no
-/// `esc` because [`Offer::Nothing`] is what that pane answers (`tester`, 2026-09-18).
+/// the browser's own pane — a claim about rows that had not arrived, over a footer whose `esc` is
+/// about something else entirely: [`Offer::Nothing`] is what that pane answers, and there that line
+/// reads `esc back` (`tester`, 2026-09-18; NOTES § D310).
 #[test]
 fn the_filter_line_is_not_drawn_over_a_pane_with_no_rows_to_have_narrowed() {
     let now = now();
