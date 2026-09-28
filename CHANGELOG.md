@@ -271,6 +271,7 @@
 - *(docs)* Close phase 12, and carry phase 11's unfinished close into it ([fe5390d](https://github.com/murat-akpinar/k8rs/commit/fe5390d0833bf59474ea775de2d8e97aea8e4062)) — Phase 11's close stopped half-way on 2026-09-13 and its head note listed seven owed items that nobody was routed to for five sessions and four phase closes. Five of them have no subject left: the six-blocker commit touched no Rust, and all eight screen files it did touch were rewritten during Phase 12, each by a box with its own designer and operator rounds. The remaining three are this close's own steps, and one PR carries both phases because there has only ever been one branch.
 - *(docs)* Record what phase 12 closed with, and what it paid for ([76d9cab](https://github.com/murat-akpinar/k8rs/commit/76d9cab9b1713f725fcacd440c190e93f033261a))
 - *(docs)* Put security-guard on the dev's gate, and teach the scope counter to see a digit ([4de661c](https://github.com/murat-akpinar/k8rs/commit/4de661c88ceda19fee865a2f48e34d3d78c6bce9)) — Two rules, both paid for by this box.
+- *(screens)* Draw the manifest bare, and name where the outcome words live ([dcecf4a](https://github.com/murat-akpinar/k8rs/commit/dcecf4a4742c87719cd3903c29f23984dade6e15)) — The gap rule illustrated itself with `not allowed`, a word nothing implements, and seven mockup rows marked the manifest line — four with `(reconnecting)`, three with `→ login expired` — marks nothing produces. One family, and both halves were settled in the screens with no behaviour changed.
 
 ### ⚡ Performance
 
