@@ -70,6 +70,17 @@ missing feature
   removal; and `PRIOR-ART.md`, `.claude/session-check.sh` and
   `.claude/settings.json` are in no **Writes** cell — the entry further down
   records `PRIOR-ART.md`; the two `.claude/` paths join it here.
+- **`package-check.sh` goes red on every version bump, on any warm tree.**
+  Measured 2026-09-28 at the `0.1.0` bump: the guard refuses to guess when
+  `target/package` holds two `.crate` files, and a bump leaves the previous
+  version's beside the new one — so the first run after any bump fails on this
+  host and on any developer machine, though never on a clean CI runner. **The
+  guard was right and the message was actionable**; the stale file was deleted
+  by name and the re-run was green. A one-line pre-delete of `$PKG_DIR/*.crate`
+  before packing would close it without weakening the freshness stamp.
+  `tester` found it, could have written it, and deliberately did not: changing
+  a canary's semantics is not a defect in the box being landed. 2026-09-28
+
 - **`ci.yml`'s matrix comment cites `NOTES § D66` for a rule D66 does not
   state.** The comment calls the `cross` matrix *the one list of release
   targets* and cites D66, which is actually *`just check` is not quite the whole
