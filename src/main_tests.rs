@@ -973,7 +973,6 @@ fn the_live_report_prints_the_reading_line_above_the_panes() {
         now(),
         &mut last,
         true,
-        false,
         &AtConnect {
             lists_read_at: Some(four_minutes_ago()),
             ..Default::default()
@@ -1011,7 +1010,6 @@ fn the_live_report_prints_the_reading_line_above_the_panes() {
         now(),
         &mut last,
         true,
-        false,
         &AtConnect::default(),
     )
     .expect("a bootstrapped store draws a report");
@@ -1173,12 +1171,13 @@ fn the_wall_clock_reads_the_wall_clock() {
 /// (NOTES § D17). The text has to name every door to a cluster this build has, because the name
 /// promises one and a reader decides here whether it is safe to try against production.
 ///
-/// **The claim outlived two spellings of the sentence that carries it.** It was *this build
+/// **The claim outlived three spellings of the sentence that carries it.** It was *this build
 /// cannot reach a cluster* until `ops` landed, then *without --once, --live, --logs, --describe,
 /// --yaml or ops this build reads files only* until the console did — a bare `k8rs` reaches a
 /// cluster with none of those six words on it (`screens/states.md` § The command line's own
-/// synopsis). What has not changed is what the test is for: the **list** is complete, so nothing
-/// that reaches a cluster is missing from the one page a reader checks.
+/// synopsis) — and `--live` dropped out of the list at Phase 13 (NOTES § D303). What has not
+/// changed is what the test is for: the **list** is complete, so nothing that reaches a cluster is
+/// missing from the one page a reader checks.
 #[test]
 fn no_arguments_is_the_usage_text_and_not_a_report() {
     let Err(problem) = run(&[]) else {
@@ -1188,7 +1187,7 @@ fn no_arguments_is_the_usage_text_and_not_a_report() {
     assert!(problem.starts_with("usage: k8rs "), "{problem}");
     assert!(
         problem.contains(
-            "--once, --live, --logs, --describe, --yaml and ops are its other doors to a cluster"
+            "--once, --logs, --describe, --yaml and ops are its other doors to a cluster"
         ),
         "{problem}"
     );
@@ -1452,7 +1451,6 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
             now(),
             &mut last,
             false,
-            false,
             &AtConnect::default()
         ),
         None
@@ -1462,14 +1460,7 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     let mut store = k8s::Store::default();
     the_other_four(&mut store);
     assert_eq!(
-        live_report(
-            &store,
-            now(),
-            &mut last,
-            false,
-            false,
-            &AtConnect::default()
-        ),
+        live_report(&store, now(), &mut last, false, &AtConnect::default()),
         None
     );
     assert!(
@@ -1486,7 +1477,6 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
         now(),
         &mut last,
         false,
-        false,
         &AtConnect::default(),
     )
     .expect("a listed store");
@@ -1494,14 +1484,7 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     // `None` and not merely *empty*: `Some(String::new())` is a blank block on stdout, which is
     // what the driver would print every time a watch re-listed.
     assert_eq!(
-        live_report(
-            &store,
-            now(),
-            &mut last,
-            false,
-            false,
-            &AtConnect::default()
-        ),
+        live_report(&store, now(), &mut last, false, &AtConnect::default()),
         None,
         "a bootstrap with nothing wrong printed something after an earlier report"
     );
@@ -1519,29 +1502,15 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     let mut store = listed(objects::<Pod>("kube-system-pods.json"));
     let mut last = String::new();
 
-    let first = live_report(
-        &store,
-        now(),
-        &mut last,
-        false,
-        false,
-        &AtConnect::default(),
-    )
-    .expect("every initial LIST landed");
+    let first = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("every initial LIST landed");
     println!("{first}");
     assert!(
         first.contains(" pods · "),
         "the live report is not the report `render` draws"
     );
     assert_eq!(
-        live_report(
-            &store,
-            now(),
-            &mut last,
-            false,
-            false,
-            &AtConnect::default()
-        ),
+        live_report(&store, now(), &mut last, false, &AtConnect::default()),
         None,
         "the same cluster printed twice"
     );
@@ -1551,15 +1520,8 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     )
     .expect("the capture decodes");
     store.pod(&now(), Event::Apply(crashloop));
-    let second = live_report(
-        &store,
-        now(),
-        &mut last,
-        false,
-        false,
-        &AtConnect::default(),
-    )
-    .expect("a pod arrived, so the report moved");
+    let second = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("a pod arrived, so the report moved");
     println!("{second}");
     assert!(
         second.contains("broken-crashloop"),
@@ -1616,15 +1578,8 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     );
 
     let mut last = String::new();
-    let plain = live_report(
-        &store,
-        now(),
-        &mut last,
-        false,
-        false,
-        &AtConnect::default(),
-    )
-    .expect("every LIST landed");
+    let plain = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("every LIST landed");
     for pane in PANES {
         assert!(
             !plain.contains(pane),
@@ -1633,7 +1588,7 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     }
 
     let mut last = String::new();
-    let panes = live_report(&store, now(), &mut last, true, false, &AtConnect::default())
+    let panes = live_report(&store, now(), &mut last, true, &AtConnect::default())
         .expect("every LIST landed");
     for pane in PANES {
         assert!(
@@ -1679,7 +1634,7 @@ fn versions_draws_the_control_plane_line_and_the_machines_behind_it() {
     let pane_of = |identity| {
         let store = identified(Vec::new(), nodes(), identity);
         let mut last = String::new();
-        let printed = live_report(&store, now(), &mut last, true, false, &AtConnect::default())
+        let printed = live_report(&store, now(), &mut last, true, &AtConnect::default())
             .expect("every LIST landed");
         let at = printed.find("[versions]").expect("the pane is drawn");
         printed[at..].to_string()
@@ -1742,7 +1697,7 @@ fn certificates_draws_c1s_row_and_the_sidebar_badge() {
     let printed = |identity| {
         let store = identified(Vec::new(), Vec::new(), identity);
         let mut last = String::new();
-        let printed = live_report(&store, now(), &mut last, true, false, &AtConnect::default())
+        let printed = live_report(&store, now(), &mut last, true, &AtConnect::default())
             .expect("every LIST landed");
         let at = printed.find("[certificates]").expect("the pane is drawn");
         let end = printed[at..].find("[drain safety]").expect("the next pane");
@@ -1800,54 +1755,54 @@ fn live_is_the_flag_that_names_a_cluster_and_context_names_which_one() {
     // `--context` without `--live` is not a live run: the file path is what this driver reads.
     assert_eq!(live_context(&args(&["--context", "kind-k8rs"])), None);
 
-    assert_eq!(live_context(&args(&["--live"])), Some(None));
+    assert_eq!(live_context(&args(&["--once"])), Some(None));
     assert_eq!(
-        live_context(&args(&["--live", "--context", "kind-k8rs"])),
+        live_context(&args(&["--once", "--context", "kind-k8rs"])),
         Some(Some("kind-k8rs"))
     );
     // **The spelling `kubectl` and every GNU tool accept.** Matching only the separated form let
     // this fall through to the kubeconfig's current context in silence, which for this flag is
     // watching a different cluster than the one the reader named (`tester`, 2026-08-27).
     assert_eq!(
-        live_context(&args(&["--live", "--context=kind-k8rs"])),
+        live_context(&args(&["--once", "--context=kind-k8rs"])),
         Some(Some("kind-k8rs"))
     );
     // **A `--context` with nothing after it is the current context here, and never reaches
     // here.** [`mistyped`] refuses it before this function is called (2026-08-30), so what this
     // asserts is that the second line still holds if the first one is ever moved: this function
     // alone answers *no context was named*, not *the context named `--live`*.
-    assert_eq!(live_context(&args(&["--live", "--context"])), Some(None));
-    assert!(mistyped(&args(&["--live", "--context"])).is_some());
+    assert_eq!(live_context(&args(&["--once", "--context"])), Some(None));
+    assert!(mistyped(&args(&["--once", "--context"])).is_some());
     // **A flag is never a context name.** Both of these used to come back as the context called
     // `--live` / `--analysis`, and the truth arrived later as a kubeconfig error about a name
     // nobody typed.
-    assert_eq!(live_context(&args(&["--context", "--live"])), Some(None));
+    assert_eq!(live_context(&args(&["--context", "--once"])), Some(None));
     assert_eq!(
-        live_context(&args(&["--live", "--context", "--analysis", "pod.json"])),
+        live_context(&args(&["--once", "--context", "--analysis", "pod.json"])),
         Some(None)
     );
     // An `=` says the value was meant, so a flag-shaped one after it is kept.
     assert_eq!(
-        live_context(&args(&["--live", "--context=--analysis"])),
+        live_context(&args(&["--once", "--context=--analysis"])),
         Some(Some("--analysis"))
     );
     // **Last-wins, which is `kubectl`'s rule** — it was first-wins, and the flags box that
     // released this flag is the box both parsers' docs had deferred the fix to
     // (`k8s-admin`, 2026-09-24; [`context_arg`], which carries the wrapper it turns on).
     assert_eq!(
-        live_context(&args(&["--live", "--context", "a", "--context", "b"])),
+        live_context(&args(&["--once", "--context", "a", "--context", "b"])),
         Some(Some("b"))
     );
     // A longer flag that merely starts the same way is not this one.
     assert_eq!(
-        live_context(&args(&["--live", "--contextual", "x"])),
+        live_context(&args(&["--once", "--contextual", "x"])),
         Some(None)
     );
     // `--context=` with nothing after the `=` is passed through empty rather than quietly
     // becoming the current context: the connect below it answers *no such context*, which is the
     // loud version of the same mistake.
     assert_eq!(
-        live_context(&args(&["--live", "--context="])),
+        live_context(&args(&["--once", "--context="])),
         Some(Some(""))
     );
 }
@@ -1862,24 +1817,24 @@ fn namespace_names_the_one_namespace_this_run_watches_in_either_spelling() {
     let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
 
     assert_eq!(live_namespace(&args(&[])), None);
-    assert_eq!(live_namespace(&args(&["--live"])), None);
-    assert_eq!(live_namespace(&args(&["--live", "--analysis"])), None);
+    assert_eq!(live_namespace(&args(&["--once"])), None);
+    assert_eq!(live_namespace(&args(&["--once", "--analysis"])), None);
 
     for line in [
-        vec!["--live", "--namespace", "payments"],
-        vec!["--live", "--namespace=payments"],
-        vec!["--live", "-n", "payments"],
-        vec!["--live", "-n=payments"],
+        vec!["--once", "--namespace", "payments"],
+        vec!["--once", "--namespace=payments"],
+        vec!["--once", "-n", "payments"],
+        vec!["--once", "-n=payments"],
         // Beside every other flag, in either order — the scan is over the whole line.
         vec![
-            "--live",
+            "--once",
             "--analysis",
             "--context",
             "prod",
             "-n",
             "payments",
         ],
-        vec!["-n", "payments", "--live"],
+        vec!["-n", "payments", "--once"],
     ] {
         assert_eq!(
             live_namespace(&args(&line)),
@@ -1892,12 +1847,12 @@ fn namespace_names_the_one_namespace_this_run_watches_in_either_spelling() {
     // **Last-wins on repeats, across the two spellings**, which is `kubectl`'s rule and the one
     // `alias kp='k8rs -n a'` needs to be overridable ([`value_of`]).
     assert_eq!(
-        live_namespace(&args(&["--live", "-n", "a", "--namespace", "b"])),
+        live_namespace(&args(&["--once", "-n", "a", "--namespace", "b"])),
         Some("b")
     );
     // A longer flag that merely starts the same way is not this one.
     assert_eq!(
-        live_namespace(&args(&["--live", "--namespaces", "x"])),
+        live_namespace(&args(&["--once", "--namespaces", "x"])),
         None
     );
     // `-nginx` is deliberately not `-n ginx`: taking the attached shorthand would make a word
@@ -1906,9 +1861,9 @@ fn namespace_names_the_one_namespace_this_run_watches_in_either_spelling() {
     // first (`a_namespace_joined_to_the_short_flag_is_refused_rather_than_dropped`). Until
     // 2026-08-29 nothing refused it and the run went cluster-wide, which is the silent wider
     // scope this spelling was rejected to avoid.
-    assert_eq!(live_namespace(&args(&["--live", "-nginx"])), None);
+    assert_eq!(live_namespace(&args(&["--once", "-nginx"])), None);
     // Nothing after the flag is `None` here, and refused by [`mistyped`] before it is used.
-    assert_eq!(live_namespace(&args(&["--live", "--namespace"])), None);
+    assert_eq!(live_namespace(&args(&["--once", "--namespace"])), None);
 }
 
 /// **One parser for `--context`, and the console reads it on a line [`live_context`] is silent
@@ -1937,9 +1892,9 @@ fn the_context_flag_has_one_parser_and_a_console_line_reads_the_same_answer() {
         (vec!["--context="], Some(Some(""))),
         (vec!["--context"], Some(None)),
         // A flag is never a context name — the second line, behind [`mistyped`]'s sentence.
-        (vec!["--context", "--live"], Some(None)),
+        (vec!["--context", "--once"], Some(None)),
         // An `=` says the value was meant, so a flag-shaped one after it is kept.
-        (vec!["--context=--live"], Some(Some("--live"))),
+        (vec!["--context=--analysis"], Some(Some("--analysis"))),
         // Last-wins, which is `kubectl`'s rule — it was first-wins until the flags box.
         (vec!["--context", "a", "--context", "b"], Some(Some("b"))),
         // A longer flag that merely starts the same way is not this one.
@@ -1947,10 +1902,10 @@ fn the_context_flag_has_one_parser_and_a_console_line_reads_the_same_answer() {
         (vec![], None),
     ] {
         assert_eq!(context_arg(&line(&words)), answer, "{words:?}");
-        // **The same line under `--live` answers the same context**, which is what one parser
+        // **The same line under `--once` answers the same context**, which is what one parser
         // buys: a console and the temporary driver cannot come to connect to two clusters off
         // one spelling.
-        let driven: Vec<&str> = std::iter::once("--live")
+        let driven: Vec<&str> = std::iter::once("--once")
             .chain(words.iter().copied())
             .collect();
         assert_eq!(
@@ -2044,8 +1999,8 @@ fn a_cluster_flag_a_verb_or_a_file_never_opens_a_console() {
             vec!["--once", "--context", "prod-eu", "-n", "payments"],
             true,
         ),
-        (vec!["--live"], true),
-        (vec!["--live", "--namespace=payments"], true),
+        (vec!["--once"], true),
+        (vec!["--once", "--namespace=payments"], true),
         (vec!["--logs", "--object", "default/web"], true),
         (vec!["--describe", "--object", "default/web"], true),
         (vec!["--yaml", "--object", "default/web"], true),
@@ -2318,7 +2273,7 @@ fn a_path_beside_a_console_flag_is_refused_rather_than_read_with_the_flag_droppe
     // sentence are one function ([`cluster_reader`]).
     for (words, subject) in [
         (vec!["--once", "pod.json"], "--once"),
-        (vec!["--live", "pod.json"], "--live"),
+        (vec!["--once", "pod.json"], "--once"),
         (
             vec!["--logs", "--object", "default/web", "pod.json"],
             "--logs",
@@ -2348,10 +2303,10 @@ fn a_namespace_flag_with_nothing_usable_after_it_is_refused() {
     let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
 
     for missing in [
-        vec!["--live", "--namespace"],
-        vec!["--live", "-n"],
-        vec!["--live", "--namespace="],
-        vec!["--live", "-n="],
+        vec!["--once", "--namespace"],
+        vec!["--once", "-n"],
+        vec!["--once", "--namespace="],
+        vec!["--once", "-n="],
     ] {
         let problem = mistyped(&line(&missing)).unwrap_or_else(|| {
             panic!("{missing:?} was accepted, so the run watches every namespace instead of one")
@@ -2371,18 +2326,18 @@ fn a_namespace_flag_with_nothing_usable_after_it_is_refused() {
     let too_long = "a".repeat(64);
     let enormous = "b".repeat(8192);
     for bad in [
-        vec!["--live", "--namespace", "--analysis"],
-        vec!["--live", "-n", "--live"],
-        vec!["--live", "--namespace=../secrets"],
-        vec!["--live", "-n", "kube system"],
-        vec!["--live", "--namespace", "a/b"],
-        vec!["--live", "--namespace=kube-system?watch=true"],
-        vec!["--live", "--namespace", "PAYMENTS"],
-        vec!["--live", "--namespace", "foo.bar"],
-        vec!["--live", "--namespace", "-leading"],
-        vec!["--live", "--namespace", "trailing-"],
-        vec!["--live", "--namespace", too_long.as_str()],
-        vec!["--live", "--namespace", enormous.as_str()],
+        vec!["--once", "--namespace", "--analysis"],
+        vec!["--once", "-n", "--once"],
+        vec!["--once", "--namespace=../secrets"],
+        vec!["--once", "-n", "kube system"],
+        vec!["--once", "--namespace", "a/b"],
+        vec!["--once", "--namespace=kube-system?watch=true"],
+        vec!["--once", "--namespace", "PAYMENTS"],
+        vec!["--once", "--namespace", "foo.bar"],
+        vec!["--once", "--namespace", "-leading"],
+        vec!["--once", "--namespace", "trailing-"],
+        vec!["--once", "--namespace", too_long.as_str()],
+        vec!["--once", "--namespace", enormous.as_str()],
     ] {
         let problem = mistyped(&line(&bad))
             .unwrap_or_else(|| panic!("{bad:?} was accepted as a namespace name"));
@@ -2416,7 +2371,7 @@ fn a_namespace_flag_with_nothing_usable_after_it_is_refused() {
     }
 
     // A control character in the value never reaches the terminal (invariant 9).
-    let crafted = mistyped(&line(&["--live", "--namespace=pay\u{1b}[2Jments"]))
+    let crafted = mistyped(&line(&["--once", "--namespace=pay\u{1b}[2Jments"]))
         .expect("an escape sequence is not a namespace name");
     println!("{crafted}");
     assert!(
@@ -2428,16 +2383,16 @@ fn a_namespace_flag_with_nothing_usable_after_it_is_refused() {
     // namespace flag on it at all.
     let longest = "a".repeat(63);
     for good in [
-        vec!["--live", "--namespace", "payments"],
-        vec!["--live", "--namespace=kube-system"],
-        vec!["--live", "-n", "payments"],
-        vec!["--live", "-n=default"],
+        vec!["--once", "--namespace", "payments"],
+        vec!["--once", "--namespace=kube-system"],
+        vec!["--once", "-n", "payments"],
+        vec!["--once", "-n=default"],
         // Digits are a namespace name and a leading one is legal — `team-2`, `2048`.
-        vec!["--live", "-n", "2048"],
+        vec!["--once", "-n", "2048"],
         // The boundary itself, not one past it: a bound that refused a legal name would be the
         // same defect facing the other way.
-        vec!["--live", "--namespace", longest.as_str()],
-        vec!["--live"],
+        vec!["--once", "--namespace", longest.as_str()],
+        vec!["--once"],
         vec!["--analysis", "pod.json"],
     ] {
         assert_eq!(mistyped(&line(&good)), None, "{good:?}");
@@ -2460,11 +2415,11 @@ fn a_namespace_joined_to_the_short_flag_is_refused_rather_than_dropped() {
     let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
 
     for attached in [
-        vec!["--live", "-npayments"],
+        vec!["--once", "-npayments"],
         // The word the doc names: `-nginx` would silently mean the namespace `ginx`.
-        vec!["--live", "-nginx"],
-        vec!["--live", "-n../secrets"],
-        vec!["-npayments", "--live"],
+        vec!["--once", "-nginx"],
+        vec!["--once", "-n../secrets"],
+        vec!["-npayments", "--once"],
     ] {
         let problem = mistyped(&line(&attached)).unwrap_or_else(|| {
             panic!("{attached:?} was accepted, so the run is wider than the reader asked for")
@@ -2490,11 +2445,11 @@ fn a_namespace_joined_to_the_short_flag_is_refused_rather_than_dropped() {
     );
 
     for spelled in [
-        vec!["--live", "-n", "payments"],
-        vec!["--live", "-n=payments"],
-        vec!["--live", "--namespace", "payments"],
+        vec!["--once", "-n", "payments"],
+        vec!["--once", "-n=payments"],
+        vec!["--once", "--namespace", "payments"],
         // Not the short flag at all — a longer flag that merely starts the same way.
-        vec!["--live", "--namespace=payments"],
+        vec!["--once", "--namespace=payments"],
         // Nor is a path that does not begin with it.
         vec!["--analysis", "pod.json"],
     ] {
@@ -2534,7 +2489,7 @@ fn a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error() {
     // **The live line is checked too**, which is the half that was missing: the guard lived
     // inside the file-reading path, so `--live --contxt=prod` watched the current context and
     // said nothing at all about the typo.
-    assert!(mistyped(&line(&["--live", "--contxt=prod"])).is_some());
+    assert!(mistyped(&line(&["--once", "--contxt=prod"])).is_some());
 
     // **A flag where the context name should be is refused, not swallowed** (`k8s-admin`,
     // 2026-08-27). `live_context` turned it into `None` = the current context and the run watched
@@ -2542,9 +2497,9 @@ fn a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error() {
     // `kind-review` with a normal banner. The realistic form is `--context "$CTX"` with `CTX`
     // unset. Both words are known flags, so this can only be seen as a pair.
     for swallowed in [
-        vec!["--live", "--context", "--live"],
-        vec!["--live", "--context", "--analysis", "pod.json"],
-        vec!["--context", "--live"],
+        vec!["--once", "--context", "--once"],
+        vec!["--once", "--context", "--analysis", "pod.json"],
+        vec!["--context", "--once"],
     ] {
         let problem = mistyped(&line(&swallowed)).unwrap_or_else(|| {
             panic!("{swallowed:?} was accepted, so the run watches a cluster nobody named")
@@ -2559,9 +2514,9 @@ fn a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error() {
     // after it is now its own refusal** and no longer the current context — the sentence differs
     // by one clause, which is what this asserts
     // ([`the_flags_this_build_accepts_and_the_ones_it_now_names_instead_of_dropping`]).
-    assert_eq!(mistyped(&line(&["--live", "--context=--analysis"])), None);
+    assert_eq!(mistyped(&line(&["--once", "--context=--analysis"])), None);
     assert_eq!(
-        mistyped(&line(&["--live", "--context"])),
+        mistyped(&line(&["--once", "--context"])),
         Some(format!(
             "k8rs: --context needs the name of a context\n{USAGE}"
         ))
@@ -2570,9 +2525,9 @@ fn a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error() {
     // Every flag this build has, in both modes, and in both spellings — none of them is a typo.
     for good in [
         vec!["--analysis", "pod.json"],
-        vec!["--live"],
-        vec!["--live", "--context", "kind-k8rs"],
-        vec!["--live", "--context=kind-k8rs"],
+        vec!["--once"],
+        vec!["--once", "--context", "kind-k8rs"],
+        vec!["--once", "--context=kind-k8rs"],
         // One dash is not the shape this refuses: it is a path like any other, and *no such
         // file* is the true thing to say about it.
         vec!["-live"],
@@ -2623,27 +2578,30 @@ fn a_runtime_that_would_not_start_says_what_the_machine_said() {
     );
 }
 
-/// **[`live`] under `--live`, which is the mode that has no happy ending** — the sentence it came
-/// back with.
+/// **[`live`] over a run that cannot report** — the sentence it came back with.
 ///
-/// **The `expect` is an assertion and not a convenience.** `None` is *`--once` ran and reported*,
-/// and `--live` reaching it would mean the mode that must never stop had stopped with an exit
-/// code of `0` — every test below would then have failed on the unwrap rather than passing on a
-/// sentence nobody read.
+/// **The `expect` is an assertion and not a convenience.** `None` is *it ran and reported*, so
+/// reaching it here would mean a run over a kubeconfig that will not load, or over watches that
+/// all ended, had exited `0` — every test below would then have failed on the unwrap rather than
+/// passing on a sentence nobody read.
 ///
-/// **And the timeout is an assertion too.** `--live` has no deadline of its own by design
-/// (NOTES § D150), so every caller cuts its streams with `take` to make the run end at all — a
-/// change that merges one uncut stream into the pump makes all three of them hang instead of
-/// fail, which the mutation gate reported as a 90-second `TIMEOUT` rather than a defect
+/// **And the outer timeout is an assertion too.** [`live`]'s own budget is generous here so that
+/// the *ending* is what each caller measures rather than the deadline; every caller cuts its
+/// streams with `take` or hands over a session whose watches are already done, so the run has to
+/// end on its own. A change that merges one uncut stream into the pump makes all of them hang
+/// instead of fail, which the mutation gate reported as a 90-second `TIMEOUT` rather than a defect
 /// (2026-08-30). A test that hangs is a test whose failure nobody reads.
+///
+/// **It drove `--live` until Phase 13 took that flag out** (NOTES § D303), where the third argument
+/// was `None` and the mode had no happy ending at all.
 async fn watching(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool) -> String {
     tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        live(connected, analysis, None),
+        live(connected, analysis, in_a_moment(19_000)),
     )
     .await
-    .expect("--live never came back, and every caller here cuts its streams so that it must")
-    .expect("--live has no ending that is not a sentence")
+    .expect("live() never came back, and every caller here makes its streams end so that it must")
+    .expect("a run that could not report has no ending that is not a sentence")
 }
 
 /// A client pointed at a name RFC 6761 reserves so that it can never resolve — the same double
@@ -2682,15 +2640,8 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     k8s::drive_watching(watches, Vec::new(), &mut store, |_| {}).await;
 
     let mut last = String::new();
-    let failing = live_report(
-        &store,
-        now(),
-        &mut last,
-        false,
-        false,
-        &AtConnect::default(),
-    )
-    .expect("five watches are failing");
+    let failing = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("five watches are failing");
     println!("{failing}");
     for kind in ["pods", "nodes", "Deployments", "StatefulSets", "DaemonSets"] {
         assert!(
@@ -2713,14 +2664,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
 
     // The same store again is not news…
     assert_eq!(
-        live_report(
-            &store,
-            now(),
-            &mut last,
-            false,
-            false,
-            &AtConnect::default()
-        ),
+        live_report(&store, now(), &mut last, false, &AtConnect::default()),
         None
     );
 
@@ -2729,15 +2673,8 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     store.pod(&now(), Event::Init);
     store.pod(&now(), Event::InitDone);
     the_other_four(&mut store);
-    let recovered = live_report(
-        &store,
-        now(),
-        &mut last,
-        false,
-        false,
-        &AtConnect::default(),
-    )
-    .expect("the cluster came back");
+    let recovered = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("the cluster came back");
     println!("{recovered}");
     assert!(
         !recovered.contains("not getting"),
@@ -2767,15 +2704,8 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .map(|watch| watch.take(2).boxed())
         .collect();
     k8s::drive_watching(watches, Vec::new(), &mut store, |_| {}).await;
-    let stale = live_report(
-        &store,
-        now(),
-        &mut last,
-        false,
-        false,
-        &AtConnect::default(),
-    )
-    .expect("an outage is news");
+    let stale = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("an outage is news");
     println!("{stale}");
     let (unreadable, cards) = stale
         .split_once("\n\n")
@@ -3046,7 +2976,7 @@ async fn refused_over(store: &mut k8s::Store) -> String {
         .collect();
     k8s::drive_watching(watches, Vec::new(), store, |_| {}).await;
     let mut last = String::new();
-    live_report(store, now(), &mut last, false, false, &AtConnect::default())
+    live_report(store, now(), &mut last, false, &AtConnect::default())
         .expect("five refused watches are news whatever else the store holds")
 }
 
@@ -3489,7 +3419,7 @@ fn the_line_about_a_kind_the_run_ran_out_on_states_the_two_numbers_and_never_a_c
 /// unfinished, gets the ordinary tail, and on a `--once` run that tail was a promise the process
 /// was about to break.
 ///
-/// **The same trouble, both modes, asserted against each other** — a `--live` run must keep the
+/// **The same trouble, both surfaces, asserted against each other** — the console must keep the
 /// retry sentence, because there a retry really is what happens next.
 #[test]
 fn a_run_that_is_about_to_exit_does_not_promise_it_keeps_asking() {
@@ -3507,8 +3437,8 @@ fn a_run_that_is_about_to_exit_does_not_promise_it_keeps_asking() {
     for listed in [true, false] {
         let watching = unreadable(&broke(listed), None, Some(&now()), false);
         let stopping = unreadable(&broke(listed), None, Some(&now()), true);
-        println!("--live  {}", watching[0]);
-        println!("--once  {}", stopping[0]);
+        println!("console  {}", watching[0]);
+        println!("--once   {}", stopping[0]);
         assert!(
             watching[0].contains("It keeps asking"),
             "a screen somebody is watching stopped saying the tool is still trying: {watching:?}"
@@ -4205,7 +4135,7 @@ fn saying(
     }
 }
 
-/// **The one sentence that says *why* a run is scoped**, and the two arms that say nothing
+/// **The one sentence that says *why* a run is scoped**, and the three arms that say nothing
 /// (NOTES § D5, `PRIOR-ART § B4`, the security gate's Authorization row).
 ///
 /// **The refusal is the only arm with anything to say.** `--namespace payments` is a choice the
@@ -4229,21 +4159,18 @@ async fn a_run_that_was_scoped_by_a_refusal_says_so_and_one_that_was_asked_does_
     };
 
     assert_eq!(
-        scoped_because(&scoped(k8s::Coverage::Cluster), false),
+        scoped_because(&scoped(k8s::Coverage::Cluster)),
         None,
         "a run that reads the whole cluster explained a scope it does not have"
     );
     assert_eq!(
-        scoped_because(&scoped(k8s::Coverage::Asked("payments".to_string())), false),
+        scoped_because(&scoped(k8s::Coverage::Asked("payments".to_string()))),
         None,
         "a reader who typed --namespace was told what --namespace does"
     );
 
-    let said = scoped_because(
-        &scoped(k8s::Coverage::Refused("payments".to_string())),
-        false,
-    )
-    .expect("a run nobody asked to narrow narrowed in silence");
+    let said = scoped_because(&scoped(k8s::Coverage::Refused("payments".to_string())))
+        .expect("a run nobody asked to narrow narrowed in silence");
     println!("{said}");
     assert_eq!(
         said,
@@ -4252,69 +4179,40 @@ async fn a_run_that_was_scoped_by_a_refusal_says_so_and_one_that_was_asked_does_
          one, or ask for cluster-wide read access"
     );
 
-    // **The guess that was refused too says so, rather than presenting itself as a scope**
-    // (`k8s::Coverage::Blind`, `reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1).
-    // The old sentence claimed k8rs *is watching* `default` over a namespace it had just been
-    // refused in, and the report under it printed a header and a health claim.
-    let blind = scoped_because(&scoped(k8s::Coverage::Blind("default".to_string())), false)
-        .expect("a run that could read nothing at all said nothing about it");
-    println!("{blind}");
-    assert_eq!(
-        blind,
-        "the role this kubeconfig uses needs to `list` pods across the whole cluster — and this \
-         kubeconfig names no namespace, so k8rs tried default and was refused there too. Pass \
-         --namespace <name> to say which namespace you work in"
-    );
-    assert!(
-        !blind.contains("is watching one namespace instead"),
-        "a scope that read nothing was presented as one that worked: {blind}"
-    );
-
-    // **And under `--once` that one arm goes quiet, because [`pods_unread`] is about to say it
-    // with the scope and the action in it** (`k8s-admin`, 2026-08-30). Measured, the reader got
+    // **The guess that was refused too is silent here, because [`pods_unread`] is about to say
+    // it with the scope and the action in it** (`k8s-admin`, 2026-08-30). Measured, the reader got
     // one fact in two sentences with two different verb sets: `list` pods across the whole
-    // cluster here, `list` and `watch` pods there. **Only that arm** — `Refused` is the run that
-    // works, so this is the only line explaining the header, and losing it loses the sentence.
+    // cluster here, `list` and `watch` pods there. It was a `stopping` parameter and only `--once`
+    // suppressed it; `--live` was taken out at Phase 13 (NOTES § D303), so the suppression has
+    // nothing left to be conditional on.
     assert_eq!(
-        scoped_because(&scoped(k8s::Coverage::Blind("default".to_string())), true),
+        scoped_because(&scoped(k8s::Coverage::Blind("default".to_string()))),
         None,
-        "a --once run that ends on the refusal said it here first, in different words"
+        "a run that ends on the refusal said it here first, in different words"
     );
     assert_eq!(
-        scoped_because(
-            &scoped(k8s::Coverage::Refused("payments".to_string())),
-            true
-        ),
+        scoped_because(&scoped(k8s::Coverage::Refused("payments".to_string()))),
         Some(said.clone()),
-        "a --once run that reports fine lost the only line saying why its header names one \
-         namespace"
+        "a run that reports fine lost the only line saying why its header names one namespace"
     );
 
-    // Invariant 9: the namespace came off argv or a kubeconfig, and neither is ours. Both arms
-    // that print one, because a strip on one of two interpolations is a strip on neither.
-    for crafted in [
-        scoped_because(
-            &scoped(k8s::Coverage::Refused("pay\u{1b}[2Jments".to_string())),
-            false,
-        ),
-        scoped_because(
-            &scoped(k8s::Coverage::Blind("pay\u{1b}[2Jments".to_string())),
-            false,
-        ),
-    ] {
-        let crafted = crafted.expect("both narrowed arms always say something");
-        assert!(
-            !crafted.contains('\u{1b}'),
-            "an escape sequence in a namespace reached the terminal: {crafted:?}"
-        );
-        // The readable part survives: a strip that returned nothing would pass the line above
-        // and leave a sentence naming no namespace at all (CLAUDE.md § a derived list asserts it
-        // found something). `[2J` is printable — only the `ESC` goes.
-        assert!(
-            crafted.contains("pay[2Jments"),
-            "the strip took the namespace with it: {crafted:?}"
-        );
-    }
+    // Invariant 9: the namespace came off argv or a kubeconfig, and neither is ours. The one arm
+    // that prints one.
+    let crafted = scoped_because(&scoped(k8s::Coverage::Refused(
+        "pay\u{1b}[2Jments".to_string(),
+    )))
+    .expect("the narrowed arm always says something");
+    assert!(
+        !crafted.contains('\u{1b}'),
+        "an escape sequence in a namespace reached the terminal: {crafted:?}"
+    );
+    // The readable part survives: a strip that returned nothing would pass the line above
+    // and leave a sentence naming no namespace at all (CLAUDE.md § a derived list asserts it
+    // found something). `[2J` is printable — only the `ESC` goes.
+    assert!(
+        crafted.contains("pay[2Jments"),
+        "the strip took the namespace with it: {crafted:?}"
+    );
 }
 
 /// **The startup line names what it could not read and why**, per question, and the session
@@ -5458,7 +5356,6 @@ async fn a_measured_clock_reaches_the_live_report_and_sits_under_what_it_qualifi
         now(),
         &mut last,
         false,
-        false,
         &AtConnect {
             skew: Some(SignedDuration::from_mins(9)),
             ..Default::default()
@@ -5976,7 +5873,6 @@ async fn a_read_certificate_reaches_the_live_report_as_the_same_sentence() {
         now(),
         &mut last,
         false,
-        false,
         &AtConnect {
             serving_expiry: expiry,
             ..Default::default()
@@ -6008,15 +5904,8 @@ async fn a_read_certificate_reaches_the_live_report_as_the_same_sentence() {
     );
 
     let mut last = String::new();
-    let unread = live_report(
-        &store,
-        now(),
-        &mut last,
-        false,
-        false,
-        &AtConnect::default(),
-    )
-    .expect("every LIST landed");
+    let unread = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("every LIST landed");
     assert!(
         !unread.contains("A certificate the API server presented"),
         "a session that read nothing printed a sentence anyway: {unread}"
@@ -6237,15 +6126,8 @@ fn the_pane_wins_under_analysis_and_the_trailer_does_not_print_twice() {
     let printed = |analysis| {
         let store = identified(Vec::new(), Vec::new(), nearly_out(Some("v1.36.1")));
         let mut last = String::new();
-        live_report(
-            &store,
-            now(),
-            &mut last,
-            analysis,
-            false,
-            &AtConnect::default(),
-        )
-        .expect("every LIST landed")
+        live_report(&store, now(), &mut last, analysis, &AtConnect::default())
+            .expect("every LIST landed")
     };
 
     let bare = printed(false);
@@ -6661,18 +6543,18 @@ fn a_served_certificate_past_the_cap_is_not_read_and_one_at_the_cap_is() {
 
 /// **`--once` is a cluster flag, and every flag that qualifies one applies to it unchanged.**
 ///
-/// **`--live` is asserted beside it in each case**, because the failure this guards is not *the
-/// flag does nothing* — it is *the flag does something slightly different*, and one mode's answer
-/// read on its own cannot show that. `--context` and `--namespace` come out of the same two
-/// functions for both, which is the point: there is one cluster path and `--once` is a stopping
-/// point on it, not a second one (`screens/once.md` § What `--once` does not do).
+/// **`--live` was asserted beside it in each case until Phase 13 took that flag out**
+/// (NOTES § D303), because the failure this guards is not *the flag does nothing* — it is *the flag
+/// does something slightly different*, and one mode's answer read on its own could not show that.
+/// `--context` and `--namespace` come out of the same two functions, which is the point: there is
+/// one cluster path and `--once` is a stopping point on it, not a second one
+/// (`screens/once.md` § What `--once` does not do).
 #[test]
-fn once_reaches_the_cluster_path_and_carries_context_and_namespace_the_way_live_does() {
+fn once_reaches_the_cluster_path_and_carries_context_and_namespace() {
     let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
 
     assert!(once_wanted(&args(&["--once"])));
     assert!(once_wanted(&args(&["--analysis", "--once"])));
-    assert!(!once_wanted(&args(&["--live"])));
     assert!(!once_wanted(&args(&["pod.json"])));
     // Not a prefix match: a word that merely starts like the flag is not the flag.
     assert!(!once_wanted(&args(&["--once=true"])));
@@ -6681,7 +6563,7 @@ fn once_reaches_the_cluster_path_and_carries_context_and_namespace_the_way_live_
     assert_eq!(live_context(&args(&["pod.json"])), None);
     assert_eq!(live_context(&args(&["--analysis", "pod.json"])), None);
 
-    for mode in ["--once", "--live"] {
+    for mode in ["--once"] {
         assert_eq!(
             live_context(&args(&[mode])),
             Some(None),
@@ -6710,19 +6592,19 @@ fn once_reaches_the_cluster_path_and_carries_context_and_namespace_the_way_live_
             );
         }
     }
-    // Both together is a cluster run with a stopping point, not a usage error and not a file run.
-    assert_eq!(live_context(&args(&["--once", "--live"])), Some(None));
-    assert!(once_wanted(&args(&["--once", "--live"])));
+    // A repeat is still a cluster run, not a usage error and not a file run — the shape
+    // `--once --live` had while both flags existed (NOTES § D303).
+    assert_eq!(live_context(&args(&["--once", "--once"])), Some(None));
+    assert!(once_wanted(&args(&["--once", "--once"])));
 }
 
-/// **Every refusal `--live` gets for a bad line, `--once` gets too — and a file beside either is
-/// now one of them.**
+/// **A file beside a cluster flag is a refusal.**
 ///
 /// **The file is the case this box added.** `k8rs --once pod.json` used to read the cluster and
 /// say nothing whatever about the file the reader had named ([`live_context`] answers the cluster
 /// and drops the path), which is the silent-wrong-input shape [`mistyped`] already refuses three
-/// other ways round. It is refused for `--live` as well, because it is one rule about one
-/// ambiguity.
+/// other ways round. It was refused for `--live` too while that flag existed, because it is one
+/// rule about one ambiguity (NOTES § D303).
 ///
 /// **The negatives are the half that makes it a test.** A value that follows `--context`,
 /// `--namespace` or `-n` is that flag's and not a file, and the file-driven path — which has no
@@ -6732,7 +6614,7 @@ fn a_file_beside_a_cluster_flag_is_refused_and_a_flags_own_value_is_not_a_file()
     let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
     let refused = |line: &[&str]| mistyped(&args(line));
 
-    for mode in ["--once", "--live"] {
+    for mode in ["--once"] {
         let said = refused(&[mode, "pod.json"]).unwrap_or_else(|| {
             panic!("{mode} beside a file was accepted, so the file was read by nothing")
         });
@@ -6798,8 +6680,8 @@ fn a_file_beside_a_cluster_flag_is_refused_and_a_flags_own_value_is_not_a_file()
         assert_eq!(mistyped(&args(&line)), None, "{line:?}");
     }
     // `--once` itself is a flag k8rs has, which is what the unknown-flag arm would deny it —
-    // and `--once=true` is not, for [`LIVE`]'s reason: an `=` form nothing accepts used to fall
-    // through as a path and come back `--live=true: No such file or directory`.
+    // and `--once=true` is not, for the reason `--live=true` was not: an `=` form nothing accepts
+    // used to fall through as a path and come back `No such file or directory`.
     assert_eq!(mistyped(&args(&["--once"])), None);
     let attached = mistyped(&args(&["--once=true"])).expect("--once takes no value");
     println!("{attached}");
@@ -6828,14 +6710,15 @@ fn a_file_beside_a_cluster_flag_is_refused_and_a_flags_own_value_is_not_a_file()
 /// tests `--` words — and `json` fell through as a stray positional. `screens/once.md` lists
 /// `-o json` by name as a shape readers will try.
 ///
-/// **Both modes for all three**, because each is one rule about one line and a rule that held for
-/// one of two modes is the second rule this driver would then have (NOTES § D189).
+/// **Both modes for all three while there were two**, because each is one rule about one line and
+/// a rule that held for one of two modes is the second rule this driver would then have
+/// (NOTES § D189); `--live` went out at Phase 13 (NOTES § D303) and the loop kept its shape.
 #[test]
 fn the_flags_this_build_accepts_and_the_ones_it_now_names_instead_of_dropping() {
     let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
     let refused = |line: &[&str]| mistyped(&args(line));
 
-    for mode in ["--once", "--live"] {
+    for mode in ["--once"] {
         // **Accepted**, and it reaches the cluster path unchanged: there is no write path for it
         // to guard yet and refusing it teaches the wrong thing.
         assert_eq!(
@@ -6871,9 +6754,9 @@ fn the_flags_this_build_accepts_and_the_ones_it_now_names_instead_of_dropping() 
             assert!(said.contains("usage: k8rs "), "{said:?}");
         }
         assert_eq!(
-            refused(&[mode, "--context=--live"]),
+            refused(&[mode, "--context=--analysis"]),
             None,
-            "{mode} --context=--live is refused, and an `=` says the value was meant \
+            "{mode} --context=--analysis is refused, and an `=` says the value was meant \
              (`live_context`)"
         );
         assert_eq!(refused(&[mode, "--context", "kind-k8rs"]), None, "{mode}");
@@ -6936,7 +6819,7 @@ fn the_flags_this_build_accepts_and_the_ones_it_now_names_instead_of_dropping() 
 async fn a_once_run_that_reported_ends_by_itself_and_has_no_sentence_to_return() {
     let session = k8s::session(emptied().await, k8s::Coverage::Cluster).await;
 
-    let ending = live(Ok(session), false, Some(in_a_moment(10_000))).await;
+    let ending = live(Ok(session), false, in_a_moment(10_000)).await;
 
     assert_eq!(
         ending, None,
@@ -6952,8 +6835,6 @@ async fn a_once_run_that_reported_ends_by_itself_and_has_no_sentence_to_return()
         now(),
         &mut String::new(),
         false,
-        // The store a `--once` run reaches, read the way that run reads it.
-        true,
         &AtConnect::default(),
     )
     .expect("the store a --once run reaches is a report, or `None` above means it printed none");
@@ -7024,7 +6905,7 @@ async fn driven(client: kube::Client) -> k8s::Store {
 async fn a_once_run_that_was_never_shown_a_pod_is_one_sentence_and_not_a_wall_of_symptoms() {
     let session = k8s::session(refusing().await, k8s::Coverage::Cluster).await;
 
-    let refused = live(Ok(session), false, Some(in_a_moment(10_000)))
+    let refused = live(Ok(session), false, in_a_moment(10_000))
         .await
         .expect("a cluster that refused the pod watch has no report and must say so");
 
@@ -7244,19 +7125,21 @@ fn the_block_a_run_with_no_pods_ends_on_names_the_scope_and_a_next_step_that_fit
     );
 }
 
-/// **`--once` cannot run without a cluster either, and it says the same sentence `--live` does.**
+/// **`--once` cannot run without a cluster, and it says the same sentence the console says.**
 ///
-/// **One text for both modes** (`screens/once.md` § Exit codes: *failures print the same
+/// **One text for both paths** (`screens/once.md` § Exit codes: *failures print the same
 /// plain-language stderr messages the TUI prints before it ever enters raw mode — one text, both
-/// paths*). The assertion is `assert_eq!` against the `--live` answer rather than a substring,
-/// because a second sentence for the same fault is exactly what would go unnoticed.
+/// paths*). The assertion is `assert_eq!` against [`no_cluster_to_watch`] — the console's own
+/// wall — rather than a substring, because a second sentence for the same fault is exactly what
+/// would go unnoticed. It compared `--once` against `--live` until Phase 13 took that flag out
+/// (NOTES § D303), and the surviving pair is the one the screen file is about.
 ///
 /// **Three startup failures, not one**, and they are the three a kubeconfig can produce before
 /// anything is sent: a context that is not in the file, an entry pointing at a certificate that
 /// is not on disk, and a login program that is not installed. Each is a different `k8s::Fault`,
-/// so a mode that swallowed one would still pass on the others.
+/// so a path that swallowed one would still pass on the others.
 #[tokio::test]
-async fn a_once_run_that_could_not_start_returns_the_same_sentence_live_returns() {
+async fn a_once_run_that_could_not_start_returns_the_same_sentence_the_console_returns() {
     let yaml = |user: &str| {
         kube::config::Kubeconfig::from_yaml(&format!(
             "apiVersion: v1\nkind: Config\n\
@@ -7282,7 +7165,7 @@ async fn a_once_run_that_could_not_start_returns_the_same_sentence_live_returns(
         let once = live(
             k8s::connect_with(yaml(user), context, None).await,
             false,
-            Some(in_a_moment(10_000)),
+            in_a_moment(10_000),
         )
         .await
         .unwrap_or_else(|| panic!("{what}: --once exited 0 over a cluster it never reached"));
@@ -7291,15 +7174,16 @@ async fn a_once_run_that_could_not_start_returns_the_same_sentence_live_returns(
             once.starts_with("k8rs: no cluster to watch — "),
             "{what}: {once:?}"
         );
+        // **A `match` and not `expect_err`**: `k8s::Session` derives no `Debug` and may not
+        // (the security gate's *no `Debug` over a type that can hold config* row), so the `Ok`
+        // side cannot be unwrapped by a helper that prints it.
+        let Err(problem) = k8s::connect_with(yaml(user), context, None).await else {
+            panic!("{what}: a kubeconfig this test broke on purpose connected")
+        };
         assert_eq!(
-            Some(once),
-            live(
-                k8s::connect_with(yaml(user), context, None).await,
-                false,
-                None
-            )
-            .await,
-            "{what}: --once and --live say two different things about one fault"
+            once,
+            no_cluster_to_watch(&problem),
+            "{what}: --once and the console say two different things about one fault"
         );
     }
 }
@@ -7332,7 +7216,7 @@ async fn a_once_run_that_could_not_start_returns_the_same_sentence_live_returns(
 async fn a_cluster_that_answers_nothing_names_the_fault_instead_of_calling_it_slow() {
     let session = k8s::session(offline(), k8s::Coverage::Cluster).await;
 
-    let gave_up = live(Ok(session), false, Some(in_a_moment(300)))
+    let gave_up = live(Ok(session), false, in_a_moment(300))
         .await
         .expect("a run that never got an answer has nothing to report and must say so");
 
@@ -7460,29 +7344,15 @@ fn a_kind_the_run_ran_out_on_reaches_the_report_where_it_used_to_cost_the_whole_
     let mut wedged = read_everything_but(ObjectKind::Node);
     let mut last = String::new();
     assert_eq!(
-        live_report(
-            &wedged,
-            now(),
-            &mut last,
-            false,
-            true,
-            &AtConnect::default()
-        ),
+        live_report(&wedged, now(), &mut last, false, &AtConnect::default()),
         None,
         "the gate was open before anybody said the waiting was over, so the assertion below is \
          about nothing"
     );
 
     wedged.stop_waiting();
-    let report = live_report(
-        &wedged,
-        now(),
-        &mut last,
-        false,
-        true,
-        &AtConnect::default(),
-    )
-    .expect("a wedged kind cost the entire report, where a refused one costs two rules");
+    let report = live_report(&wedged, now(), &mut last, false, &AtConnect::default())
+        .expect("a wedged kind cost the entire report, where a refused one costs two rules");
     println!("{report}");
     assert!(
         report.contains("▲ k8rs never finished reading nodes from this cluster"),
@@ -7521,7 +7391,7 @@ async fn a_once_run_whose_nodes_never_answered_still_reports_and_exits_zero() {
     let ended = live(
         Ok(k8s::session(client, k8s::Coverage::Cluster).await),
         false,
-        Some(in_a_moment(2_000)),
+        in_a_moment(2_000),
     )
     .await;
 
@@ -7554,7 +7424,7 @@ async fn a_list_that_is_only_slow_still_gets_the_two_facts_and_no_verdict() {
     let gave_up = live(
         Ok(k8s::session(client, k8s::Coverage::Cluster).await),
         false,
-        Some(in_a_moment(500)),
+        in_a_moment(500),
     )
     .await
     .expect("a run whose LISTs never landed has nothing to report and must say so");
@@ -7603,8 +7473,6 @@ async fn analysis_under_once_puts_the_panes_under_the_cards_and_without_it_there
         now(),
         &mut String::new(),
         true,
-        // `--once --analysis`, so the lines are that mode's.
-        true,
         &AtConnect::default(),
     )
     .expect("a cluster with nothing in it is still a report");
@@ -7614,8 +7482,6 @@ async fn analysis_under_once_puts_the_panes_under_the_cards_and_without_it_there
         now(),
         &mut String::new(),
         false,
-        // The store a `--once` run reaches, read the way that run reads it.
-        true,
         &AtConnect::default(),
     )
     .expect("a cluster with nothing in it is a report with or without the flag");
@@ -7664,7 +7530,7 @@ async fn once_waits_for_what_each_node_is_using_and_asks_for_it_exactly_once() {
     let ending = live(
         Ok(k8s::session(client, k8s::Coverage::Cluster).await),
         true,
-        Some(in_a_moment(10_000)),
+        in_a_moment(10_000),
     )
     .await;
     let waited = started.elapsed();
@@ -7695,7 +7561,7 @@ async fn once_waits_for_what_each_node_is_using_and_asks_for_it_exactly_once() {
     let ending = live(
         Ok(k8s::session(client, k8s::Coverage::Cluster).await),
         false,
-        Some(in_a_moment(10_000)),
+        in_a_moment(10_000),
     )
     .await;
     let plain = started.elapsed();
@@ -7713,43 +7579,6 @@ async fn once_waits_for_what_each_node_is_using_and_asks_for_it_exactly_once() {
     );
 }
 
-/// **Which mode asks metrics-server for the numbers on a timer, and which asks once**
-/// ([`polls_node_usage`], NOTES § D181, § D188).
-///
-/// **The requirement and not the expression.** `--live` redraws for as long as it runs, so a
-/// metrics-server that is restarting, being installed, or being granted the verb starts showing
-/// up without the reader touching anything — that is what the poll is for, and it is the row a
-/// deleted `!` would silently take away. `--once` has no later pass, so it reads the same number
-/// once at connect instead ([`once_waits_for_what_each_node_is_using_and_asks_for_it_exactly_once`]
-/// measures that half against a listener). Neither mode asks at all without the flag, because
-/// nothing would draw the answer.
-///
-/// **It is a function so that a test can reach it**: the poll stream cannot end, so a test that
-/// drove `--live --analysis` to a conclusion would be waiting for one that cannot come. The
-/// mutation gate is what said so — the condition spelled inline had no assertion behind it.
-#[test]
-fn only_a_run_that_keeps_redrawing_asks_metrics_server_again() {
-    assert!(
-        polls_node_usage(true, false),
-        "--live --analysis stopped polling, so a metrics-server that comes back, is installed, \
-         or is granted the verb never shows up on a screen somebody is watching (NOTES § D181)"
-    );
-    assert!(
-        !polls_node_usage(true, true),
-        "--once --analysis merged a poll into a loop it stops before the second tick of, and it \
-         already read the number once at connect"
-    );
-    assert!(
-        !polls_node_usage(false, false),
-        "--live with no --analysis asks metrics-server every thirty seconds for a pane it does \
-         not draw"
-    );
-    assert!(
-        !polls_node_usage(false, true),
-        "--once with no --analysis asks for a number nothing prints"
-    );
-}
-
 /// **[`ONCE_DEADLINE`] bounds the run and not the watch loop inside it** ([`cluster_run`],
 /// `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 5).
 ///
@@ -7762,16 +7591,17 @@ fn only_a_run_that_keeps_redrawing_asks_metrics_server_again() {
 /// **The sentence is [`too_slow`]'s empty arm**, which had no way to be reached until this call
 /// existed: there is no store, so no kind to name and no count to compare on a second run.
 ///
-/// **`--live` is asserted to have no such bound**, which is the half that keeps this a `--once`
-/// decision: a screen somebody is looking at may wait forever (NOTES § D150), so the same
-/// pending connection is still pending when the test stops waiting for it.
+/// **The bound is this mode's and not `k8s.rs`'s** (NOTES § D150): a screen somebody is looking at
+/// may wait forever, which is why the console has no deadline and why `--live` had none while it
+/// existed (NOTES § D303). What is asserted here is that the one mode with a stopping point
+/// actually stops.
 #[tokio::test]
-async fn a_connection_that_never_finishes_ends_a_once_run_and_leaves_live_waiting() {
+async fn a_connection_that_never_finishes_ends_a_once_run() {
     let never = || std::future::pending::<Result<k8s::Session, k8s::NotConnected>>();
 
     let budget = std::time::Duration::from_millis(200);
 
-    let gave_up = tokio::time::timeout(budget * 10, cluster_run(never(), false, Some(budget)))
+    let gave_up = tokio::time::timeout(budget * 10, cluster_run(never(), false, budget))
         .await
         .expect("--once did not come back inside ten times its own budget, so it bounds nothing")
         .expect("a run that never reached the cluster has nothing to report and must say so");
@@ -7788,13 +7618,6 @@ async fn a_connection_that_never_finishes_ends_a_once_run_and_leaves_live_waitin
     assert!(
         !gave_up.contains("still reading"),
         "a run with no store named a kind it was reading: {gave_up:?}"
-    );
-
-    assert!(
-        tokio::time::timeout(budget * 10, cluster_run(never(), false, None))
-            .await
-            .is_err(),
-        "--live gave up on a connection, and a screen somebody is watching may wait (D150)"
     );
 }
 
@@ -8170,23 +7993,23 @@ fn the_object_selector_reads_both_spellings_and_takes_the_last() {
 #[test]
 fn the_namespace_flag_reads_the_same_four_ways_it_always_did() {
     assert_eq!(
-        namespace_arg(&argv(&["--live", "--namespace", "payments"])),
+        namespace_arg(&argv(&["--once", "--namespace", "payments"])),
         Some(Some("payments"))
     );
     assert_eq!(
-        namespace_arg(&argv(&["--live", "--namespace=payments"])),
+        namespace_arg(&argv(&["--once", "--namespace=payments"])),
         Some(Some("payments"))
     );
     assert_eq!(
-        namespace_arg(&argv(&["--live", "-n", "payments"])),
+        namespace_arg(&argv(&["--once", "-n", "payments"])),
         Some(Some("payments"))
     );
     assert_eq!(
-        namespace_arg(&argv(&["--live", "-n=payments"])),
+        namespace_arg(&argv(&["--once", "-n=payments"])),
         Some(Some("payments"))
     );
-    assert_eq!(namespace_arg(&argv(&["--live", "-n"])), Some(None));
-    assert_eq!(namespace_arg(&argv(&["--live"])), None);
+    assert_eq!(namespace_arg(&argv(&["--once", "-n"])), Some(None));
+    assert_eq!(namespace_arg(&argv(&["--once"])), None);
 }
 
 /// **An object is split on its *first* slash**, so a name with a slash in it stays a name with a
@@ -8346,7 +8169,7 @@ fn a_selectors_namespace_and_its_name_are_refused_for_their_own_reasons() {
     );
 
     // The namespace sentence is `--namespace`'s own, so the two cannot drift apart.
-    let flag = mistyped(&argv(&["--live", "--namespace", "PAYMENTS"]))
+    let flag = mistyped(&argv(&["--once", "--namespace", "PAYMENTS"]))
         .expect("an uppercase namespace is not a namespace");
     assert_eq!(
         flag.replace("--namespace needs", "the namespace in --object needs"),
@@ -9660,9 +9483,10 @@ fn two_verbs_over_one_object_are_refused_and_the_sentence_names_them() {
         "{three:?}"
     );
 
-    // **The contrast, and it is asserted rather than described**: two breadths of one read are
-    // still accepted, so this refusal is about verbs and not about *two flags*.
-    assert_eq!(mistyped(&argv(&["--once", "--live"])), None);
+    // **The contrast, and it is asserted rather than described**: a breadth flag repeated is
+    // still accepted, so this refusal is about verbs and not about *two flags*. It was
+    // `--once --live` — two breadths of one read — until Phase 13 (NOTES § D303).
+    assert_eq!(mistyped(&argv(&["--once", "--once"])), None);
     for one in [["--logs"], ["--describe"], ["--yaml"]] {
         let mut line = one.to_vec();
         line.extend(["--object", "default/web"]);
@@ -11179,18 +11003,18 @@ fn only_a_bare_ops_word_is_the_subcommand_and_a_flags_value_is_not() {
     for line in [
         vec!["pod.json"],
         vec!["--once", "--namespace", "payments"],
-        vec!["--live", "-n", "ops"],
+        vec!["--once", "-n", "ops"],
         vec!["--namespace", "ops", "--once"],
         vec!["--logs", "--object", "ops"],
         vec!["--logs", "--object", "ops/web"],
         vec!["--logs", "--object", "default/web", "--container", "ops"],
-        vec!["--live", "--context", "ops"],
+        vec!["--once", "--context", "ops"],
         vec!["--yaml", "--object", "web", "--kind", "ops"],
         vec!["ops.json"],
         // **`--read-only` is read inside [`ops_line`] now and must not reach past it**: a
         // read-only watch of a namespace called `ops` is a watch, and refusing it would be the
         // B1 fix breaking the run it was not about.
-        vec!["--read-only", "--live", "-n", "ops"],
+        vec!["--read-only", "--once", "-n", "ops"],
         vec!["--read-only", "ops.json"],
     ] {
         let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
@@ -14445,7 +14269,7 @@ fn the_usage_leads_with_the_console_and_stops_denying_it() {
         ),
         "the rewritten trailing sentence is not the one screens/states.md writes: {USAGE}"
     );
-    for door in ["--once", "--live", "--logs", "--describe", "--yaml", "ops"] {
+    for door in ["--once", "--logs", "--describe", "--yaml", "ops"] {
         assert!(
             USAGE.contains(door),
             "the synopsis stopped naming {door}, which still reaches a cluster"

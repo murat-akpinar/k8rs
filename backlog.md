@@ -4040,3 +4040,38 @@ Phase 12 close triage fixes them; the rest are notes.
   chunked transfer, and TLS the kubeconfig will accept — or plain `http://127.0.0.1:<port>`,
   which `ops_tests.rs` already proves kube accepts. A box of its own, and the same server would
   serve `e2e.sh`'s rows and every future pty leg. `tester`, 2026-09-28.
+- **The eight read flags come out when the detail tabs get their reads, and not before.**
+  `--logs --object --container --previous --follow --describe --yaml --kind` stay in v0.1 —
+  [D303](NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)
+  measured every leg of the case for removing them false: all ten were in `USAGE`, the console's
+  four detail tabs are `Pane::Loading` so these three verbs are the **only** way to read a log, a
+  description or a YAML out of k8rs, and the removal orphans ten items in `k8s.rs` — `log_stream`,
+  `LogRequest`, `read_lines`, `pod`, `PodRead`, `events`, `document`, `Document::yaml`,
+  `mask`/`SECRET` and `Fetch::plain` — one of which is the secret mask. **The trigger is the box
+  that wires the four tabs**: that is when they become the second way in D288 believed they
+  already were, when the ten items get a live caller, and when the deletion costs nothing. Until
+  then they are a documented, tested read path with no substitute, and what ships is a feature
+  rather than scaffolding. Whoever takes that box deletes the flags in it.
+- **`k8s.rs`'s crate-level `expect(dead_code)` gives its reason as a phase that closed months
+  ago, and it is why an orphan there is a green build.** The attribute reads *"the watch loop
+  that drives this store is a later box of Phase 5"*; Phase 5's watch loop landed, and the
+  expectation now silences every uncalled item in the file. Measured: a clean `cargo build` over
+  two throwaway uncalled functions in that file printed **nothing**
+  ([D303](NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)).
+  So the one gate that would have caught the flag removal's real cost could not, and the same
+  blind spot covers anything else that stops being called there. **A blind spot whose stated
+  reason has expired is worse than one that never had a reason, because it reads as deliberate.**
+  Narrowing it — per-item `expect`s, or none at all — is a `k8s.rs` change to a file frozen since
+  Phase 6, so it needs a recorded reversal and a measurement of what goes red, which is the box.
+  `analysis.rs` carries the same module-wide shape (D38) and would be asked the same question.
+- **Two things lost their only cover when `--live` went.** `scoped_because`'s
+  `k8s::Coverage::Blind` sentence — *this kubeconfig names no namespace, so k8rs tried `default`
+  and was refused there too* — is no longer in the product at all; `main::pods_unread` says the
+  equivalent with the scope and the action in it and is still tested, which is why the arm went
+  rather than being made unconditional. And **a cluster read with no deadline** is now
+  unreachable from the driver, since `live()` cannot be called without a `Budget`, so nothing
+  outside the console's own tests exercises *a watching surface may wait forever*
+  ([D150](NOTES.md#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)).
+  Neither is a defect today; both are what a reader of
+  [D303](NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)
+  would otherwise have to rediscover.

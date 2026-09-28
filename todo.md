@@ -5225,7 +5225,7 @@ behaves as specified.
       captures, which would put the whole gate inside `just check`, and a
       committed transcript fixture, which is what would let `--self-test` catch a
       needle over a frame no sample models — both in [`backlog.md`](backlog.md)
-- [ ] **Take the ten scaffolding flags out before anything is published** —
+- [x] **Take the ten scaffolding flags out before anything is published** —
       `--live` `--logs` `--describe` `--yaml` `--object` `--kind` `--container`
       `--previous` `--follow` `--subresource`. CLAUDE.md invariant 10 said they
       were *gone at Phase 12* and no box ever ordered it, so all fifteen are still
@@ -5236,7 +5236,34 @@ behaves as specified.
       ([D288](NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)).
       **Done when** the `grep` in D288 answers with the five released flags and
       nothing else, and `just check` is green with the driver's own tests either
-      removed or rewritten against the console
+      removed or rewritten against the console.
+      **Done 2026-09-28, and it was one flag rather than ten**
+      ([D303](NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)).
+      **The done-when above is re-ruled, because `dev-ui` measured all three legs
+      of this box's own rationale false before deleting anything**: every one of
+      the ten was in `USAGE` (so none was undocumented surface); the console's
+      four detail tabs are `Pane::Loading`, so `--logs`, `--describe` and `--yaml`
+      are the **only** way to read a log, a description or a YAML out of k8rs
+      rather than a second way into something the console owns; and the removal
+      orphans ten items in `k8s.rs` — `log_stream`, `LogRequest`, `read_lines`,
+      `pod`, `PodRead`, `events`, `document`, `Document::yaml`, `mask`/`SECRET`
+      and `Fetch::plain`, one of them the secret mask — in a file whose
+      crate-level `expect(dead_code)` makes an orphan a **green build**, measured
+      with a clean `cargo build` over two throwaway uncalled functions.
+      **`--live` is gone**, and it is the one flag the rationale held for: the
+      console *is* the live watch. `cluster_run` and `live` take a non-optional
+      `Budget`, `polls_node_usage` died with it, and the grep now answers
+      **fourteen**. **`--subresource` was removed and restored byte-identical**,
+      because `screens/help.md` measures a slash reading `scale` as an object
+      name and answering *yes* for a login that may not scale, and teaches
+      `--subresource=scale` as the fix — it is `ops may-i`'s own argument on a
+      shipped subcommand, and D288's list was wrong to name it.
+      **The eight stay in v0.1 with a trigger rather than a date**, which is
+      D288's own lesson re-paid: they come out in the box that wires the four
+      detail tabs, when they become the second way in and when those ten items
+      get a live caller. In [`backlog.md`](backlog.md), with two behaviours that
+      lost their only cover when `--live` went and the expired
+      `expect(dead_code)` reason that hid all of this
 - [ ] `README.md` (EN): what/why, screenshot or asciinema, install, **both**
       RBAC examples, the `--read-only` flag, "no telemetry" statement, and an
       honest paragraph on what k8rs can change in your cluster ·

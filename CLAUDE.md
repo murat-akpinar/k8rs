@@ -197,23 +197,29 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
     No `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
-    **The flag list below is a fact about the code and has gone stale four
+    **The flag list below is a fact about the code and has gone stale five
     times. Counted, not recalled:**
     `grep -oE '^(pub )?const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs src/views.rs`
     — `views.rs` since `--namespace` moved there
     ([D264](NOTES.md#d264--the-picker-round-a-failure-box-with-a-second-vocabulary-a-current-row-that-could-not-be-retried-and-a-cursor-on-a-context-nobody-chose-2026-09-13)
-    ruling 14). Two groups, and the split is the point:
+    ruling 14). **Fourteen**, and the split is the point:
     **released** — `--read-only` `--context` `--namespace` (also `-n`) `--once`
     `--analysis`
-    ([D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30));
-    **temporary driver's, and still here after Phase 12's close — boxed in Phase 13,
-    because a scaffolding flag on a published binary is surface nobody supports
-    ([D288](NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26))** — `--live` `--logs` `--describe`
-    `--yaml` `--object` `--kind` `--container` `--previous` `--follow`
-    `--subresource`
+    ([D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30))
+    and `--subresource`, which is `ops may-i`'s own argument and was never the
+    driver's
+    ([D303](NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28));
+    **the temporary driver's eight** — `--logs` `--describe` `--yaml` `--object`
+    `--kind` `--container` `--previous` `--follow`
     ([D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
-    **Ten of fifteen are scaffolding, which is why the count was never the thing
-    to defend** — the threshold is.
+    **This line used to name a date and the date was an outcome no step owned**
+    ([D288](NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)),
+    so it names a **trigger** instead: the eight come out in the box that wires
+    the four detail tabs, which is when they become a second way into a read path
+    the console owns and when the ten `k8s.rs` items behind them get a live
+    caller. `--live` was the one flag that was already true of and is gone
+    (2026-09-28, D303). **The count was never the thing to defend** — the
+    threshold is.
     **The narrow case for a thirteenth is a crate already in the build that only
     needs *naming***: that is what the eleventh and twelfth were, each adding no
     compiled code and leaving `Cargo.lock` at 213 packages

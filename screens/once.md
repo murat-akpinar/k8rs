@@ -591,9 +591,9 @@ than from anything the cluster answers — the login this machine uses,
 not the login the cluster is running. `rules.rs` already carries this
 finding and it is already drawn, one screen over,
 [in the Certificates pane](analysis.md#certificates-and-versions) — the gap
-this box closes is that a bare `k8rs --once` or `k8rs --live`, with no
-`--analysis`, currently shows it nowhere at all. `Severity::Info` is exactly
-what keeps it off a card ([§ What `--once` does not do](#what---once-does-not-do)
+this box closes is that a bare `k8rs --once`, with no `--analysis`,
+currently shows it nowhere at all. `Severity::Info` is exactly what keeps it
+off a card ([§ What `--once` does not do](#what---once-does-not-do)
 already names it as one of three rules with no other reader before this
 box), and D87's ruling that the card block never draws that band is
 unchanged — this is a trailer sentence, C2's shape, not a fourth card.
@@ -811,10 +811,10 @@ sanitized like every other free-text field, printed once the read is known
 to have happened rather than promised in advance
 ([screens/detail.md](detail.md), `main.rs`'s `kubectl_get` for `--yaml`
 and `describe_run`'s own line for `--describe`, printed after the pod is
-read and before events are asked for). The live path — a bare `k8rs
---once` or `k8rs --live`, with no other flag — joins that same convention
-instead of starting a second one, and this is the first place it is
-written down rather than only drawn as two lines nobody emits:
+read and before events are asked for). The live path — a bare
+`k8rs --once`, with no other flag — joins that same convention instead of
+starting a second one, and this is the first place it is written down
+rather than only drawn as two lines nobody emits:
 
 ```
 $ kubectl get --raw '/api/v1/pods?limit=1'
@@ -997,10 +997,10 @@ $ kubectl get daemonsets -A --watch
   three lines above them.
 - **`kubectl top nodes`, not a raw path into `metrics.k8s.io`.** It is the
   command a reader already knows for this exact question, and it is the
-  one command in this list that is not a `kubectl get`. Under `k8rs
-  --live --analysis`, the same reading is polled every thirty seconds
+  one command in this list that is not a `kubectl get`. This mode reads it
+  once; the console polls the same reading every thirty seconds
   (`k8s::node_usage_poll`, invariant 6's one timed exception) and the
-  line prints once, when the poll starts, the same as a watch's line
+  line still prints once, when the poll starts, the same as a watch's line
   marks the read starting rather than every object it delivers — a
   command log line means *this read began*, not *this stream is still
   open*.

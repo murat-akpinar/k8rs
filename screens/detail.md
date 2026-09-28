@@ -1526,8 +1526,11 @@ cluster-unreachable sentence are `logs_run`'s own first steps, read again
 rather than rewritten, because describe's first read is the identical
 `k8s::pod()` call before either verb touches what makes it different.
 `--container`, `--previous` and `--follow` are simply not read by
-`--describe` — not specially refused, the same way `--context` without
-`--live` is not refused today (`fn mistyped`'s own stated rule).
+`--describe` — not specially refused, which is `fn mistyped`'s own stated
+rule: a flag that is real but useless in this mode is left alone. That rule's
+example was `--context` without `--live`, and `--live` has since left the
+binary ([NOTES § D303](../NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28));
+the rule did not, and these three flags are what it now covers.
 
 ```
 $ kubectl describe pod web-7d9f4 -n payments

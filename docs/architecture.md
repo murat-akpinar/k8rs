@@ -52,7 +52,7 @@ What this build accepts:
 ```
 usage: k8rs [--read-only] [--context <name>] [--namespace <name>]
        k8rs [--analysis] <file.json>...
-       k8rs --once|--live [--analysis] [--context <name>] [--namespace <name>]
+       k8rs --once [--analysis] [--context <name>] [--namespace <name>]
        k8rs --logs --object <[namespace/]pod> [--container <name>] [--previous] [--follow] [--context <name>] [--namespace <name>]
        k8rs --describe|--yaml --object <[namespace/]name> [--kind <kind>] [--context <name>] [--namespace <name>]
        k8rs [--read-only] ops <operation> <kind>/<name> [<value>] --namespace <name>
@@ -70,9 +70,8 @@ alternative asks for a path, a mode word, `--object` or a subcommand first.
 | `<file.json>...` | Read Kubernetes objects from disk — one object per file, or a `kind: List`. **A path on the line is always the file-driven form, and nothing else**; without one, a run at a keyboard opens the console instead. |
 | `--analysis` | Draw the seven `analysis.rs` panes under the findings. One meaning in both modes ([NOTES § D169](../NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)). |
 | `--once` | Connect, print one report, exit — `0` when it ran and reported, `2` when it could not run. **The released surface**: this is what v0.0.1 ships ([NOTES § D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). The whole run is bounded — it does not wait forever on a cluster that never answers. |
-| `--live` | Watch the cluster and redraw whenever the answer changes, forever. **The temporary driver's**, not a shipped flag: a watch that reconnects on its own is provable no other way. |
 | `--read-only` | Refuses every operation, on every surface. **Load-bearing since Phase 7** ([D234](../NOTES.md#d234----read-onlys-box-went-stale-twice-and-the-carve-out-i-ordered-is-the-thing-to-attack-2026-09-05)): the guard sits at `ops_line`, the single door from argv into a mutation. Phase 12's flags box carried it onto the console — `ui::Writes::ReadOnly`, every mutating key withheld, the header reading `read-only` — and such a run **opens no audit log at all**, because a run that can write nothing owes no record. Asking is still allowed: `k8rs --read-only ops may-i …` ([D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) ruling 3). |
-| `--context <name>` | Which context k8rs connects to — the console as well as `--once`/`--live`. **Released, not scaffolding**, since Phase 12's flags box. A `--context` with nothing usable after it is **refused**, not silently answered with the current context ([D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). Repeated, the **last** one wins, the way `kubectl` resolves it. |
+| `--context <name>` | Which context k8rs connects to — the console as well as `--once`. **Released, not scaffolding**, since Phase 12's flags box. A `--context` with nothing usable after it is **refused**, not silently answered with the current context ([D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). Repeated, the **last** one wins, the way `kubectl` resolves it. |
 | `--namespace <name>`, `-n <name>` | Narrow the watches to one namespace. **This one is not scaffolding**: the scope it sets is a field on the snapshot that rules and reports were written to read. |
 
 `--namespace` and `-n` each take their value attached with `=` or as the next
@@ -103,9 +102,15 @@ card block does not draw that band, so without `--analysis` they would ship with
 no reader at all
 ([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
 
-**`--live` is the temporary driver's**, not a shipped flag: the console watches a
-cluster because that is what it is, and reading objects from a file is the
-scaffolding that let the rules be proven before there was a screen
+**`--live` was the temporary driver's and is gone** (2026-09-28,
+[NOTES § D303](../NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)):
+the console watches a cluster because that is what it is, so a second flag that
+did it was the one removal whose whole rationale held. **The eight read flags
+above stay in v0.1** — the console's four detail tabs are `Pane::Loading`, so
+`--logs`, `--describe` and `--yaml` are the only way to read a log, a
+description or a YAML out of k8rs today, and they come out in the box that wires
+those tabs. Reading objects from a file is the other scaffolding that let the
+rules be proven before there was a screen
 ([NOTES § D34](../NOTES.md#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
 
 ## Data flow

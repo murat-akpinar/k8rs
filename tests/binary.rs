@@ -153,10 +153,15 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
         "the usage still denies the cluster a bare `k8rs` now opens a console on: {stderr:?}"
     );
     // **Counting the lines does not read them.** The synopsis is the only place a reader
-    // learns which modes this build has, and the whole `--live` form was removable from it
-    // with all seven of these green until this loop existed. It is asserted against the
-    // first line and not the whole text because the prose below still says `--live` while
-    // the synopsis offers no way to reach it.
+    // learns which modes this build has, and the whole `--once|--live` form was removable from it
+    // with all seven of these green until this loop existed.
+    //
+    // **It is asserted against the first line and not the whole text, and the hazard survived
+    // `--live`'s removal in a new spelling** (NOTES § D303): the prose under the synopsis names
+    // `--once`, `--logs`, `--describe`, `--yaml` and `--read-only` in a sentence about which doors
+    // reach a cluster, so a whole-text `contains` goes green for two of the five rows below over a
+    // synopsis that offers no way to reach them. `--analysis`, `--context` and `--namespace` are
+    // in the synopsis alone, which is why only some of this loop would have noticed.
     let synopsis = stderr.lines().next().expect("the usage has a first line");
     // **The console is the first form offered**, because it is the one a reader reaches by typing
     // the program's name and nothing else — and because a reader who has just been shown this
@@ -190,9 +195,13 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
     // assertion's own test failed on the line above. The narrow thing the `contains` adds over
     // that line count is a `main` that prints a *different*, well-formed usage — thin, and the
     // reason to keep exactly one of the two rather than both.
+    // **`--once` where `--live` stood** (NOTES § D303): the console *is* the live watch, so
+    // `--live` was the one flag of the ten whose removal the rationale held for, and `--once` is
+    // the surviving mode that reads a cluster and ends. The claim the row makes is unchanged —
+    // the synopsis names every mode this build has — and only its subject moved.
     for named in [
         "--analysis",
-        "--live",
+        "--once",
         "--context",
         "--namespace",
         "--read-only",
@@ -216,35 +225,55 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
 /// its absence.
 const CONNECT_CANARY: &str = "no cluster to watch";
 
-/// **Neither cluster mode can start without a kubeconfig: exit 2, stderr, and an empty stdout.**
+/// **The reporting mode cannot start without a kubeconfig: exit 2, stderr, and an empty stdout.**
 ///
 /// The unit test over `live` can assert only the sentence it returns — "stdout belongs to the
 /// process and a test cannot read it back" (`src/main_tests.rs` § WATCHING A CLUSTER). This is
 /// that half, and it is the half `screens/once.md` § stdout and stderr are split is about:
-/// `k8rs --live > findings.txt` against a kubeconfig that is not there leaves an **empty** file,
+/// `k8rs --once > findings.txt` against a kubeconfig that is not there leaves an **empty** file,
 /// not a diagnostic sitting where a report should be.
+///
+/// **It read `--live` beside `--once` until NOTES § D303 removed that flag, and the row did not go
+/// red — it went vacuous**, which is worse and is why it is written down here. A word this build
+/// does not have is refused by `mistyped` with `k8rs: --live is not a flag k8rs has` and the
+/// synopsis under it: stderr, exit 2, stdout empty — all three of this test's assertions, none of
+/// them about a cluster mode. Measured 2026-09-28: it was among the 37 that passed while the three
+/// rows that name a driver went red. **The mode is named in a `let` rather than a one-entry
+/// array**, for the reason the body gives.
 ///
 /// **The wording is deliberately not pinned.** Telling `403` from `401` from *nothing answered*
 /// is the next box of Phase 5 and it will rewrite this sentence; what may not change is the
 /// stream, the exit code and the empty stdout.
 #[test]
 fn a_cluster_mode_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty() {
-    // **`--once` is asserted beside `--live` because only one of the two has an exit code to
-    // get wrong.** `--live` returns a sentence and `main` exits 2 whatever the sentence says;
-    // `--once` returns `Option`, and the mode that can answer *it reported* is the mode that can
-    // answer it about a cluster it never reached (`screens/once.md` § Exit codes).
-    for mode in ["--live", "--once"] {
-        let out = k8rs(&[mode]);
+    // **`--once` is the mode with an exit code to get wrong, which is why it is the one left.**
+    // It returns `Option`, and the mode that can answer *it reported* is the mode that can answer
+    // it about a cluster it never reached (`screens/once.md` § Exit codes). The console cannot
+    // stand beside it: it is not a reporting mode, so it has no *report* whose absence from stdout
+    // means anything — which is the pair of facts this test asserts together.
+    //
+    // **A `let` and not a one-entry array**: this read `for mode in ["--live", "--once"]` until
+    // NOTES § D303, and `clippy::single_element_loop` is `-D warnings` and right. The record of
+    // what belongs here next is in this comment rather than in the shape, because a comment is
+    // what no lint can delete — D303's trigger for the eight surviving read drivers is exactly
+    // when a second mode joins this one, and re-looping is a two-line edit then.
+    //
+    // **The lint fires on where it can *see* the array and not on one-entry arrays**, which is
+    // worth knowing before shrinking another: `src/main_tests.rs` keeps three
+    // `for mode in ["--once"]` loops (`:6566`, `:6617`, `:6721`) that clippy passes in silence,
+    // each of them wrapping an inner `for` (measured by `dev-ui`, 2026-09-28, after
+    // `touch src/*.rs tests/*.rs` and a fresh pass).
+    let mode = "--once";
+    let out = k8rs(&[mode]);
 
-        assert_eq!(out.status.code(), Some(2), "{mode}: {out:?}");
-        assert!(
-            out.stdout.is_empty(),
-            "{mode} wrote a diagnostic where a report goes: {:?}",
-            text(out.stdout.clone())
-        );
-        let stderr = text(out.stderr);
-        assert!(stderr.starts_with("k8rs: "), "{mode}: {stderr:?}");
-    }
+    assert_eq!(out.status.code(), Some(2), "{mode}: {out:?}");
+    assert!(
+        out.stdout.is_empty(),
+        "{mode} wrote a diagnostic where a report goes: {:?}",
+        text(out.stdout.clone())
+    );
+    let stderr = text(out.stderr);
+    assert!(stderr.starts_with("k8rs: "), "{mode}: {stderr:?}");
 }
 
 /// **A committed capture: exit 0, the report on stdout, and stderr empty.**
@@ -335,7 +364,7 @@ fn a_crafted_path_leaves_the_process_with_no_control_character_on_stderr() {
 /// namespace name.
 ///
 /// **A missing value is refused rather than ignored, and that is the half worth a process
-/// test.** `k8rs --live -n "$NS"` with `NS` unset is the commonest way here; swallowing it would
+/// test.** `k8rs --once -n "$NS"` with `NS` unset is the commonest way here; swallowing it would
 /// watch **every** namespace, which is the opposite of what the reader asked for and has no line
 /// on screen to notice it by.
 #[test]
@@ -344,32 +373,39 @@ fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
     // assertion in the loop rests on *this exact sentence* being what a run that reached the
     // connect says; reword it and the `!contains` goes silently true for every case at once,
     // which is the shape `write-guard.py`'s `CANARIES` exists to refuse (CLAUDE.md § A derived
-    // list asserts it found something). `--once` is asserted beside `--live` because the two
-    // share one `live()` and one sentence, and a mode that grew a second one would show here.
-    for mode in ["--live", "--once"] {
-        let reached = text(k8rs(&[mode]).stderr);
-        assert!(
-            reached.contains(CONNECT_CANARY),
-            "{mode} that reached the connect no longer says {CONNECT_CANARY:?}, so every \
-             `!contains` below proves nothing: {reached:?}"
-        );
-    }
+    // list asserts it found something). `--live` stood beside `--once` here until NOTES § D303
+    // removed it — the two shared one `live()` and one sentence, so a mode that grew a second one
+    // would have shown here. `--once` is now the whole of that call's reachable surface, and
+    // measured rather than assumed: `live` has one caller, `cluster_run`, which has one, under
+    // `ONCE_DEADLINE` (src/main.rs). **A `let` and not a one-entry array**, and the array this
+    // replaced, the lint that refuses it and the place a second mode comes back from are all in
+    // [`a_cluster_mode_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty`]'s body.
+    let mode = "--once";
+    let reached = text(k8rs(&[mode]).stderr);
+    assert!(
+        reached.contains(CONNECT_CANARY),
+        "{mode} that reached the connect no longer says {CONNECT_CANARY:?}, so every \
+         `!contains` below proves nothing: {reached:?}"
+    );
 
+    // **Every shape moved from `--live` to `--once` rather than being dropped** (NOTES § D303):
+    // the matrix is the claim — three shapes the flag can be given nothing usable in, both
+    // spellings of each — and deleting the eight rows that named the removed flag would have kept
+    // two of them, which is weakening a test to reach green.
+    //
+    // **And only a process can show any of it.** The unit tests call `mistyped` directly, which
+    // cannot tell *refused first* from *refused after a connection was attempted* — and `--once`
+    // is the mode whose whole promise is that it ends, so a run that dialled first would still
+    // exit 2 and look identical here.
     for args in [
-        vec!["--live", "--namespace"],
-        vec!["--live", "-n"],
-        vec!["--live", "--namespace="],
-        vec!["--live", "-n="],
-        vec!["--live", "--namespace", "../secrets"],
-        vec!["--live", "-n", "../secrets"],
-        vec!["--live", "--namespace=a/b"],
-        vec!["--live", "-n=.."],
-        // **`--once` goes through the same gate, and only a process can show it.** The unit
-        // tests call `mistyped` directly, which cannot tell *refused first* from *refused after
-        // a connection was attempted* — and `--once` is the mode whose whole promise is that it
-        // ends, so a run that dialled first would still exit 2 and look identical here.
         vec!["--once", "--namespace"],
+        vec!["--once", "-n"],
+        vec!["--once", "--namespace="],
+        vec!["--once", "-n="],
+        vec!["--once", "--namespace", "../secrets"],
         vec!["--once", "-n", "../secrets"],
+        vec!["--once", "--namespace=a/b"],
+        vec!["--once", "-n=.."],
     ] {
         let out = k8rs(&args);
 
@@ -430,7 +466,11 @@ fn a_crafted_namespace_never_reaches_the_terminal_at_all() {
     // branch is ever the one that moves.
     let crafted = "pay\u{1b}[2J\rments\u{9b}/x";
 
-    let out = k8rs(&["--live", "--namespace", crafted]);
+    // **`--once` where `--live` stood** (NOTES § D303). This row did not go red on the removal,
+    // and the reason is worth the line: `mistyped` refuses the crafted namespace *before* it
+    // reaches an unknown flag, so the run was still answered by the sentence this test reads.
+    // The flag is not what is under test here — it is the mode the value is given to.
+    let out = k8rs(&["--once", "--namespace", crafted]);
 
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let stderr = text(out.stderr);
@@ -579,9 +619,9 @@ fn a_console_flag_line_with_no_terminal_is_the_usage_and_nothing_else() {
     );
 }
 
-/// **The cluster modes keep their driver when a console flag is beside them** — `--once`
-/// especially, which is released and is a command in a pipeline rather than a screen
-/// (NOTES § D17, `screens/once.md`).
+/// **The cluster mode keeps its driver when a console flag is beside it** — `--once`, which is
+/// released and is a command in a pipeline rather than a screen (NOTES § D17, `screens/once.md`).
+/// It was plural while `--live` was the second one (NOTES § D303).
 ///
 /// **Not *not a console*, but *the driver it named***. A build where every line fell through to
 /// the file-driven report would pass an assertion that only said *no console* — and that build is
@@ -600,8 +640,13 @@ fn a_cluster_flag_keeps_its_driver_when_a_console_flag_is_beside_it() {
             "--context=prod-eu",
             "--namespace=payments",
         ],
-        vec!["--live", "--read-only"],
-        vec!["--live", "--namespace=payments"],
+        // **What the two `--live` rows here really carried was a spelling, not a pairing**
+        // (NOTES § D303): `--once --read-only` is row 1 and already makes the pairing claim, with
+        // `--read-only` the console flag this file calls *the single worst flag in this build to
+        // drop in silence* one test below. What no `--once` row had was `--namespace=` as the
+        // **only** flag beside the cluster mode — it appears above only alongside three others —
+        // so the two rows collapse to this one and no shape is lost.
+        vec!["--once", "--namespace=payments"],
     ] {
         let out = k8rs(&args);
 
@@ -1321,10 +1366,11 @@ fn a_once_run_over_a_cluster_that_answers_is_the_report_on_stdout_and_exit_0() {
         "a cluster with nothing in it got no health claim, which is the one thing an empty \
          report may not do: {stdout:?}"
     );
-    // **One trailing newline, not two.** The blank line between reports belongs to `--live`,
-    // which has a successor to separate; `--once` does not (`screens/once.md` § What it prints
-    // ends at the tally), and a redirected report that ends on two leaves a blank line at the
-    // foot of `findings.txt`. The file-driven half of the same claim is pinned by the
+    // **One trailing newline, not two** — `screens/once.md` § What it prints ends at the tally,
+    // and a redirected report that ends on two leaves a blank line at the foot of
+    // `findings.txt`. The separating blank line belonged to `--live`, which had a successor
+    // report to separate; nothing in this build emits a second report, so the page is the whole
+    // of the reason now (NOTES § D303). The file-driven half of the same claim is pinned by the
     // whole-report literal in [`a_healthy_capture_is_the_report_on_stdout_and_exit_0`]; this
     // half was proved once with `od -c` on a real run and asserted nowhere.
     assert!(

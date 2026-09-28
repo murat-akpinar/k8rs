@@ -518,7 +518,7 @@ The banner's **middle clause** is the whole of this state.
 
 - **This mockup draws the banner the binary prints, not this page's older
   wording for the same pane.** `▲ k8rs is not getting <kind> from this
-  cluster: …` is [`unreadable`](../src/main.rs)'s, the same string `--live`
+  cluster: …` is [`unreadable`](../src/main.rs)'s, the same string `--once`
   prints, and `Pane::Denied` carries exactly it. The `⚠ Not connected to the
   cluster right now.` prose just above, and *"Nodes are not checked at
   all — your user can't list them"* under
@@ -597,7 +597,7 @@ The banner's **middle clause** is the whole of this state.
   would then be wrong for that reader: the refusal is permanent, it **is**
   about permissions, and the tail would promise a retry that can never
   succeed. Invisible in the console, where the banner is the first trouble row
-  and during a blip that is pods, and plain under `--live` and `--once`
+  and during a blip that is pods, and plain under `--once`
   (`reports/2026-09-28-a-403-from-a-restarting-apiserver.md`).
 
   Two shapes that look close, and what excludes each:
@@ -745,7 +745,7 @@ Deployments, StatefulSets, DaemonSets — whatever that row's fault is. So this
 clause reaches a console frame only when the first row is the refused one
 **and** had listed; a refused nodes watch behind an unanswered pods one draws
 pods' own *nothing is coming back* line instead, with the refusal visible only
-under `--live`.
+under `--once`.
 
 **That order is not reordered here**, and the reason is not politeness about a
 frozen file: a rank per kind would be per-kind layout in a frame that has none
@@ -753,7 +753,7 @@ frozen file: a rank per kind would be per-kind layout in a frame that has none
 first* but *is this my `Role`* — which every one of the lines answers the same
 way, so which one arrives first changes nothing they would do.
 
-**`--live` prints every line**, one per kind, each naming its own kind and its
+**`--once` prints every line**, one per kind, each naming its own kind and its
 own API plural — *"…it refused `list` and `watch` pods, and nothing else is
 answering either…"*, *"…it refused `list` and `watch` statefulsets, and nothing
 else is answering either…"*. Unwrapped they run 275 and 291 columns, past this
@@ -3003,12 +3003,28 @@ syntactically fine console line with no terminal to draw it on. `src/main.rs`'s
 no screens/ authority for that text before this box; there is now, and
 `docs/architecture.md`'s CLI table quotes the same text and has to match it.
 
-Measured, the synopsis is one unwrapped printed line, 609 columns — past
-this page's frame by a wide margin, so quoted rather than fenced, the same
-treatment the RBAC-refusal sentences above get for the same reason:
+**Nothing in `just check` reads this synopsis, so it is re-read against the
+binary rather than trusted.** `src/ui_tests.rs` crosses this page with the
+code through *fenced* mockups and the pane sentences inside them; the
+synopsis is quoted prose, because it fits no frame, and
+`scripts/screens-check.py` measures frame geometry only. So the three
+hand-typed copies — the binary, this section, that CLI table — drift in
+silence, and a person opening all three is the whole gate. It has already
+been needed: `--live` left the binary and this section still printed it until
+the turn that read the two side by side
+([NOTES § D303](../NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)).
+This page's refusal banner was in the same position — two hand-typed copies
+with nothing comparing them — until `the_refusal_banner_is_the_pages_own_words`
+was written for it, after one word misspelled inside both mockups at once left
+1 605 tests green. The synopsis has no equivalent yet.
+
+Measured, the synopsis is one unwrapped printed line, 602 columns — 609
+while `--live` was on it — past this page's frame by a wide margin, so
+quoted rather than fenced, the same treatment the RBAC-refusal sentences
+above get for the same reason:
 
 *"usage: k8rs [--read-only] [--context `<name>`] [--namespace `<name>`]   |
-k8rs [--analysis] `<file.json>`...   |   k8rs --once|--live [--analysis]
+k8rs [--analysis] `<file.json>`...   |   k8rs --once [--analysis]
 [--context `<name>`] [--namespace `<name>`]   |   k8rs --logs --object
 `<[namespace/]pod>` [--container `<name>`] [--previous] [--follow]
 [--context `<name>`] [--namespace `<name>`]   |   k8rs --describe|--yaml
@@ -3020,15 +3036,16 @@ k8rs [--analysis] `<file.json>`...   |   k8rs --once|--live [--analysis]
 
 followed by two explanatory lines — the first unchanged, the second rewritten
 in this same box. *"Each file holds Kubernetes objects as JSON: one object,
-or a list of them."* stays. What this build prints today —
+or a list of them."* stays. What this build printed until this box —
 *"Without --once, --live, --logs, --describe, --yaml or ops this build reads
-files only — it cannot reach a cluster."* — does not survive the console
+files only — it cannot reach a cluster."*, quoted as the line this build used
+to print and not as one a reader can still get — does not survive the console
 line above it: a bare `k8rs` now reaches a cluster with none of those six
 words on it, so that clause is false the instant this box ships. It becomes:
 
 *"A path on the line is always the file-driven form, and nothing else;
 without one, this build opens a console instead of reading nothing —
---once, --live, --logs, --describe, --yaml and ops are its other doors to a
+--once, --logs, --describe, --yaml and ops are its other doors to a
 cluster. --read-only refuses every operation this build can reach, so a run
 that carries it can ask (ops may-i) and never change anything."*
 
@@ -3057,15 +3074,26 @@ typing `k8rs` alone opens anything.
   console without touching this sentence would have shipped a synopsis that
   contradicts its own second line. The fix does not drop the six words — a
   reader still needs to know each of them reaches a cluster too — it just
-  stops claiming a bare `k8rs` cannot.
+  stops claiming a bare `k8rs` cannot. **They are five now**: `--live` left
+  the binary and the sentence above lost that word with it
+  ([NOTES § D303](../NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)).
+  This line changes whenever a door to a cluster opens or closes, which is
+  what makes it the one to re-read after either.
 - **Every flag on it is released, not scaffolding**
   ([CLAUDE.md invariant 10](../CLAUDE.md)): `--read-only`, `--context` and
-  `--namespace` are three of the five flags that survive Phase 12's end,
-  where `--logs`, `--describe`/`--yaml` and their neighbours two alternatives
-  down do not. A synopsis missing the one line guaranteed to outlive this
-  phase, while carrying four about to be deleted, had the omission backwards
-  — and it stays backwards a moment longer, since the six-line version is
-  what ships until the dev turn that reads this section lands it.
+  `--namespace` are three of the five released flags, where `--logs`,
+  `--describe`/`--yaml` and their neighbours two alternatives down belong to
+  the temporary driver. A synopsis missing the one line guaranteed to outlive
+  that driver, while carrying the eight that go with it, had the omission
+  backwards — and it no longer does: the console leads the seven alternatives
+  the binary prints today.
+  **What the scaffolding half lost is a date, not a form.** Those eight stay
+  in v0.1 and come out when the box that wires the four detail tabs lands,
+  because until then they are the only way to read a log, a description or a
+  YAML out of k8rs
+  ([NOTES § D303](../NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)) —
+  so the two alternatives above are drawn as they ship, and not as something
+  about to be deleted. `--live` was the exception and is gone.
 - **`--analysis` is not on it, on purpose.** It draws the seven extra panes
   under the findings in the temporary driver's own printed report and in
   `--once`; the console's Analysis view is a sidebar entry a reader opens

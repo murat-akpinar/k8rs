@@ -324,6 +324,7 @@ its line moving with it.
 - [D300](#d300--a-403-while-nothing-else-is-answering-is-not-an-rbac-errand-and-the-detector-is-the-contradiction-itself-2026-09-28) — a `403` while nothing else is answering is not an RBAC errand, and the detector is the contradiction itself
 - [D301](#d301--the-command-log-draws-the-manifest-bare-because-that-line-is-not-on-screen-2026-09-28) — the command log draws the manifest bare, because that line is not on screen
 - [D302](#d302--the-confirmation-arm-gets-a-gate-and-four-of-its-first-sixty-needles-asked-for-something-nothing-draws-2026-09-28) — the confirmation arm gets a gate, and four of its first sixty needles asked for something nothing draws
+- [D303](#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28) — the ten scaffolding flags were one flag, and every leg of the rationale for the other nine was false
 
 ## Why it exists — where the gap is
 
@@ -27228,3 +27229,95 @@ fixture, which needs a capture route with a sanitizer in front of it
 in [`reports/`](reports/README.md) — that directory is `k8s-admin`'s by the
 ownership table, one file per *its* measurement, and a PM run filed there would
 put two writers in one cell.
+
+### D303 — the ten scaffolding flags were one flag, and every leg of the rationale for the other nine was false (2026-09-28)
+
+[D288](#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)
+boxed the removal of ten flags with three reasons: they *"appear in no `USAGE`
+line"*, they are *"undocumented surface on a binary a stranger installs with
+`cargo install`"*, and *"every one of them is a second way into a read path the
+console already owns"*. `dev-ui` measured all three against the built binary
+before deleting anything, and **all three are false for nine of the ten.**
+
+**1. Every one of the ten was in `USAGE`** — `--once|--live`, the `--logs` form
+with `--object --container --previous --follow`, the `--describe|--yaml` form with
+`--kind`, and `[--subresource <name>]` on the `may-i` row. Measured on the binary
+as it stood. So they were neither undocumented nor hidden; `screens/states.md`
+§ *The command line's own synopsis* is their stated authority and draws them.
+
+**2. The console owns none of the read paths three of them reach.** Its four
+detail tabs are `Pane::Loading` and nothing fetches them, so `--logs`,
+`--describe` and `--yaml` are not a *second* way in — they are the **only** way
+to read a log, a description or a YAML out of k8rs today.
+
+**3. Removing them orphans ten items in a frozen file, and the compiler cannot
+say so.** `log_stream`, `LogRequest`, `read_lines`, `pod`, `PodRead`, `events`,
+`document`, `Document::yaml`, `mask`/`SECRET` and `Fetch::plain` have exactly one
+product caller each, and it is the driver. **`k8s.rs` carries a crate-level
+`#![cfg_attr(not(test), expect(dead_code, …))]`**, so an uncalled item there is a
+**green** build — measured with a clean `cargo build` over two throwaway uncalled
+functions, which printed nothing. So the choice was a recorded reversal of that
+file's Phase 6 freeze, or a dead-code bandage, and the first one deletes
+`mask`/`SECRET` — the secret mask — because a CLI flag went away.
+
+**Ruled: `--live` goes, `--subresource` stays, and the other eight stay for
+v0.1 with a named trigger.**
+
+**`--live` is the one the rationale was true of.** The console *is* the live
+watch, so it was genuinely a second way into what the console owns, and it
+orphaned nothing: `polls_node_usage` died with it (`analysis && !stopping` is now
+always false) and `k8s::node_usage_poll` keeps the console as its caller. Gone,
+with `cluster_run` and `live` taking a non-optional `Budget` rather than keeping a
+`None` reachable only from tests — which would have been ruling 2's bandage in
+another shape.
+
+**`--subresource` was removed and is restored, because a shipped screen teaches
+it.** `screens/help.md` § *When a key is refused* measures the trap and names the
+fix: `deployments/scale` reads `scale` as an **object name** and answers *yes* for
+the very login the screen draws `s no scale` for, in `kubectl auth can-i` and in
+`k8rs ops may-i` alike, so *"either tool's real question is `--subresource=scale`,
+never the slash"*. `may-i` is [D23](#d23--permissions-are-discovered-by-failing-and-that-is-backwards)'s
+carve-out and ships; taking its flag out leaves a screen teaching a paste the
+binary refuses, on the one question the `s` key's mark depends on. It was never
+scaffolding — it is a released subcommand's argument, and D288's list was wrong to
+name it.
+
+**The eight stay, and what changes is the reason on the record rather than the
+date.** They are documented, tested, and the only access to those reads. **The
+trigger for their removal is the box that wires the four detail tabs**: that is
+when they become the second way in D288 believed they already were, and when the
+ten `k8s.rs` items get a live caller so the deletion costs nothing. Recorded in
+[`backlog.md`](backlog.md) with that trigger, the way
+[D285](#d285--the-error-state-pass-one-blip-made-the-header-lie-for-the-life-of-the-process-and-the-fix-is-a-predicate-rather-than-a-clock-2026-09-26)
+ruling 5 named v0.5's Events watch for the sixth-watch guard. **CLAUDE.md
+invariant 10 now says that** instead of a date no step owns — which is D288's own
+lesson, re-paid one box later by the list it wrote.
+
+**What the driver's own tests cost, and what is owed.** 189 places in
+`main_tests.rs` named one of the ten; the `--live` half is rewritten against
+`--once` or deleted. Two things lost their only cover and are boxed rather than
+mourned: `scoped_because`'s `Coverage::Blind` sentence, which `pods_unread` says
+better and still tests, and *a cluster read with no deadline*, which only the
+console's own tests now exercise. Four `tests/binary.rs` cases fail on `--live` by
+construction and are `tester`'s to rewrite.
+
+**A fourth `tests/binary.rs` case did not go red, and that is the worse
+outcome.** `a_cluster_mode_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty`
+drove `k8rs --live` and **passed** among the 37 while the three that name a driver
+failed — because `mistyped` answers an unknown flag on stderr with exit 2 and an
+empty stdout, which is every assertion that test makes. The row had stopped
+testing its subject and nothing said so: a deleted mode reads exactly like a mode
+that could not find a kubeconfig. Rewritten against `--once`, with the arithmetic
+in its own doc. **The same shape survived the removal one file over**: the prose
+under the synopsis names `--once`, `--logs`, `--describe`, `--yaml` and
+`--read-only`, so a whole-text `contains` over the usage output would go green for
+two of the five rows in the loop that checks a synopsis offers a way to reach each
+mode — only `--analysis`, `--context` and `--namespace` are synopsis-only, which is
+why the loop would notice for three rows and not for two.
+
+**And one measurement that outlives this box.** That `expect(dead_code)` in
+`k8s.rs` carries the reason *"the watch loop that drives this store is a later box
+of Phase 5"* — a phase that closed months ago. It is why ruling 3's stop was
+invisible to every gate, and narrowing it is in [`backlog.md`](backlog.md): a
+blind spot whose stated reason has expired is worse than one that never had a
+reason, because it reads as deliberate.
