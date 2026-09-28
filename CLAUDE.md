@@ -77,6 +77,7 @@ binds whoever is writing — a dev at step 3 as much as the PM at step 7:
 | **What** is required, per role (developer / devops / devsecops) | [REQUIREMENTS.md](REQUIREMENTS.md) |
 | **When** — phases, order, done-when. The only place steps are checked off | [todo.md](todo.md) |
 | Work that belongs to **no phase yet** — a finding nobody has ruled on, an idea with no home | [backlog.md](backlog.md) — nothing in it is work; read at phase close, never mid-phase ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)) |
+| The **A-to-Z pass over the shipped binary** — every feature run by hand, and what it found | [test.md](test.md) — checks, never boxes; a failing row is a blocker fixed now or a `backlog.md` line ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
 | A **measurement** somebody already made — commands and their real output | [reports/](reports/README.md) — evidence a decision cites, never the decision |
 | The **built** state, for humans outside this repo | [docs/](docs/README.md) — never contains anything not yet true of the code |
 | What a screen actually looks like, key by key | [screens/](screens/README.md) — one file per screen |
@@ -504,7 +505,7 @@ Every path in the repo appears in exactly one **Writes** cell.
 | `tui-designer` | `screens/` | any `.rs` |
 | `tester` | `tests/` `scripts/` `justfile` `clippy.toml` `deny.toml` `.github/workflows/` | product code in `src/` — **including the rule tests**, see below |
 | `k8s-admin` | `reports/` — its own measurements, one file per run | every other file: no code, no screen, no plan, no box |
-| **PM** (main session) | `todo.md` `NOTES.md` `backlog.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/` `.claude/commands/`, branches, commits, PRs | `src/` (delegate it) |
+| **PM** (main session) | `todo.md` `NOTES.md` `backlog.md` `test.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/` `.claude/commands/`, branches, commits, PRs | `src/` (delegate it) |
 
 **A `<name>_tests.rs`, and every module under `<name>_tests/`, has the same
 writer as `<name>.rs`** (invariant 11): the tests move out of the file, never out

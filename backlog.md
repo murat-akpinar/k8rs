@@ -4184,3 +4184,25 @@ Phase 12 close triage fixes them; the rest are notes.
   leave the pane honest about not being wired, or stop drawing kind rows until the fetch lands
   — which is the shape [D296](NOTES.md#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)
   already built for a refused discovery. PM, measured while writing the README.
+  **Ruled 2026-09-28: the second way out**, and it is being fixed inside the close rather than boxed
+  ([D310](NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)).
+  Re-measured on the released binary the same day, and the user's report of it was *the browser's
+  screens come up empty* — the groups are not empty, one pane never answers
+  ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)).
+
+### From the A-to-Z pass over the released binary (2026-09-28)
+
+- **The sidebar cuts a kind's front, and five of `storage`'s eight rows are cut.** Measured on the
+  registry-installed `0.1.0`, `tmux` 120×40 against `kind-k8rs`: `storage` expands to eight kinds and
+  `…ragecapacities` `…ntvolumeclaims` `…sistentvolumes` `…umeattachments` `…ributesclasses` are what
+  a reader gets, in the sidebar's twenty columns — which is its spec'd width at every terminal size,
+  so no terminal is wide enough to fix it. **`ui::front` is deliberate and is not the defect**: it
+  keeps the tail because the front-cut alternative collapses `persistentvolumes` and
+  `persistentvolumeclaims` into the same string, and its doc comment argues that. What is not true is
+  `screens/widgets.md § 7`'s claim that a shortened kind *still reads as itself* — `…ributesclasses`
+  does not read as `volumeattributesclasses` to anyone who does not already know the kind, which is
+  invariant 14's reader. **Neither cut is right, so this is a screen ruling and not a code fix**:
+  a wider sidebar, a second line per row, or a cut that keeps both ends (`volume…classes`). Ruled
+  not a blocker and kept out of the Phase 13 close
+  ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)).
+  PM, measured while reproducing the user's *the browser's screens come up empty*.

@@ -331,6 +331,8 @@ its line moving with it.
 - [D307](#d307--the-registry-publish-ran-in-session-because-the-credential-is-on-the-pms-own-machine-2026-09-28) — the registry publish ran in-session, because the credential is on the PM's own machine
 - [D308](#d308--the-changelog-is-regenerated-whole-because---prepend-duplicated-a-released-versions-header-2026-09-28) — the changelog is regenerated whole, because `--prepend` duplicated a released version's header
 - [D309](#d309--the-cratesio-page-keeps-a-readme-that-says-the-crate-is-not-published-and-the-maintainer-will-not-spend-a-version-number-on-it-2026-09-28) — the crates.io page keeps a README that says the crate is not published, and the maintainer will not spend a version number on it
+- [D310](#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28) — the browser's kind pane is made honest rather than wired, and that reverses the freeze on three top-layer files
+- [D311](#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28) — the A-to-Z pass gets a file, and its first four rows found a binary that calls a flag a missing file
 
 ## Why it exists — where the gap is
 
@@ -27600,3 +27602,86 @@ unpacks. Absolutising them would have fixed that and taken six links out of `che
 coverage. Measured first: crates.io already rewrites them to
 `https://github.com/murat-akpinar/k8rs/blob/HEAD/…`, so the public rendering is correct and the
 papercut exists only in a file almost nobody opens. The links stay relative and the guard keeps them.
+
+### D310 — the browser's kind pane is made honest rather than wired, and that reverses the freeze on three top-layer files (2026-09-28)
+
+**The blocker.** [`backlog.md`](backlog.md)'s *opening a kind in the Resources browser is a dead end
+on the real binary*, measured on the four-node `k8rs` cluster: `drawn` hands `browser: &UNOPENED`, a
+`static views::Pane<k8s::Table> = Pane::Loading`, so every kind row draws `reading the cluster…` for
+a fetch nothing issues — and `esc` does not come back, because `main.rs`'s `Esc` arm closes a
+`Detailing` and the browser is not one. `Tab` does get out and is on no footer. The same entry
+carries the half the close review added: `?` lists `l logs`, `d describe` and `y view as YAML` under
+*Looking at things (always available)* on the screen that already marks `s` *not built yet*.
+
+**The user's ruling, 2026-09-28, out of the three ways the backlog entry named:** `esc` comes back,
+the pane says plainly that the kind cannot be listed yet, and `?`'s three rows take the mark the
+screen already knows how to draw. **Wiring the fetch was refused** — the machinery is proven, but it
+is a feature, and [CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+step 6 says a blocker is *fixed*, not that a close is where v0.2 gets built. **Stopping the kind rows
+from drawing was refused** too: it empties five sidebar groups, so a stranger never meets the browser
+at all, and [D296](#d296--a-refused-apis-is-two-surfaces-with-two-gates-and-the-row-outlives-the-sentence-2026-09-27)'s
+shape is for a discovery that was *refused*, not one that answered.
+
+**The reversal, which is the part the pyramid rule asks for in writing.** `main.rs`, `ui.rs` and
+`views.rs` were all finished in Phase 12 and are frozen, and this fix reaches all three: the `Esc`
+arm, the browser's `Pane::Loading` arm and `HELP`, and whatever decides the browser's footer. The
+plan is not wrong and the order is not being fixed — the boxes that built these files were correct
+and a *later* box (the `Table` fetch) is what will remove these words again. **What is being repaired
+is the box that is landing**, which CLAUDE.md's *one exception* already allows, and the freeze is
+lifted for this fix and nothing else. The three files go back to frozen the moment it lands.
+
+**Why the honest sentence is not a smaller lie.** `reading the cluster…` is a promise with a subject
+— something is reading — and nothing is. A pane that says the kind cannot be listed yet, next to an
+`esc` the footer names, is the same shape this project has shipped everywhere else a key outruns the
+code: `s`'s row, the log tab's `c` and `⇧p`. It is the one wording a reader cannot be trapped by.
+
+### D311 — the A-to-Z pass gets a file, and its first four rows found a binary that calls a flag a missing file (2026-09-28)
+
+**[`test.md`](test.md) exists because `just check` green and a published release are two different
+claims.** The gate proves the code does what its tests say; nothing in it has ever opened the
+console, pressed a key or watched a pane answer. The file is one checklist over the seven doors the
+`USAGE` string names, run by hand against the **registry-installed** binary on the test host — which
+is what a stranger gets — and it holds **checks, not boxes**: the next task is still the first
+unchecked box in the lowest open phase of [`todo.md`](todo.md) and nowhere else. A failing row
+produces a finding, and a finding is triaged exactly the way a phase close triages one (step 6): a
+blocker is fixed in the turn that found it, everything else is a [`backlog.md`](backlog.md) line
+waiting for a ruling. **Neither ever adds a box to an open phase**, which is the rule the file would
+otherwise be a way around. **The version never moves while it runs** — `0.1.0`, on
+[D309](#d309--the-cratesio-page-keeps-a-readme-that-says-the-crate-is-not-published-and-the-maintainer-will-not-spend-a-version-number-on-it-2026-09-28)'s
+ruling — so a fix out of it touches `src/`, the docs and that page, and never `Cargo.toml`'s
+`version`. It is the PM's file, and [CLAUDE.md § Ownership](CLAUDE.md#ownership--and-the-file-each-one-may-write)
+says so in the same edit, because every path in the repo appears in exactly one **Writes** cell.
+
+**The user opened the console and reported that the browser's screens come up empty (2026-09-28).**
+Measured rather than assumed, released binary, `tmux` at 120×40 against `kind-k8rs`: the five groups
+are **not** empty — `storage` expands to its eight kinds off discovery, and the Alerts view draws 21
+findings in plain language. What is empty is the pane a kind opens, which is
+[D310](#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)'s
+blocker confirmed on the artifact a stranger installs: `csidrivers` draws `reading the cluster…`,
+still draws it 20 s later, the footer collapses to `? all keys  q quit`, and `esc` changes nothing.
+**A report of a symptom is not a report of its cause** — *every screen is empty* and *one pane never
+answers and traps you* need different fixes, and only the measurement separates them.
+
+**Two findings the backlog entry did not have, and the first is ruled a blocker.**
+
+**`k8rs -h` answers `k8rs: -h: No such file or directory (os error 2)`.** The same binary answers
+`k8rs: -h is not a flag k8rs has` for `k8rs --once -h` — measured, five spellings, and `-x` and `-v`
+behave like `-h`. The cause is one line: the unknown-flag refusal tests `arg.starts_with(FLAG)` and
+`FLAG` is `"--"`, so no single-dash word reaches it, and the file-driven door — **the default door,
+the one a bare `k8rs <word>` takes** — then reads it as a path. The correct sentence already exists
+(`main.rs:2529`) and is only reachable once a mode flag is on the line, under a comment that states
+the contract this breaks: *"Everything else with a dash on the front is a flag k8rs does not have."*
+**Ruled a blocker**: a close triages wrong output as one, and a product telling a reader a file is
+missing when they typed a flag is wrong output, on the first thing a stranger types. **It is fixed in
+D310's turn rather than in one of its own** — same owner, same file, same close, same lifted freeze —
+and it carries its own test and its own red, because it answers a different question from the pane.
+
+**The sidebar cuts a kind's front, and five of `storage`'s eight rows are cut.** `…ributesclasses`
+for `volumeattributesclasses`, `…ragecapacities`, `…ntvolumeclaims`, `…sistentvolumes`,
+`…umeattachments` — in a twenty-column sidebar, which is the spec'd width at every terminal size.
+`ui::front` is deliberate and keeps the **tail** for a stated reason: the front-cut alternative
+collapses `persistentvolumes` and `persistentvolumeclaims` into one string. So this is **not a defect
+against a contract and not a blocker** — but `screens/widgets.md § 7`'s claim that a shortened kind
+*still reads as itself* is not true of `…ributesclasses`, and neither cut is right. The fix is a
+screen decision — a wider sidebar, a second line, or a cut that keeps both ends — so it goes to
+[`backlog.md`](backlog.md) for a ruling and not into this close.
