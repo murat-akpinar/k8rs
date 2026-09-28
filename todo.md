@@ -5393,7 +5393,11 @@ behaves as specified.
       step 6 does not allow. The close review added the half nobody had read: `?`
       advertises `l logs`, `d describe` and `y view as YAML` under *always
       available* while the same screen marks *not built yet* on `s`, and all
-      three land on `reading the cluster…` for a fetch nothing issues
+      three land on `reading the cluster…` for a fetch nothing issues.
+      **The order the close still runs in, and what it must not re-run, is
+      § What the v0.1 close still owes at the end of this phase** — read it before
+      briefing anything off this box, because the box's own title is a release
+      that has already happened
 
 **🔒 Security gate:** `strings` the release binary — no path from the build
 machine that leaks a username, no embedded credential. `SHA256SUMS` published.
@@ -5426,7 +5430,7 @@ new box, because a phase close is not a box:
    second pass, `docs/`, the CHANGELOG, and the PR to `main`.
 
 **What is already true and is not re-done.** `just check` green on the test host
-and CI green at `7ce6ea7`; the registry-installed `0.1.0` run against a four-node
+and CI green at `308a73f`; the registry-installed `0.1.0` run against a four-node
 kind cluster both headless (`--once`, `--once --analysis`, exit `0`) and in a PTY,
 where the console draws; the GitHub release verified against its published bytes
 rather than the runner's; the crate verified against crates.io's own API. **What
