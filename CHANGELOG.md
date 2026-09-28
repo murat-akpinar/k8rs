@@ -13,6 +13,7 @@
 - *(docs)* A decision that closes a box closes it in the same edit ([09543a1](https://github.com/murat-akpinar/k8rs/commit/09543a11a48099297f471ba41dca58cd77683214))
 - *(docs)* Route the release box at the list of what the close still owes ([a94b5e9](https://github.com/murat-akpinar/k8rs/commit/a94b5e9e2a0b252b95414a3a2f7df509e144803c))
 - *(docs)* Add the A-to-Z pass over the shipped binary, and rule the browser dead end ([2c6f15a](https://github.com/murat-akpinar/k8rs/commit/2c6f15a8e42d5ed64d4bcceb1bdb7d725d92a6fb)) — The close's first owed item needed a recorded reversal before it could be dispatched: the fix reaches main.rs, ui.rs and views.rs, all frozen since Phase 12, and D310 lifts the freeze for this fix alone and records which of the three ways out the maintainer chose — esc comes back, the pane says plainly it cannot be listed yet, and the three help rows take the mark the screen already draws on s. Wiring the Table fetch was refused as a feature inside a close.
+- *(docs)* Give test.md a resume block and point CLAUDE.md at it ([e1642b9](https://github.com/murat-akpinar/k8rs/commit/e1642b97a2a59637793665d18d0d35d9be69c470))
 ## [0.1.0] - 2026-09-28
 
 ### 🚀 Features
