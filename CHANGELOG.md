@@ -273,6 +273,7 @@
 - *(docs)* Record what phase 12 closed with, and what it paid for ([76d9cab](https://github.com/murat-akpinar/k8rs/commit/76d9cab9b1713f725fcacd440c190e93f033261a))
 - *(docs)* Put security-guard on the dev's gate, and teach the scope counter to see a digit ([4de661c](https://github.com/murat-akpinar/k8rs/commit/4de661c88ceda19fee865a2f48e34d3d78c6bce9)) — Two rules, both paid for by this box.
 - *(screens)* Draw the manifest bare, and name where the outcome words live ([dcecf4a](https://github.com/murat-akpinar/k8rs/commit/dcecf4a4742c87719cd3903c29f23984dade6e15)) — The gap rule illustrated itself with `not allowed`, a word nothing implements, and seven mockup rows marked the manifest line — four with `(reconnecting)`, three with `→ login expired` — marks nothing produces. One family, and both halves were settled in the screens with no behaviour changed.
+- *(docs)* Write the README in both languages, against what the binary does ([e59fbfa](https://github.com/murat-akpinar/k8rs/commit/e59fbfa605e44fde6a4863669a5e7503181c2097)) — The front page had to be written from measurements rather than from the plan, and two of its first-draft claims did not survive that. The license is GPL-3.0-or-later where the draft said MIT, and there is no defensible rule count to print: analyze runs nineteen checks, eleven direct and eight per container, so the sentence names the families instead of a number that would go stale the way the flag list did five times.
 
 ### ⚡ Performance
 
