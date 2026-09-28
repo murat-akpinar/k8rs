@@ -61,6 +61,12 @@ binds whoever is writing — a dev at step 3 as much as the PM at step 7:
   with its line in [§ Decision index](NOTES.md#decision-index) in the same edit.
   `scripts/check-docs.py` fails on a line whose anchor stopped resolving; a
   heading added with no line at all it cannot see, and that one is on the PM.
+  **A decision that closes a box closes it in the same edit** — same shape, and
+  with no guard at all behind this half:
+  [D306](NOTES.md#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28)
+  ruled Phase 5's release box closed as superseded, the box stayed unchecked for
+  the rest of that day, and it is the first unchecked box in the file — which is
+  the one place a cold session is guaranteed to read.
 
 ## Where to look
 
