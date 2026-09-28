@@ -5179,7 +5179,7 @@ behaves as specified.
       page draws a strip line nothing produces in ~23 mockups, in
       [`backlog.md`](backlog.md)
 
-- [ ] **No automated gate reaches the confirmation arm, so give one a route to it.**
+- [x] **No automated gate reaches the confirmation arm, so give one a route to it.**
       `scripts/e2e.sh` drives the headless `k8rs ops` driver with a confirmation off
       stdin and never enters `pressed`/`over_modal`, and `cargo test`'s own ends are
       both pipes so `console()` is never entered from the suite
@@ -5194,7 +5194,37 @@ behaves as specified.
       12's close, which is the pass that asks *what does no gate cover*.
       **Done when** a pty gate presses `r`, answers the dialog, and asserts what the
       screen and the audit log say — including the *gone* path, whose cluster write
-      the PM runs
+      the PM runs.
+      **Done 2026-09-28**
+      ([D302](NOTES.md#d302--the-confirmation-arm-gets-a-gate-and-four-of-its-first-sixty-needles-asked-for-something-nothing-draws-2026-09-28)).
+      `scripts/confirm-test.py` — **87 checks and 5 preflight walls**, its
+      `--self-test` inside `scripts/guards.sh`, and three recipes: `just confirm`
+      (five refusal journeys, writes nothing, re-runnable), `just confirm-write`
+      (the real `rollout restart`, behind `K8RS_CONFIRM_WRITE=yes`) and
+      `just confirm-gone`. A new script rather than an extension of
+      `picker-test.py`, whose *no run here can reach a cluster* is load-bearing;
+      it imports that file's pty machinery, which imports `suspend-test.py`'s.
+      **Measured on the four-node `k8rs` kind cluster, all three legs on the same
+      tree: `just confirm` 68/68, `just confirm-write` 75/75, `just confirm-gone`
+      11/11** — and it took four rounds, each of which found a defect in the
+      *reading* and none in the product. The first real run was 60 checks with
+      **4 failures that `--self-test` was green on**, which is the measurement
+      this box exists for: a squeezed pty transcript is not a row-ordered reading
+      of a frame that has a sidebar under it, and the sidebar's column lands
+      inside every wrapped dialog sentence.
+      **What the cluster proved that no fixture can**: the `dryRun=All` was
+      **accepted** at `02:08:13.186` with the object still there, the PM deleted
+      it, and the real call at `02:12:04.540` found it gone and sent nothing — a
+      dry-run verdict is not a precondition, which is the whole of
+      [D22](NOTES.md#d22--a-confirmation-can-outlive-the-thing-it-confirms). Also
+      first observed outside a unit test: `ops::which_uid` telling the two
+      operations' preconditions apart in the audit line, and
+      [D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+      ruling 1's declined dry-run beside an accepted one.
+      **What this box did not take**: a loopback apiserver replaying the committed
+      captures, which would put the whole gate inside `just check`, and a
+      committed transcript fixture, which is what would let `--self-test` catch a
+      needle over a frame no sample models — both in [`backlog.md`](backlog.md)
 - [ ] **Take the ten scaffolding flags out before anything is published** —
       `--live` `--logs` `--describe` `--yaml` `--object` `--kind` `--container`
       `--previous` `--follow` `--subresource`. CLAUDE.md invariant 10 said they

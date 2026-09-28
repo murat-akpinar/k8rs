@@ -323,6 +323,7 @@ its line moving with it.
 - [D299](#d299--the-scope-list-went-stale-a-fifth-time-because-the-command-that-counts-it-cannot-see-a-digit-2026-09-27) — the scope list went stale a fifth time because the command that counts it cannot see a digit
 - [D300](#d300--a-403-while-nothing-else-is-answering-is-not-an-rbac-errand-and-the-detector-is-the-contradiction-itself-2026-09-28) — a `403` while nothing else is answering is not an RBAC errand, and the detector is the contradiction itself
 - [D301](#d301--the-command-log-draws-the-manifest-bare-because-that-line-is-not-on-screen-2026-09-28) — the command log draws the manifest bare, because that line is not on screen
+- [D302](#d302--the-confirmation-arm-gets-a-gate-and-four-of-its-first-sixty-needles-asked-for-something-nothing-draws-2026-09-28) — the confirmation arm gets a gate, and four of its first sixty needles asked for something nothing draws
 
 ## Why it exists — where the gap is
 
@@ -27125,3 +27126,105 @@ builder writes at all, since `connect_log` writes
 `api-resources --verbs=list`. Box 1's disease at twenty-three times the scale,
 named on the page as a divergence and boxed in [`backlog.md`](backlog.md) rather
 than rewritten inside a family that was ruling two rows.
+
+### D302 — the confirmation arm gets a gate, and four of its first sixty needles asked for something nothing draws (2026-09-28)
+
+Phase 13's box out of Phase 12's close: `just check` said nothing about the arm
+that decides whether a write goes out. `scripts/e2e.sh` drives the headless
+`ops` driver and never enters `pressed`/`over_modal`; `cargo test`'s own ends are
+both pipes, so `console()` is unreachable from the suite
+([D279](#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24)
+ruling 2). The only end-to-end evidence for
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s guard was two hand journeys a person ran
+once.
+
+**What landed:** `scripts/confirm-test.py`, **87 checks and 5 preflight walls**,
+its `--self-test` inside `scripts/guards.sh` (so `just check` proves the logic
+with no cluster and no terminal), and three recipes — `just confirm`,
+`confirm-write`, `confirm-gone`.
+
+**Four design rulings, and the first two are about where a gate of this shape
+lives.** It is a **new script**, not an extension of `picker-test.py`, whose
+*"no run here can reach a cluster"* is load-bearing and stated in its own doc; it
+imports that file's pty machinery, which imports `suspend-test.py`'s, which is
+the house pattern rather than a third copy. It takes **`e2e.sh`'s shape** — the
+logic covered by a self-test in the gate, the real run the PM's — because that is
+the only precedent for a gate that needs an apiserver. **No loopback apiserver
+was built**: replaying committed captures would put the whole thing inside
+`just check` and is a box of its own, named with a cost rather than smuggled in.
+And `tester` **wrote it without running it**: `r restart` on a real Deployment is
+a cluster write, which is the PM's ([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
+
+**Five legs, and only one writes** — so `just confirm` is re-runnable and a
+mistyped invocation cannot restart anything: a refusal (`r`, a key with no arm,
+`esc`), a typed-name near miss on `ctrl-d`, `--read-only`, the confirmed write
+behind `K8RS_CONFIRM_WRITE=yes`, and *gone*. The object is
+`deployment/broken-quota` in `k8rs-quota` — W2's own fixture, whose finding fires
+on the **Deployment**; every other broken Deployment in `broken.yaml` is reached
+through a pod whose card owner is the ReplicaSet until the on-demand fetch
+resolves it, and a card whose kind changes under the cursor is not something to
+time a gate against.
+
+**The real runs: 68/68, 75/75 and 11/11 — and it took four rounds to get there,
+every one of which found a defect in the *reading* and none in the product.** The
+first real run was 60 checks with 4 failures, and that is the measurement this
+box exists for: `--self-test` was green on all four.
+
+**The lesson the four share: a squeezed pty transcript is not a row-ordered
+reading of a frame that has a sidebar under it.** The dialog is drawn over the
+sidebar, and the squeeze concatenates each row left to right — so the sidebar's
+column lands *inside* every wrapped dialog sentence:
+*"…replace every copy of your app with"* **`outconfi`** *"a new one"*, and
+*"Nothing will take"* **`cluster`** *"its place on its own."* `picker-test.py`
+never met this because the picker is drawn over genuinely nothing. **The remedy
+is needles inside one wrapped row**, chosen for the clauses that carry a ruling;
+what it costs is coverage — no whole product sentence is asserted, so a wording
+change inside an uncovered clause rides through. Reading the transcript as a grid
+instead means re-implementing a terminal's cursor model, against that file's own
+standing ruling that a transcript is not a frame.
+
+**One row was a misplaced claim rather than a wrong fact, and the arithmetic is
+the answer.** *The run said which object it was changing while the call was out*
+failed because `App::changing`'s footer marker lives about **150 ms** — the
+audit's 14.257 s between attempt and result is almost entirely the harness's own
+drain, since `ops::perform` writes the attempt line before the dry-run and before
+the box waits for a human — and `repainted()` costs 2.1 s of resizes, so **no pty
+frame can ever land inside that window**. The marker is already pinned four ways
+in `views_tests.rs` over `App::footer`, a pure function, which is
+`picker-test.py`'s own ruling one screen along: a state that lives 150 ms belongs
+to `TestBackend`. The row is now inverted — *the in-flight marker did not outlive
+the call that set it* — which is a property only a pty can hold, and its canary is
+the row above it: `→ done` is written only where something is `waiting`, which the
+same three lines of the confirm arm set.
+
+**What the cluster proved that no fixture can.** The *gone* leg's two stamps are
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s whole reason: the `dryRun=All` went out
+and was **accepted** at `02:08:13.186` with the object still there, the PM deleted
+it, and the real call at `02:12:04.540` found it gone and sent nothing. **A
+dry-run verdict is not a precondition**, which is why the guard re-asks at the
+moment the yes becomes an answer. `resourceVersion not sent` on the same line is
+[D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05).
+Two more facts reached the record for the first time outside a unit test:
+`ops::which_uid` telling the operations' preconditions apart — the restart's *no
+uid was read* beside the delete's *uid … (a condition on the change — the cluster
+does not make it unless the object is this one)* — and
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1, the delete's *k8rs did not check this one with the cluster first*
+beside the restart's *the cluster checked it first and accepted it*.
+
+**Why `--self-test` missed all four, and the structural fix.** It proves a row
+goes red on a **planted** fact, and says nothing about whether a needle matches
+anything the product draws — because the plant was applied to a sample of clean
+rows, which is the one shape the real screen does not have. `healthy()` now
+**models the frame underneath**: a `bleeding()` helper puts the sidebar fragments
+a measured run really produced between the drawn rows, and each sample's wrap
+points are the measured ones. All four would now be caught with no cluster. The
+residue is in [`backlog.md`](backlog.md): a needle over a frame **no sample
+models** is still invisible, and the answer to that is a committed transcript
+fixture, which needs a capture route with a sanitizer in front of it
+([D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)).
+
+**Where the PM's own cluster evidence lives.** In the box and in this entry, not
+in [`reports/`](reports/README.md) — that directory is `k8s-admin`'s by the
+ownership table, one file per *its* measurement, and a PM run filed there would
+put two writers in one cell.

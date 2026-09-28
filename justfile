@@ -1120,3 +1120,47 @@ suspend:
 picker:
     cargo build --locked
     python3 scripts/picker-test.py
+
+# **Not in `just check` either, and this one needs a third thing the other two
+# do not**: a pty, a built binary *and* a kind cluster. What runs in the gate is
+# `scripts/confirm-test.py --self-test`, out of `scripts/guards.sh`.
+#
+# What it proves was reachable from nothing. `main::pressed` and `main::over_modal`
+# are entered only by a run at a keyboard, and `scripts/e2e.sh` drives the headless
+# `ops` driver, which reads a confirmation off stdin and has no modal at all — so
+# the arm that decides whether a write goes out had no automated evidence at all,
+# only two hand journeys (NOTES § D290, § D291).
+#
+# **This recipe writes nothing into the cluster.** Both of its confirmations are
+# refused — `esc` on the restart box, and `⏎` on a delete box with the name one
+# character short — so what goes out is the `dryRun=All` invariant 2 requires and
+# nothing else, exactly as `just e2e`'s second leg does. `just confirm-write` is the
+# one that really restarts, and it is opt in twice over.
+#
+# `r`, the confirmation box, the typed-name guard and the refusal key, on a real pty
+confirm:
+    cargo build --locked
+    python3 scripts/confirm-test.py
+
+# The write leg of the same box: `r`, then `⏎`, against kind. It restarts
+# `deployment/broken-quota` in `k8rs-quota`, which bumps its generation and resets
+# its `Progressing` condition — so the W2 card the journeys select is gone for the
+# 60 seconds of its `progressDeadlineSeconds`. Run `just confirm` first, and
+# `scripts/cluster.sh reset` after, or the next run finds no card to press `r` on.
+#
+# A confirmed restart against kind, with the audit log read back as a file
+confirm-write:
+    cargo build --locked
+    K8RS_CONFIRM_WRITE=yes python3 scripts/confirm-test.py --confirm
+
+# The *gone* path (NOTES § D22): the box is left open and the object is deleted out
+# from under it. **The delete is the PM's to run** (NOTES § D92) — this prints the
+# command, waits, and then reads the cluster to check the object really went before
+# it presses `⏎`, so a run whose delete never happened presses `esc` instead of
+# sending a real restart. `scripts/cluster.sh reset` afterwards puts the Deployment
+# back.
+#
+# D22's guard against a real delete, with the dialog already open
+confirm-gone:
+    cargo build --locked
+    python3 scripts/confirm-test.py --gone

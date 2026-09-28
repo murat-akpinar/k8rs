@@ -108,6 +108,17 @@ python3 scripts/suspend-test.py --self-test
 # no terminal: every check fed a healthy transcript and then one broken variant of
 # itself.
 python3 scripts/picker-test.py --self-test
+# The same split again, on the one arm nothing in this gate reached: `just confirm`
+# presses `r`, reads the confirmation back and answers it, which needs a pty, a
+# built binary *and* a kind cluster. `main::pressed` and `main::over_modal` are
+# entered only at a keyboard and `e2e.sh` drives a driver with no modal at all, so
+# before this file the whole of `just check` said nothing about the arm that decides
+# whether a write goes out (NOTES § D290, § D291). This is the half that runs with
+# nothing: every check fed a healthy transcript and then one broken variant of
+# itself, plus every preflight refusal — and those are the loud ones, because a
+# `just confirm` that exits 0 for want of a cluster, an object or a card proves
+# nothing at all.
+python3 scripts/confirm-test.py --self-test
 # Every fixture is trusted because a jq predicate in cluster.sh said it reached
 # the state its rule is about. Those predicates only ever ran against a live
 # cluster, where too-loose and too-tight look identical.

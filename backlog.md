@@ -4015,3 +4015,28 @@ Phase 12 close triage fixes them; the rest are notes.
   in what order, so the answer is one measurement against the binary and then every strip at
   once — and `ui_tests.rs` feeds every mockup `log: &[]`, so nothing has ever held these rows
   honest. `tui-designer` finding 2, 2026-09-28.
+- **A pty needle over a frame no sample models is still invisible to `--self-test`.**
+  [D302](NOTES.md#d302--the-confirmation-arm-gets-a-gate-and-four-of-its-first-sixty-needles-asked-for-something-nothing-draws-2026-09-28)
+  closed the loud half — `confirm-test.py`'s samples now model the sidebar bleeding into every
+  wrapped dialog row, with the fragments and wrap points a measured run produced, so all four
+  of the needles the first real run falsified would now go red with no cluster. What is left is
+  the class: a self-test proves a row red on a **planted** fact, and a sample is still something
+  a human wrote. **The answer is a committed transcript fixture** — one real frame per state,
+  checked in, every needle read against it inside `just check`. What it costs is a second
+  capture route: `fixture-audit.sh` and `sanitize-test.sh` cover `tests/fixtures/` only, and a
+  pty transcript carries context names, namespaces and object names straight off somebody's
+  cluster, so it needs [D53](NOTES.md#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)'s
+  gate in front of it or it is a leak with a test's name on it. `picker-test.py` and
+  `suspend-test.py` have the same gap and would share the fixture. `tester` findings across
+  four rounds, 2026-09-28.
+- **A loopback apiserver replaying committed captures would put the write-path gate inside
+  `just check`.** `confirm-test.py` needs a real apiserver for a card and a patch, so its three
+  real legs are the PM's to run and `just check` sees only the self-test
+  ([D302](NOTES.md#d302--the-confirmation-arm-gets-a-gate-and-four-of-its-first-sixty-needles-asked-for-something-nothing-draws-2026-09-28)).
+  A server replaying the 63 committed fixtures would close that — and the expensive part is not
+  the LISTs but a `?watch=true` endpoint that streams `ADDED` from a fixture and emits `DELETED`
+  on command, which is exactly what the *gone* leg needs. Cost as `tester` estimated it, not
+  measured: a `hyper` server (a fourteenth crate) or `std::net::TcpListener` plus hand-rolled
+  chunked transfer, and TLS the kubeconfig will accept — or plain `http://127.0.0.1:<port>`,
+  which `ops_tests.rs` already proves kube accepts. A box of its own, and the same server would
+  serve `e2e.sh`'s rows and every future pty leg. `tester`, 2026-09-28.
