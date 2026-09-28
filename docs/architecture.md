@@ -13,9 +13,11 @@
 > `ui.rs` is frozen; `views.rs` is frozen against new behaviour, and the probe's
 > box reached it for one mechanical edit only — deleting the two
 > `expect(dead_code)` attributes that existed to say the probe was unwired, which
-> `-D warnings` turns into a red build the moment it is. What is left is shipping it — Phase 13 — and
-> the ten driver flags coming out before it ships
-> ([NOTES § D288](../NOTES.md#d288--the-close-found-ten-scaffolding-flags-that-outlived-the-phase-that-was-meant-to-remove-them-2026-09-26)).
+> `-D warnings` turns into a red build the moment it is. What is left is shipping
+> it — Phase 13 — which since this line last moved has taken the README in both
+> languages and the one driver flag that came out of the ten
+> ([The command line](#the-command-line) states which flags this build accepts
+> and why the eight read flags stay).
 > Decisions and their rationale live in `../NOTES.md`; the technology choices
 > (language, crates, toolchain) in `tech-stack.md`; this is the buildable summary.
 
@@ -179,7 +181,8 @@ src/
   views.rs     per-view state: selection, filters, tabs, scroll —
                and the wording a detail tab draws, shared with main.rs
   ui.rs        ratatui drawing
-  theme.rs     Catppuccin constants (10 of them)
+  theme.rs     10 Catppuccin colours + the 8 marks that give every meaning on
+               the screen a shape, so none of them rests on colour alone
 tests/
   fixtures/    sanitized JSON captured from a real cluster
 ```
@@ -206,15 +209,29 @@ Two details this depends on:
 - The `,application/json` fallback is mandatory. Aggregated and extension API
   servers may not serve Table at all and answer `406` to a Table-only Accept
   header; the client must handle either shape.
-- kube-rs does not expose a `Table` type, so this one request is built through
-  `Client::request` and decoded with `serde_json`. It is the only hand-built
-  HTTP request in the binary.
-- Table is a list representation, not a watch one. Browser views therefore
-  watch `watch_metadata` (PartialObjectMetadata — tiny) to learn *that*
-  something changed and re-fetch the Table, debounced. No blind polling.
+- kube-rs does not expose a `Table` type, so this request is built through
+  `Client::request` and decoded with `serde_json`. **It is one of four
+  hand-built requests, not the only one** — the others are the node metrics
+  poll, the `y`/`--yaml` document (which decodes into `serde_yaml_ng`, not
+  `serde_json`) and the `/version` round trip the clock skew is read off. This
+  line said *the only* until 2026-09-28, which is the wrong number for a
+  reviewer auditing the paths that carry a user-supplied segment: the Table's
+  and the document's both do.
+- Table is a list representation, not a watch one, so a browser view learns
+  *that* something changed from a metadata watch — `watcher()` over
+  `Api<PartialObjectMeta<DynamicObject>>`, tiny — and re-fetches the Table,
+  throttled. No blind polling. **This is settled policy and not yet a call**:
+  `k8s.rs` § KEEPING A BROWSER VIEW FRESH holds it in an `ignore` block that
+  nothing invokes, which is the same *not fetched yet* the status block at the
+  top of this file names. It was written here as built, under the spelling
+  `watch_metadata`, until 2026-09-28 — and `metadata_watcher`, the nearest real
+  method, is `#[deprecated]` and would fail `-D warnings`.
 
-Typed `k8s-openapi` structs are used only where the rule engine needs field
-access (Pod, Node, Deployment, Service, PVC).
+Typed `k8s-openapi` structs are used only where the rule engine or a report
+needs field access — twelve kinds, counted off `k8s.rs`'s imports: Pod, Node,
+Service, PersistentVolumeClaim, Event, Deployment, StatefulSet, DaemonSet,
+ReplicaSet, PodDisruptionBudget, EndpointSlice and CertificateSigningRequest.
+Everything else the browser shows has no struct at all (invariant 12).
 
 ### The shared contract
 
@@ -308,7 +325,8 @@ select object → keypress → confirm dialog (consequence in plain language,
              → audit line + command log entry, success or failure
 ```
 
-Deletes and drains insert one more step: the user types the object name.
+Deletes insert one more step: the user types the object name. Drain will too,
+in v0.2.
 `--read-only` makes the whole path unreachable — the keys are not bound and
 `ops.rs` is never called. There is no bulk mutation and no operation that
 runs without a selected object.
@@ -408,16 +426,29 @@ code and never touch product files.
   other kind is listed when its view opens and watched only while it is on
   screen — "browse everything" must not mean forty permanent streams.
 - Drop `metadata.managedFields` at ingest — often a third of the object.
-- Store reduced snapshots, not full `Pod` objects (~10x memory).
+- Store reduced snapshots, not full `Pod` objects — **6.43×**, measured by heap
+  profile rather than estimated
+  ([NOTES § D204](../NOTES.md#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03)).
+  A stored pod costs 2 701 bytes, *less* than the 3 708 it arrives in; the
+  expensive object is the decoded `Pod` the snapshot is pruned out of, which
+  kube buffers 500 at a time.
 - No global Events watch in v1 — noisiest stream in the cluster; the
   event-based rules ship in v2.
-- metrics-server (if ever used) is polled slowly (30s+) and only for
-  visible pods; it cannot be watched.
+- metrics-server is the one input that cannot be watched, so it is **polled**
+  — every 30 s, and only while a report wants it. **One item per node, never
+  one per pod**: that is why the read-only role grants `metrics.k8s.io: nodes`
+  and not `pods` ([security § RBAC](security.md#rbac)), and it is the
+  expensive half either way.
 - No fixed-FPS rendering: draw on change, block when idle → 0% CPU at idle.
-- Redraws are coalesced (~100ms debounce) so rollouts don't spike CPU.
+- Redraws are coalesced (~100 ms) so rollouts don't spike CPU — a **throttle**
+  and not a debounce, for the reason under [Async model](#async-model): the
+  deadline is set by the first event of a burst and never pushed out.
 
 Targets: < 50MB RSS at ~1000 pods · first paint < 1s · findings < 3s ·
-minimum terminal 80×24. The paint figures are quoted at that cluster size on
+minimum terminal 80×24. **The memory target is measured and not met** — 58 752
+KiB (57.4 MiB) at 1 011 pods, 125 704 KiB at 10 011 — and it stays as the
+target with the cause beside it rather than being moved to the measurement
+([REQUIREMENTS § Non-functional targets](../REQUIREMENTS.md#non-functional-targets)). The paint figures are quoted at that cluster size on
 purpose — the initial LIST grows with the cluster and nothing is drawn until it
 lands, so the size they hold up to is measured in Phase 5 and stated, and above
 it the first paint reports what it is waiting for
@@ -564,9 +595,14 @@ draw a different screen, and where that ruling belongs on a screen page is
   partial view of a large one look identical from inside a rule
   ([NOTES § D46](../NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
 - A rejected write (admission webhook, validation, conflict) shows the API
-  server's own message verbatim and stays until dismissed. A `409 Conflict` on
-  apply means the object changed underneath the edit; the user is offered a
-  re-read, never a blind overwrite.
+  server's own message verbatim and stays until dismissed. A `409 Conflict`
+  means the object moved under the request, and **what ships today is the
+  sentence that names the next step** — look at it again before deciding
+  whether you still want this change — never a blind overwrite. *Offering* the
+  re-read belongs to a read-modify-write, which is v0.4's `e` edit and the only
+  literal *apply* k8rs will have; `scale --replicas=N` is absolute intent and
+  carries no precondition
+  ([NOTES § D228](../NOTES.md#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05)).
 - Every failed or refused mutation is written to the audit log too — a trail
   that records only successes cannot answer "what did they try".
 
@@ -585,8 +621,9 @@ draw a different screen, and where that ruling belongs on a screen page is
   deletes them regardless — so a fixture never carries the field pruning is
   about, and a test asserting it was pruned would pass over an object that
   never had it. Pruning is to be verified against live watch data in the
-  client layer, where the field actually arrives — Phase 5 is where that
-  becomes true; no code in this repo has met an API server yet
+  client layer, where the field actually arrives. **That was Phase 5's, and
+  Phase 5 closed** — the sentence here read *no code in this repo has met an API
+  server yet* until 2026-09-28, which had been false since August
   ([NOTES § D30](../NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
 - **A decode test may set one field on a real capture** — a branch whose input
   the capture cannot contain is a branch no test can reach, and the corpus has

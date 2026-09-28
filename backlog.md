@@ -53,6 +53,45 @@ keys from the first screen — a false statement about other objects rather than
 missing feature
 ([D274](NOTES.md#d274--the-console-event-loop-what-the-brief-had-to-rule-before-it-could-be-written-2026-09-24)).
 
+- **`docs/security.md` promised a Dependabot that does not exist**, and `.github/`
+  holds one file. The claim is corrected (2026-09-28, the Phase 13 docs-refresh
+  box); what is not written is the `dependabot.yml` it described — cargo plus
+  GitHub Actions, weekly, with `kube` and `k8s-openapi` in one group because they
+  are upgraded together and never separately. It is a supply-chain gate and
+  belongs beside the release workflow, not inside a docs box.
+
+- **Three things the docs-refresh box could not settle, all found by the operator
+  review** ([reports/2026-09-28-docs-refresh-against-head.md](reports/2026-09-28-docs-refresh-against-head.md)):
+  the two RBAC roles exist in three files — `docs/security.md`, `README.md`,
+  `README_TR.md` — and **nothing compares them**; no k8rs role has been run
+  under itself since D187's 2026-08-30 run, which predates both the
+  `authorization.k8s.io` rule added 2026-09-26 and
+  [D304](NOTES.md#d304--the-documented-admin-role-grants-three-capabilities-the-binary-cannot-use-and-a-grant-nothing-uses-is-not-least-privilege-2026-09-28)'s
+  removal; and `PRIOR-ART.md`, `.claude/session-check.sh` and
+  `.claude/settings.json` are in no **Writes** cell — the entry further down
+  records `PRIOR-ART.md`; the two `.claude/` paths join it here.
+- **`ops` ships as a subcommand and `clap`'s stated threshold names subcommands.**
+  [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)
+  restated the threshold as *subcommands, generated help, or a mutual-exclusion
+  table*, when `ops` was scaffolding in the temporary main that would die at
+  Phase 12. It did not die —
+  [D303](NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)
+  calls `ops may-i` a shipped subcommand, and `USAGE` carries two `ops` forms.
+  So the condition D194 wrote down is met and the conclusion it drew is not,
+  and the honest reading may be that the threshold was the wrong shape rather
+  than that `clap` is now due: the parse is hand-written, `USAGE` is a `const`,
+  and nothing generates help. Needs a ruling either way, because
+  `docs/tech-stack.md` cannot state a threshold the binary contradicts. Found
+  by the Phase 13 docs-refresh box, 2026-09-28
+
+- **Two stale numbers in files this box may not write.** `REQUIREMENTS.md`'s
+  coalescing line says *min ~100ms debounce* and the shipped coalescer is a
+  throttle, which is the distinction
+  [PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted) exists for;
+  and `scripts/package-check.sh`'s header says `Cargo.toml`'s `exclude` drops
+  *six more entries* (nine) when it drops 19. The first is the PM's, the second
+  `tester`'s; neither is worth a turn of its own. 2026-09-28
+
 - **Two `KubeconfigError` variants get a sentence in which every clause is false.**
   `KindMismatch` and `ApiVersionMismatch` group into `Fault::Kubeconfig`, which
   `main.rs`'s `because()` renders as *"the kubeconfig itself could not be read — it

@@ -12,18 +12,19 @@
 | UI | **ratatui** (+ **crossterm** backend) | The de-facto Rust TUI library; immediate-mode drawing fits "redraw only on change". crossterm gives cross-platform terminal control (raw mode, events, colors). |
 | Kubernetes client | **kube-rs** | Provides `watcher()` / `reflector()` out of the box — the watch-based architecture is the whole performance story. |
 | API types | **k8s-openapi** | Typed Pod/Event structs. Pinned to the **newest** feature offered — **`v1_36`** (the window is `v1_32`…`v1_36`). Reversed from *oldest* on 2026-08-15: an old pin drops every field added since, at decode, without a word, while a new pin against an older cluster simply reads `None` — which every rule already treats as no finding. `scripts/fixture-audit.sh` fails if the pin falls below the cluster the fixtures came from. Upgraded together with kube-rs, never separately. |
-| Async runtime | **tokio** | Required by kube-rs; also drives the single `select!` event loop (watch stream + keyboard + Ctrl-C). |
-| Errors | **anyhow** | Startup errors only. Rules never return `Result` (missing field = no finding). One tiny enum distinguishes "403", "401 — your login expired" and "no connection", because the user message differs in all three. |
+| Async runtime | **tokio** | Required by kube-rs; also drives the single `select!` event loop — the frame the coalescer owes, the key channel, the mutation on the wire and the merged watch streams ([architecture § Async model](architecture.md#async-model)). Ctrl-C is a key on that loop and not a signal; the `signal` feature is for `SIGTSTP`/`SIGCONT`, the stop that can arrive from outside. |
+| Errors | **anyhow** *(approved, not present — see the count below)* | Startup errors only, and nothing has needed it yet: the shipped error path is the `k8s::Fault` enum plus the caller's own sentence. Rules never return `Result` (missing field = no finding). One tiny enum distinguishes "403", "401 — your login expired" and "no connection", because the user message differs in all three. |
 | Time | **`k8s_openapi::jiff`** — not a dependency of ours | `meta::v1::Time` *is* `jiff::Timestamp`, and k8s-openapi re-exports the library, so `Snapshot::now` uses the same type the API's own timestamps already have: no conversion layer and no eleventh crate. Verified against 0.28.0, not assumed — it was `chrono` before k8s-openapi moved ([NOTES § D18](../NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact)). |
-| Fixtures / JSON | **serde_json**, feature `preserve_order` | Test fixtures, `DynamicObject`, decoding server-side `Table` responses. `preserve_order` is not optional: without it `Value` is a `BTreeMap` and every YAML we display comes out alphabetised instead of in kubectl's order. |
+| Fixtures / JSON | **serde_json** | Test fixtures, the file-driven form's objects, decoding server-side `Table` responses. Reached through `k8s_openapi::serde_json`; the direct entry in `Cargo.toml` is a **dev**-dependency. **No `preserve_order`, and the pane it would have been for does not go through `serde_json` at all**: `k8s::document` deserialises the answer straight into a `serde_yaml_ng::Value`, whose mapping keeps the API's own key order, so `y` is in kubectl's order without the feature. This row required it — on a `Value` no display path holds — until it was read against the code on 2026-09-28. |
 | YAML | **serde_yaml_ng** | `y` view in v0.1, `e` edit in v0.4 — admins read and write YAML, not JSON. Chosen over `serde_norway` by spike: the two are equivalent, and neither preserves comments, which is why edits keep the user's text buffer rather than round-tripping it. |
 | X.509 | **x509-parser** | Certificate expiry warnings. Hand-parsing ASN.1 dates in a security-adjacent path is the wrong place to be clever. |
 | Diff | **similar** *(v0.4)* | The diff shown before an edit is applied — the thing that makes `e` safe to press. Approved, but it enters the build with `edit`, not before. |
 
-Full dependency list (**thirteen** crates approved; twelve ship in v0.1,
-`similar` arrives with `edit` in v0.4). **The last three were reversals of
-invariant 10 and none added compiled code**, which is the only shape that
-reversal takes here.
+Full dependency list: **thirteen** crates approved, **ten** of them in
+`Cargo.toml` today — the three absent ones are counted below, and this paragraph
+used to say *twelve ship in v0.1*, which was a forecast standing where a count
+belongs. **The last three were reversals of invariant 10 and none added compiled
+code**, which is the only shape that reversal takes here.
 The eleventh, `futures-util`: `kube-runtime` returns `impl Stream`, `Stream` is
 not in `std`, and the crate was already linked under `kube-client`
 ([NOTES § D143](../NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)).
@@ -69,7 +70,7 @@ manifest cannot drift away from the one `ratatui-crossterm` chose.
 | `k8s-openapi` | `0.28.0` | Phase 3 | `v1_36` |
 | `x509-parser` | `0.18.1` | Phase 3 | — |
 | `kube` | `4.2.0` | Phase 5 | `client`, `runtime`, `rustls-tls`, `ring`, no defaults |
-| `tokio` | `1.53.1` | Phase 5 | `rt-multi-thread`, `macros`, `net`, no defaults |
+| `tokio` | `1.53.1` | Phase 5 | `rt-multi-thread`, `macros`, `net`, `time`, `signal`, no defaults — `time` is every deadline `k8s.rs` and `ops.rs` put on a call, `signal` is the `SIGTSTP`/`SIGCONT` pair ([D277](../NOTES.md#d277--the-handover-round-a-measurement-that-read-the-shell-instead-of-the-job-one-door-for-three-ways-of-stopping-and-a-test-that-passed-with-its-subject-deleted-2026-09-24)) |
 | `futures-util` | `0.3.34` | Phase 5 | `std`, no defaults — the narrow crate, not the `futures` facade |
 | `tokio-rustls` | `0.26.4` | Phase 5 | no defaults — the connector C2's handshake is driven with |
 | `serde_yaml_ng` | `0.10.0` | Phase 6 | — — the first arrival that is not free: `Cargo.lock` 213 → 218 |
@@ -99,10 +100,10 @@ system trust store on disk.
 
 | Not used | Until |
 |---|---|
-| `clap` | a flag needs validation, or a shipped subcommand appears. The flags are parsed from `std::env::args` — today `--once`, `--analysis`, `--read-only`, `--context` and `--namespace`/`-n`, plus the eight the temporary driver still carries and `ops may-i`'s `--subresource` ([architecture § The command line](architecture.md#the-command-line), [NOTES § D303](../NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)). Fourteen flags, counted off the source and not recalled, four of them taking a name, is still not a reason for `clap` — and `--analysis` is deliberately valueless, which is what let `--once` print the reports without crossing the threshold D17 named ([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)). (The `k8rs ops …` driver used to prove the writes headlessly is scaffolding in the temporary main and never ships.) |
+| `clap` | [D194](../NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)'s threshold: **subcommands, generated help, or a mutual-exclusion table** — and `ops` has since shipped as a subcommand while the parse stayed hand-written, which is a tension nobody has ruled on and is [backlog](../backlog.md)'s, not this page's. The flags are parsed from `std::env::args` — today `--once`, `--analysis`, `--read-only`, `--context` and `--namespace`/`-n`, plus the eight read flags the console's own file still carries and `ops may-i`'s `--subresource` ([architecture § The command line](architecture.md#the-command-line), [NOTES § D303](../NOTES.md#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28)). Fourteen flags, counted off the source and not recalled, four of them taking a name, is still not a reason for `clap` — and `--analysis` is deliberately valueless, which is what let `--once` print the reports without crossing the threshold D17 named ([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)). (`k8rs ops …` is not scaffolding: it is a shipped subcommand on the released surface — it is in `USAGE`, `--subresource` is its argument, and it is how a `--read-only` login asks what it may do, [D230](../NOTES.md#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) ruling 3.) |
 | `tracing` | debugging genuinely demands it |
 | `tempfile` | `std::env::temp_dir()` plus an explicit 0600 create covers the edit buffer |
-| theme loader (TOML, hot-reload) | never, most likely — `theme.rs` is 10 constants (YAGNI) |
+| theme loader (TOML, hot-reload) | never, most likely — `theme.rs` is 10 `Colour` constants and 8 `Signal` ones, counted off the file (YAGNI) |
 | config file of any kind | never for v1 — zero configuration on first run is a product requirement |
 | i18n framework | never for v1 — UI is English only, splitting later is cheaper |
 | plugin system / trait layers | never — eight plain files |
@@ -115,7 +116,8 @@ NOTES.md with the reason.
 - **Catppuccin Mocha** palette, accent = teal, defined as constants in
   `theme.rs`.
 - Truecolor (24-bit RGB) with a `COLORTERM` check and 16-color fallback in v1.
-- Common Unicode symbols only (`● ▲ ○`), no nerd-font dependency.
+- Common Unicode symbols only — `● ▲ ○` for severity, plus `▸ ⚠` for selection
+  and the alarm. No nerd-font dependency.
 
 ## Toolchain
 
@@ -129,7 +131,7 @@ NOTES.md with the reason.
 | **git-cliff** | CHANGELOG from conventional commits (`feat:` / `fix:`) |
 | **cargo-deny** | advisories, license policy, source policy (CI) |
 | **clippy** | `-D warnings` + `disallowed-methods` ban on K8s write calls |
-| **GitHub Actions** | fmt/clippy/test + cross-compile check matrix; release on `v*` tags. Also the honest-test guards: a run with zero tests, or an unexplained `#[ignore]`, fails the build |
+| **GitHub Actions** | One workflow, [`ci.yml`](../.github/workflows/ci.yml), three jobs: fmt/clippy/test plus `bash scripts/guards.sh`, `cargo-deny`, and the cross-compile check matrix. Also the honest-test guards: a run with zero tests, or an unexplained `#[ignore]`, fails the build. **There is no release workflow yet** — tagging, the binaries and `SHA256SUMS` are Phase 13's last unchecked box |
 
 ## The test cluster — reproducing it yourself
 

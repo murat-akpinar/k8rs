@@ -59,7 +59,7 @@ Five mechanisms, each a requirement rather than a nicety:
 | **Containment** — writes exist only in `ops.rs` | An accidental mutation anywhere else in the codebase |
 | **Consent** — selected object + keypress + confirmation stating the consequence | Acting on the wrong object, or without understanding what happens |
 | **Preflight** — server-side `dryRun=All` where the operation asks for one, abort on rejection | Discovering an admission-webhook rejection halfway through a change |
-| **Typed confirmation** for delete and drain | The keyboard-slip class of accident |
+| **Typed confirmation** for delete, and for drain when it lands in v0.2 | The keyboard-slip class of accident |
 | **Audit** — every described mutation, including refusals and failures | Not being able to answer "what happened to this cluster" |
 
 **Which operations ask for a preflight is each operation's own decision, and it
@@ -228,8 +228,10 @@ rules:
   #     verbs: ["get", "list", "watch"]
 ```
 
-**Every rule above is reachable by code that exists, and that is checked rather
-than assumed.** The role was run against kind under itself on 2026-08-30 — including under an
+**Every rule in both roles is reachable by code that exists, and that is checked
+rather than assumed** — the admin role failed that test on 2026-09-28 and three
+grants came out
+([NOTES § D304](../NOTES.md#d304--the-documented-admin-role-grants-three-capabilities-the-binary-cannot-use-and-a-grant-nothing-uses-is-not-least-privilege-2026-09-28)). The role was run against kind under itself on 2026-08-30 — including under an
 identity outside `system:authenticated`, so the default `system:discovery`
 binding could not apply and the `nonResourceURLs` rule above is what answered
 discovery — and it drew every finding and all seven analysis panes with zero
@@ -252,12 +254,14 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["delete"]
-  - apiGroups: [""]
-    resources: ["pods/eviction"]     # drain
-    verbs: ["create"]
+  # `nodes: ["delete"]` and nothing else. `ctrl-d` applies to any kind and the
+  # node is one of them (NOTES § D225 ruling 3). **`patch` was here for cordon /
+  # uncordon and came out on 2026-09-28** — that is v0.2, no call in `ops.rs`
+  # reaches it, and `patch` on nodes taints or cordons every node in the cluster
+  # (NOTES § D304). It comes back with the operation.
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["patch", "delete"]       # cordon / uncordon; delete
+    verbs: ["delete"]
   - apiGroups: ["apps"]
     # `delete` is on the same rule and not a separate one: `ctrl-d` applies to
     # any kind (NOTES § Operations), which is six of them and not the pod alone
@@ -270,7 +274,12 @@ rules:
     # bytes with a container environment value in it — so `patch` already reads
     # the object whole for anyone willing to patch it harmlessly and read the
     # answer. Removing `get` costs the operator their command and buys nothing.
-    verbs: ["get", "patch", "update", "delete"] # rollout restart, edit, delete
+    #
+    # **`update` was here for `e` edit and came out on 2026-09-28.** That is
+    # v0.4, and it is the widest write in this file — a full object replace on
+    # every Deployment, StatefulSet and DaemonSet in the cluster, for a feature
+    # nobody can invoke. It comes back with `edit` (NOTES § D304).
+    verbs: ["get", "patch", "delete"]           # rollout restart, delete
   # `replicasets` has no rule above because neither scale nor restart patches
   # one — scale reaches it through the subresource below. `delete` does reach
   # it, so the parent resource needs its own rule (NOTES § D226 finding 1).
@@ -611,10 +620,14 @@ a wall of refusals, not a full disk in 2036
   ([NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12) ·
   [§ D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)),
   and `managedFields` is on the pane for the same reason.
-- **Secret contents are hidden by default.** Viewing a Secret shows its keys
-  and their sizes; revealing a value requires an explicit second action, and a
-  revealed value never enters the command log, the audit log, or the YAML
-  shown by `y`. **The command log still shows the command k8rs ran, and on a
+- **Secret contents are hidden, and today there is no way to unhide them.**
+  Viewing a Secret shows its keys and their sizes. `k8s::mask` runs before the
+  document reaches any caller and no key undoes it, so **k8rs has no reveal on
+  any surface** — the stronger statement, and the true one. This bullet
+  promised *an explicit second action* until 2026-09-28, which described a
+  control that does not exist. When a reveal lands it is a keypress on a drawn
+  pane, and a revealed value still never enters the command log, the audit log,
+  or the YAML shown by `y`. **The command log still shows the command k8rs ran, and on a
   Secret that command prints what this pane hid** — there is no `kubectl` line
   that reproduces a masked view, so rather than print a line that does not
   produce what was printed, k8rs names the difference out loud: *a Secret's
@@ -628,9 +641,10 @@ a wall of refusals, not a full disk in 2036
   behind its size too, and the keys stay drawn
   ([NOTES § D198](../NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
   Labels stay visible: 63 characters, and nothing writes a Secret's body into
-  one. **The headless `--yaml` has no reveal at all** — a reveal is a keypress on
-  a drawn pane — so on that surface a Secret's values are unreachable, not merely
-  hidden.
+  one. This holds on every surface, because a reveal is a keypress on a drawn
+  pane and no pane offers one yet — so today a Secret's values are unreachable
+  rather than merely hidden, and `--yaml` will stay that way even after a drawn
+  pane can reveal.
 - **A report is a document, and its reader chooses where it goes.** A finding
   carries the controller's message **verbatim**
   ([NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)),
@@ -643,15 +657,16 @@ a wall of refusals, not a full disk in 2036
   **a `--once` report carries whatever this cluster's controllers wrote into a
   status, and redirecting it is a decision about who sees that**
   ([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
-- **The edit temp file is treated as a leak surface.** A full object YAML can
+- **The edit temp file is treated as a leak surface** *(from v0.4, when `edit`
+  lands — there is no temp-file code in `src/` today)*. A full object YAML can
   carry Secret data, environment values and tokens. It is written to the
   user's own temp directory with mode 0600 and removed on exit *and* on panic.
 - **`exec` and `port-forward` change the boundary** and are therefore the last
   features to land: exec hands the terminal to a process inside a container
   (control-character stripping cannot apply to an interactive PTY), and
-  port-forward opens a local listening socket. Both bind to loopback only,
-  both are shown in the header while active, and both are disabled under
-  `--read-only`.
+  port-forward opens a local listening socket. **Neither exists yet — they are
+  v0.3.** When they land, both will bind to loopback only, both will be shown
+  in the header while active, and both are disabled under `--read-only`.
 - Free-text API fields (event messages, container status messages) are
   rendered through ratatui's cell-based drawing and additionally stripped of
   control characters — an ANSI escape sequence inside an event message must
@@ -690,13 +705,18 @@ a wall of refusals, not a full disk in 2036
 - `Cargo.lock` is committed.
 - CI runs `cargo deny check` (advisories, licenses, sources); non-crates.io
   sources are forbidden.
-- Dependabot watches cargo + GitHub Actions weekly; kube-rs and k8s-openapi
-  are grouped and upgraded together.
+- **No Dependabot yet** — `.github/` holds one file, `ci.yml`. kube-rs and
+  k8s-openapi are upgraded together by hand, never separately
+  ([tech-stack](tech-stack.md#core-choices)); a `dependabot.yml` grouping them
+  is in [backlog.md](../backlog.md). This line claimed the robot was watching
+  until it was read against the tree on 2026-09-28.
 - GitHub Actions run with `permissions: contents: read` by default;
   third-party actions are pinned to commit SHAs; `pull_request_target` with
   secrets is forbidden.
-- Releases ship with a `SHA256SUMS` file. Binary signing is deferred until
-  there is an audience to verify it.
+- Releases will ship with a `SHA256SUMS` file — **future tense on purpose**:
+  the release workflow is Phase 13's last unchecked box, so no release has
+  shipped anything yet. Binary signing is deferred until there is an audience to
+  verify it.
 
 ## Future trust-boundary changes (recorded now, on purpose)
 

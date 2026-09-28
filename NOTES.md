@@ -325,6 +325,7 @@ its line moving with it.
 - [D301](#d301--the-command-log-draws-the-manifest-bare-because-that-line-is-not-on-screen-2026-09-28) — the command log draws the manifest bare, because that line is not on screen
 - [D302](#d302--the-confirmation-arm-gets-a-gate-and-four-of-its-first-sixty-needles-asked-for-something-nothing-draws-2026-09-28) — the confirmation arm gets a gate, and four of its first sixty needles asked for something nothing draws
 - [D303](#d303--the-ten-scaffolding-flags-were-one-flag-and-every-leg-of-the-rationale-for-the-other-nine-was-false-2026-09-28) — the ten scaffolding flags were one flag, and every leg of the rationale for the other nine was false
+- [D304](#d304--the-documented-admin-role-grants-three-capabilities-the-binary-cannot-use-and-a-grant-nothing-uses-is-not-least-privilege-2026-09-28) — the documented admin role grants three capabilities the binary cannot use, and a grant nothing uses is not least privilege
 
 ## Why it exists — where the gap is
 
@@ -27321,3 +27322,51 @@ of Phase 5"* — a phase that closed months ago. It is why ruling 3's stop was
 invisible to every gate, and narrowing it is in [`backlog.md`](backlog.md): a
 blind spot whose stated reason has expired is worse than one that never had a
 reason, because it reads as deliberate.
+
+
+### D304 — the documented admin role grants three capabilities the binary cannot use, and a grant nothing uses is not least privilege (2026-09-28)
+
+Found by the operator review of the Phase 13 docs-refresh box
+([reports/2026-09-28-docs-refresh-against-head.md](reports/2026-09-28-docs-refresh-against-head.md)
+finding 1), and it is a reversal of what `docs/security.md` § RBAC has said since
+the design phase, so it is written here before it is acted on.
+
+`k8rs-admin` is a role an operator copies into their cluster. Three of its rules
+are for operations [§ Operations](#operations--the-full-admin-surface) places at
+**v0.2** and **v0.4**, and no call in `ops.rs` reaches any of them — counted, not
+recalled: the whole mutating surface of that file is `get_scale`, `patch_scale`,
+`patch`, `delete`, and the two `create`s that perform a `SelfSubject*Review`.
+`grep -rn 'eviction\|unschedulable\|\.replace' src/ops.rs` answers nothing.
+
+- `pods/eviction: ["create"]` — drain, v0.2. Evicts any pod in the cluster.
+- `nodes: ["patch", ...]` — cordon / uncordon, v0.2. Taints or cordons any node.
+- `update` on `deployments`, `statefulsets`, `daemonsets` — `edit`, v0.4. A full
+  object replace on every workload in the cluster, and the widest write in the
+  file.
+
+**They come out.** The alternative the review offered — mark them the way the
+read-only role marks `pods/log` and `events`, which were also granted ahead of
+their code — was rejected, and the difference is blast radius rather than
+consistency. A comment does not reduce a privilege. `pods/log` and `events` are
+reads; these three are the three widest writes k8rs will ever ask for, and
+leaving them in means a platform team that binds `k8rs-admin` to the account
+running `k8rs --once` today has granted cluster-wide evict and cluster-wide
+workload replace for features that do not exist. That is exactly what
+[D187](#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)
+removed `configmaps` and `batch: ["jobs"]` for, one role over.
+
+**Each comes back in the box that ships its operation**, named here so nobody
+re-derives the list: drain restores `pods/eviction: ["create"]`, cordon /
+uncordon restores `nodes: ["patch"]`, and `edit` restores `update` on the three
+workload kinds. `nodes: ["delete"]` stays — `ctrl-d` applies to any kind and the
+node is one of them
+([D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 3).
+
+**What this does not touch:** the role was never measured under itself with
+these three present or absent, and the review that found it ran no cluster. The
+last run of a k8rs role under itself is D187's, 2026-08-30, which also predates
+the `authorization.k8s.io` rule added 2026-09-26 — so **that rule has never been
+exercised under either role**. Both are recorded in
+[`backlog.md`](backlog.md); neither blocks this removal, because removing an
+unreachable grant cannot break a call that does not exist.

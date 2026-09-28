@@ -178,10 +178,12 @@ rules:
     verbs: ["create"]
 ```
 
-**Operations** — what the write path needs, on top of the read-only role. It
-covers the whole operation set, including the cordon, drain and edit verbs that
-arrive in v0.2 and v0.4; drop the `pods/eviction` and `nodes` rules if you want
-only what this build can do:
+**Operations** — what the write path needs, on top of the read-only role. This
+is **exactly what this build can do and nothing more**: scale, rollout restart
+and delete. Cordon, drain and edit arrive in v0.2 and v0.4 and bring their own
+verbs back with them — `pods/eviction`, `patch` on nodes and `update` on the
+workload kinds were in this block until 2026-09-28, granting cluster-wide evict
+and cluster-wide workload replace for features nobody could invoke.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -193,14 +195,11 @@ rules:
     resources: ["pods"]
     verbs: ["delete"]
   - apiGroups: [""]
-    resources: ["pods/eviction"]     # drain
-    verbs: ["create"]
-  - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["patch", "delete"]       # cordon / uncordon; delete
+    verbs: ["delete"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "patch", "update", "delete"] # rollout restart, edit, delete
+    verbs: ["get", "patch", "delete"]           # rollout restart, delete
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["delete"]

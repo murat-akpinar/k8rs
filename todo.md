@@ -5292,7 +5292,33 @@ behaves as specified.
       blocker, measured while writing this box** and recorded in
       [`backlog.md`](backlog.md) — `esc` does not come back from it either, so
       a reader who opens a kind can only quit
-- [ ] `docs/` refreshed against the code as built
+- [x] `docs/` refreshed against the code as built.
+      **Done 2026-09-28.** Nine stale claims found by the PM's own pass and nine
+      more by the operator review
+      ([reports/2026-09-28-docs-refresh-against-head.md](reports/2026-09-28-docs-refresh-against-head.md)),
+      one of them a blocker: **`k8rs-admin` granted `pods/eviction: create`,
+      `patch` on nodes and `update` on the three workload kinds for drain,
+      cordon and edit — v0.2 and v0.4 operations no call in `ops.rs` reaches**.
+      All three came out of the role in `docs/security.md`, `README.md` and
+      `README_TR.md` together, and each is named with the box that brings it
+      back
+      ([D304](NOTES.md#d304--the-documented-admin-role-grants-three-capabilities-the-binary-cannot-use-and-a-grant-nothing-uses-is-not-least-privilege-2026-09-28)).
+      **`k8rs-readonly` held** — every read the binary performs maps to a rule
+      in it and no grant is missing, checked against call sites by two passes
+      independently. The rest were sentences a built-state doc may not carry:
+      *the only hand-built HTTP request in the binary* (four), *no code in this
+      repo has met an API server yet* (Phase 5 closed), a Secret reveal that
+      does not exist on any surface, the browser's freshness documented as
+      built under a method name the code rejected, a Dependabot that is not
+      configured, `serde_json`'s `preserve_order` on a path that never touches
+      `serde_json`, and four counts — `exclude` 19 not 9, 37 planted violations
+      not 17, twelve typed kinds not five, 6.43× not ~10×.
+      **What it could not settle is in [`backlog.md`](backlog.md), not here**:
+      the three copies of each RBAC role that nothing compares, no role run
+      under itself since 2026-08-30, and `ops` shipping as a subcommand while
+      [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)'s
+      `clap` threshold names subcommands — a ruling, not a docs edit.
+      `just check` green on the test host, `EXIT=0`, over the corrected tree
 - [ ] Release workflow: tag `v0.1.0` → git-cliff CHANGELOG → musl/darwin
       binaries + `SHA256SUMS` → GitHub release; crates.io publish over v0.0.1
       (the placeholder was replaced back in Phase 5)

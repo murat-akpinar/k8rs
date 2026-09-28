@@ -180,9 +180,12 @@ rules:
 ```
 
 **İşlemler** — yazma yolunun, salt okunur rolün üstüne ihtiyaç duyduğu şeyler.
-Bu rol, v0.2 ve v0.4'te gelecek cordon, drain ve edit fiilleri dâhil işlem
-kümesinin tamamını kapsıyor; yalnızca bu yapının yapabildiklerini istiyorsanız
-`pods/eviction` ve `nodes` kurallarını çıkarın:
+Bu rol **tam olarak bu yapının yapabildiği kadarını** kapsıyor, bir fazlasını
+değil: scale, rollout restart ve delete. Cordon, drain ve edit v0.2 ile v0.4'te
+geliyor ve kendi fiillerini de beraberinde getirecekler — `pods/eviction`,
+node'lar üzerinde `patch` ve iş yükü türlerinde `update` 2026-09-28'e kadar bu
+blokta duruyordu; hiç kimsenin çağıramadığı özellikler için küme genelinde
+tahliye ve küme genelinde iş yükü değiştirme yetkisi veriyorlardı.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -194,14 +197,11 @@ rules:
     resources: ["pods"]
     verbs: ["delete"]
   - apiGroups: [""]
-    resources: ["pods/eviction"]     # drain
-    verbs: ["create"]
-  - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["patch", "delete"]       # cordon / uncordon; delete
+    verbs: ["delete"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "patch", "update", "delete"] # rollout restart, edit, delete
+    verbs: ["get", "patch", "delete"]           # rollout restart, delete
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["delete"]

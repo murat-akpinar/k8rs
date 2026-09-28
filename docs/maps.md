@@ -35,6 +35,8 @@ step with the other three:
 | [clippy.toml](../clippy.toml) | The write-path ban list — how [invariant 1](../CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision) is enforced mechanically | `tester` |
 | [deny.toml](../deny.toml) | Advisories, licences, sources — the supply-chain gate | `tester` |
 | [cliff.toml](../cliff.toml) | Changelog generation; `filter_unconventional` makes a bad commit message vanish silently | PM |
+| [README.md](../README.md) · [README_TR.md](../README_TR.md) | The front page a stranger reads: what k8rs is, a real captured frame, both RBAC roles taken from [security.md](security.md#rbac) — **copied with a script once, but nothing compares them since**, so the two move together only because whoever edits one remembers the other ([backlog](../backlog.md)), `--read-only`, no telemetry, and what k8rs can change. `README_TR.md` is its translation and **the only Turkish file in the repository** | PM |
+| [PRIOR-ART.md](../PRIOR-ART.md) | k9s's issue tracker read as a defect catalogue. Evidence, never a plan — a gap becomes a box only by a ruling ([D89](../NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14)) | PM **in practice only** — it is in no **Writes** cell, which is [backlog.md](../backlog.md)'s |
 | [LICENSE](../LICENSE) · [.gitignore](../.gitignore) | — | PM |
 
 ## `src/` — the product
@@ -48,27 +50,36 @@ frozen. Layer order is the row order below. A file's tests sit beside it in
 |---|---|---|---|
 | [rules.rs](../src/rules.rs) | `Finding`, the snapshot types, `analyze(&Snapshot) -> Vec<Finding>`. Pure: no network, no terminal, no clock — `now` is a field | `dev-core` | **frozen** (Phase 3 close), and the snapshot types and their decode with it since Phase 4 close ([NOTES § D42](../NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)) — the whole file is now closed to a later phase |
 | [analysis.rs](../src/analysis.rs) | The **seven** reports: Capacity, Drain safety, Waste, Posture, Restarts, Versions, Certificates. Pure, same discipline. A producer is `fn(&ClusterSnapshot, &[Finding]) -> Report` — it takes the findings `analyze` already returned, because the rule functions are private to its *sibling* and a row that restates a card has no other way to reach one | `dev-core` | **frozen** (Phase 4 close) |
-| `k8s.rs` | Watches, discovery, the capability probe, server-side `Table`, reconnect. Fills the snapshot types | `dev-core` | Phase 5 |
-| `ops.rs` | **Every mutation, and nowhere else.** Carries the single `#![allow(clippy::disallowed_methods)]` | `dev-core` | Phase 7 |
-| `theme.rs` | Colours and constants — one file, so a change propagates from one place | `dev-ui` | Phase 9 |
+| [k8s.rs](../src/k8s.rs) | Watches, discovery, the capability probe, server-side `Table`, reconnect, the log stream and the four detail reads. Fills the snapshot types | `dev-core` | **frozen** (Phase 6 close, with the two named exceptions in [todo.md](../todo.md)'s Phase 6 `Frozen after:`) |
+| [ops.rs](../src/ops.rs) | **Every mutation, and nowhere else** — scale, rollout restart, delete, and `may_i`, which mutates nothing and is here because it is performed with `create` ([D23](../NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)). Carries the single `#![allow(clippy::disallowed_methods)]` | `dev-core` | **frozen** (Phase 7 close) |
+| [theme.rs](../src/theme.rs) | Colours and constants — one file, so a change propagates from one place | `dev-ui` | **frozen** (Phase 9 close) |
 | `views.rs` | The three views, grouping, sorting — **and, since Phase 11, the wording a detail tab draws**: the event and container sentences the drawn pane and `main.rs`'s headless printer both read, moved down here because `k8s.rs` was already frozen and this file freezes at Phase 12's close ([D254](../NOTES.md#d254--the-events-tab-is-settled-before-it-is-drawn-describes-grammar-reused-whole-a-heading-that-only-comes-back-to-withdraw-a-promise-and-the-check-that-could-not-see-the-defect-it-was-written-after-2026-09-06)) | `dev-ui` | **frozen** (Phase 12 close, 2026-09-26 — [D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 2) |
-| `ui.rs` | Drawing, keys, dialogs. A ninth file (`dialog.rs`) is pre-approved if this passes ~800 lines | `dev-ui` | **frozen** (Phase 12 close, 2026-09-26 — [D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 2) |
-| [main.rs](../src/main.rs) | The event loop and CLI wiring — wired **last**. Until then the **temporary driver**: reads Kubernetes objects out of JSON files named on argv — including the five lists a report fetches — runs `analyze`, prints `screens/once.md`'s card, prints `analysis.rs`'s seven reports under it when `--analysis` is passed, and carries `sanitize` — the control-character strip invariant 9 owes every printer, two phases before Phase 5's ingest strip exists ([NOTES § D121](../NOTES.md#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20) · [§ D122](../NOTES.md#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20)) | `dev-core` until Phase 12, then `dev-ui` | **temporary driver** (Phase 3) |
+| [ui.rs](../src/ui.rs) | Drawing, keys, dialogs. **`dialog.rs` was never created and now cannot be**: [D11](../NOTES.md#d11--the-ninth-file-pre-approved) pre-approves it if this file passes ~800 lines, it passed that eight times over, nothing ever forced the split, and the file froze whole at Phase 12's close. The pre-approval stands unspent and the count stayed at eight | `dev-ui` | **frozen** (Phase 12 close, 2026-09-26 — [D266](../NOTES.md#d266--the-phase-11-close-six-screens-that-draw-something-false-and-a-freeze-set-one-phase-before-its-consumer-2026-09-13) ruling 2) |
+| [main.rs](../src/main.rs) | **Wired at Phase 12, and the console is what it is now**: the `select!` event loop, key routing, terminal setup and teardown, the startup picker, and the argv parse behind every form in `USAGE`. It still carries the older surfaces off the same parse — the file-driven form the rules were proven on, `--once`, the three object reads and the headless `ops` driver — plus `sanitize`, the control-character strip invariant 9 owes every printer ([NOTES § D121](../NOTES.md#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20) · [§ D122](../NOTES.md#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20)) | `dev-ui` since Phase 12 ([D34](../NOTES.md#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)) | top of the pyramid — the one file never frozen |
 
 **Tests sit beside the file they test**, never inside it: `src/rules.rs` carries
 `#[cfg(test)] #[path = "rules_tests.rs"] mod tests;` and no test code of its own;
 the tests live in [`src/rules_tests.rs`](../src/rules_tests.rs), same writer as
-the file they test. **When that file outgrows a turn it splits by section, and
-only it does** — since 2026-08-15 `rules_tests.rs` holds the imports, the
-helpers more than one section reads, and five `#[path]` declarations into
-[`src/rules_tests/`](../src/rules_tests) (`snapshot` · `pod` · `node` ·
-`workload` · `certificate`), one per `// --- … START ---` region of `rules.rs`.
-No `mod.rs`, and `rules.rs` itself stays whole — a module boundary is where a
+the file they test. **When a test file outgrows a turn it splits by section, and the
+product file never splits with it** — since 2026-08-15 `rules_tests.rs` holds
+the imports, the helpers more than one section reads, and five `#[path]`
+declarations into [`src/rules_tests/`](../src/rules_tests) (`snapshot` · `pod` ·
+`node` · `workload` · `certificate`), one per `// --- … START ---` region of
+`rules.rs`. [`src/analysis_tests.rs`](../src/analysis_tests.rs) has since done
+the same, into [`src/analysis_tests/`](../src/analysis_tests) — one module per
+report (`capacity` · `certificates` · `drain` · `posture` · `restarts` ·
+`versions` · `waste`). No `mod.rs`, and neither `rules.rs` nor `analysis.rs`
+splits with its tests — a module boundary is where a
 second copy of a shared helper grows back
 ([NOTES § D91](../NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15) ·
 [§ D103](../NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
-`main.rs` splits the same way, into
-[`src/main_tests.rs`](../src/main_tests.rs). Still a **child module**, so it sees
+Every other product file with tests has the single-file form:
+[`src/main_tests.rs`](../src/main_tests.rs),
+[`src/k8s_tests.rs`](../src/k8s_tests.rs),
+[`src/ops_tests.rs`](../src/ops_tests.rs),
+[`src/ui_tests.rs`](../src/ui_tests.rs),
+[`src/views_tests.rs`](../src/views_tests.rs) and
+[`src/theme_tests.rs`](../src/theme_tests.rs). Each is still a **child module**, so it sees
 the private items — and the crate still has one `bin` target and no `lib`, which
 is why nothing under `tests/` can reach a product type and why the tests are not
 there
@@ -77,8 +88,13 @@ there
 
 ## `scripts/` — the guards, and the cluster
 
-All owned by `tester`. Everything here runs in `just check`; a step whose tool
-is missing is a loud error, never a skipped step.
+All owned by `tester`. **Most** of it runs in `just check` — through
+[`guards.sh`](../scripts/guards.sh), the one list — and a step whose tool is
+missing is a loud error, never a skipped step. Three rows are not on it and say
+so in their own cells: `e2e.sh` is run by hand, the three pty scripts give
+`just check` their `--self-test` only, and `make-certs.sh` / `make-csr.sh` have
+no caller at all — they are run once to mint a fixture, and it is
+`certs-test.sh` that `just check` runs against what they produced.
 
 | Path | Proves / does |
 |---|---|
@@ -87,7 +103,7 @@ is missing is a loud error, never a skipped step.
 | [test-guard.py](../scripts/test-guard.py) | Declared tests equal listed tests — catches a test that stopped being run |
 | [write-guard.py](../scripts/write-guard.py) | The [invariant 1](../CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision) allowlist, built from kube's own signatures, with canaries so "extracted nothing" cannot pass |
 | [toolchain-guard.py](../scripts/toolchain-guard.py) | **`just check` is the whole of CI, or it is a lie** — this is the line that makes that checkable. Refuses a channel (`stable`) as the pin, a workflow step that does not read it, and a local `rustc`/`clippy` that differs from CI's. Written after `development` sat red for seven days because CI's clippy had moved and the local one had not ([NOTES § D211](../NOTES.md#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03)) |
-| [security-guard.py](../scripts/security-guard.py) | The half of [§ Security gate](../CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions) a script can decide **today**: workflow permissions and SHA-pinned actions, no shell spawned from `src/`, no dependency or hostname outside the approved list, no derived `Debug` over a config holder, no door into the in-cluster environment, no TLS knob turned off by us. Six checks, 17 planted violations in its `--self-test`. The rest of the gate stays human-checked and [D105](../NOTES.md#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16) says which and why |
+| [security-guard.py](../scripts/security-guard.py) | The half of [§ Security gate](../CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions) a script can decide **today**: workflow permissions and SHA-pinned actions, no shell spawned from `src/`, no dependency or hostname outside the approved list, no derived `Debug` over a config holder, no door into the in-cluster environment, no TLS knob turned off by us. Six checks, **37** planted violations in its `--self-test` — the number it prints, not one recalled. The rest of the gate stays human-checked and [D105](../NOTES.md#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16) says which and why |
 | [sanitize.jq](../scripts/sanitize.jq) | The sanitizer itself: payloads destroyed, references kept, foreign node names and foreign CSR requesters **refused** |
 | [sanitize-test.sh](../scripts/sanitize-test.sh) | Feeds it poisoned objects in every shape *and* every framing — single object and `List`, whole value / substring / base64 |
 | [fixture-audit.sh](../scripts/fixture-audit.sh) | The same questions asked of the **committed** bytes, after the fact |
@@ -96,16 +112,37 @@ is missing is a loud error, never a skipped step.
 | [verify-test.sh](../scripts/verify-test.sh) | Proves `cluster.sh verify`'s predicates offline — a predicate that matches the wrong state is a fixture that cannot fail |
 | [make-certs.sh](../scripts/make-certs.sh) · [certs-test.sh](../scripts/certs-test.sh) | C1's certificate fixtures with pinned dates, and the assertion that each still has the days *left* its rule needs at the pinned `now`. **The numbers are deliberately not repeated here** — they move every time a capture moves the pin, this row went stale on two consecutive moves, and a copy nothing compares is worse than a pointer: `certs-test.sh`'s `pinned[]` holds them, and it asserts that **every file under `src/` that reads those bytes** pins the same instant it does — three of them until 2026-08-28, four since |
 | [make-csr.sh](../scripts/make-csr.sh) | The CertificateSigningRequest fixture |
+| [guards.sh](../scripts/guards.sh) | **The one list.** Every guard in this table, its `--self-test` first where it has one. `just guards` and CI's single step both call it and neither keeps a copy, so adding a guard is one line ([D111](../NOTES.md#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16)). Its own first clause reads `check`'s recipe out of the justfile and fails if a guard was written there instead |
+| [todo-guard.py](../scripts/todo-guard.py) | Every phase heading and its `Done when:` / `Frozen after:` block is still in `todo.md`. Written after a context compaction deleted `## Phase 3` and Phase 2's block, invisibly — everything under them survived |
+| [width-guard.py](../scripts/width-guard.py) | No line in `src/` past 100 columns. `cargo fmt` reflows code and leaves comments alone, so this is the only thing that reads a comment's width. On the dev's own per-turn list, at 0.13 s measured |
+| [signal-guard.py](../scripts/signal-guard.py) | Every mark `theme.rs` ships is drawn, whole, by the `screens/` file that promises it — the glyphs that carry severity when colour is gone |
+| [handover-guard.py](../scripts/handover-guard.py) | The `ctrl-z` terminal handover in `main.rs` asks the terminal no question: stdin belongs to the key thread, which would swallow the reply |
+| [read-deadline-guard.py](../scripts/read-deadline-guard.py) | The read deadline exists at the client and sits inside kube's own window — a watch whose socket stays open and delivers nothing raises no error at all |
+| [twin-guard.py](../scripts/twin-guard.py) | Each duration that exists twice is the same duration in both files. `rules.rs` is frozen and its constants are private, so `k8s.rs` keeps a second copy; this is what that costs |
+| [copy-guard.py](../scripts/copy-guard.py) | The same, for the two copies `twin-guard.py` cannot read — a sentence and a table, forced by the same freeze |
+| [reports-guard.py](../scripts/reports-guard.py) | Refuses a secret in `reports/` before it is committed — the sanitizer's job, for the other directory that takes a real cluster's bytes into git ([D108](../NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)) |
+| [package-check.sh](../scripts/package-check.sh) | What `cargo install k8rs` actually gets, built here rather than in a stranger's hands: `Cargo.toml`'s `exclude` drops **19** entries, counted off the manifest and `cargo publish` verifies the upload with a build |
+| [mutants.sh](../scripts/mutants.sh) | The mutation gate's scratch volume, and the failures the gate cannot report about itself — cargo-mutants files *any* build failure as `unviable`, so a full disk reads as a pass ([D133](../NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)) |
+| [suspend-test.py](../scripts/suspend-test.py) · [picker-test.py](../scripts/picker-test.py) · [confirm-test.py](../scripts/confirm-test.py) | **The three journeys no `cargo test` can reach**, each driving the real binary on a real pty and reading the terminal back: the three ways of stopping, the startup picker, and the confirmation box answered both ways. `cargo test`'s own ends are both pipes, so `console()` is never entered from the suite ([D279](../NOTES.md#d279--the-context-family-two-boxes-that-cannot-be-landed-apart-and-the-five-rulings-their-brief-needed-2026-09-24)) |
+| [e2e.sh](../scripts/e2e.sh) | The cluster leg of `--read-only`, and the body of `just e2e`: the real binary against kind, asserting what a cluster *can* show — the object did not change and no audit log was opened. Run by hand, not by CI; `tests/binary.rs` § THE WIRE is the half that watches the socket |
 
 ## `tests/` — the data
 
 | Path | What |
 |---|---|
 | [tests/fixtures/](../tests/fixtures/) | Real captures from the pinned kind cluster, sanitized on the way out. **Never edited by hand to make a test pass** ([NOTES § D53](../NOTES.md#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)) |
-| `tests/fixtures/certs/` | Locally generated certificates with pinned dates — no real cluster material, ever |
-| `tests/fixtures/K8S_VERSION` | The version the capture came off, so a fixture cannot silently change cluster |
+| [tests/fixtures/certs/](../tests/fixtures/certs) | Locally generated certificates with pinned dates — no real cluster material, ever |
+| [tests/fixtures/K8S_VERSION](../tests/fixtures/K8S_VERSION) | The version the capture came off, so a fixture cannot silently change cluster |
 | [tests/binary.rs](../tests/binary.rs) | `tester`'s. The three things `main` does that no unit test can reach — argv, the choice of stream, the exit code — asserted by **running the built binary** and reading its streams. Not a lib target and no step towards one ([NOTES § D123](../NOTES.md#d123--the-mutation-gate-has-nothing-to-say-about-mains-body-so-a-test-drives-the-binary-2026-08-20)) |
-| End-to-end tests | `tester`'s, from Phase 7 — a different thing: a `--read-only` job that fails if a mutating request reaches the API |
+| End-to-end | `tester`'s, from Phase 7, and it is **two** halves in two places, neither under `tests/fixtures/`: `tests/binary.rs` § THE WIRE watches the socket under a recording stub and runs on every push, and [`scripts/e2e.sh`](../scripts/e2e.sh) runs the same binary against kind by hand. A kind apiserver cannot say what one client sent it, which is why the wire half is not the cluster half ([D236](../NOTES.md#d236--the-four-rulings-the-e2e-box-needs-where-a-wire-is-visible-what-just-e2e-is-then-and-the-synopsis-that-buried-a-correct-answer-2026-09-05) ruling 1) |
+
+## `examples/` — throwaway
+
+[`examples/spike_tui.rs`](../examples/spike_tui.rs), `dev-ui`'s. The Phase 8
+ratatui spike: a learning spike never touches a product file, and it is
+`exclude`d from the published crate, so a stranger who runs `cargo install`
+never downloads it
+([D238](../NOTES.md#d238--the-spike-cannot-import-the-product-and-the-tui-crate-does-not-go-in-the-shipped-artifact-to-learn-a-loop-2026-09-05)).
 
 ## `screens/` — the mockups
 
@@ -127,11 +164,26 @@ PM's.
 [README](README.md) · [architecture](architecture.md) ·
 [security](security.md) · [tech-stack](tech-stack.md) · this map
 
-## `.claude/agents/` and `.github/workflows/`
+## `.claude/` and `.github/workflows/`
 
-The five agent definitions are committed, because the workflow in CLAUDE.md
-describes people who have to be in the room. Workflows default to
-`permissions: contents: read`, third-party actions pinned to commit SHAs.
+`.claude/agents/` holds the five agent definitions and `.claude/commands/` the
+`/basla` procedure — **both the PM's**, both committed, because the workflow in
+CLAUDE.md describes people who have to be in the room. Two more files are
+committed beside them and are in **no Writes cell**, which is
+[backlog.md](../backlog.md)'s and not this page's to settle:
+`.claude/session-check.sh`, which answers the one question `git status` cannot —
+whether a *live* process holds this repo, and so tells a dirty tree from another
+session's box in flight
+([D249](../NOTES.md#d249--the-layout-box-lands-from-a-second-session-the-header-gives-way-from-its-front-and-a-refusal-keeps-the-list-it-is-about-2026-09-06))
+— and `settings.json`. `settings.local.json` sits in the working tree and is
+**not committed**. The whole of `.claude/` is `exclude`d from the published
+crate.
+
+`.github/workflows/` holds one file, [`ci.yml`](../.github/workflows/ci.yml),
+`tester`'s. Three jobs — fmt/clippy/test plus `scripts/guards.sh`, `cargo-deny`,
+and the cross-compile matrix. Workflows default to `permissions: contents: read`,
+third-party actions pinned to commit SHAs. **There is no release workflow yet**;
+it is Phase 13's last unchecked box.
 
 ---
 
@@ -150,7 +202,7 @@ describes people who have to be in the room. Workflows default to
 | Record a **decision** | [`NOTES.md`](../NOTES.md), numbered, dated | PM |
 | Check off a **step** | [`todo.md`](../todo.md) — same commit as the work | PM |
 | Change **CI** | [`justfile`](../justfile) first — anything CI runs that `just check` skips can only fail after a push | `tester` |
-| Change the **docs** | [`docs/`](README.md), and `README.md` / `README_TR.md` when they exist — same commit as the structural change, never "later" | PM |
+| Change the **docs** | [`docs/`](README.md), and [`README.md`](../README.md) / [`README_TR.md`](../README_TR.md) — same commit as the structural change, never "later". The two READMEs move together: the Turkish one is a translation, not a second document | PM |
 
 ## The four questions this repo answers in four different files
 

@@ -1,18 +1,21 @@
 # k8rs — documentation
 
-> Status: **Phase 12 closed — final wiring, milestone M3.** Every phase through 12
-> is complete bar one deliberately open box, the crates.io publish, which waits on
-> a README. The rules and the seven analysis reports are tested against real
+> Status: **Phase 13 is running — shipping v0.1, milestone M4.** Every phase
+> through 12 is closed, and the one box left open underneath them is the crates.io
+> publish. The rules and the seven analysis reports are tested against real
 > captures from a kind cluster you can stand up yourself
 > ([tech-stack § The test cluster](tech-stack.md#the-test-cluster--reproducing-it-yourself)).
 > **It runs**: `k8rs` opens the console against your current context — the Alerts
-> view, the seven analysis panes, the confirmation dialogs, the write path and the
-> cluster picker are wired into one binary, while the reads behind the resource
-> browser and the detail tabs are not yet fetched and say so on screen — and
-> `k8rs --once` prints the findings and exits
+> view, the seven analysis panes, the confirmation dialogs, the write path, the
+> cluster picker and the permission probe that marks a key this login may not use
+> are wired into one binary, while the reads behind the resource browser and the
+> detail tabs are not yet fetched and say so on screen — and `k8rs --once` prints
+> the findings and exits
 > ([architecture § The command line](architecture.md#the-command-line)).
-> What is left is Phase 13: the README, the release workflow, and `cargo install
-> k8rs` · Last updated: 2026-09-26
+> Phase 13 has landed the permission probe, the driver-flag removal and
+> [`README.md`](../README.md) with its Turkish translation. **What is left is the
+> release workflow and the publish itself**, which needs the maintainer's
+> crates.io credential and no agent can run · Last updated: 2026-09-28
 
 This directory is the **built** state: what is true of the shipped tool, written
 for humans outside this repo. The reasoning behind any of it lives one level up,
