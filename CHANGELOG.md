@@ -1,5 +1,10 @@
 ## [0.1.0] - 2026-09-28
 
+### 🐛 Bug Fixes
+
+- *(ci)* Bound the release body, because GitHub refuses one over 125k ([0caa532](https://github.com/murat-akpinar/k8rs/commit/0caa5328703de16984808e59754d9c46799d7aa6)) — The first real tag found it: gh release create answered HTTP 422, body is too long, ten seconds in. v0.1.0's own changelog section is 143 816 bytes against a 125 000 cap — this repo writes long commit bodies and cliff.toml puts each one in its entry, so every release is over, not just this one.
+## [0.1.0] - 2026-09-28
+
 ### 🚀 Features
 
 - *(rules)* See workloads whose pods were never created ([4ea285d](https://github.com/murat-akpinar/k8rs/commit/4ea285d34ca40c06bb2a589ba746561737b2833f))
