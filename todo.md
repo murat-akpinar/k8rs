@@ -2350,9 +2350,16 @@ public release.
       floor and this design never sends it, which closes D147's deferral twice
       over: an older server *ignores* it and hangs, a newer one with the gate off
       *rejects* it with 403, and the gate is not monotonic. **k8rs warns and does
-      not refuse** — two sentences, one per end of the window, neither naming a
-      minor version and neither echoing the server's string, so invariant 9 holds
-      structurally. The third clause landed as **two facts and no threshold**:
+      not refuse** — two sentences, one per end of the window, neither echoing the
+      server's string, so invariant 9 holds structurally. **This clause said
+      *neither naming a minor version* until Phase 5's close read it against the
+      code, and both sentences print `This cluster is Kubernetes {major}.{minor}`
+      — they have since the box's own commit `503e408`.** The reason the clause
+      was making survives by a better mechanism than the one it claimed: the two
+      integers come from `minor_version` (`k8s.rs:3897`), so what reaches the
+      screen is k8rs's own parse and not a string the server wrote. Corrected in
+      the body, not in the code
+      ([D314](NOTES.md#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28)). The third clause landed as **two facts and no threshold**:
       `Listing { kind, so_far, since }` — a working LIST moves both numbers, a
       hung one moves neither, and there is no constant to tune because *slow* and
       *hung* genuinely overlap. `Event::Init` arrives before the request is made,
@@ -2657,8 +2664,14 @@ public release.
       case on EKS/GKE/AKS — and it names the renewal command from the user's
       own kubeconfig `exec` block rather than guessing a cloud
       ([NOTES § D19](NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program)).
-      Done: **eight**, not three — `k8s::Fault`, one classifier, no string on the
-      type, the words the caller's
+      Done: **more than three, and the box no longer says how many** —
+      `k8s::Fault`, one classifier, no string on the type, the words the caller's.
+      It said *eight* until Phase 5's close re-took it and the enum answered
+      **eleven**, which is a fact that moves every time a variant lands; the point
+      the box was making is that *three* was wrong, and that survives without a
+      number. Counted off the enum when it is needed, never off this line
+      ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)'s
+      own rule about a fact on a schedule, applied rather than quoted)
       ([D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27) ·
       [reports/2026-08-27](reports/2026-08-27-fault-taxonomy-against-a-live-api-server.md)).
       `Why`/`why()` were deleted rather than kept beside it. The renewal hint
@@ -3101,14 +3114,21 @@ public release.
       documented read-only role runs everything but the operations* — is the
       read-only-`ClusterRole` box below, which has never been run under that role
       (D186).
-      **What this box did not take**: the *"One node check is off"* line is still
-      drawn and not built (`Input::skipped` is `BTreeMap::new()` on the live
-      path), below the clock-skew sentence and not above it
+      **What this box did not take — and this paragraph was wrong about it, which
+      Phase 5's close found** ([D314](NOTES.md#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28)).
+      It said the *"One node check is off"* line was *still drawn and not built*,
+      riding on `Input::skipped`, and routed a future box at building it. **The
+      same commit built it**: `c9e40ea` added `check_switched_off`
+      (`main.rs:284` in that diff), keyed on `namespace_scope` and not on
+      `skipped`, wired into `render` at `main.rs:903`. The source says so in as
+      many words at `main.rs:1022` — *a comment in this file used to say this
+      sentence rode on that field; it never did*. So there is nothing here for a
+      later box to build, and the placement question alone remains: the line
+      draws below the clock-skew sentence and not above it
       ([screens/once.md § Stacked with a check that could not run](screens/once.md#stacked-with-a-check-that-could-not-run) ·
-      [D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)) —
-      it belongs to whichever box builds `skipped`, and the
-      `▲ k8rs is not getting …` watch-trouble line is a third thing that is not
-      either of them
+      [D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)).
+      The `▲ k8rs is not getting …` watch-trouble line is a third thing that is
+      not either of them
 - [x] Wire into the same print loop; verify against kind while breaking pods.
       **The wiring half was already closed by the boxes above it** — `--live`
       drives `live_report` through `drive_watching` and renders with the same
@@ -3174,7 +3194,10 @@ public release.
       because a reader meeting them beside a 3271-line `ops.rs` should be told
       they expired rather than left to wonder.
       **What this box did not cover**: the browser, whose rows need `list` +
-      `watch` on every discovered kind rather than the 15 this role names — it is
+      `watch` on every discovered kind rather than the **16** this role names
+      (re-counted off `docs/security.md` at Phase 5's close; it was 15 until the
+      permission probe added the `authorization.k8s.io` pair,
+      [D292](NOTES.md#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26)) — it is
       Phase 11 and does not exist yet, and the 2026-08-22 measurement behind that
       claim stands
       ([reports/2026-08-22-browser-rows-table-watch-and-refresh.md](reports/2026-08-22-browser-rows-table-watch-and-refresh.md))
@@ -5463,6 +5486,54 @@ new box, because a phase close is not a box:
    broken*, a kubeconfig k8rs accepts and `kubectl` rejects, the header row's right
    edge spelled six ways, the footer describing the pane while nothing draws which
    panel holds the keyboard, and the two identical `events` rows.
+   **And a second blocker joined this item after the three should-fixes were
+   written, from a user running the shipped binary**
+   ([D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)):
+   the fix above closed the help screen's half of `test.md`'s **F2** and left the
+   panes' half standing. `ui::unwired` is the browser's alone by its own doc
+   comment (`ui.rs:4793`), so `l`, `d`, `y` and the events tab still draw
+   *reading the cluster…* for a fetch nothing issues — the four `WAITING` draw
+   sites in `ui.rs`, while the Alerts pane keeps the sentence because its read is
+   real. **This sentence said *four of `WAITING`'s six call sites; the Alerts
+   pane's two stay* and both halves were wrong**: two of that six are the constant
+   itself and a use inside `note()`, neither of them Alerts' and neither a draw
+   site, and the same grep missed a bare literal spelling of the sentence on
+   another `Pane::Loading` arm. It was the third copy of one loose count — the PM
+   wrote it into `NOTES.md`, a dev brief and here — which is
+   [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+   landing on the PM's own files. Corrected in all three; the fix is verified
+   against what the code does, never against this number. Same class as D310, same reversal, same close, and **not** the
+   feature: the four reads stay unwired. `screens/detail.md` is ruled before the
+   dev is briefed, and the measurement the fix owes is `test.md` § K's first row,
+   which has never been run. **The released `0.1.0` carries neither fix** — tagged
+   at `5dc4b24`, and `git merge-base --is-ancestor 1270675 v0.1.0` answers no.
+   **Where round 3 stands, so nothing is dispatched twice.** `screens/states.md`,
+   `screens/detail.md` and `screens/widgets.md` all landed (three `tui-designer`
+   turns, in that order, each alone because `cargo test` compares drawn blocks
+   against them). The code landed with all six of the dev's gate commands green,
+   `1612 + 40` tests, `mutants-diff` 32/32 caught, and the four sentences driven on
+   the real binary at 80×24 under `tmux` against kind. **The fix is five renderer
+   arms, not four** — `ui::block` spelled the sentence as a bare literal that no
+   `WAITING` sweep could see, and it is the describe pane's own events section, so
+   D313 reached it. `ui.rs` now spells it once and `:157`'s claim is true.
+   **Both reviews report no blockers** —
+   `k8s-admin` over eight findings and `tester` with `just check` green, `EXIT=0`,
+   on the PM's own tree including its markdown
+   ([D316](NOTES.md#d316--the-operator-review-of-the-unwired-panes-no-blockers-and-the-four-findings-that-are-this-turns-own-second-copies-2026-09-28),
+   [reports/2026-09-28-the-unwired-panes-and-esc.md](reports/2026-09-28-the-unwired-panes-and-esc.md)).
+   **Five findings were this turn's own second copies and landed before the commit,
+   in two dispatches — `screens/` alone first, then `dev-ui`**: one clause spelled
+   twice, an `f follow` the footer withheld and the key router did not,
+   `screens/widgets.md` carrying two unqualified claims (and `screens/dialogs.md` a
+   third copy), a retracted count still in `screens/detail.md`, and `ui::unread`
+   being the third meaning of that word while inverting the other two — now
+   `ui::unsent`. Five more went to [`backlog.md`](backlog.md).
+   **`tester` planted eleven semantic defects `cargo mutants` cannot express; ten
+   died and the survivor was the field both reviews had circled** — `stream`
+   unpinned for `Pane::Denied`, now asserted. **This item is landed.**
+   **What it still owes is one run, not a dispatch**: `test.md` § K's first row on
+   the **landed tree**. Both dev runs were on their own trees; the row carries their
+   frames and is deliberately unticked until one is taken on what was committed.
 2. **No whole mutation sweep is owed, and that is answered rather than assumed.**
    `just mutants` mutates `rules.rs` and `analysis.rs` only, and `git log` over
    those two plus their tests is **empty for this phase** — the last touch to
@@ -5476,7 +5547,26 @@ new box, because a phase close is not a box:
    run and the security pass, and the family review too if it touched a shared
    helper.
 4. **Phase 5's own close ritual**, owed from the moment its release box closed as
-   superseded above.
+   superseded above. **Step 4 ran and found no blockers**
+   ([D314](NOTES.md#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28),
+   [reports/2026-09-28-phase-5-close-family-review.md](reports/2026-09-28-phase-5-close-family-review.md));
+   **step 7 then found one, and it is the first cross-box defect this project's
+   whole-phase pass has caught**
+   ([D315](NOTES.md#d315--the-fourth-member-of-a-class-the-code-had-already-named-found-by-the-closes-own-whole-phase-pass-2026-09-28)).
+   **Two code changes are owed and both are `k8s.rs`, so they are one `dev-core`
+   turn**: an arm for `410`/`Expired` in `answer()`, and the `insecure` field on
+   `Session` that step 5's own security gate row needs. Each is a narrow reversal
+   of that file's freeze, both recorded before being acted on. The `greeting()`
+   clause that reads the field is `main.rs`'s and stays a separate `dev-ui` turn.
+   **Still owed after those:** step 1 (`just check` green and the code exercised),
+   step 2 (build and run the real binary on the test host and paste it), step 5's
+   gate item by item, and — measured, not assumed — the **whole mutation sweep**,
+   because Phase 5 touched `rules.rs`, `rules_tests.rs` and `analysis.rs` after the
+   last clean sweep of 2026-08-22 (`57a7336`, `048f46d`, `e1db3b4`). `cargo mutants
+   --list` over the two files answers **879**; D210's shard guidance was measured
+   against an 890-test suite and the suite is now over 1,600, so the shard size is
+   re-measured before the sweep rather than carried
+   ([D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
 5. **Then the rest of this ritual**: the phase's security gate, the whole-phase
    second pass, `docs/`, the CHANGELOG, and the PR to `main`.
 

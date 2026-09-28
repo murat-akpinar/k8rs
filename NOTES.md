@@ -334,6 +334,10 @@ its line moving with it.
 - [D310](#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28) — the browser's kind pane is made honest rather than wired, and that reverses the freeze on three top-layer files
 - [D311](#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28) — the A-to-Z pass gets a file, and its first four rows found a binary that calls a flag a missing file
 - [D312](#d312--esc-back-was-an-identity-write-and-the-key-that-got-the-reader-out-was-never-on-the-footer-2026-09-28) — `esc back` was an identity write, and the key that got the reader out was never on the footer
+- [D313](#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28) — the four detail tabs kept the sentence the browser's pane lost, and a user found it before the close did
+- [D314](#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28) — Phase 5's close family review: no blockers, two box bodies that do not describe their own code, and a security gate row the headless surface does not meet
+- [D315](#d315--the-fourth-member-of-a-class-the-code-had-already-named-found-by-the-closes-own-whole-phase-pass-2026-09-28) — the fourth member of a class the code had already named, found by the close's own whole-phase pass
+- [D316](#d316--the-operator-review-of-the-unwired-panes-no-blockers-and-the-four-findings-that-are-this-turns-own-second-copies-2026-09-28) — the operator review of the unwired panes: no blockers, and the four findings that are this turn's own second copies
 
 ## Why it exists — where the gap is
 
@@ -27881,3 +27885,585 @@ is corrected in the three places that carry it. The first two were *"this arm is
 (impossible). **Three *only* / *never* sentences in one box, two of them wrong** — the pattern is the
 finding, and it is the same shape as a count taken from a proxy: an exhaustiveness claim is evidence
 and needs deriving, not asserting.
+
+### D313 — the four detail tabs kept the sentence the browser's pane lost, and a user found it before the close did (2026-09-28)
+
+**The report, in the user's own words: *some things do not come up on the TUI, it says `reading the
+cluster…`*.** Two different defects answer to that sentence, and **what was checked against what is
+stated exactly, because the two halves are not the same strength of evidence**: the released binary
+half is settled by `git merge-base`, and the `HEAD` half is read off four call sites in the source
+and has **not** been run. Which of the two the reporter actually saw was never established — the
+question was drafted and withdrawn — so neither is attributed to them beyond the sentence they
+quoted. **The measurement on a running binary is owed by the turn that fixes this**, and it is
+`test.md` § K's first row.
+
+**One is already fixed here and is not fixed anywhere a stranger can reach.**
+[D310](#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)
+landed as `1270675` at 19:43; `v0.1.0` is tagged at `5dc4b24`, and
+`git merge-base --is-ancestor 1270675 v0.1.0` answers **no**. So every binary anyone can install —
+the GitHub release, `cargo install k8rs` — still carries F1 whole: open a kind, the pane says
+`reading the cluster…` forever, and `esc` does not come back. That is the second thing
+[D309](#d309--the-cratesio-page-keeps-a-readme-that-says-the-crate-is-not-published-and-the-maintainer-will-not-spend-a-version-number-on-it-2026-09-28)'s
+*no `0.1.1`* ruling now costs, and it is recorded rather than re-argued: the ruling stands, the cost
+is named.
+
+**The other is still true at `HEAD`, and it is the half the close's own fix did not take.**
+`ui::unwired` — the function that replaced the sentence with *not built yet — k8rs cannot list …* —
+is **the browser's alone**, said so in its own doc comment at `ui.rs:4793` and scoped that way
+deliberately, because `WAITING` still serves the Alerts pane whose read is real. The four detail
+panes were left on it: `ui.rs` **5716**, **5834**, **5957** and **6119** each still draw
+`reading the cluster…` for a fetch nothing issues. `l`, `d` and `y` are bound unconditionally
+(`main.rs` 10071–10073), so one keypress on the first card a reader selects reaches it.
+
+**What makes this a ruling rather than a bug report is where it was already written down.**
+[`test.md`](test.md)'s **F2** reads *"`?` lists `l logs`, `d describe` and `y view as YAML` under
+always available while the same body marks `s` not built yet; **all three land on a fetch nothing
+issues**"*, and it is marked *fix in flight, same turn, D310*. The fix closed the first clause — the
+help screen stopped advertising them — and left the second standing. **That is exactly the shape
+[D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22) sends a
+close's review to hunt: a row checked over work narrower than its own text**, invisible to a diff
+because the code did change, and it was found by a user pressing a key rather than by the close.
+F2's row is corrected instead of re-filed.
+
+**Ruled a blocker, and the reasoning is D310's own, re-paid rather than re-argued.** A pane that
+says *reading the cluster…* while no read was issued is wrong output — that sentence, on that
+class of pane, is what D310 already ruled wrong output for the browser, and the same words cannot
+be a blocker on one pane and a nit on four. Two facts pull the other way and are recorded because
+they are real: `esc` **does** close a detail tab, so it is not a trap the way F1 was, and `?` no
+longer advertises the three keys as available. **What settles it against them is the phase's own
+done-when** — *a stranger in their first month … without asking us anything* — and the person who
+hit it had to ask.
+
+**It joins the close's item 1 rather than becoming a box, and the freeze is reopened again here
+rather than inherited.** D310 reopened `ui.rs`, `views.rs` and `main.rs` for the browser's pane and
+they were **re-frozen as that fix landed**, so this fix does not stand on that reversal — it takes its
+own, on the same three files and no wider: the four `Pane::Loading` arms in `ui.rs`, the logs tab's
+footer arm in `views.rs`, and the tests beside them. `docs/maps.md`'s freeze cells carry it in the
+same change that lands the code, the way D310's did. Same class, same turn's worth of work, and
+[CLAUDE.md](CLAUDE.md) forbids adding a box to an open phase in any case. **It is not the feature**:
+the four reads stay unwired, `k8s::Browsing` and the detail fetches are still nobody's box, and the
+only thing that changes is the sentence a pane draws while nothing is being read. The screen owns
+the wording, so `screens/detail.md` is ruled before the dev is briefed, not beside it.
+
+**Amended when the screen ruling came back, because it settled something the brief did not ask for
+and it is a behaviour rather than a sentence.** `screens/detail.md` withholds `f follow` and
+`c container` from the **logs** tab's footer while that tab is `Pane::Loading`. Today `views.rs`'s
+footer arm keys on `(Detailing, Tab, View)` and not on the tab's own `Pane`, so both keys are drawn
+unconditionally — a key promising a live stream and a key promising a pick, over a pane whose read is
+never issued. **That is not a reversal of
+[D259](#d259--the-footer-is-a-curated-subset-with-one-pair-that-never-gives-way-the-help-screen-is-the-frame-wearing-a-title-rather-than-a-box-drawn-inside-it-and-a-gate-verified-against-a-substituted-tree-is-not-verified-2026-09-10)
+ruling 5, it is that ruling applied**: `Offer` is defined as a fact about the *pane's content*, and
+`Pane::Loading` is content state — unlike the focus condition
+[D312](#d312--esc-back-was-an-identity-write-and-the-key-that-got-the-reader-out-was-never-on-the-footer-2026-09-28)'s
+second amendment refused, which is a fact about where the reader navigated. `screens/help.md` already
+landed the same three keys as *not built yet*, so the two surfaces agree rather than diverge.
+**Two things were left to be checked against the object rather than reasoned, and the
+`screens/widgets.md` turn answered both off the source.** `⇧p previous` is **not** on that footer, in
+any state: `views.rs:3158-3170`'s exhaustive `(Detailing::Tabs, Tab::Logs, _)` arms produce only
+`[ ] tabs  f follow  c container  esc back  ? all keys  q quit` while picking and
+`[ ] tabs  f follow  esc back  ? all keys  q quit` otherwise — `help.md`'s three-key list is the `?`
+modal's body, a different surface, and the two do not disagree. And describe, yaml and events are one
+arm with no `Pane` guard (`views.rs:3169-3170`), the same string in `Loading`, `Ready` and `Denied` —
+which is exactly what makes the carve-out the logs tab's alone. **So the carve-out is two keys, not
+three**, and nobody re-derives it.
+
+**And `screens/widgets.md`'s footer table is the second copy of this**, found by the screen ruling and
+outside its own file: its row reads *"Detail — logs tab, every state of it"*, unqualified, which stops
+being true the moment the carve-out lands. It got the state-specific split the same table already has
+for the browser's unwired kind, in its own turn **before** the dev's and not after — two files describing
+one footer differently is [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+second copy, and a test compares a drawn footer against the page. The row *"Detail — logs tab, every
+state of it"* is gone, replaced by one row for `Pane::Loading` and one for every other state; done, not
+pending, so nobody reads this paragraph as an instruction and does it twice.
+
+**And the sweep this turn owes is named now so it is not re-derived later — and the first version of
+this paragraph was itself loose, which is why it is written twice.** It said *`WAITING` has six call
+sites, the fix is four of six*. Two of those six are not call sites at all: `161` is the **definition**
+and `4016` is a use inside `note()`. **There are four draw sites through `WAITING`** — 5716, 5834, 5957,
+6119 — and the count was right by accident rather than by counting.
+
+**What the loose count hid is a fifth spelling.** `grep -n '"reading the cluster' src/ui.rs` answers
+`161` (the const), `774` (a doc comment) **and `5928`** — a bare literal on a `Pane::Loading` arm inside
+`fn block(events: &Pane<Happened>, …)`, not routed through the constant at all. So before the fix the
+sentence was **spelled twice in one file**, while `ui.rs:157`'s own doc says *"`reading the cluster…`,
+spelled once"*. That doc is false, and a constant whose entire purpose is one spelling had a second copy
+beside it — [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+shape, inside the very file this ruling is about. **Whether `block()` is a fifth site this ruling reaches
+or the Alerts card's own events region is answered by the dev against the object**, because the PM read
+the file mid-write and its line numbers had already moved; either way `:157`'s claim is made true or
+corrected before the turn lands. **The lesson is the repo's own and was paid again here**: a grep's line
+count is a proxy, the object is what each line *is*, and the PM's brief carried the proxy.
+
+**Amended a third time, by what the fix found: the sentence was drawn at five places and the fifth was
+invisible to every sweep that had looked for it.** `ui.rs`'s `block()` spelled `reading the cluster…` as
+a **bare literal** rather than through `WAITING`, so neither the constant's *spelled once* doc nor any
+grep for the constant could see it. It is called from exactly one place — `describe()`'s body, drawing
+`Detail::events` — so it is a **detail tab's renderer** and squarely inside this ruling; the fix would
+have shipped incomplete without it. **The PM's brief said *change four call sites* and that number came
+from a grep, which is the whole lesson repeated one level down**: the sweep that finds every use of a
+constant cannot find the copy that does not use it. Before: five draw sites (one real, four unwired)
+plus the literal. After: **one draw site — `note()`, whose read is real — and no literal**, so
+`ui.rs:157`'s claim is true for the first time rather than merely restated, and it now names both
+`ui::block` as the copy that had broken it and `main.rs`'s `reading the cluster… N pods` as the one
+other place the words are legitimately built, from a store count the constant cannot serve.
+
+**A second path nobody had named came out with it.** With no findings block above it, the old tab
+renderers fell through to `note()` — which draws `WAITING`. So *change the four `Pane::Loading` arms*
+would have left the empty-pane case still claiming a read. `unread` now pairs `sentence` (a block above)
+with `dimly` (nothing above), which is the browser's own shape.
+
+**Five choices the brief did not make, settled by the dev and recorded here before the commit.**
+
+1. **`Detailing::Tabs` gains `stream: bool`.** The footer arm keys on `(Detailing, Tab, View)` and
+   `views.rs` cannot see a `Pane`, so the carve-out needs a carrier. The two already in scope were
+   rejected with reasons: a sixth `footer` parameter is the same churn with no type safety, and
+   `containers == 0` is **a lie in the Ready-but-container-list-unknown state**, which
+   `screens/widgets.md` deliberately keeps `f follow` for. The arms stay exhaustive on `Tab`, so a fifth
+   tab is a compile error. **Two producers now set one claim** — `ui::detailing` derives it, `main.rs`
+   hardcodes `false` the way it already does `containers: 0` — and that is the shape this repo has been
+   bitten by, so it is named here rather than discovered when the log stream is wired.
+2. **`SLOTS` grew from three to four**, adding `Tabs { containers: 0, stream: false }` — the state every
+   reader is actually in today. Five footer sweeps claim *every mode* and were walking only the answered
+   one, which is a sweep asserting something about a state no run reaches.
+3. **The container-picker test changed behaviour, not wording.** Its *before the container list is known*
+   case builds `Open::new()`, which is `Pane::Loading`, so that footer is now the bare line; it is
+   asserted apart from the Ready-with-no-containers case, because `f follow` is the only thing separating
+   them.
+4. **The fifth site's wording extends `screens/detail.md`'s events sentence to a section *inside* the
+   describe pane**, for which that file draws no mockup — the state is unreachable on today's binary,
+   since `describe()` returns on its own `Pane::Loading` before reaching `block()`. Its only evidence is
+   a unit test and the test says so. If `tui-designer` wants a different sentence there it is one line,
+   and the review is asked the question directly.
+5. **Test function names kept** — `esc_steps_back_one_step_from_whichever_step_…` is still true of one
+   press from either focus, and renaming churns three doc-comment cross-references.
+
+### D314 — Phase 5's close family review: no blockers, two box bodies that do not describe their own code, and a security gate row the headless surface does not meet (2026-09-28)
+
+Phase 5 (Live reads) was built 2026-08-22 → 2026-08-30 and its close ritual never ran, because its
+last box was the v0.0.1 release and that box stayed open until
+[D306](#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28) closed it
+as superseded. Step 4 ran a month late, over 31 boxes and fourteen regions of `k8s.rs`, under
+[D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)'s rule
+that a close's review runs whole rather than as a diff
+([reports/2026-09-28-phase-5-close-family-review.md](reports/2026-09-28-phase-5-close-family-review.md)).
+
+**The D157 hunt answered, and the answer is the one that could not have been got any other way.**
+Every box carrying a checkable specific was read against the code: **no box was checked over work
+narrower than its own text.** Two box *bodies* do not describe the code, and one of them is **D157's
+shape with the sign flipped** — it describes the code as *less* than it is. The namespace box's
+closing paragraph said the *"One node check is off"* line was still drawn and not built, riding on
+`Input::skipped`, and routed a future box at building it; `check_switched_off` landed in that box's
+**own commit** `c9e40ea`, keyed on `namespace_scope`, wired into `render`, with a source comment at
+`main.rs:1022` saying in as many words that it never rode on that field. A paragraph that sends the
+next reader to build something that exists costs exactly what a box checked too wide costs, and
+nothing in the process was looking for it. The other is the version-floor box's *neither naming a
+minor version*, false since its own commit `503e408`; the reason it was making survives by a better
+mechanism, which is written into the box rather than argued here. Both corrected in the body, not in
+the code.
+
+**Counts re-taken against the object, which is the other half D157 makes a close owe.**
+
+| The box states | Re-taken | Against |
+|---|---|---|
+| 51 `String` fields | **51** at `cd8929e`, **52** at `HEAD` (`PodSnapshot.reason`, [D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)) | an independent port of the guard's own parser, agreeing with the in-tree printed list at both commits |
+| eight faults | **11** | the enum at `k8s.rs:834` |
+| seven group strings | **7 variants, 8 strings** — Linkerd matches two | `k8s.rs:4624-4646` |
+| six kubeconfig shapes | **6** | the region labels plus the two named tests |
+| 90 files / 4.3 MiB packaged | **99 files / 8.08 MiB** | `git ls-files` minus the `exclude` globs |
+| 15 resources in the read-only role | **16** | `docs/security.md:159-228`; the `authorization.k8s.io` pair arrived with [D292](#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26) |
+| `62 of 62` declarations parsed, `49 can hold a token` | **188 of 188 parsed; 12 can hold a token and 1 an unpruned API object** | `scripts/security-guard.py`, `EXIT=0`, run by the PM after the review reported it as unprovable |
+
+**The packaged count moved for two reasons and only one was growth.** `test.md` — 43K of working
+notes created 2026-09-28 — is not in `Cargo.toml`'s `exclude`, so it shipped inside `0.1.0`. That
+list exists to keep working documents off a public registry and nothing re-read it when the file was
+created. Added; the next release carries the corrected list, and the published `0.1.0` keeps what it
+has, on [D309](#d309--the-cratesio-page-keeps-a-readme-that-says-the-crate-is-not-published-and-the-maintainer-will-not-spend-a-version-number-on-it-2026-09-28)'s
+standing ruling. The re-taken figure is stated as a replication of cargo's packaging rule and not as
+`cargo package --list`, which is what would settle it and needs the test host.
+
+**The one finding that is not a nit, and it is not triaged — it is a gate.** Phase 5's own
+🔒 Security gate reads *"if the kubeconfig sets `insecure-skip-tls-verify` it is honoured **and
+surfaced**, not swallowed."* Measured: `k8s::Session` carries eleven fields and none of them is
+`insecure`; `main::Input` has none either; `greeting()` builds its clauses from `version` and
+`served` alone. **Every `⚠ TLS not verified` the product *draws* is `ui.rs`'s** — six of them — fed by
+`main::tls_unverified` off `k8s::Choice::insecure`: the console header and the picker badge, neither of
+which existed when this phase was written. **The review said *in the tree* and the PM's own pass found
+that loose**: `grep -rn` answers `ui.rs` six times, plus one in `theme.rs:271` and one in `k8s.rs:7630`,
+both **doc comments** and neither a draw site. The claim survives with the right subject, and the
+correction is kept rather than quietly fixed, because *every X in the tree* is an exhaustiveness claim
+and this file's standing lesson is that those are derived, not asserted. `Session`'s eleven fields were
+re-derived the same way and are exactly as listed — `pub(crate) struct Session` at `k8s.rs:7030`, no
+`insecure` among them. So the row has **never** been met on the surface it was written for:
+`k8rs --once --analysis > report.txt` against an unverified connection produces a complete report,
+exit `0`, and says nothing about the connection — in CI, in a ticket, pasted.
+
+**It is fixed rather than boxed, and the reason is that a security gate is not a triage input.**
+[CLAUDE.md § Security gate](CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions)
+says anything unchecked there is a red build and not a follow-up ticket, and
+[§ Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase) step 5 runs the phase's
+own gate item by item — a phase does not close over a gate row it does not meet, and *nothing is
+negotiated down to get past a gate*. The reviewer offered the other door — narrow the row to
+*surfaced in the console* — and that is the one thing this cannot be: `--once` is a shipped,
+documented surface ([D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)),
+and a report that hides an unverified connection is worse in a file than on a screen, because a file
+gets forwarded. **The triage rule is untouched:** it sends *non-blockers* to `backlog.md`, and a gate
+row is neither a blocker nor a non-blocker.
+
+**That reverses `k8s.rs`'s freeze, narrowly, and the reversal is written before it is acted on**
+(invariant: a reversal goes into this file first). `k8s.rs` froze at Phase 6's close. What it reopens
+is **one field on `Session`, populated from a value already in hand at the call site** —
+`config.accept_invalid_certs`, read by `probe(&config)` at `k8s.rs:7418`, one line before
+`Client::try_from` consumes the `Config` — and nothing else. The clause that reads it belongs to
+`greeting()` in `main.rs`, which is not frozen and is `dev-ui`'s, so the change is two turns and two
+owners rather than one reversal covering both. **The wording is not new either**: the console already
+says `⚠ TLS not verified`, and a second vocabulary for the same fact is what this repo keeps paying
+for.
+
+**Three findings stay where they already are, and one of them is amended rather than re-filed.**
+A routine `410` watch desync and the `ExternalName` Service with a leftover selector are both live at
+`HEAD` and both already in [`backlog.md`](backlog.md); the phase closes over them on the triage rule.
+**The `410` entry understated itself** and is corrected in the same edit: it called the defect *a
+wrong sentence and not a wrong state*, and the two consequences it does not name are that the
+**next step is a wrong errand** — *check the server address and that this machine can reach it*,
+about a cluster whose API server had just answered correctly — and that **`○ nothing is broken` is
+withheld** for the window, because `watch_trouble` is true. Both are the *errors that lie* class this
+phase was built to close, one door along.
+
+**Triage: no blockers. Phase 5 closes on all seven findings.** Nothing produces wrong output on a
+healthy cluster, nothing crashes, nothing the security pass rules exploitable. The gate row is not in
+that count because it is not a finding — it is an unmet gate, and it is met before the phase closes.
+
+**Amended when the screen ruling for the gate row came back, and four choices it had to make are settled
+here rather than left in a report.** `screens/once.md` gained § *When the connection was never verified*
+(one new block, the page 17 → 18 and the repo 273 → 274 mockups).
+
+- **Stdout on a report, silence on a wall, and the silence is the debatable half.** The sentence rides
+  **stdout** in every mode that produces a report, because `k8rs --once --analysis > cluster-report.txt`
+  is the scenario the gate row exists for and a fact on stderr never reaches that file — the same
+  reasoning the page already uses for the *check that could not run* line. On a run that ends at the
+  stderr wall with exit `2` it does **not** print at all. **Upheld, and the reason is the harm's own
+  shape**: what the row forbids is a *report* that hides an unverified connection, and a wall asserts
+  nothing about the cluster for a reader to mistake as verified. The one case worth reopening is an
+  RBAC refusal, where the connection genuinely completed and the fact is known — [`backlog.md`](backlog.md),
+  not this box, because it is a second question about a surface this turn is only making meet its own gate.
+- **The stack position is the file's own discipline and not this box's judgement.** The new line lands
+  after C1 and before the check-that-could-not-run line, by *append, do not reorder* — the rule the page
+  already followed when C1 was inserted. **A real case was made the other way** and is recorded rather
+  than dismissed: the fact is unconditional and needs no successful read, so it could be argued to belong
+  first. Reordering a settled trailer stack is a bigger change than the box that prompted it, and the
+  reader meets the sentence either way.
+- **The wording is the first full sentence this fact has ever had, and it is now the single source.**
+  Everything that existed before was `ui.rs`'s three-word badge `⚠ TLS not verified`. If a console
+  banner is ever built for the same fact it matches this sentence rather than writing a third — which is
+  [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+  rule applied before the second copy exists instead of after.
+- **The existing `insecure-skip-tls-verify` passage two sections up is about the opposite setting**, and
+  the page now says so. That passage names the setting as the *enabling condition* for a C2 finding —
+  the only way a handshake completes against an already-expired certificate. The new sentence prints only
+  when the setting is **on**; the certificate wall fires only when it is **off**. Mutually exclusive by
+  the definition of one boolean, and the first draft of the disambiguation had the condition backwards and
+  was caught by its own author's second pass.
+
+**One thing this turn did not have to decide and is worth its line:** `screens/once.md` is read by no
+test — the six screen files `src/*_tests.rs` compare against are `alerts` `context` `detail` `dialogs`
+`help` `states` — which is why this screen ruling ran **beside** a dev holding `src/` rather than before
+it, and the concurrency rule's *disjoint trees* held literally.
+
+**What the review could not prove, stated rather than assumed:** the 10 000-pod resident set
+(needs a cluster, and the PM's fixture cluster is up — one at a time), `cargo package --list` (needs
+cargo, so the test host, and the mirror was held), and the per-box mutation counts. Each is named with
+the exact command that would settle it.
+
+**One of those was settled after the report, and the way it was settled is the point.**
+`scripts/security-guard.py` reads source with Python and builds nothing, so it does not fall under
+[D267](#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17)'s
+*nothing runs on this machine* — that rule is about builds — and it ran here while a dev held the
+mirror. `EXIT=0`, and all six of its checks pass. **The two numbers are re-taken but they are not a
+like-for-like comparison and saying so is the honest half**: the guard's own output line changed after
+[D164](#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27)
+taught it three shapes, so *49 can hold a token* and today's *12 can hold a token and 1 an unpruned API
+object* are two different quantities and the fall between them is not a measured improvement. The
+denominator is the comparable half: **62 → 188 declarations**, which is growth.
+
+### D315 — the fourth member of a class the code had already named, found by the close's own whole-phase pass (2026-09-28)
+
+Phase 5's close ritual step 7 — the second pass over the **whole phase**, which
+[CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase) calls the only
+place cross-box defects live. The family review had already run
+([D314](#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28))
+and reported **no blockers**, with the routine `410` watch desync as a should-fix already sitting in
+[`backlog.md`](backlog.md) since 2026-08-27. **That triage is reversed here, and what reverses it is
+not a new measurement — it is joining two boxes the review read one at a time.**
+
+**Box 2672's own rule, verbatim:** *"**A generic message may never stand in for an error we were
+handed** … Whatever failed, the screen names *what* failed and *why*; a fallback string is printed
+only for the case it actually describes."* Its done-when names **one** legitimate fallback: *a watch
+that ended with no error attached*. The box is `[x]`.
+
+**What `410` does, read off the object.** `answer()` matches `400 401 403 404 409 422` on code and
+six `reason` strings, and nothing else; a watch desync carries `Status { code: 410, reason: "Expired" }`
+and hits neither, so it lands in `Fault::Unanswered` — the fallback, printed for a case it does not
+describe, over a watch that ended **with** an error attached. Downstream: `views.rs:4229` says
+*"nothing usable came back when k8rs tried to `list` and `watch` pods"*, `views.rs:4314` sends the
+operator to *"Check the server address this kubeconfig names, and that this machine can reach it"*,
+and `main.rs:988` withholds `○ nothing is broken` for the window. **The cluster had just answered
+correctly and kube relists by itself** — pinned by
+`a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land` (`k8s_tests.rs:2139`, read
+by the PM rather than taken from the review, which said 2138), whose fixture is literally
+`code: 410, reason: "Expired"`.
+
+**So box 2672 is checked over work narrower than its own text**, which is
+[D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)'s
+re-open condition. The family review hunted that shape and honestly reported none, because it read
+each box against its **implementation** and this one is only visible when 2672's rule is read against
+2655's classifier and the backlog's `410` entry at the same time. **That is the whole argument for a
+whole-phase pass existing.**
+
+**A sentence stood here saying it was the first time in this project the pass had paid, and it was
+false — derived after the fact, which is the only reason it did not ship.** `grep -n 'cross-box'`
+answers three earlier ones:
+[D62](#d62--the-fifth-place-a-node-name-lives-and-a-guard-that-asked-less-than-its-consumer-2026-08-12)
+(*two boxes apart, the cross-box drift the phase-close pass exists to catch*),
+[D89](#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14)
+(*two boxes, solved differently*) and
+[D289](#d289--the-phase-12-close-review-a-write-guard-with-no-caller-two-screens-that-name-a-key-that-does-nothing-and-the-ruling-that-changed-stays-unproduced-2026-09-26),
+which has a report file of its own. **So this is at least the fourth, and the count is stated as a
+floor rather than a total**, because *at least* is what a grep can support and *the first* is what it
+cannot. **That makes three unverified exhaustiveness claims caught in one session** — *every
+`⚠ TLS not verified` in the tree*, *four of `WAITING`'s six call sites* in three copies, and this
+one — two of them the PM's own and one inherited from a review. The pattern is not carelessness about
+numbers; it is that a superlative reads as a conclusion and slips past the check a bare number gets.
+Counted, not recalled, applies to *first*, *only*, *never* and *every*.
+
+**What makes it a blocker rather than a fourth opinion is that the code itself already ruled it a
+class.** `answer()`'s doc comment records the same defect three times and then names it:
+
+> `400` had no arm until 2026-08-30 and fell to `Fault::Unanswered` … `409` and `422` had no arm
+> until 2026-09-04 and fell the same way, **which is the third occurrence of one defect and the
+> reason it is written as a class rather than as a missing arm: the fallback is a claim about the
+> cluster, so every code without an arm silently accuses the network.**
+
+`410` is the fourth member of that class. It was in `backlog.md` **before** either of those two
+fixes, and both of them walked past it — a class was declared, written into the source, and its
+oldest known member left open. `k8s.rs:3663`'s own doc calls `WatchError` *the one a busy cluster
+produces most*, so this is not a corner: it is the most common failure of the phase's headline
+mechanism, answered with a wrong sentence, a wrong errand, and a suppressed health claim.
+
+**The preferred fix is the smaller one, and the dev falsifies it rather than implements it on my
+word.** A `410` desync is not a failure the operator has anything to do about — the client handles
+it, relists, and the store rebuilds — so the first candidate is **not a new sentence but no trouble
+at all**: an arm that says this is the watch doing its job, which removes the wrong errand and the
+health suppression together and needs no new `Fault` variant, no `views.rs` wording and no screen
+ruling. The second candidate is a new `Fault` that names what happened. **The first is preferred
+because it is smaller and because a sentence about a self-healing protocol event is one more thing a
+newcomer has to be told not to worry about** (invariant 13's second half). If the dev finds a reason
+the operator genuinely needs to know — a gap in which findings were stale long enough to matter — the
+second candidate wins and the sentence gets a screen ruling first. **Either way the evidence decides,
+not this paragraph.**
+
+**One hazard is named so the first candidate is not rejected for a fixable reason.** `answer()` returns
+a `Fault`, and a `Fault` is by construction *something went wrong* — so *this is not trouble* may not be
+sayable inside that function at all, and a dev that tries it there could conclude the first candidate is
+impossible and fall back to inventing a variant. **If that is what it finds, the arm belongs upstream**,
+at the `WatchError` site (`k8s.rs:3663`'s region) which decides whether a failure is recorded on the
+`Watch` in the first place — a desync that is never recorded as a failure needs no fault, no sentence and
+no variant. That is a hypothesis for the dev to confirm or kill against the code, not an instruction:
+what it must not do is let the shape of one function decide a behaviour.
+
+**This reverses `k8s.rs`'s freeze a second time in the same close, and the two reversals are one
+turn.** D314 already reopened it for a single `Session` field; this reopens `answer()` and whatever
+one arm requires. Both are `dev-core`'s, both are narrow, and batching them is not a convenience —
+`k8s.rs` is one file and one writer, and two turns over it would be two reviews of the same frozen
+file. The `greeting()` clause D314 owes stays `dev-ui`'s and stays separate, because `main.rs` has a
+different owner and not because it is a different idea.
+
+**And the `backlog.md` entry does not simply move.** It was amended hours earlier in this same close
+with the two consequences it had been missing; it now records that the item was **promoted to a
+blocker and fixed**, so the next reader meets the outcome and not a live-looking line.
+
+### D316 — the operator review of the unwired panes: no blockers, and the four findings that are this turn's own second copies (2026-09-28)
+
+Step 6 on the family [D313](#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)
+produced. **No blockers** — nothing says anything false about a cluster, nothing crashes, no state is a
+trap, `ops.rs` is untouched and `--read-only` is unaffected
+([reports/2026-09-28-the-unwired-panes-and-esc.md](reports/2026-09-28-the-unwired-panes-and-esc.md)).
+Eight findings. **The split is not by severity but by origin**, because
+[CLAUDE.md](CLAUDE.md) makes a defect in the box being landed the same box and everything else a later
+one.
+
+**Four are this turn's own and are fixed before it lands.**
+
+1. **One clause, spelled twice, in the file this ruling is about.** `unbuilt` made the *sentence* one
+   spelling and left the *clause* two: `"fetch this object's events"` at `ui.rs:5970` and `:6005`,
+   35 lines apart, both drawing `Detail::events` in `Pane::Loading`. **That is the same shape that
+   produced the fifth site** — a grep for the whole sentence finds one copy because the other is
+   assembled — inside the turn that was fixing it. The day the events read is wired for pods and someone
+   writes `fetch this pod's events`, a sweep over `unread(` call sites returns one hit and the describe
+   pane keeps the old words.
+2. **The footer stopped naming `f follow`; the key stayed live.** `main.rs:10049`'s `Char('f')` arm has
+   no `stream` guard and no `Pane` guard. Harmless today — it flips `App::following`, which only
+   `ui::stream` reads and which a `Pane::Loading` tab never reaches — but **this turn is what made the
+   footer and the router disagree**, and a key a drawn footer withholds is a class this repo already has
+   a test name for. Gated with the footer, in the same turn that split them.
+   **And the PM's own check of that arm found the half the review did not name**: it returns
+   `Did::Changed` unconditionally, so a press over a pane with no stream reports a change while the frame
+   is byte-identical. That is exactly what
+   [D312](#d312--esc-back-was-an-identity-write-and-the-key-that-got-the-reader-out-was-never-on-the-footer-2026-09-28)'s
+   second amendment ruled on for `esc` — *a key must have a visible effect rather than a correct
+   invisible one* — landing on a second key, in the same file, three rulings later. One guard closes
+   both: with no stream, the press is not this arm's.
+3. **`screens/widgets.md` contradicts its own table, and the PM's check made the finding narrower and
+   more exact than the review stated it.** The review read it as *one footer described two ways nine
+   lines apart*. Read against the file, the prose at `:673` is about a **different state** — *every other
+   mode keeps its own footer while a call is in flight, less one word*, the mutating-call state
+   `screens/dialogs.md` owns — while the new table row is about an **unwired pane**. Two states, not one
+   description twice. **What is real is their intersection**, and the review is right that it is
+   reachable: `l` in `pressed` carries no `changing` guard, so a detail tab opens over a running call.
+   There, the prose says `f follow` and `c container` *"stay bound and stay named"* and the table says
+   neither is drawn. So the prose's **point** survives whole — an in-flight call does not remove viewing
+   keys — and only its **enumeration** fails, where the tab's own state had already removed them. The fix
+   is to say the two keys are governed by the tab's state and that the in-flight rule does not add them
+   back; it is not to retract the paragraph. D313's amendment moved that table on the stated grounds that
+   two files describing one footer differently is D103's second copy, and left a narrower version of the
+   same thing inside one file.
+4. **A count this very ruling retracted is sitting in a spec file.** `screens/detail.md` says *"this is
+   four of `WAITING`'s six call sites in `ui.rs`, not all six (NOTES § D313)"* — the number corrected in
+   `NOTES.md`, in `todo.md` and in the dev brief, in the one file none of those corrections reached, and
+   no guard reads it. It comes out rather than being re-stated: the fix was five renderer arms and the
+   next number would go stale too.
+
+**One more is fixed with them although the review graded it a nit, and the reason is that its cost is
+permanent while the fix is now.** `ui::unread` is **the third meaning of that word in the product and it
+inverts the other two**: `ops::unread` is *k8rs tried to read this and could not*, `views::NavItem::Unread`
+is *a discovery that was refused*, and `ui::unread` is *a read that was never issued*. The third is the
+semantic opposite of the first two and is the one a cold reader grepping `unread` meets last. It was
+introduced today; renaming it costs one turn and keeping it costs every future reader.
+
+**A sixth item is a doc correction, not a behaviour one.** `stream` is named *whether there is a stream*
+and derived as *whether the read answered* (`!matches!(open.logs, Pane::Loading)`), and the two part ways
+on `Pane::Denied`, where the footer will offer `f follow` over a refused stream. The buffer is real there,
+so the behaviour is right and the name is what misleads.
+
+**The review also verified `stream: bool` rather than accepting the dev's reason for it**, which is what
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+asks of a reviewer: `ui::containers` answers `&[]` for `Pane::Loading` **and** for a `Ready` pane whose
+pod snapshot has not landed, so `stream == false` implies `containers == 0` and not the reverse — the
+carrier genuinely could not be `containers`. **What it flagged instead is the placement**, and it is not
+new: `Detailing::Tabs`'s existing `containers: 0` already produces a latent disagreement at
+`views.rs:3425`, where `App::escape` reads the router's hardcoded `0` and classifies an open
+`Modal::ContainerPick` as *dropped* rather than *cancelled*. Unreachable today, documented at
+`main.rs:9851`, not this diff's — **and it is what a second field on that fault line looks like after it
+matures.** What keeps `stream` honest meanwhile is `main_tests.rs:16251`, which pins `stream: false`, so
+the wiring box trips a red test rather than rotting quietly.
+
+**Three go to [`backlog.md`](backlog.md) and the close proceeds.**
+
+- **The logs sentence promises a node's logs, and the spec's reason for the wording is untrue.**
+  `Card::pods()` keeps only Pod-kind findings, so every node card yields an empty list and `l` opens the
+  logs tab on a **Node**; `screens/detail.md` justifies *this object's logs* with *"true of a pod and a
+  node alike"*, which the pod-log API does not support — `kubectl logs node/x` does not exist, and the
+  only node-log surface is the feature-gated kubelet log-query proxy. Nothing wrong is *done* (no fetch
+  is issued), so it is a wording ruling rather than a defect — **but the false justification comes out of
+  the spec now**, because a stated reason that is untrue is what makes the next reader repeat the
+  conclusion.
+- **None of the four sentences names a next step**, where everywhere else this product ends a dead end
+  with one (`ui::empty`'s *pick another kind*, `screens/states.md`'s *no state is a dead end*, invariant
+  4's kubectl line as the teaching device). The browser's pane set this precedent under D310 and was
+  accepted, so it is **one ruling over both panes**, not a change to this box.
+- **The one new screen state this close produced has no drawn frame.** Four sentences and a footer
+  carve-out, ruled in prose, with zero fenced blocks in that section — so `screens-check.py` measures
+  nothing and the `screens/`-side pin
+  [D293](#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)
+  names does not exist. The behaviour is pinned by tests, which is why it is not a blocker; adding a
+  mockup moves block indices and reaches `ui_tests.rs`'s sweeps, which is why it is not a nit either.
+
+**Amended by step 5, which ran beside the operator review and landed on the same field from the opposite
+direction.** `just check` is green on the PM's own tree, `EXIT=0`, 1612 + 40 tests and all 33 guard
+invocations — including the markdown ones re-run after a post-gate re-sync, so nothing the PM wrote
+while the gate ran is owed an explanation. **No blockers.** What it found instead:
+
+**One planted defect survived, and it is the field both reviews had already circled.** `tester` planted
+eleven semantic defects `cargo mutants` cannot express; ten died. The survivor: `ui.rs:1368`'s
+`stream: !matches!(open.logs, Pane::Loading)` can be widened to
+`!matches!(open.logs, Pane::Loading | Pane::Denied(..))` and **all 1652 tests still pass**. A refused
+logs read would silently lose `f follow`, which `screens/widgets.md`'s own new row forbids — *every other
+state … adds `f follow`*. The only test that feeds a `Denied` logs pane asserts the **body** on all four
+tabs and never the footer. **The convergence is the finding**: `k8s-admin` reached the same line from the
+documentation side — the field is *named* whether there is a stream and *derived* as whether the read
+answered, and those part ways on exactly `Denied` — while `tester` reached it by planting the difference
+and watching nothing go red. Two reviewers, opposite methods, one gap; the test is `dev-ui`'s to write
+and is handed back rather than written by the finder.
+
+**Three things the attack settled that nobody had asked it to.**
+
+- **The dev's reason for `stream` is correct *and* pinned — but not by its own diff.** Planting
+  `stream: !containers(screen).is_empty()`, the carrier the dev rejected, reddens
+  `ui_tests.rs:15915` — a **pre-existing** test whose first case is a `Pane::Ready` logs pane over a pod
+  with an empty container slice, the one line in the suite that separates the two spellings. So the brief's
+  worry, *a footer that is right for the wrong reason*, was already fed; what the diff did not add is the
+  test that would have proved it deliberately.
+- **The footer's exhaustiveness is enforced by `rustc`, not only by tests.** Widening the second logs arm
+  makes the third arm's `Tab::Logs` unreachable, and `-D warnings` turns that into a red build. Structural,
+  and stronger than the four tests that also catch it.
+- **The wrap is load-bearing, not decorative.** The events sentence is 54 columns and `padded(area)` at the
+  floor is 53; measuring at the pane instead of the padded region puts it on one line the `Paragraph` then
+  clips. Driven on the binary at 80×24 it draws across two rows **whole, with no `…`** — so
+  `screens/widgets.md § 7`'s closed list of cuts gains no thirteenth entry.
+
+**And the gate's own first run was red for a reason that was not the code's, which is worth more than the
+green.** `tester` made an isolated attack tree with `cp -a`, copied a 23 GB `target/`, filled the disk
+while the gate was linking, and got
+`collect2: fatal error: ld terminated with signal 7 [Bus error]` — **a filesystem fact filed as a compile
+error**. That is
+[D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)'s
+class one level up from `unviable`: there the full disk read as a *pass*, here it read as a *code defect*,
+and in both directions the tool's own word for what happened is wrong. It recovered by deleting named
+directories rather than reaching for a git command, and the green above is a clean re-mirror. **The lesson
+`scripts/mutants.sh` already encodes — refuse to start without headroom, then read the logs rather than the
+count — has a second home it does not yet have: the gate itself.**
+
+**The landing round, and the one thing the dev handed to the PM rather than deciding.** All five
+findings landed, both behavioural ones proven red then green. `ui::unread` became **`ui::unsent`** —
+it joins the file's `un*` family, cannot be read as *tried and failed* or *refused*, and is the word
+`main_tests.rs` already used in prose for the state. The duplicated clause became one `FETCH_EVENTS`
+const and **only that one**: the other three clauses have a single call site each, and three names for
+three strings nobody can spell twice is an abstraction that earns nothing. The `f` guard is spelled
+inline in `main.rs` rather than extracted to a `views::following(open, tab)` predicate, for a reason
+worth keeping: the footer's arms **must stay patterns**, because turning them into `if` guards would
+destroy the compiler-enforced exhaustiveness this entry records as stronger than the four tests.
+
+**The handed-back item: a pre-existing test gave up a claim, and the PM ruled it kept.**
+`a_detail_tabs_keys_scroll_that_tab_and_move_between_the_four` asserted *"`f` did not turn follow back
+on"*, went red on the new guard, and the dev removed those two lines rather than the guard — flagging it
+as the one thing to send back if the PM read it the other way. **Read against the object, the dev is
+right and this is not a test weakened to reach green.** That assertion pressed `f` on a logs pane the
+router can only produce as `Pane::Loading`, where the drawn footer names no `f follow` — so it was
+pinning *what the implementation happened to do before D313*, which is what
+[CLAUDE.md § Code phase rules](CLAUDE.md#code-phase-rules) forbids asserting. **The requirement it
+looked like it was guarding is covered three times over, checked by the PM rather than taken from the
+report**: `views_tests.rs:4629` and `:4638` pin that a `stream: true` footer draws `f follow` (with and
+without `c container`), `:4645` pins that neither key is on the line while the read has not answered,
+and `main_tests.rs`'s new second half pins the refusal across all four tabs. What is genuinely unpinned
+is the key *acting* where the footer names it — unreachable through the router until a stream is wired,
+so a test for it would have to build a state the router cannot produce, **which is the precise shape
+that let an identity write past 1,610 tests one round ago** (D312). It stays unwritten on purpose.
+
+**Two mutants survived and are ruled equivalent, with the reason rather than a shrug.** Both are the
+guard's positive branch (`main.rs:10064` and `:10065`). `main::detailing` constructs `stream` at exactly
+one place with a literal `false` — one hit, grepped — so `matches!(open, Tabs { stream: true, .. })` is
+false on every input the router can produce and neither mutation changes reachable behaviour. Killing
+either would need a test that cannot fail, which [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)
+forbids more strongly than a sweep asks for a kill. What keeps it from rotting is
+`main_tests.rs:16261`, which pins that `stream: false`: the wiring box reddens rather than discovering
+this quietly.
+
+**And the dev's own second pass caught two comments its own diff had falsified three files away** —
+`stream`'s doc said *"Only `App::footer` reads it"* while the new guard read it, and `detailing`'s said
+*"no key it decides is bound yet either"*. **Nothing in `just check` can see a comment that has become
+false**, which is why that pass is where they died, and it is the same class as the third *only* claim
+D312 lost.
+
+**Two claims the review named rather than reasoned, and they are owed as runs**: where the events
+sentence wraps at the floor (`padded()` is 53 columns and the sentence is 54), and the four sentences on
+a real binary **on the landed tree** — `dev-ui`'s run was on its own tree and `test.md` § K's first row
+is deliberately unticked until one is taken on what is committed.

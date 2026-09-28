@@ -728,10 +728,111 @@ out](#when-the-api-servers-own-certificate-is-running-out)): a session
 fact printed in the same slot is not a fifth vocabulary, it is the same
 one used again.
 
+## When the connection was never verified
+
+`insecure-skip-tls-verify: true` in the kubeconfig this run used is not a
+finding about the cluster — it is a fact about how this connection was
+made, read straight off the `Config` k8rs builds from the kubeconfig,
+before a single request goes out
+([NOTES § D314](../NOTES.md#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28)).
+Unlike the pair of certificate readings above it, it carries no
+threshold — there is nothing here to be "close to," only on or off — so
+it prints on every run that connects with the setting on, and on none
+that does not.
+
+**Same fact the console already names, worded for a page with no header
+to read it off.** The picker's tag column and the connected session's
+header both show the same fixed-width tag, `⚠ TLS not verified`
+([context.md § The picker](context.md#the-picker) ·
+[widgets.md § 1a](widgets.md#1a-the-header-row)) — the shortest form
+that fits a column. A reader of `--once` has never seen that column and
+may never see the console at all: `--once` ships as v0.0.1, months
+before the console does. So this is not a second vocabulary for the same
+fact; it is the sentence that tag has always stood in for, spelled out in
+full — the same relationship the clock line already has to the header's
+own pointer ([§ When your clock and the cluster's
+disagree](#when-your-clock-and-the-clusters-disagree)). No `⚠`: this
+file's vocabulary is `● ▲ ○` and nothing else, said twice above for the
+same reason.
+
+```
+$ k8rs --once
+84 pods · 3 nodes
+
+● payments/web · 3 of 5 pods · 4 min ago
+  Containers exceeded their memory limit and were killed by the kernel
+  (OOMKilled)
+  limit 256Mi · exit 137 · 47 restarts
+  → raise limits.memory, or find the leak
+
+▲ shop/api · 2 of 6 pods · 12 min ago
+  Running, but not receiving traffic — the readiness check is failing
+  → check the app's /healthz endpoint
+
+1 critical, 1 warning
+
+k8rs never checked that the server on the other end of this connection
+is really this cluster — your kubeconfig sets
+`insecure-skip-tls-verify: true`, and `kubectl` would skip the same
+check with it. Everything above came back over that unchecked
+connection. If that was not deliberate, ask whoever gave you this
+kubeconfig why the check is off — it is not something k8rs can turn
+back on for you.
+```
+
+**On stdout, with the findings — for the same reason the
+check-could-not-run line already is.** `k8rs --once --analysis >
+cluster-report.txt` in CI is the exact scenario this line exists for:
+complete, exit `0`, forwarded into a ticket — and a sentence that only
+reached stderr would never make it into that file at all
+([§ When a check could not run](#when-a-check-could-not-run)).
+
+**Not to be confused with the enabling condition named two sections up.**
+[§ When the API server's own certificate is running
+out](#when-the-api-servers-own-certificate-is-running-out) also reads
+`insecure-skip-tls-verify`, but only as the reason C2's *expired* reading
+is reachable at all: with the setting **off**, that same expired
+certificate fails the handshake outright and the run lands in
+[§ When the certificate is why nothing came
+back](#when-the-certificate-is-why-nothing-came-back) instead — a wall,
+not a report. That passage is about what C2 can read; this one is about
+telling the reader the setting is **on**, whether or not any certificate
+this run saw happens to be expiring at all. The two sentences can never
+share a run for exactly that reason: this one only ever prints when the
+setting is true, and that wall is only ever reached when it is false.
+They are *not* exclusive of C2's own **expiring** band — an
+expiring-but-not-yet-expired server certificate and an unverified
+connection are two independent facts about the same run, and both
+trailer lines print together when both are true.
+
+**No card, no severity band, no tally entry, and no analysis-pane row.**
+This fact is not a certificate or an expiry, so `--analysis` does not
+move it the way it moves C1: it prints in the trailer on every run where
+the setting is on, flag or no flag. **It does not touch the exit code**
+either — `0` still means "k8rs ran and reported," the same distinction
+every trailer line above it already draws
+([§ Exit codes](#exit-codes)).
+
+**No report, no line.** Every reading above prints inside a report that
+already succeeded — "the report is the proof the connection worked"
+([§ When the API server's own certificate is running
+out](#when-the-api-servers-own-certificate-is-running-out)) — and this
+sentence is no exception. A run that never reaches a report at all — no
+kubeconfig, refused, unreachable — prints the one plain-language wall
+[states.md § Before the TUI ever
+starts](states.md#before-the-tui-ever-starts) already draws, on stderr,
+exit `2`, and this sentence does not join it: there is no report there
+for a reader to mistake as verified. `insecure-skip-tls-verify` is
+knowable before that wall ever prints — it needs no connection, only the
+kubeconfig on disk — but knowing it is not the same as there being
+anything for it to qualify: **the concern this box closes is a report
+that hides the fact, and a wall is not a report.**
+
 ## Stacked with the other trailer lines
 
-The order is **clock, then C2, then C1, then the check-that-could-not-run
-line**, and each join has its own reason rather than one blanket rule.
+The order is **clock, then C2, then C1, then the connection-unverified
+line, then the check-that-could-not-run line**, and each join has its own
+reason rather than one blanket rule.
 Clock goes first because it says something about *every* line above it,
 cards included — a reader has to know whether to trust the ages before
 anything else on the page. The check-that-could-not-run line stays
@@ -743,7 +844,12 @@ between clock and the last line, and that is where each new fact has
 joined — the same append, do not reorder call, applied twice now to print
 order rather than drop order. C1 takes the same treatment: it is the
 newer fact, so it takes the next open slot — right after C2 — rather than
-displacing a line that already prints correctly. Ordering the two by
+displacing a line that already prints correctly. **The connection-unverified
+line takes it now, one join later, for the same reason and no other:**
+it is the newest fact on the page, so it takes the next open slot in
+turn — right after C1 — rather than being weighed against the two
+certificate readings for urgency, which the next sentence already rules
+out doing at all. Ordering the two by
 urgency instead of arrival would mean weighing a certificate the cluster
 answers against one the reader's own laptop holds, which no rule on this
 page has ever had to do for two cards, let alone two trailer lines, and
@@ -751,7 +857,20 @@ this box does not start now. This
 ordering is for the readings that print *inside* a report — the
 expired-and-typed reading for C2, and the connection-refused wall C1's
 expired band routinely produces instead of a report, do not join it,
-because when either fires there is no report for it to join.
+because when either fires there is no report for it to join. The
+connection-unverified line follows the same rule, and its own wall
+besides — see [§ When the connection was never
+verified](#when-the-connection-was-never-verified).
+
+**The worked example below is the one this file had before this fact
+existed, and it stays that way on purpose.** It already fills this
+page's own 80×24 block budget at exactly twenty-four rows; a fifth
+trailer line would push it past the same limit every mockup on this page
+is held to. Shortening an existing sentence to make room would be
+editing a decision this box did not make, so the connection-unverified
+line gets its own worked example instead, in [its own section
+above](#when-the-connection-was-never-verified), and this block is read
+as four of the five, not all five.
 
 ```
 $ k8rs --once --namespace payments

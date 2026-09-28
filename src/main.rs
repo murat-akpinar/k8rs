@@ -7406,13 +7406,13 @@ fn ending(performed: &ops::Performed) -> Ended {
 // (`k8s::Browsing`), and the four detail reads and the log stream. Each has a slot the frame
 // already fills — `Pane::Loading` — and each is a box of its own.
 //
-// **The browser's slot is the one that now says so on the screen rather than only here** (NOTES
-// § D310, `ui::unwired`): a pane that draws *reading the cluster…* for a fetch nothing issues is a
-// promise with no subject, and `esc` had no way out of it either. The detail tabs are the same
-// shape and are a separate box; the words come off the browser's pane the day this item does.
+// **Every one of those slots now says so on the screen rather than only here** (NOTES § D310,
+// `ui::unwired`; NOTES § D313, `ui::unsent`): a pane that draws *reading the cluster…* for a fetch
+// nothing issues is a promise with no subject, and on the browser's pane `esc` had no way out of
+// it either. The sentences come off the day each fetch is wired, one tab at a time.
 //
 // **The first of those is why a refused discovery call is said on somebody else's pane** (NOTES
-// § D296, [`unread`]): the pane the fact is about is the `Table` fetch, so until it exists the
+// § D296, `ui::discovery`): the pane the fact is about is the `Table` fetch, so until it exists the
 // sentence rides the panes that do, ranked last on each of them.
 //
 // **The `may_i_in` probe is wired and was the third of those** ([`refusals`], [`permitted`],
@@ -9214,9 +9214,10 @@ fn drawn<B: ratatui::backend::Backend>(
     // none of them is in trouble right now"* (`k8s-admin` predicted it in
     // `reports/2026-09-24-the-console-event-loop.md` § 4; this box measured it).
     //
-    // **Empty is not a loss for the others**: `ui::note` draws `WAITING` — *reading the cluster…* —
-    // for a pane whose caller handed it nothing, which is what `screens/detail.md` draws for a tab
-    // whose read has not answered.
+    // **Empty is not a loss for the others, and since NOTES § D313 it is not what they draw
+    // either**: the four detail tabs answer `Pane::Loading` through `ui::unsent`, which draws each
+    // tab's own *not built yet — …* sentence and never reaches `ui::note`. This stays a match
+    // rather than a call because the leak it refuses is the paragraphs', not the sentence's.
     let alerts_pane = console.app.view == views::View::Alerts && console.opened.is_none();
     // **Derived once, above the pane, because the header and the paragraphs answer out of it
     // both** — the defect this closes is a body that said *reading the cluster…* under a header
@@ -9855,13 +9856,22 @@ fn discovered<'a>(console: &'a Console<'_>) -> Option<&'a [k8s::Browsable]> {
 /// (NOTES § D289 ruling 3, which found the clause here claiming the second). The day the pod read
 /// lands, this answers a real count, the logs footer starts drawing `c container` — and `c` is
 /// still bound nowhere. Both halves are that box's.
+///
+/// **`stream` is not that shape**: `f` *is* bound, so this field is what refuses it, and the day a
+/// stream lands here the key and the footer start together off the one value (NOTES § D316).
 fn detailing(console: &Console<'_>) -> views::Detailing {
     match &console.opened {
         None => views::Detailing::Closed,
         Some(Opened::Pods(_)) => views::Detailing::Pods,
+        // **`stream: false` for the same reason `containers` is `0`** — no log stream is wired, so
+        // the logs tab is `Pane::Loading` on every frame this router can produce (NOTES § D313).
+        // The drawn footer is [`ui::footer`]'s own answer off the pane itself; this value is the
+        // key router's, and it is what makes [`pressed`]'s `f` arm refuse today (NOTES § D316) —
+        // the same answer the footer reaches, from the same field.
         Some(Opened::Tabs { from_step, .. }) => views::Detailing::Tabs {
             containers: 0,
             from_step: *from_step,
+            stream: false,
         },
     }
 }
@@ -10041,7 +10051,19 @@ fn pressed(
         }
         // **`f` off leaves the pane where it stands and needs no scroll of its own** — the stored
         // offset already *is* the tail (`views::App::scroll_by`'s own doc).
-        KeyCode::Char('f') if open != views::Detailing::Closed => {
+        //
+        // **The guard is the drawn footer's own condition, spelled the way [`views::App::footer`]
+        // spells it** (`screens/widgets.md`'s footer table): `f follow` is named on the logs tab,
+        // and there only where that tab has a stream behind it, so those are the presses this arm
+        // answers. Ungated it flipped `App::following` over a pane with nothing to follow and
+        // still returned `Did::Changed`, for a frame that came back byte-identical — a key with a
+        // correct invisible effect, which NOTES § D312's second amendment ruled against for `esc`
+        // and § D316 rules against here. **One condition closes two halves**: the `Pane::Loading`
+        // logs tab this turn split off the footer, and the three tabs that never named `f` at all.
+        KeyCode::Char('f')
+            if matches!(open, views::Detailing::Tabs { stream: true, .. })
+                && console.app.tab == views::Tab::Logs =>
+        {
             console.app.following = !console.app.following;
             Did::Changed
         }

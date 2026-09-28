@@ -2387,9 +2387,12 @@ fn every_state_draws_the_body_and_the_footer_its_own_mockup_gives_it() {
     // from the file's word and it is compared with the file's sentence.
     //
     // **Six frames, and the section draws seven fenced blocks.** The one [`mockups`] does not index
-    // is the **second** — the cropped namespace-scoped title, which carries no footer — so the six
-    // here are that section's blocks 0, 1, 3, 4, 5 and 6, and this comment named the fourth for the
-    // second until `tester` caught it (D312 finding 8).
+    // is the **third** — the cropped namespace-scoped title, which carries no footer — so the six
+    // here are that section's blocks 0, 1, 3, 4, 5 and 6. **This ordinal has now been wrong
+    // twice**: it named the fourth until `tester` caught it (D312 finding 8), was corrected to the
+    // second, and block 2 is the third block of seven. The list of six beside it was right through
+    // both, which is why neither wrong ordinal reddened anything — re-derived off the file rather
+    // than off this comment: `awk` the section's fences and count the rows in each.
     //
     // **What each of the six is fed, and why the three that need something are the three that get
     // it**: mockup 1 is the expired login, whose `X switch cluster` is the one footer literal on
@@ -7068,6 +7071,13 @@ fn the_containers_block_keeps_the_order_the_author_wrote() {
 /// **A healthy pod's empty events block is not a broken fetch** — the heading loses its
 /// `(newest first)`, and the sentence under it says *why* the list is empty. **Left-flush here**,
 /// unlike the tab, because it is a section of a pane rather than the whole of one.
+///
+/// **And the second half is the same block with the events read never sent** (NOTES § D313): it
+/// is the fifth site that ruling reaches, and the only one that spelled `reading the cluster…` as
+/// a literal instead of through [`WAITING`] — invisible both to that constant's *spelled once* and
+/// to a sweep over its call sites. **Not reachable on the binary today**, because `describe`'s own
+/// read is `Pane::Loading` and returns before this block; it becomes reachable the day that read
+/// is wired, which is why the frame is asserted here rather than measured on a screen.
 #[test]
 fn describe_with_no_events_says_nothing_is_left_rather_than_nothing_happened() {
     let (pod, names) = declared_by("healthy-sidecar");
@@ -7094,6 +7104,47 @@ fn describe_with_no_events_says_nothing_is_left_rather_than_nothing_happened() {
         "the heading sits directly above the calm line"
     );
     assert!(holds(&drawn, "Kubernetes only keeps events for a"));
+
+    // **And the same block, with the events read still unsent, says what the events *tab* says**
+    // (NOTES § D313, `screens/detail.md` § Before any of the four tabs has read anything). This is
+    // the fifth site the ruling reaches: `ui::block` is the describe tab's own events section over
+    // `Detail::events`, one of the four reads nothing issues, and it spelled
+    // `reading the cluster…` as a literal rather than through `WAITING` — so neither the constant's
+    // *spelled once* nor the four-site sweep could see it.
+    let mut unsent_events = Open::new();
+    unsent_events.read = Pane::Ready(Described {
+        snapshot: &pod,
+        containers: &containers,
+    });
+    assert!(
+        matches!(unsent_events.events, Pane::Loading),
+        "`Open::new` stopped leaving the events read unsent, which is what this half is about"
+    );
+    let unsent = detailed(&on(Tab::Describe), &unsent_events.open());
+    // `self::` because `rows` is shadowed by a local binding above — the drawn rows of the
+    // healthy-events frame — and this half needs the function, not that value.
+    let drawn_rows = self::rows(&unsent);
+    let seen = drawn_rows.join("\n");
+    println!("{seen}");
+    let joined = words(
+        &drawn_rows
+            .iter()
+            .map(|line| celled(line))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    assert!(
+        joined.contains("not built yet — k8rs cannot fetch this object's events"),
+        "the describe tab's events block promised a read nothing issues\n{seen}"
+    );
+    assert!(
+        !holds(&unsent, "reading the cluster…"),
+        "the one spelling of that sentence is `WAITING`, and this block kept a second\n{seen}"
+    );
+    assert!(
+        !holds(&unsent, "none right now"),
+        "a read that was never sent came out as an answer of none"
+    );
 }
 
 /// **`▾` where there is something to pick, and nothing where there is not** — a key that does
@@ -7352,21 +7403,61 @@ fn a_secret_with_no_keys_says_it_holds_none_yet() {
     );
 }
 
-/// **A tab that has not answered says so, and never says there is nothing** (PRIOR-ART § C2) — the
-/// same wait every other pane on this product draws.
+/// **A tab whose read was never wired says what it cannot do, and never says there is nothing**
+/// (PRIOR-ART § C2, NOTES § D313, `screens/detail.md` § Before any of the four tabs has read
+/// anything) — the same fact the browser's own kind pane draws, in this page's own voice.
+///
+/// **The four sentences are typed off the screen file**, which is the only place they are ruled;
+/// what the code composes is the construction around each tab's clause ([`unbuilt`]).
+///
+/// **And none of them says `reading the cluster…`** — that sentence is a promise that something is
+/// reading and the read will finish, and it is the defect a user reported.
 #[test]
 fn a_tab_that_has_not_answered_is_not_a_tab_with_nothing_in_it() {
-    for tab in Tab::ALL {
+    let cannot = [
+        (
+            Tab::Logs,
+            "not built yet — k8rs cannot fetch this object's logs",
+        ),
+        (
+            Tab::Describe,
+            "not built yet — k8rs cannot describe this object",
+        ),
+        (
+            Tab::Yaml,
+            "not built yet — k8rs cannot show this object as YAML",
+        ),
+        (
+            Tab::Events,
+            "not built yet — k8rs cannot fetch this object's events",
+        ),
+    ];
+    assert_eq!(
+        cannot.len(),
+        Tab::ALL.len(),
+        "a fifth tab arrived with no sentence of its own"
+    );
+    for (tab, want) in cannot {
         let open = Open::new();
         let drawn = detailed(&on(tab), &open.open());
+        println!("=== {tab:?} ===\n{}", rows(&drawn).join("\n"));
+        assert!(holds(&drawn, want), "{tab:?} did not say what it cannot do");
         assert!(
-            holds(&drawn, "reading the cluster…"),
-            "{tab:?} drew no waiting state"
+            !holds(&drawn, "reading the cluster…"),
+            "{tab:?} promised a read nothing issues"
         );
         assert!(
             !holds(&drawn, "none right now") && !holds(&drawn, "no logs yet"),
-            "{tab:?} turned a wait into an empty answer"
+            "{tab:?} turned a read that was never sent into an empty answer"
         );
+        // **Each tab names the thing *it* cannot do, and never another tab's** — a helper handed
+        // one clause for all four would satisfy every assertion above and fail here.
+        for (other, wrong) in cannot {
+            assert!(
+                other == tab || !holds(&drawn, wrong),
+                "{tab:?} drew {other:?}'s sentence"
+            );
+        }
     }
 }
 
@@ -7896,6 +7987,18 @@ fn a_refusal_draws_the_sentence_and_the_partial_answer_on_every_tab() {
         assert!(
             !holds(&drawn, "none right now") && !holds(&drawn, "no logs yet"),
             "{tab:?} turned a refusal into an empty answer"
+        );
+        // **A refused logs read keeps `f follow`, and the other three tabs never offer it**
+        // (`screens/widgets.md`'s footer table: the logs tab's *every other state* row adds the
+        // key; NOTES § D316). The refusal carries the lines that did come back, so there is a
+        // buffer to follow — and `views::Detailing::Tabs::stream` is what has to say so.
+        // Widening it to `Pane::Loading | Pane::Denied(..)` reddens here; before this
+        // assertion existed it reddened nowhere in the suite (`tester`, NOTES § D316).
+        assert_eq!(
+            footer_of(&drawn).contains("f follow"),
+            tab == Tab::Logs,
+            "{tab:?} drew the wrong footer over a refusal: {:?}",
+            footer_of(&drawn)
         );
     }
 }
@@ -15827,13 +15930,18 @@ fn the_container_picker_is_not_drawn_once_there_is_nothing_left_to_pick() {
         "the picker kept a footer of its own over a box nobody can see"
     );
 
-    // And the same before the container list is known at all — the logs pane has not answered.
+    // **And the same before the container list is known at all — the logs pane has not
+    // answered.** The picker is still not drawn, and the footer under it is *the bare line*
+    // rather than the one above: a `Pane::Loading` logs tab is the unwired read, which withholds
+    // `f follow` as well (NOTES § D313, `screens/detail.md` § Before any of the four tabs has read
+    // anything). The two cases differ on exactly that key, which is why they are asserted apart
+    // and not folded into one expectation.
     let waiting = Open::new();
     let drawn = detailed(&app, &waiting.open());
     assert!(!holds(&drawn, "pick a container"));
     assert_eq!(
         unframed(&rows(&drawn)[22]),
-        "[ ] tabs  f follow  esc back  ? all keys  q quit"
+        "[ ] tabs  esc back  ? all keys  q quit"
     );
 
     // **And a pod that has exactly one container, which is the ordinary case this rule is written
@@ -17063,7 +17171,7 @@ fn a_block_taller_than_the_pane_keeps_the_tabs_own_sentence_and_scrolls_for_the_
     // empty two frames and not one.
     let loading = detailed(&on(Tab::Describe), &held);
     assert!(
-        holds(&loading, "reading the cluster…"),
+        holds(&loading, "not built yet — k8rs cannot describe this object"),
         "the block erased the tab's own sentence\n{}",
         rows(&loading).join("\n")
     );
@@ -17121,7 +17229,22 @@ fn a_block_taller_than_the_pane_keeps_the_tabs_own_sentence_and_scrolls_for_the_
         "the block erased the empty sentence\n{}",
         rows(&none).join("\n")
     );
-    assert!(holds(&waiting, "reading the cluster…"));
+    // **Read across the wrap, not off one row.** The events tab's own sentence is the longest of
+    // the four at 54 columns, and the padded pane at 80×24 is narrower, so it comes out over two
+    // rows — which is the sentence drawn whole rather than cut, and a row-at-a-time `holds` cannot
+    // see it. Describe's, at 48, fits on one, which is why the assertion above is a `holds`.
+    let unbuilt = words(
+        &rows(&waiting)
+            .iter()
+            .map(|line| celled(line))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    assert!(
+        unbuilt.contains("not built yet — k8rs cannot fetch this object's events"),
+        "the block erased or cut the tab's own sentence\n{}",
+        rows(&waiting).join("\n")
+    );
     assert_ne!(
         rows(&waiting),
         rows(&none),
@@ -17188,33 +17311,60 @@ fn a_block_taller_than_the_pane_keeps_the_tabs_own_sentence_and_scrolls_for_the_
 /// means or reopening a frozen file (`k8s-admin`, 2026-09-18).
 #[test]
 fn the_slot_carries_whether_the_tabs_were_reached_through_the_step() {
-    let open = Open::new();
-    let held = open.open();
+    let unread = Open::new();
+    let unanswered = unread.open();
+
+    // The same slot with the logs read answered, which is the *other* value of `stream` and the
+    // only thing that puts `f follow` back on the footer (NOTES § D313).
+    let (pod, names) = declared_by("healthy-sidecar");
+    let named = paired(&pod, &names);
+    let read = Described {
+        snapshot: &pod,
+        containers: &named,
+    };
+    let lines = crate::k8s::LogLines::default();
+    let mut streaming = Open::new();
+    streaming.logs = Pane::Ready(Logs {
+        pod: &read,
+        container: "app",
+        previous: false,
+        held: &lines,
+    });
+    let answered = streaming.open();
+
     let alerts = Pane::Ready(vec![oom()]);
     let now = later();
 
     for from_step in [false, true] {
-        let mut screen = screen(&alerts, &now);
-        screen.detail = Some(Detailed::Tabs {
-            open: &held,
-            from_step,
-        });
-        assert_eq!(
-            detailing(&screen),
-            Detailing::Tabs {
-                containers: containers(&screen).len(),
-                from_step,
-            },
-            "the slot dropped how the tabs were reached"
-        );
-        // **And the footer is the same line either way** — the behaviour is not this box's.
-        let (keys, _) = App::default().footer(
-            detailing(&screen),
-            views::Offer::Move { switch: false },
-            Refused::default(),
-            "",
-            &[],
-        );
-        assert!(keys.contains("esc back"), "{keys:?}");
+        for (open, stream) in [(&unanswered, false), (&answered, true)] {
+            let mut screen = screen(&alerts, &now);
+            screen.detail = Some(Detailed::Tabs { open, from_step });
+            assert_eq!(
+                detailing(&screen),
+                Detailing::Tabs {
+                    containers: containers(&screen).len(),
+                    from_step,
+                    stream,
+                },
+                "the slot dropped how the tabs were reached, or whether the logs read answered"
+            );
+            // **`esc back` is on the line whatever the slot holds** — the closing pair never gives
+            // way (`screens/widgets.md` § 2a).
+            let (keys, _) = App::default().footer(
+                detailing(&screen),
+                views::Offer::Move { switch: false },
+                Refused::default(),
+                "",
+                &[],
+            );
+            assert!(keys.contains("esc back"), "{keys:?}");
+            // **And `f follow` is on it only where there is a stream to follow** — the fact the
+            // slot now carries, read back off the drawn line rather than off the value.
+            assert_eq!(
+                keys.contains("f follow"),
+                stream,
+                "the logs footer and the logs pane disagree about whether anything is being read"
+            );
+        }
     }
 }

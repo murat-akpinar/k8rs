@@ -29,6 +29,10 @@ exclude = [
     "screens/", "scripts/", "tmp/", "docs/",
     "NOTES.md", "REQUIREMENTS.md", "todo.md", "CLAUDE.md",
     "reports/", "backlog.md", "PRIOR-ART.md",
+    # Added 2026-09-28: the A-to-Z pass over the shipped binary is a working
+    # document like the four above it, and it shipped in 0.1.0 because nothing
+    # re-read this list when the file was created (NOTES § D314).
+    "test.md",
     ".claude/", ".github/", ".gitignore",
     # Added 2026-09-05 with the Phase 8 spike that creates it (NOTES § D238).
     # Throwaway code is not part of what a stranger downloads from crates.io.

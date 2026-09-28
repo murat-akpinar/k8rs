@@ -561,20 +561,22 @@ the `FLOOR` rows the cap guarantees it instead.** Centring text inside a
 region whose top edge moves every time a block grows or shrinks is not a
 position this file can compute honestly; the fixed alternative is what
 erased the sentence in the first place. So `no logs yet`, `none right now`
-and `reading the cluster…` draw as ordinary left-aligned lines directly
-under the block — the same shape a real log line or a `describe` field
-already takes there — never further than `FLOOR` rows below whatever of
-the block is showing. **This is what keeps loading and empty two frames
-and not one**: the cap guarantees the sentence is never more than a
-short, bounded scroll away, and it is drawn — in full, its own words, never
-paraphrased into the block's — every single time, which is the property
-that was missing, not merely a taller pane. (Denied was never the pair
-these two collapsed into, and stays a third, for the separate reason two
-paragraphs down.) Where there is no block at all
-— a healthy pod opened straight from the browser, nothing filed against it
-— the sentence is not capped against anything and centres exactly as
-[states.md](states.md) already draws it; this section changes nothing
-there.
+and each tab's own still-loading sentence (below) draw as ordinary
+left-aligned lines directly under the block — the same shape a real log
+line or a `describe` field already takes there — never further than
+`FLOOR` rows below whatever of the block is showing. **This is what keeps
+loading and empty two frames and not one**: the cap guarantees the
+sentence is never more than a short, bounded scroll away, and it is
+drawn — in full, its own words, never paraphrased into the block's —
+every single time, which is the property that was missing, not merely a
+taller pane. (Denied was never the pair these two collapsed into, and
+stays a third, for the separate reason two paragraphs down.) Where there
+is no block at all — a healthy pod opened straight from the browser,
+nothing filed against it — the sentence is not capped against anything
+and centres exactly the same way it always has; only its words changed,
+and
+[§ Before any of the four tabs has read anything](#before-any-of-the-four-tabs-has-read-anything),
+next, is where and why.
 
 **Denied is not this shape, and this round changes nothing about it.** A
 refused or failed pane's own sentence is a fixed banner, drawn *before* any
@@ -627,6 +629,78 @@ that page's own phrase for it, and a Detail tab that dropped every finding
 that pod earned but the one drawn would be pointing the marker at nothing —
 the promise was always about the object the marker leads to, not about the
 group it was found in.
+
+## Before any of the four tabs has read anything
+
+**`Pane::Loading` on these four tabs does not resolve today — no log
+stream, describe read, YAML fetch or events read is wired yet, so nothing
+ever moves any of them to `Ready` or `Denied` on its own**
+([NOTES § D313](../NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)).
+`reading the cluster… N pods` is
+[states.md § Still loading](states.md#still-loading)'s own sentence, and it
+is a *promise*: something is reading, and the read will finish. Nothing is
+reading here, and nothing here will finish on its own, so each tab says the
+one thing that is actually true instead — the same fact
+[states.md § A kind the browser cannot list yet](states.md#a-kind-the-browser-cannot-list-yet)
+already settled for the browser's own version of this gap, said here in
+this page's own voice rather than a second one invented for it:
+
+- **logs:** `not built yet — k8rs cannot fetch this object's logs`
+- **describe:** `not built yet — k8rs cannot describe this object`
+- **yaml:** `not built yet — k8rs cannot show this object as YAML`
+- **events:** `not built yet — k8rs cannot fetch this object's events`
+
+**One family, one spelling — lowercase, joined by an em-dash, no trailing
+period** — the same construction the browser's own pane and `?`'s own `l`,
+`d`, `y`, `s` rows already use
+([help.md](help.md), [states.md § A kind the browser cannot list
+yet](states.md#a-kind-the-browser-cannot-list-yet)). The four differ only
+in the thing each tab cannot do yet; nothing here invents a fifth
+vocabulary for a fifth pane. Dim, no glyph, for the same reason the
+browser's own sentence carries none: `● ▲ ○` are severities and this is
+none of them, `⚠` marks a connection or trust problem and this is neither
+— the connection is live, the read simply was never sent.
+
+**`this object`, never `this container`, on purpose.** `l` opens the logs
+tab on whatever card is selected — a node's own card included, since every
+node card already opens its object directly, with no which-pod step in
+front of it
+([§ A group of one pod, or none at all](#a-group-of-one-pod-or-none-at-all--there-is-no-step)) —
+and a node is never a container. Saying *this container's logs* would be a
+wrong claim the instant someone pressed `l` there; *this object's logs* is
+the wording that stays true of whichever object `l` actually opened, pod or
+node, without this page having to draw a second, node-shaped state for the
+same unwired fetch.
+
+**Out of scope for this fix, and unchanged.** The Alerts pane's own
+`reading the cluster… N pods` is a real read that finishes, and keeps its
+sentence exactly as [states.md § Still loading](states.md#still-loading)
+already draws it — this fix is the tabs' own renderers, not the Alerts
+pane, whose read is real (NOTES § D313). Wiring any of the four reads is
+still nobody's
+box; once one lands, that tab's `Pane::Loading` means what it always meant
+everywhere else on this product — a request on the wire — and this
+section's own sentence for that tab comes out with it.
+
+**The footer withholds exactly what cannot do anything while this is
+true, and nothing else.** `[ ] tabs`, `esc back`, `? all keys` and
+`q quit` all stay: switching tabs still moves the highlighted one and
+redraws the tab now showing its own sentence above, `esc` still closes the
+pane — measured true today, the one thing that makes this less severe than
+the browser's own trap was — and the closing pair never gives way. Logs is
+the only one of the four whose ordinary footer ever names more than that:
+`f follow` and `c container` both promise a stream this pane is not
+receiving and never will while the fetch stays unwired — there is no
+stream to follow, and picking a container would not change what nothing
+reads — so neither key is offered while `Pane::Loading` holds there. The
+footer reads `[ ] tabs  esc back  ? all keys  q quit`, the same bare line
+describe, yaml and events already carry in every state of theirs
+([§ The describe tab](#the-describe-tab), [§ The events
+tab](#the-events-tab), [§ The yaml tab](#the-yaml-tab)) — no new key is
+spent here, and none is promised twice. This is the same principle
+[states.md § A kind the browser cannot list
+yet](states.md#a-kind-the-browser-cannot-list-yet) already applied to
+`/ filter` on the browser's own version of this pane.
 
 ## The logs tab
 

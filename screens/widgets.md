@@ -472,7 +472,10 @@ was added back in:
   previous` and `/ search`** — the two kept are what a reader reaches for on
   nearly every open pane; `⇧p` only matters once a container has crashed, and
   the search key is the same `/` every other pane already carries without a
-  footer hint.
+  footer hint. **That is the tab's row once its read is wired.** Before then
+  (`Pane::Loading`, true of every run today) neither key has anything to act
+  on and both drop instead — the closed mode list's own two rows for this
+  tab, below, not a third choice made here.
 
 **A key this login may not use is marked where it is drawn, never omitted —
 omission is a different fact and belongs to a different box.**
@@ -669,10 +672,14 @@ footer, so none of them has anything on the line a call in flight makes
 false — except `q quit`, which every one of them carries and which drops
 silently, the same way it already drops from Help's own footer in this same
 state: not marked `q no quit`, because a call finishing is a wait, not a
-permission. `[ ] tabs`, `f follow`, `c container`, `esc back`, `⏎ open` and
-`↑↓ move` all stay bound and stay named — they are viewing and moving, not
-mutating (`screens/dialogs.md § Detail tabs and Analysis keep their own
-footer`).
+permission. `[ ] tabs`, `esc back`, `⏎ open` and `↑↓ move` all stay bound and
+stay named — they are viewing and moving, not mutating. **`f follow` and `c
+container` do too, on whichever of the logs tab's own two rows is current** —
+the closed mode list below, in this section: `Pane::Loading` draws neither,
+every other state draws both. An in-flight call adds neither key to a row the
+tab's own state has already narrowed, and takes neither away from a row where
+they are already drawn — it only takes the one word above
+(`screens/dialogs.md § Detail tabs and Analysis keep their own footer`).
 
 **The closed mode list** — every mode's own exact string is drawn once, in
 the file that owns it, cited here rather than copied:
@@ -682,7 +689,8 @@ the file that owns it, cited here rather than copied:
 | Alerts | ordinary, anchor always present — the pair's own named exception applies (above): replaced outright | [alerts.md](alerts.md), [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
 | Resources | ordinary, identical to Alerts', the same exception and all | [resources.md](resources.md), [dialogs.md § While the call is running](dialogs.md#while-the-call-is-running) |
 | Analysis, any of the seven reports | ordinary, fixed regardless of report — adds nothing to the key map — the pair's own named exception applies (above): `q quit` alone | [analysis.md § How a report is drawn](analysis.md#how-a-report-is-drawn--the-grammar-every-pane-on-this-page-obeys) |
-| Detail — logs tab, every state of it | ordinary, anchor always present — the pair's own named exception applies (above): `q quit` alone | [detail.md § The logs tab](detail.md#the-logs-tab) |
+| Detail — logs tab, before any of the four tabs has read anything (`Pane::Loading`) | ordinary, identical to the describe / yaml / events tab's row below, the same exception and all — no `f follow`, no `c container`: neither promises anything while the fetch stays unwired | [detail.md § Before any of the four tabs has read anything](detail.md#before-any-of-the-four-tabs-has-read-anything) |
+| Detail — logs tab, every other state | ordinary, anchor always present, adds `f follow` and, only while picking a container, `c container` — the pair's own named exception applies (above): `q quit` alone | [detail.md § The logs tab](detail.md#the-logs-tab) |
 | Detail — describe / yaml / events tab | ordinary, anchor always present — the pair's own named exception applies (above): `q quit` alone | [detail.md](detail.md), each tab's own mockup |
 | Detail — yaml tab, a Secret with keys | ordinary, anchor always present, adds `v reveal` — the pair's own named exception applies (above): `q quit` alone | [detail.md § A Secret, values hidden behind an explicit reveal](detail.md#a-secret-values-hidden-behind-an-explicit-reveal) |
 | Empty kind in the browser | ordinary, narrowed to what there is an object to act on — anchor still present | [states.md § An empty kind in the browser](states.md#an-empty-kind-in-the-browser) |

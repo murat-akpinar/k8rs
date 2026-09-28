@@ -2465,7 +2465,34 @@ pub enum Detailing {
     /// copy — or reopening a frozen file. [`crate::ui::Detail`] is not the discriminator: its
     /// `card` is `Some` both for a tab reached through the step and for one reached by `⏎`
     /// straight onto a bare-pod card.
-    Tabs { containers: usize, from_step: bool },
+    Tabs {
+        containers: usize,
+        from_step: bool,
+        /// **Whether the logs tab has a stream behind it at all** — `false` for one pane state and
+        /// one only, `crate::ui::Pane::Loading`, which today is every frame, because no log stream
+        /// is wired (NOTES § D313, `screens/detail.md` § Before any of the four tabs has read
+        /// anything).
+        ///
+        /// **A refused read is `true`, and that is the field meaning what it is named rather than
+        /// an edge of how it is derived** (NOTES § D316): `crate::ui::Pane::Denied` carries the
+        /// lines that did come back, so there is a buffer to follow, and `screens/widgets.md`'s
+        /// footer table gives *every other state* `f follow`. Folding `Denied` in with `Loading`
+        /// would withhold the key in silence, which `ui_tests`'
+        /// `a_refusal_draws_the_sentence_and_the_partial_answer_on_every_tab` now reddens on.
+        ///
+        /// **[`App::footer`] draws off it and `main.rs`'s key router guards `f` on it**:
+        /// `f follow` and `c container` each name a stream, and a pane whose read was never issued
+        /// has none to follow and none to pick a container out of. `c` is already withheld there
+        /// by [`picking`] — `ui::containers` answers an empty slice off a `Loading` pane — so what
+        /// this field adds is `f`; it pins both rather than leaving one of them true by
+        /// coincidence. **The router reading the same field is what keeps the key and the drawn
+        /// footer one answer** (NOTES § D316).
+        ///
+        /// **A fact about the pane's content and not about the reader**, which is what keeps it on
+        /// the right side of NOTES § D259 ruling 5 where a focus condition would not be
+        /// (NOTES § D312's second amendment).
+        stream: bool,
+    },
     /// **Which pod of a group to open, before Detail has one**
     /// (`screens/detail.md` § Picking a pod, before Detail has one). It carries no count: what
     /// the step is about is the card, and the card is the renderer's.
@@ -3160,13 +3187,21 @@ impl App {
             // already shipped once here*). One container, and a pod whose snapshot has not
             // reached the store yet, draw the same line — k8rs does not know of a second
             // container in either case, and guessing is what the header's own vitals refuse.
-            (Detailing::Tabs { .. }, Tab::Logs, _) if picking(open) => {
+            (Detailing::Tabs { stream: true, .. }, Tab::Logs, _) if picking(open) => {
                 "[ ] tabs  f follow  c container  esc back  ? all keys  q quit"
             }
-            (Detailing::Tabs { .. }, Tab::Logs, _) => {
+            (Detailing::Tabs { stream: true, .. }, Tab::Logs, _) => {
                 "[ ] tabs  f follow  esc back  ? all keys  q quit"
             }
-            (Detailing::Tabs { .. }, Tab::Describe | Tab::Yaml | Tab::Events, _) => {
+            // **A logs tab whose read has not answered draws the bare line the other three draw in
+            // every state of theirs** ([`Detailing::Tabs::stream`], `screens/detail.md` § Before
+            // any of the four tabs has read anything, `screens/widgets.md`'s footer table):
+            // `f follow` promises a stream that is not being received and `c container` a pick
+            // that would change nothing about what is not being read, so neither is offered.
+            // **`⇧p previous` is on none of these lines in any state** — it is `?`'s own modal
+            // body, a different surface, so there is nothing here for this arm to withhold
+            // (NOTES § D313's amendment, checked off this match).
+            (Detailing::Tabs { .. }, Tab::Logs | Tab::Describe | Tab::Yaml | Tab::Events, _) => {
                 "[ ] tabs  esc back  ? all keys  q quit"
             }
             (Detailing::Closed, _, View::Analysis(_)) => {
@@ -3434,32 +3469,27 @@ impl App {
             // view, not instead of one, so `esc` goes back to a list whose filter is still the one
             // the reader typed (`screens/detail.md` § Picking a pod).
             None if open != Detailing::Closed => {}
-            // **`esc back` on the browser's pane whose fetch was never wired — one step back,
-            // whichever step the reader is on** ([`Offer::Nothing::back`], NOTES § D312's
-            // amendment, `screens/states.md` § A kind the browser cannot list yet). The two cases
-            // are the two states the router can put a reader in, and each has an effect the other
-            // would not:
+            // **`esc back` on the browser's pane whose fetch was never wired — the view closes,
+            // one press, from whichever focus the reader is on** ([`Offer::Nothing::back`],
+            // NOTES § D312's second amendment, `screens/states.md` § A kind the browser cannot
+            // list yet). **Alerts and not a kindless browser** — `View::Resources` carries the
+            // kind index, so there is no such state to return to.
             //
-            // - **`Panel::Content`, reached by `tab`** — the one real trap on this pane: `moved`
-            //   answers `Did::Nothing` off Alerts, so the sidebar's marker freezes and no arrow
-            //   moves it. Focus goes back, and the next arrow moves again.
-            // - **`Panel::Sidebar`, which is every reader's entry state** — `⏎` opened the pane
-            //   without touching `focus`, so there is no focus to hand back and assigning it again
-            //   is the no-op this arm shipped as (NOTES § D312). The view closes instead, which is
-            //   what *back* means everywhere else here and the only visible answer available:
-            //   focus is drawn with no mark anywhere, so a correct handoff shows nothing until the
-            //   next keypress. **Alerts and not a kindless browser** — `View::Resources` carries
-            //   the kind index, so there is no such state to return to.
+            // **One case, because the second one drew a byte-identical frame.** Handing focus from
+            // `Panel::Content` back to `Panel::Sidebar` changes nothing a reader can see: the body
+            // is the same, `theme::FOCUS` is drawn nowhere, and [`App::footer`] does not read
+            // `focus` — so the reader whose arrows had just frozen pressed the key the footer names
+            // and saw nothing. It had no future either: the arm runs only while the pane is
+            // `Pane::Loading` with `back` set, and once the `Table` fetch lands `back` is `false`.
+            // **Leaving the pane is what opens that freeze**, and off the footer `tab` opens it
+            // too — [`Panel::next`] is a two-way toggle.
             //
             // **The press is spent on this and never on a filter**, because that footer names
             // `esc back` and not `esc clear filter`. A filter typed *on this pane* is the only
             // reachable one — [`App::open`] empties them on every view change, so one committed on
             // Alerts is already gone when the kind opens — and it goes with the view by that same
             // rule rather than by anything this arm does.
-            None if back => match self.focus {
-                Panel::Content => self.focus = Panel::Sidebar,
-                Panel::Sidebar => self.open(NavItem::Alerts),
-            },
+            None if back => self.open(NavItem::Alerts),
             // **Narrow to wide, and the order is [`Filters::clears`]'s so the footer that names
             // the field and the key that empties it are one answer** (`screens/states.md` § The
             // filter hides every row).

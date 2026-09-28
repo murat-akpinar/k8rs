@@ -1501,6 +1501,32 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   so it is a wrong sentence and not a wrong state. Read off the two match arms —
   producing it needs etcd compaction or watch-cache eviction on demand, which
   `k8s-admin` could not do.
+  **Amended 2026-09-28 at Phase 5's close, which re-confirmed it live at `HEAD`
+  and found this entry understated it twice**
+  ([D314](NOTES.md#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28)).
+  *A wrong sentence and not a wrong state* misses both consequences. **The next
+  step is a wrong errand**: `views.rs:4314` answers *"Check the server address
+  this kubeconfig names, and that this machine can reach it"*, about a cluster
+  whose API server had just answered precisely — and kube relists by itself,
+  pinned by `a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land`
+  (`k8s_tests.rs:2138`), which feeds exactly `Status{code:410, reason:"Expired"}`.
+  **And `○ nothing is broken` is withheld** for the window, because
+  `watch_trouble` is true at `main.rs:988`. `k8s.rs:3663`'s own doc calls
+  `WatchError` *the one a busy cluster produces most*, so this is the *errors that
+  lie* class the phase was built to close, one door along. Traced end to end by
+  reading, not produced — the desync still needs a cluster to trigger.
+  **Promoted to a blocker and fixed inside Phase 5's close, hours after that
+  amendment**
+  ([D315](NOTES.md#d315--the-fourth-member-of-a-class-the-code-had-already-named-found-by-the-closes-own-whole-phase-pass-2026-09-28)).
+  The whole-phase pass joined this entry to **box 2672**, whose own rule is *a
+  fallback string is printed only for the case it actually describes* and whose
+  one named legitimate fallback is *a watch that ended with no error attached* —
+  this watch ended **with** one. So the box is checked over work narrower than its
+  text, which is [D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)'s
+  re-open condition, and `answer()`'s own doc had already declared the missing-arm
+  fallback a **class** after fixing `400`, then `409` and `422`. `410` is its
+  fourth member and was filed here **before** either of those fixes, which walked
+  past it. **This line is history now, not work.**
 - **One credential fault is reported seven times** (2026-08-27). Under a
   mid-session 401 an operator gets two greeting clauses plus one line per watch,
   all saying the same thing, and the whole report reprints as each lands — five
@@ -4171,6 +4197,16 @@ Phase 12 close triage fixes them; the rest are notes.
   (always available)* while marking *not built yet* on `s` and on the log tab's `c` / `⇧p`. All three
   land on `reading the cluster…` for a fetch nothing issues — `esc` does close those, which the
   browser's kind pane does not. Found by the Phase 13 close review, 2026-09-28.
+  **Ruled 2026-09-28 and it has left this file: the second half is a blocker too, and it is being
+  fixed inside the same close**
+  ([D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)).
+  D310's turn closed the help screen's clause and left the panes'. `ui::unwired` is the browser's
+  alone by its own doc comment (`ui.rs:4793`), so `ui.rs` 5716 / 5834 / 5957 / 6119 kept the
+  sentence — four of `WAITING`'s six call sites; the Alerts pane's two stay, its read is real.
+  **A user hit it in ordinary use before this file's own § K row was ever run**, which is what
+  moved it: the same words cannot be wrong output on one pane and a nit on four, and the phase's
+  done-when is *without asking us anything*. The reads themselves stay unwired and are still
+  nobody's box.
   **Why it is a blocker and not a later box**: the sidebar draws five RESOURCES groups, every
   group expands, every kind row is selectable, and each one traps the reader — on the surface a
   stranger meets in their first minute, on a binary Phase 13 exists to publish. It is the class
@@ -4331,3 +4367,106 @@ Phase 12 close triage fixes them; the rest are notes.
   Related and smaller, from the same read: after `esc` leaves a kind pane for Alerts the sidebar marker
   stays on the kind row nobody moved, and Alerts' own `⏎ open` then re-opens the pane just left — so
   `esc` `⏎` is a loop. `k8s-admin`, second read, answering question 3.
+
+### From `tester`'s attack on the kind-pane fix (2026-09-28)
+
+Four findings that are not blockers and were ruled out of the Phase 13 close by
+[CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+step 6. The fifth and sixth of that report are gone from here on purpose: the falsified wrap counts
+were a defect in the text the close itself had just written and were fixed in the same turn, and the
+*unviable is new this round* correction was about a dev's report and never reached `NOTES.md`.
+
+- **Two footers carry the same three keys in two orders, and nothing rules which is right.**
+  `views.rs:3222` draws `X switch cluster  ↑↓ move  ⏎ open  esc back …`; `Offer::Move { switch: true }`
+  at `:3266`, the only other footer carrying both the moving keys and `X`, draws
+  `↑↓ move  ⏎ open  X switch cluster  / filter …`. `screens/states.md` pins both (lines 305 and 1113),
+  so neither is a code slip. The precedent the new line cited — `Offer::Hidden`'s browser lines —
+  carries no moving keys and does not settle it, and `screens/widgets.md § 2a` says *promotes* without
+  naming a position. **One screen ruling over the closed set of footers**, not a per-line fix.
+- **The whole page draws at 70 columns and the binary cannot render narrower than 80.**
+  `MIN_WIDTH` is 80 and `too_small` replaces the frame below it, so the 47-column content pane several
+  `screens/states.md` mockups draw is a width no run produces; the reachable floor is 57. This is a
+  **page-wide convention**, not one block's defect — `states.md` and `alerts.md` are 70- and
+  72-column throughout — so singling out one mockup would be wrong and re-drawing the page is a
+  ruling with a real cost. Named here rather than acted on; the one bullet whose *illustrative only*
+  clause was scoped to the sidebar group and read as if it also excused the width was fixed in the
+  close's own turn.
+- **Nothing pins the sidebar cursor across the entry-state `esc`.** The press closes the view to
+  Alerts and leaves `nav` where it was; that is the behaviour, it is reachable another way
+  (`tab` then one `↓` from a fresh run, measured), and no test would notice if a later edit reset it.
+  Benign today, unpinned tomorrow. Related to the `esc` `⏎` loop recorded above.
+- **`holds(&reading, WAITING)` compares the implementation with its own constant.** A reworded
+  `WAITING` keeps that assertion green. What actually pins Alerts' waiting sentence is
+  `screens/states.md § Still loading`, whose drawn literal the block sweep compares — so the
+  direction is covered by the file and not by that line. Its sibling `!holds(&reading, "not built
+  yet")` uses a literal and can fail. Worth spelling out in the test's doc so the next reader does
+  not take the vacuous half for the proof.
+
+### From the Phase 5 close and its security-gate fix (2026-09-28)
+
+- **An unverified connection is announced on a report and not on a wall, and the RBAC refusal is the
+  one case where that is arguable.** [D314](NOTES.md#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28)'s
+  amendment scopes the new `--once` sentence to runs that produce a report: a wall asserts nothing about
+  the cluster, so nothing is swallowed. **On an RBAC refusal the connection genuinely completed** — a
+  `403` came back over a link nobody verified — and the fact is known and not said. Two of the other wall
+  cases do not have this shape (an unreachable cluster never connected; the certificate wall fires only
+  when the setting is *off*, so it and the new sentence are mutually exclusive), which is what makes this
+  one its own question rather than a hole in the ruling. A screen ruling, not a bug.
+
+### From the operator review of the unwired panes (2026-09-28)
+
+Three of eight findings; the other five were this turn's own second copies and were fixed before it
+landed ([D316](NOTES.md#d316--the-operator-review-of-the-unwired-panes-no-blockers-and-the-four-findings-that-are-this-turns-own-second-copies-2026-09-28)).
+No blockers in the set.
+
+- **`l` on a node card opens a logs tab that promises something the API does not offer.**
+  `Card::pods()` (`views.rs:464`) keeps only findings whose `object.kind` is `Pod`, so a node card yields
+  an empty list and `main.rs:10522` falls back to `card.owner` — the **Node**. The pane then says
+  *not built yet — k8rs cannot fetch this object's logs*, which reads as a promise for later.
+  **There is no pod-log API for a node**: `kubectl logs node/x` does not exist, and the only node-log
+  surface is the feature-gated kubelet log-query proxy (`/api/v1/nodes/<n>/proxy/logs/`), which is
+  journal and file access, not what a reader pressing `l` on a crashing node expects. The screen file's
+  justification for the wording was *"true of a pod and a node alike"* and that sentence is **removed in
+  the landing turn**, because a stated reason that is untrue is what makes the next reader repeat the
+  conclusion; what stays open is the ruling — should `l` be withheld on a node card, should the sentence
+  name the pod it would read, or should a node's logs become a real thing k8rs does? Nothing wrong is
+  done today: no fetch is issued.
+- **None of the four unwired sentences names a next step, and this product ends every other dead end
+  with one.** `ui::empty`'s third arm offers *no longer in the list — pick another kind*,
+  `screens/states.md`'s closing rule is *no state is a dead end*, and invariant 4 makes the equivalent
+  `kubectl` line the teaching device. An operator who presses `l` on a crashlooping pod now correctly
+  stops waiting — which is the whole win of
+  [D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28) —
+  and still has to know `kubectl logs` unaided. **The browser's kind pane set this precedent under
+  [D310](NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28)
+  and it was accepted, so this is one ruling over both panes**, not a change to either box.
+- **The one new screen state this close produced has no drawn frame.** `screens/detail.md` § *Before any
+  of the four tabs has read anything* carries four sentences and a footer carve-out in prose and **zero
+  fenced blocks**, so `screens-check.py` measures nothing there and the `screens/`-side pin
+  [D293](NOTES.md#d293--the-permission-probe-review-rounds-a-clause-drawn-for-a-key-the-footer-withholds-and-the-guard-the-devs-list-could-not-see-2026-09-27)
+  names — *a test compares a drawn block against the page* — does not exist for it. Layout is specified
+  only by two cross-references. **Not a blocker because the four strings and the bare footer are pinned
+  by unit tests; not a nit because adding a mockup moves block indices** and reaches `ui_tests.rs`'s
+  positional sweeps, which is a coupled change and a turn of its own. The class it would have caught is
+  D312's own finding 7 — an 80-column mockup carrying a 70-column header, which no guard can see.
+
+### From the attack on the unwired panes (2026-09-28)
+
+`just check` green, no blockers; the one surviving plant and the screen findings were this turn's own and
+were fixed before it landed ([D316](NOTES.md#d316--the-operator-review-of-the-unwired-panes-no-blockers-and-the-four-findings-that-are-this-turns-own-second-copies-2026-09-28)).
+Two residuals:
+
+- **`reading the cluster…` is still spelled twice in the *product*, and no guard holds the two together.**
+  `ui::WAITING` (`ui.rs:168`) and a bare `format!("reading the cluster… {} pods", …)` at `main.rs:9775`.
+  The constant's doc scopes *spelled once* to **this file** and excuses the second copy because it carries
+  a store count the constant cannot serve — which is fair, and is why this is not a defect today. **What
+  makes it worth a line is how the fifth site was found**: `ui::block`'s bare literal was invisible to
+  every sweep of the constant and was caught by a human reading the file. This copy would be found the
+  same way. The closing move is a guard that holds the two spellings together — `tester`'s to write, in
+  `scripts/`, and the twin-guard pattern already exists for `SKEW_ALLOWANCE`/`CERT_EXPIRY_WARN`.
+- **An expected value that calls the same helper as the code under test.** `ui_tests.rs:17345` builds its
+  expected `Detailing::Tabs { containers: containers(&screen).len(), … }` by calling `ui::containers` —
+  the function the code under test calls — so a defect inside it moves both sides together and the
+  assertion cannot see it. **Pre-existing and not this diff's**, and the `stream` field beside it is a
+  literal that does fail, which is what keeps the test meaningful today. Recorded so it is fixed as a
+  pattern rather than re-discovered as a surprise.

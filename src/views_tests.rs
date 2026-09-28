@@ -35,11 +35,21 @@ fn now() -> Time {
 /// **Every state the detail slot can be in** — what a footer sweep has to walk if it is claiming
 /// something about *every* mode (NOTES § D270; `tester`, 2026-09-18: the which-pods step was in
 /// none of them, so nothing held it to the width, the anchor pair, or the in-flight rule).
-const SLOTS: [Detailing; 3] = [
+const SLOTS: [Detailing; 4] = [
     Detailing::Closed,
     Detailing::Tabs {
         containers: 2,
         from_step: false,
+        stream: true,
+    },
+    // **The tabs as every reader meets them today** — nothing wires the log stream, so `stream` is
+    // `false` on every frame the console can draw and the logs footer loses `f` and `c` with it
+    // (NOTES § D313). A sweep claiming *every* mode that walked only the answered one would be
+    // claiming it about a state no run reaches.
+    Detailing::Tabs {
+        containers: 0,
+        from_step: false,
+        stream: false,
     },
     Detailing::Pods,
 ];
@@ -52,6 +62,7 @@ fn opened(detail: bool) -> Detailing {
         true => Detailing::Tabs {
             containers: 2,
             from_step: false,
+            stream: true,
         },
         false => Detailing::Closed,
     }
@@ -2868,58 +2879,74 @@ fn esc_while_typing_empties_the_focused_field_then_closes_the_session() {
     );
 }
 
-/// **`esc` on the browser's unwired kind pane takes one step back, whichever step the reader is
-/// on** (NOTES § D312's amendment, `screens/states.md` § A kind the browser cannot list yet).
+/// **`esc` on the browser's unwired kind pane closes the view, from whichever focus the reader is
+/// on** (NOTES § D312's second amendment, `screens/states.md` § A kind the browser cannot list
+/// yet).
 ///
-/// **The two cases are the two states the router can put a reader in, and the first is the one this
-/// test's predecessor could not see.** A reader arrives with `focus` on [`Panel::Sidebar`] — a kind
-/// pane can only be entered from there and [`App::open`] never moves it — so an arm that assigned
-/// `Sidebar` was an identity write, and the assertion that exercised it read the no-op as the
-/// property (D312). The view closes there instead. `Panel::Content`, reached only by `tab`, is the
-/// one state where handing focus back is the effect.
+/// **One case, over both values of `focus`, because the second case drew a byte-identical frame.**
+/// A reader arrives with `focus` on [`Panel::Sidebar`] — a kind pane can only be entered from there
+/// and [`App::open`] never moves it — so an arm that assigned `Sidebar` was an identity write, and
+/// the assertion that exercised it read the no-op as the property (D312). `Panel::Content`, reached
+/// only by `tab`, would have been the one state where handing focus back does anything at all, and
+/// what it does is invisible: `theme::FOCUS` is drawn nowhere and [`App::footer`] does not read
+/// `focus`. **So `focus` is swept rather than branched on**, and the sweep is what would fail if
+/// the ladder came back.
+///
+/// **What this test may not do is rest on an assertion that cannot fail.** Its predecessor
+/// asserted `arrived.focus == Panel::Sidebar` on the entry row — the value that row constructs,
+/// which no path in [`App::escape`] writes, so it held whatever the method did (`tester`, D312's
+/// second amendment). The claim below is *`focus` is not written at all*, swept over both values,
+/// and the `Panel::Content` row is the one that can fail: it is exactly the row the collapsed
+/// ladder acted on, so restoring that ladder reddens it. The `Panel::Sidebar` row is carried for
+/// the `view` and `nav` assertions beside it, which do fail on either value.
 ///
 /// **The entry state is driven through the router in
 /// [`crate::tests::the_unwired_kind_pane_is_not_a_dead_end_and_esc_steps_back_from_where_it_is`]**,
-/// which is where *what the router actually leaves `focus` as* is proved. This test is about
-/// [`App::escape`]'s own ladder over both values, which no router drive can enumerate as cheaply.
+/// which is where *what the router actually leaves `focus` as* is proved, and where the freeze
+/// `tab` causes is measured. This test is about [`App::escape`]'s own answer over both values,
+/// which no router drive can enumerate as cheaply.
 ///
 /// **And every press `esc` already owned still answers first** — a typing buffer, a modal, an open
 /// detail slot — because this is one more rung on that ladder and not a second mechanism.
 #[test]
 fn esc_steps_back_one_step_from_whichever_step_the_reader_is_on() {
+    // A sidebar cursor the reader actually moved, so the press below has something to disturb.
+    let rows = [None; 6];
+    let mut placed = Cursor::default();
+    placed.select(4, &rows);
     let browsing = |focus| App {
         view: View::Resources(3),
         focus,
+        nav: placed.clone(),
         ..App::default()
     };
 
-    // **Focus on the sidebar — the entry state — closes the view.** Alerts and not a kindless
-    // browser: `View::Resources` carries the kind index, so there is no such state to go back to.
-    let mut arrived = browsing(Panel::Sidebar);
-    assert!(!arrived.escape(Detailing::Closed, true));
-    assert_eq!(
-        arrived.view,
-        View::Alerts,
-        "`esc back` from the state every reader arrives in changed nothing a reader can see"
-    );
-    assert_eq!(
-        arrived.focus,
-        Panel::Sidebar,
-        "closing the view also moved focus, which is two effects for one press"
-    );
+    // **One press, both focuses, and the same visible answer** — the view closes. `Panel::Sidebar`
+    // is the state every reader arrives in; `Panel::Content` is the trapped one `tab` reaches, and
+    // leaving the pane is what opens that freeze. **Alerts and not a kindless browser**:
+    // `View::Resources` carries the kind index, so there is no such state to go back to.
+    for focus in [Panel::Sidebar, Panel::Content] {
+        let mut arrived = browsing(focus);
+        assert!(!arrived.escape(Detailing::Closed, true));
+        assert_eq!(
+            arrived.view,
+            View::Alerts,
+            "{focus:?}: `esc back` changed nothing a reader can see — the identity write"
+        );
+        assert_eq!(
+            arrived.focus, focus,
+            "{focus:?}: the press also moved focus, which is a second effect and an invisible one"
+        );
+        // **The sidebar cursor is not touched** — the pane closes to Alerts and the reader's place
+        // in the sidebar is where they left it. Nothing else pins this, and a later edit that reset
+        // it would draw a cursor on a row nobody chose.
+        assert_eq!(
+            arrived.nav, placed,
+            "{focus:?}: closing the view moved the sidebar cursor the reader had put there"
+        );
+    }
 
-    // **Focus on the content pane — reached by `tab`, and the one real trap** — hands focus back
-    // and leaves the view where it is, because the pane is what the reader is still looking at.
-    let mut trapped = browsing(Panel::Content);
-    assert!(!trapped.escape(Detailing::Closed, true));
-    assert_eq!(trapped.focus, Panel::Sidebar, "the trap did not open");
-    assert_eq!(
-        trapped.view,
-        View::Resources(3),
-        "the press spent both steps at once, so the reader lost the pane as well as the trap"
-    );
-
-    // **`back: false` is § Still loading's own shape and neither step is taken** — that read
+    // **`back: false` is § Still loading's own shape and the view is not closed** — that read
     // resolves on its own, its footer names no `esc`, and the press is the filter's again.
     let mut loading = App {
         filters: Filters {
@@ -2946,39 +2973,28 @@ fn esc_steps_back_one_step_from_whichever_step_the_reader_is_on() {
 
     // **The one reachable filter, and it goes with the view rather than with this arm.** A filter
     // committed on Alerts cannot reach here at all — [`App::open`] empties them on every view
-    // change — so the only one that exists on this pane was typed *on* it, and `esc` from the entry
-    // state closes the view, which is what clears it (D312 finding 4, whose premise this test had
-    // backwards).
-    let mut typed_here = App {
-        filters: Filters {
-            text: buffer("web"),
-            namespace: Input::default(),
-        },
-        ..browsing(Panel::Sidebar)
-    };
-    assert!(!typed_here.escape(Detailing::Closed, true));
-    assert_eq!(typed_here.view, View::Alerts);
-    assert_eq!(
-        typed_here.filters,
-        Filters::default(),
-        "the filter outlived the view change, which `App::open` empties on"
-    );
-    // From the content pane the view does not change, so neither does the filter.
-    let mut typed_and_tabbed = App {
-        filters: Filters {
-            text: buffer("web"),
-            namespace: Input::default(),
-        },
-        ..browsing(Panel::Content)
-    };
-    assert!(!typed_and_tabbed.escape(Detailing::Closed, true));
-    assert_eq!(
-        typed_and_tabbed.filters.text.text(),
-        "web",
-        "the step that only moves focus threw away a filter as well"
-    );
+    // change — so the only one that exists on this pane was typed *on* it, and `esc` closes the
+    // view, which is what clears it (D312 finding 4, whose premise this test had backwards).
+    // **From either focus, now that there is one arm**: the focus that used to keep its filter by
+    // keeping its view no longer has a view to keep.
+    for focus in [Panel::Sidebar, Panel::Content] {
+        let mut typed_here = App {
+            filters: Filters {
+                text: buffer("web"),
+                namespace: Input::default(),
+            },
+            ..browsing(focus)
+        };
+        assert!(!typed_here.escape(Detailing::Closed, true));
+        assert_eq!(typed_here.view, View::Alerts, "{focus:?}");
+        assert_eq!(
+            typed_here.filters,
+            Filters::default(),
+            "{focus:?}: the filter outlived the view change, which `App::open` empties on"
+        );
+    }
 
-    // **Every press `esc` already owned still answers first**, so neither step can reach past a
+    // **Every press `esc` already owned still answers first**, so this arm cannot reach past a
     // modal, a filter with focus, or an open detail tab — each of which draws its own footer.
     let mut helped = App {
         modal: Some(Modal::Help),
@@ -3015,7 +3031,8 @@ fn esc_steps_back_one_step_from_whichever_step_the_reader_is_on() {
     assert!(!tabbed.escape(
         Detailing::Tabs {
             containers: 0,
-            from_step: false
+            from_step: false,
+            stream: true,
         },
         true
     ));
@@ -3695,6 +3712,7 @@ fn every_dialog_footer_is_the_closed_set_the_screen_file_draws() {
                 Detailing::Tabs {
                     containers: 2,
                     from_step: false,
+                    stream: true,
                 },
                 ORDINARY,
                 Refused::default(),
@@ -4591,6 +4609,10 @@ fn the_footer_over_a_filter_that_hides_every_row_names_the_field_esc_clears() {
 /// `screens/detail.md` § Choosing a container — **`c container` is on the logs footer only where
 /// there is more than one answer**, and a pod whose snapshot has not arrived draws the same line a
 /// single-container pod does rather than a key that would do nothing.
+///
+/// **And § Before any of the four tabs has read anything takes both keys off**, which is a second
+/// condition and not a third container count: a read that was never sent has no stream to follow
+/// and no container list to pick from, whatever number is beside it (NOTES § D313).
 #[test]
 fn c_container_is_offered_only_where_there_is_something_to_choose() {
     let app = App::default();
@@ -4604,6 +4626,7 @@ fn c_container_is_offered_only_where_there_is_something_to_choose() {
         ask(Detailing::Tabs {
             containers: 2,
             from_step: false,
+            stream: true,
         }),
         "[ ] tabs  f follow  c container  esc back  ? all keys  q quit"
     );
@@ -4612,9 +4635,29 @@ fn c_container_is_offered_only_where_there_is_something_to_choose() {
             ask(Detailing::Tabs {
                 containers: many,
                 from_step: false,
+                stream: true,
             }),
             "[ ] tabs  f follow  esc back  ? all keys  q quit",
             "{many} containers still offered a picker"
+        );
+    }
+
+    // **And while the logs read has not answered, neither key is on the line at all** — `f follow`
+    // promises a stream that is not being received and `c container` a pick that would change
+    // nothing about what nothing is reading (NOTES § D313, `screens/detail.md` § Before any of the
+    // four tabs has read anything, `screens/widgets.md`'s footer table). **The container count is
+    // swept over because it must not decide this**: `c` is withheld here for its own reason on a
+    // `Loading` pane — `ui::containers` answers an empty slice — and a line that let a non-zero
+    // count back in would be the accident this pins against.
+    for many in [0, 1, 2, 9] {
+        assert_eq!(
+            ask(Detailing::Tabs {
+                containers: many,
+                from_step: false,
+                stream: false,
+            }),
+            "[ ] tabs  esc back  ? all keys  q quit",
+            "{many} containers named a stream on a tab whose read was never sent"
         );
     }
 }
@@ -4639,6 +4682,7 @@ fn the_container_picker_offers_three_keys_and_none_once_the_pod_has_gone() {
         ask(Detailing::Tabs {
             containers: 3,
             from_step: false,
+            stream: true,
         }),
         "↑↓ move  ⏎ pick  esc cancel"
     );
@@ -4647,6 +4691,7 @@ fn the_container_picker_offers_three_keys_and_none_once_the_pod_has_gone() {
             ask(Detailing::Tabs {
                 containers: many,
                 from_step: false,
+                stream: true,
             }),
             "[ ] tabs  f follow  esc back  ? all keys  q quit",
             "a picker with {many} containers kept a footer of its own"
@@ -4677,6 +4722,7 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
         Detailing::Tabs {
             containers: 3,
             from_step: false,
+            stream: true,
         },
         false
     ));
@@ -4695,10 +4741,12 @@ fn esc_closes_the_container_picker_and_touches_nothing_else() {
         Detailing::Tabs {
             containers: 0,
             from_step: false,
+            stream: true,
         },
         Detailing::Tabs {
             containers: 1,
             from_step: false,
+            stream: true,
         },
     ] {
         let mut app = picking();
@@ -4735,9 +4783,11 @@ fn only_picking_tells_a_cancelled_picker_from_a_dropped_one() {
         picking(Detailing::Tabs {
             containers: 2,
             from_step: false,
+            stream: true,
         }) && picking(Detailing::Tabs {
             containers: 9,
             from_step: false,
+            stream: true,
         })
     );
     for none in [
@@ -4745,10 +4795,12 @@ fn only_picking_tells_a_cancelled_picker_from_a_dropped_one() {
         Detailing::Tabs {
             containers: 0,
             from_step: false,
+            stream: true,
         },
         Detailing::Tabs {
             containers: 1,
             from_step: false,
+            stream: true,
         },
     ] {
         assert!(
@@ -4770,14 +4822,17 @@ fn only_picking_tells_a_cancelled_picker_from_a_dropped_one() {
         Detailing::Tabs {
             containers: 3,
             from_step: false,
+            stream: true,
         },
         Detailing::Tabs {
             containers: 1,
             from_step: false,
+            stream: true,
         },
         Detailing::Tabs {
             containers: 0,
             from_step: false,
+            stream: true,
         },
         Detailing::Closed,
     ] {
@@ -4817,14 +4872,17 @@ fn esc_out_of_a_detail_tab_leaves_the_filter_where_it_was() {
         Detailing::Tabs {
             containers: 0,
             from_step: false,
+            stream: true,
         },
         Detailing::Tabs {
             containers: 1,
             from_step: false,
+            stream: true,
         },
         Detailing::Tabs {
             containers: 4,
             from_step: false,
+            stream: true,
         },
     ] {
         let mut app = filtered();
@@ -5872,6 +5930,7 @@ fn the_step_is_not_a_container_picker() {
             !picking(Detailing::Tabs {
                 containers: many,
                 from_step: false,
+                stream: true,
             }),
             "{many}"
         );
@@ -5881,6 +5940,7 @@ fn the_step_is_not_a_container_picker() {
             picking(Detailing::Tabs {
                 containers: many,
                 from_step: false,
+                stream: true,
             }),
             "{many}"
         );

@@ -18,8 +18,8 @@ becomes a finding, and a finding becomes either a fix or a `backlog.md` line.
 |---|---|
 | **Run so far** | § A (part) · § B · § C · § D · § E · § F · § G (part) · § H (part) · § M (part) · § N (part) |
 | **Not started** | **§ I** (Analysis, partly seen) · **§ J** (the browser — its fix landed 2026-09-28, so every row is now re-runnable) · **§ K** (the four detail tabs) · **§ L** (keys, footer, `?`) |
-| **Findings** | 10, in § Findings at the end. F1/F2/F4 fixed; F3, F5, F6, F8, F9, F10 are `backlog.md` rulings; F7 judged and closed |
-| **Binary** | `cargo install k8rs` → `0.1.0` on the test host. The working-tree build is what a re-run after a fix uses |
+| **Findings** | 10, in § Findings at the end. F1/F2/F4 fixed — **F2 took two turns and five renderer arms** ([D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)); F3, F5, F6, F8, F9, F10 are `backlog.md` rulings; F7 judged and closed |
+| **Binary** | `cargo install k8rs` → `0.1.0` on the test host. The working-tree build is what a re-run after a fix uses. **`0.1.0` does not carry D310's fix** — it is tagged at `5dc4b24` and the fix is `1270675`, `git merge-base --is-ancestor` answers no — so every § J row run against the *released* binary is measuring F1 whole, on purpose ([D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)) |
 | **Cluster** | the four-node `k8rs` kind cluster is up. `scripts/cluster.sh reset` to re-break; never stand a second one up |
 
 **The cheapest next step is § J**, because the fix it was blocked on has landed and
@@ -469,7 +469,29 @@ see F1 in § Findings. Re-run every row below after that fix lands.
 ## K. The console — the detail tabs
 
 - [ ] `l` `d` `y` from a selected object — each says plainly it is not built yet
-      (F2 in § Findings), and `esc` closes each one
+      (F2 in § Findings), and `esc` closes each one.
+      **This row is the measurement [D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)
+      owes and it has never been run.** Before the fix the four panes drew
+      `reading the cluster…` — read off the four `WAITING` draw sites in `ui.rs`,
+      *not* run. Run this row against the working-tree build once the fix lands:
+      the four sentences from `screens/detail.md` § Before any of the four tabs
+      has read anything, `esc` out of each, and **a pane that still says
+      `reading the cluster…` only where a read was actually issued**.
+      **Driven 2026-09-28 by `dev-ui` and the row stays open on purpose.** At
+      80×24 under `tmux` against `kind-k8rs`, `--read-only`: the logs tab drew
+      `not built yet — k8rs cannot fetch this object's logs`, `]` walked to
+      `… cannot describe this object`, `… cannot show this object as YAML`, and an
+      events sentence wrapping onto two rows; **`f follow` and `c container` were
+      on none of the four**, and `esc` returned to Alerts. **It is not ticked
+      because the family has not landed** — `tester` and `k8s-admin` are still
+      reading it, and a review round that changes a sentence would leave a ticked
+      row describing a build nobody ships. Tick it against the landed tree.
+      **And do not carry a count into this row.** D313's first draft said *four of
+      `WAITING`'s six call sites*; two of that six are the definition and a use
+      inside `note()`, and the same grep missed a bare literal on another
+      `Pane::Loading` arm — which turned out to be a real fifth site, so the fix
+      is five renderer arms. Run this row against what the fix did, never against
+      the number that briefed it
 - [ ] `[` `]` move between the four tabs
 - [ ] the container picker has nothing to pick, and says so rather than drawing empty
 
@@ -568,10 +590,10 @@ an open phase.
 
 | # | What is wrong | Found | Blocker | Where it went |
 |---|---|---|---|---|
-| F1 | Opening a kind in the Resources browser is a dead end: the pane draws `reading the cluster…` for a fetch nothing issues, and `esc` does not come back | 2026-09-28, close review; **re-measured on the released binary**, 120×40 tmux, `csidrivers` unchanged after 20 s, footer down to `? all keys  q quit` | yes | **fix in flight** in the Phase 13 close, [D310](NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28) |
-| F2 | `?` lists `l logs`, `d describe` and `y view as YAML` under *always available* while the same body marks `s` *not built yet*; all three land on a fetch nothing issues | 2026-09-28, close review | yes | **fix in flight**, same turn, [D310](NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28) |
+| F1 | Opening a kind in the Resources browser is a dead end: the pane draws `reading the cluster…` for a fetch nothing issues, and `esc` does not come back | 2026-09-28, close review; **re-measured on the released binary**, 120×40 tmux, `csidrivers` unchanged after 20 s, footer down to `? all keys  q quit` | yes | **fixed 2026-09-28 in the Phase 13 close, `1270675`, and not in any released binary** — `v0.1.0` is tagged at `5dc4b24` and `git merge-base --is-ancestor` answers no ([D310](NOTES.md#d310--the-browsers-kind-pane-is-made-honest-rather-than-wired-and-that-reverses-the-freeze-on-three-top-layer-files-2026-09-28) · [D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)) |
+| F2 | `?` lists `l logs`, `d describe` and `y view as YAML` under *always available* while the same body marks `s` *not built yet*; all three land on a fetch nothing issues | 2026-09-28, close review | yes | **half fixed, and this row is the correction.** D310's turn closed the first clause — `?` stopped advertising the three keys — and left the second standing: `ui::unwired` is the browser's pane alone by its own doc comment (`ui.rs:4793`), so `ui.rs` 5716 / 5834 / 5957 / 6119 still draw `reading the cluster…` for a fetch nothing issues. **A user hit it in ordinary use before this file's § K was ever run**, which is [D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)'s *checked over work narrower than its own text*, found by a keypress rather than by the close. Ruled a blocker again and fixed inside the same close, not re-filed. **Closed 2026-09-28**: `ui::unread` replaced the four, and a **fifth** site nobody had counted — a bare literal in `ui::block`, the describe pane's own events section — went with it, so `ui.rs` spells the sentence once for the first time and `:157`'s claim is true rather than restated ([D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)) |
 | F3 | The sidebar cuts a kind's **front**, and five of `storage`'s eight rows are cut in its twenty columns: `…ributesclasses` `…ragecapacities` `…ntvolumeclaims` `…sistentvolumes` `…umeattachments`. `ui::front` keeps the tail deliberately — the front-cut alternative collapses `persistentvolumes` and `persistentvolumeclaims` — so neither cut is right and `screens/widgets.md § 7`'s *still reads as itself* is not true of `…ributesclasses` | 2026-09-28, this file's first pass | no | [`backlog.md`](backlog.md), for a screen ruling ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
-| F4 | `k8rs -h` answers `k8rs: -h: No such file or directory (os error 2)` — a flag read as a path. The same binary answers `-h is not a flag k8rs has` for `k8rs --once -h`; `-x` and `-v` behave like `-h`. The unknown-flag test is `arg.starts_with("--")`, so no single-dash word reaches it and the default door reads it as a file | 2026-09-28, row A of this file | yes | **fix in flight**, folded into D310's turn ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
+| F4 | `k8rs -h` answers `k8rs: -h: No such file or directory (os error 2)` — a flag read as a path. The same binary answers `-h is not a flag k8rs has` for `k8rs --once -h`; `-x` and `-v` behave like `-h`. The unknown-flag test is `arg.starts_with("--")`, so no single-dash word reaches it and the default door reads it as a file | 2026-09-28, row A of this file | yes | **fixed 2026-09-28**, folded into D310's turn and landed in `1270675`; like F1 it is in no released binary ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
 
 | F5 | Every sidebar mockup draws a per-kind count (`deployments  12`, `pods  84`) that no code draws — eight mockups across `resources.md`, `widgets.md`, `states.md`, against `screens/README.md`'s own *the code has to match them*. `ui.rs:3470` hands `NavItem::Kind` an empty badge under a comment asserting the opposite of the spec and citing no decision; no `§ Rules` on any page explains the count | 2026-09-28, reviewing the screen spec | no | [`backlog.md`](backlog.md), one ruling over the whole page ([D311](NOTES.md#d311--the-a-to-z-pass-gets-a-file-and-its-first-four-rows-found-a-binary-that-calls-a-flag-a-missing-file-2026-09-28)) |
 

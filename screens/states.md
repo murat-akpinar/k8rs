@@ -251,24 +251,37 @@ so the pane says the one thing that is actually true instead:
   [Nothing is broken](#nothing-is-broken)'s reasoning stated once and true
   here too — and the first draft's *"there is no row here to move across"*
   was false about the one panel actually holding the keyboard.
-  - **`esc back` takes one step back, whichever step the reader is on — not a
-    single fixed destination.** Focus on `Panel::Content` — reached by `tab`,
-    silently, with no mark anywhere on screen: [`FOCUS`](../src/theme.rs) is
-    `Signal::Reverse` and no mockup on this page draws it — hands focus back
-    to the sidebar. Focus already on the sidebar, the state this section's
-    own mockup draws, leaves the view to Alerts instead: the same *back*
-    every other `esc` on this product already means, and `?`'s own standing
-    `esc back / close` promise. One arm, two cases, the same ladder
-    [`App::escape`](../src/views.rs) already walks for a typing buffer, then
-    a modal, then a detail slot — one step further down it.
+  - **`esc back` closes the pane and opens Alerts, one press from either
+    focus — not the two-case ladder an earlier draft of this section
+    described.** A case that instead handed focus from `Panel::Content` back
+    to the sidebar would draw a byte-identical frame: the body is unchanged,
+    the sidebar has no focus mark to move — [`FOCUS`](../src/theme.rs) is
+    `Signal::Reverse` and no mockup on this page draws it — and `offered`
+    does not read `focus`, so the footer would still say `esc back` with
+    nothing on screen to show for the press. That case has no future either:
+    it would only run while the pane is `Pane::Loading` with `back: true`,
+    and once the `Table` fetch lands `back` is `false` and it would never
+    run again. So [`App::escape`](../src/views.rs)'s ladder collapses to the
+    one case that already had a visible effect — the same *back* every
+    other `esc` on this product already means, and `?`'s own standing
+    `esc back / close` promise — and the freeze `tab` can cause (below)
+    stops mattering the instant `esc` is pressed, because the reader has
+    already left the pane.
   - **`tab` is what creates the one real trap here, and this pane cannot
     withhold it.** Moving focus onto `Panel::Content` over a kind with
     nothing to move a cursor across leaves the sidebar's own marker frozen —
     measured directly: `▸ endpoints` sits unchanged across two presses of
-    `↓` once focus has moved to Content, and only moves again after `esc`
-    hands focus back and a further `↓` is pressed. `esc` is the only key
-    that opens that trap, which is the whole reason the arm exists — not the
-    trap this section's first draft described, which never existed.
+    `↓` once focus has moved to Content. `⏎ open` is dead in that same
+    state too, not only the arrows: `entered()`'s `Panel::Content` arm
+    routes through `selected()`, whose first line returns `None` off
+    Alerts. **`esc` is the only key *on the footer* that gets the reader
+    out** — the collapsed arm above leaves the view for Alerts, so the
+    freeze stops mattering the moment it is pressed. Off the footer, `tab`
+    itself also gets the reader out, in one press and without touching
+    `esc` at all: [`Panel::next`](../src/views.rs) is a two-way toggle and
+    the `Tab` handler in [`main.rs`](../src/main.rs) is its only caller, so
+    pressing it again hands focus back to the sidebar and restores the
+    arrows.
   - `/ filter` stays off, and for a reason the sidebar does not touch: no
     list is ever going to arrive on this pane to narrow — `/` finds nothing
     behind it either way, so offering it would promise a second thing this
@@ -369,11 +382,19 @@ so the pane says the one thing that is actually true instead:
   `not built yet — k8rs cannot list `, is 33 columns; a kind whose plural
   pushes the total past the pane's width wraps at the word boundary in front
   of it, the same `wrapped()` every other pane-width sentence on this page
-  already goes through. `persistentvolumeclaims` (55 columns whole) is one of
-  five real built-ins this happens to at the 70-column page's 47-column pane —
-  drawn here rather than asserted, and illustrative only in that the sidebar
-  keeps `workloads` open rather than the `storage` group this kind actually
-  lives under, since only the content pane's own wrap is this bullet's point:
+  already goes through — **the mechanism, not a fixed count of kinds it
+  happens to: which ones trip it depends on what a cluster serves, and a
+  count taken from one cluster is stale against the next.**
+  `persistentvolumeclaims` (55 columns whole) is a real built-in this
+  happens to at the 70-column page's 47-column pane — drawn to show the
+  mechanism, not asserted as the only kind it happens to, and illustrative
+  on two axes rather than one: the sidebar keeps `workloads` open rather
+  than the `storage` group this kind actually lives under, since only the
+  content pane's own wrap is this bullet's point, **and the 47-column pane
+  itself is a width this binary can never draw** —
+  [`MIN_WIDTH`](../src/ui.rs) is 80, so no reachable pane is narrower than
+  57 columns. The same wrap, at a width the binary does draw, is made again
+  below by the `customresourcedefinitions` block, at the 80-column floor:
 
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
@@ -435,12 +456,17 @@ so the pane says the one thing that is actually true instead:
 
   A terminal wider than 80 grows the content pane further still — the sidebar
   never does ([widgets.md § 1](widgets.md#1-the-frame)).
-- **The extra room does not make wrapping a narrow-pane fact.** Four more
-  built-ins — `customresourcedefinitions` (58), `mutatingwebhookconfigurations`
-  (62), `validatingwebhookconfigurations` (64) and
-  `validatingadmissionpolicybindings` (66) — all pass the 57-column pane the
-  80-column floor gives this sentence too, so the mockup just above is not the
-  wide case, only the common one:
+- **The extra room does not make wrapping a narrow-pane fact, and these four
+  are not the whole list.** `customresourcedefinitions` (58 columns whole),
+  `mutatingwebhookconfigurations` (62), `validatingwebhookconfigurations`
+  (64) and `validatingadmissionpolicybindings` (66) all pass the 57-column
+  pane the 80-column floor gives this sentence too, so the mockup just
+  above is not the wide case, only the common one.
+  `certificatesigningrequests` (59) is another — measured against a live
+  cluster rather than counted off these four. **How many built-ins a given
+  cluster pushes past this floor is not a number this page states**, since
+  it moves with what that cluster serves and a fixed count of it would be
+  stale the moment a different cluster answered:
 
 ```
  nodes 3/3                            k8rs           ctx: prod-eu · live · admin

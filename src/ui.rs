@@ -155,10 +155,26 @@ const MARKER: &str = "▸ ";
 const NAME: &str = "k8rs";
 
 /// **`reading the cluster…`, spelled once** — [`note`] centres it on a pane with nothing else on
-/// it, and [`sentence`] builds the identical words left-flush under a block that leads them
-/// (`screens/detail.md` § When the stack is taller than a Loading or Empty tab has anything of its
-/// own). Two spellings of one sentence is how the two frames come to differ in a word.
+/// it, which since NOTES § D313 is the Alerts pane's read and the Analysis pane's, the two that
+/// are really in flight. **The four detail tabs and the browser's kind pane are not**: nothing
+/// reads for them yet, so they draw [`unbuilt`]'s sentence through [`unsent`] and [`unwired`]
+/// instead of promising a read that will finish.
+///
+/// **Spelled once *in this file*, and that had stopped being true** — `ui::block` carried a second
+/// copy as a bare literal, which is why neither this doc nor a sweep over `WAITING`'s call sites
+/// could see it (NOTES § D313). The one other place the words are built is the caller's own
+/// paragraph, `main.rs`'s `reading the cluster… N pods`, which this constant cannot serve because
+/// it carries a count from the store.
 const WAITING: &str = "reading the cluster…";
+
+/// **The events read's half of [`unbuilt`]'s sentence, spelled once** — the only one of the
+/// four clauses `screens/detail.md` § Before any of the four tabs has read anything lists that
+/// two panes say: the events *tab* through [`unsent`], and the describe tab's own events block
+/// through [`unbuilt`] directly (NOTES § D316 finding 1).
+///
+/// **The other three are literals at their one call site each**, and stay that way: a constant
+/// per clause would be three names for three strings nobody can spell twice.
+const FETCH_EVENTS: &str = "fetch this object's events";
 
 /// **The verdict row of a `Confirm` while the cluster's check is still on the wire**
 /// (`screens/dialogs.md` § While the check is still on the wire). It lands in the row the
@@ -1351,9 +1367,14 @@ fn tabbed<'a>(screen: &Screen<'a>) -> Option<&'a Detail<'a>> {
 fn detailing(screen: &Screen) -> Detailing {
     match screen.detail {
         None => Detailing::Closed,
-        Some(Detailed::Tabs { from_step, .. }) => Detailing::Tabs {
+        // **`stream` is read off the logs pane itself and not off [`containers`]**, which answers
+        // an empty slice for a `Loading` pane *and* for a Ready one whose container list has not
+        // landed — two states the footer treats differently (NOTES § D313's amendment,
+        // `screens/widgets.md`'s footer table).
+        Some(Detailed::Tabs { open, from_step }) => Detailing::Tabs {
             containers: containers(screen).len(),
             from_step,
+            stream: !matches!(open.logs, Pane::Loading),
         },
         Some(Detailed::Pods(_)) => Detailing::Pods,
     }
@@ -4504,9 +4525,10 @@ fn leads(
     true
 }
 
-/// **A pane's own sentence as the rows it takes, left-flush** — the same words [`note`] and
+/// **A pane's own sentence as the rows it takes, left-flush** — the same words [`dimly`] and
 /// [`calmly`] centre on a pane with nothing above them (`screens/detail.md` § When the stack is
-/// taller than a Loading or Empty tab has anything of its own).
+/// taller than a Loading or Empty tab has anything of its own). Three callers, each pairing it
+/// with its own centred half: [`unsent`] with `dimly`, and the two calm states with `calmly`.
 ///
 /// **It stops being centred the moment a block precedes it, and that is the ruling rather than a
 /// compromise**: centring inside a region whose top edge moves every time a block grows or shrinks
@@ -4530,6 +4552,37 @@ fn sentence<'a>(
     }
     lines.extend(set(said, columns, screen.fg(theme::DIM)));
     lines
+}
+
+/// **A detail tab whose read was never wired says so, where [`WAITING`] would have claimed
+/// something was reading** (NOTES § D313, `screens/detail.md` § Before any of the four tabs has
+/// read anything). **The four tabs', as [`unwired`] is the browser's** — `WAITING` still serves
+/// the Alerts pane, whose read is real and does finish.
+///
+/// **Named for *never sent*, and it was called `unread` for a day** (NOTES § D316): that word
+/// already means the opposite twice over in this product — `crate::ops::unread` is *k8rs tried
+/// to read this and could not*, `crate::views::NavItem::Unread` is *a discovery that was
+/// refused* — and no read has been issued here at all.
+///
+/// **Both halves of the pane draw the same sentence.** With a finding pinned above it the sentence
+/// takes the rows [`leads`] reserves for it; with nothing above — or a pane too short to hold
+/// both — it is one dim block in the middle, which is [`dimly`]'s shape and the browser's own. The
+/// `Pane::Loading` arms reached [`note`] for that second half, and `note` draws [`WAITING`] for a
+/// caller that handed it no paragraphs — which on these four tabs is every caller, since `main.rs`
+/// fills [`Screen::note`] on the Alerts pane alone.
+fn unsent(
+    frame: &mut Frame,
+    area: Rect,
+    app: &mut App,
+    screen: &Screen,
+    above: &[Line],
+    cannot: &str,
+) {
+    let said = unbuilt(cannot);
+    let lines = sentence(screen, usize::from(padded(area).width), None, &said);
+    if !leads(frame, area, above, &lines, app, screen) {
+        dimly(frame, area, screen, &said);
+    }
 }
 
 /// **A finding's timestamp, but only where [`Finding::age`] would draw one** — the test every
@@ -4788,25 +4841,31 @@ fn empty(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable
     dimly(frame, area, screen, &said);
 }
 
+/// **The one spelling for *k8rs has not built this yet*, and every pane that needs it composes it
+/// here** (`screens/states.md` § A kind the browser cannot list yet: *"lowercase, joined by an
+/// em-dash, no trailing period… Anywhere else this fact needs saying reuses this spelling"*).
+///
+/// **`cannot` is the only half that differs** — `list jobs` for a kind the browser cannot fetch,
+/// `fetch this object's logs` for a detail tab (NOTES § D310, § D313). Two panes spelling one fact
+/// two ways is what this function exists to make impossible.
+fn unbuilt(cannot: &str) -> String {
+    format!("not built yet — k8rs cannot {cannot}")
+}
+
 /// **The kind's `Table` fetch has never been wired, so the pane says so rather than claiming
 /// something is reading** (NOTES § D310, `screens/states.md` § A kind the browser cannot list
-/// yet). **The browser's alone**: [`WAITING`] still serves the Alerts pane, whose read is real and
-/// does finish.
+/// yet). **The browser's alone**: the four detail tabs draw the same fact through [`unsent`], and
+/// [`WAITING`] still serves the Alerts pane, whose read is real and does finish (NOTES § D313).
 ///
-/// **One spelling, and it is that file's** — the same construction `s`'s own [`HELP`] row and the
-/// log tab's sub-row already use. **A stale index has no kind to name, so it hands straight to
-/// [`empty`]** rather than keeping a second copy of that sentence: the cause is the one `empty`'s
-/// third arm already answers — the row this view points at is gone — and *pick another kind* is
-/// what is true of it whether or not the fetch behind it exists.
+/// **One spelling, composed by [`unbuilt`] for every pane that needs it** — the same construction
+/// `s`'s own [`HELP`] row and the log tab's sub-row already use. **A stale index has no kind to
+/// name, so it hands straight to [`empty`]** rather than keeping a second copy of that sentence:
+/// the cause is the one `empty`'s third arm already answers — the row this view points at is gone
+/// — and *pick another kind* is true of it whether or not the fetch behind it exists.
 fn unwired(frame: &mut Frame, area: Rect, screen: &Screen, kind: Option<&Browsable>) {
     match plural(kind) {
         "" => empty(frame, area, screen, kind),
-        plural => dimly(
-            frame,
-            area,
-            screen,
-            &format!("not built yet — k8rs cannot list {plural}"),
-        ),
+        plural => dimly(frame, area, screen, &unbuilt(&format!("list {plural}"))),
     }
 }
 
@@ -5712,12 +5771,7 @@ fn logs(
     above: Vec<Line>,
 ) {
     match pane {
-        Pane::Loading => {
-            let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
-            if !leads(frame, area, &above, &said, app, screen) {
-                note(frame, area, screen, false, None, None);
-            }
-        }
+        Pane::Loading => unsent(frame, area, app, screen, &above, "fetch this object's logs"),
         Pane::Denied(said, held) => {
             let rest = banner(frame, area, screen, said, floor(area));
             stream(frame, rest, app, screen, held, above);
@@ -5831,11 +5885,7 @@ fn describe(
 ) {
     let (area, read) = match open.read {
         Pane::Loading => {
-            let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
-            if !leads(frame, area, &above, &said, app, screen) {
-                note(frame, area, screen, false, None, None);
-            }
-            return;
+            return unsent(frame, area, app, screen, &above, "describe this object");
         }
         Pane::Denied(said, read) => (banner(frame, area, screen, said, floor(area)), read),
         Pane::Ready(read) => (area, read),
@@ -5925,7 +5975,13 @@ fn block<'a>(events: &Pane<crate::k8s::Happened>, screen: &Screen, region: usize
     // the clause the heading exists to say (`k8s-admin`, 2026-09-07).
     let mut lines = set(&heading, region, dim);
     match events {
-        Pane::Loading => lines.push(Line::styled("reading the cluster…", dim)),
+        // **The fifth site D313 reaches, and it was a literal rather than [`WAITING`]** — this is
+        // the *describe tab's* own events section and the pane it draws is `Detail::events`, one
+        // of the four reads nothing issues, so it says what the events tab says rather than
+        // promising a read (`screens/detail.md` § Before any of the four tabs has read anything).
+        // **Wrapped like the heading above it and not pushed as one `Line`**: at 54 columns it is
+        // wider than this pane's region and a bare `Line` would run off the edge.
+        Pane::Loading => lines.extend(set(&unbuilt(FETCH_EVENTS), region, dim)),
         Pane::Denied(said, _) => lines.extend(set(said, region, screen.fg(theme::TEXT))),
         // **`crate::views::no_events` decides the emptiness, not this call site** — the driver
         // asks the same function, and a `lines.is_empty()` spelled at each of them is two places
@@ -5954,11 +6010,7 @@ fn events(
 ) {
     let happened = match pane {
         Pane::Loading => {
-            let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
-            if !leads(frame, area, &above, &said, app, screen) {
-                note(frame, area, screen, false, None, None);
-            }
-            return;
+            return unsent(frame, area, app, screen, &above, FETCH_EVENTS);
         }
         // **A refusal draws whatever did come back and never the empty sentence below.** A read
         // that was refused and answered with nothing draws the banner and an empty pane, which is
@@ -6116,11 +6168,7 @@ fn yaml(
 ) {
     let (area, document) = match open.yaml {
         Pane::Loading => {
-            let said = sentence(screen, usize::from(padded(area).width), None, WAITING);
-            if !leads(frame, area, &above, &said, app, screen) {
-                note(frame, area, screen, false, None, None);
-            }
-            return;
+            return unsent(frame, area, app, screen, &above, "show this object as YAML");
         }
         Pane::Denied(said, document) => (banner(frame, area, screen, said, floor(area)), document),
         Pane::Ready(document) => (area, document),

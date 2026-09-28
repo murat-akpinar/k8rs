@@ -15244,9 +15244,16 @@ fn a_resize_rewinds_every_tab_offset_and_an_ordinary_key_does_not() {
     assert_eq!(console.app.scroll, [0, 0, 0, 0]);
 }
 
-/// **Inside a detail tab the arrows scroll, `[` and `]` move between tabs, and `f` toggles follow**
+/// **Inside a detail tab the arrows scroll and `[` and `]` move between tabs**
 /// (`screens/detail.md`, `screens/widgets.md` § 4 — and a manual scroll turns follow off, which is
 /// `views::App::scroll_by`'s one call so no handler can do half of it).
+///
+/// **`f` was on this list and is not any more** (NOTES § D316): every logs pane this router can
+/// produce is `crate::ui::Pane::Loading`, so the drawn footer names no `f follow` and the key is
+/// refused — which is [`a_tabs_own_keys_and_the_switcher_are_refused_where_they_do_not_belong`]'s
+/// second half. The press that *does* toggle follow needs a stream behind the pane, which nothing
+/// wires yet; [`the_detail_slot_answers_closed_the_step_or_the_tabs`] pins the `stream: false`
+/// that says so, so the wiring box trips a red test rather than finding this claim gone.
 #[test]
 fn a_detail_tabs_keys_scroll_that_tab_and_move_between_the_four() {
     let store = a_cluster_with_cards();
@@ -15280,9 +15287,6 @@ fn a_detail_tabs_keys_scroll_that_tab_and_move_between_the_four() {
     );
     let _ = keyed(&mut console, typed('['), &store);
     assert_eq!(console.app.tab, views::Tab::Logs);
-
-    let _ = keyed(&mut console, typed('f'), &store);
-    assert!(console.app.following, "`f` did not turn follow back on");
 
     // `esc` closes the slot — the caller's, because `App` holds no field for what is open — and
     // every offset goes with it (§ 4: opening the slot again reads everything fresh).
@@ -16251,7 +16255,10 @@ fn the_detail_slot_answers_closed_the_step_or_the_tabs() {
             detailing(&console),
             views::Detailing::Tabs {
                 containers: 0,
-                from_step
+                from_step,
+                // Nothing wires the log stream, so this router has no other honest answer
+                // (NOTES § D313).
+                stream: false
             },
             "the step `⏎` came through was not carried into the tabs"
         );
@@ -17626,6 +17633,12 @@ async fn help_names_the_grant_a_reader_has_to_ask_for_on_the_two_rows_that_can_c
 /// the logs tab's own (`screens/detail.md`), and `X` is unbound while any modal is open
 /// (`views::App::may_switch_cluster`, NOTES § D16: switching clusters under an open box is how a
 /// dialog ends up naming an object on a cluster it was never read from).
+///
+/// **And `f` with the tabs open, on every one of the four** — the drawn footer names `f follow`
+/// on the logs tab alone and there only where it has a stream behind it, which today is never
+/// (`screens/widgets.md`'s footer table, NOTES § D316). Ungated the press flipped
+/// `views::App::following` and reported `Did::Changed` for a byte-identical frame. `[` and `]`
+/// are not in this half: they work on an open tab and the footer names them.
 #[test]
 fn a_tabs_own_keys_and_the_switcher_are_refused_where_they_do_not_belong() {
     let store = a_cluster_with_cards();
@@ -17638,6 +17651,31 @@ fn a_tabs_own_keys_and_the_switcher_are_refused_where_they_do_not_belong() {
     }
     assert_eq!(console.app.tab, views::Tab::default());
     assert!(!console.app.following);
+
+    console.opened = Some(Opened::Tabs {
+        object: ObjectId {
+            kind: ObjectKind::Pod,
+            namespace: Some("default".to_owned()),
+            name: "broken-crashloop".to_owned(),
+            uid: None,
+        },
+        from_step: false,
+    });
+    for tab in views::Tab::ALL {
+        console.app.tab = tab;
+        assert!(
+            matches!(keyed(&mut console, typed('f'), &store), Did::Nothing),
+            "`f` acted on the {} tab, whose drawn footer does not name it",
+            tab.label()
+        );
+        assert!(
+            !console.app.following,
+            "`f` turned following on over the {} tab, which is receiving nothing",
+            tab.label()
+        );
+    }
+    console.opened = None;
+    console.app.tab = views::Tab::default();
 
     let _ = keyed(&mut console, typed('?'), &store);
     let _ = keyed(&mut console, typed('X'), &store);
@@ -19146,9 +19184,12 @@ fn walked_to(console: &mut Console<'_>, store: &k8s::Store, want: &views::NavIte
 ///    moves over the sidebar's own rows and `⏎` on `ALERTS` goes home.
 /// 3. **`esc` from that state closes the view to Alerts** — the visible *back*, since focus is
 ///    drawn with no mark anywhere and a correct handoff would show nothing.
-/// 4. **`tab` freezes the sidebar marker and `esc` unfreezes it** — the one real trap, measured:
-///    `↓` answers `Did::Nothing` off Alerts, so the cursor does not move until `esc` hands focus
-///    back and the next `↓` is pressed.
+/// 4. **`tab` freezes the sidebar marker, and two different keys open that freeze** — the one real
+///    trap, measured: `↓` answers `Did::Nothing` off Alerts. **`esc` is the only key *on the
+///    footer* that opens it**, and it does so by leaving the pane rather than by handing focus
+///    back (D312's second amendment). **Off the footer `tab` opens it too**, because
+///    [`views::Panel::next`] is a two-way toggle and the `Tab` handler is its only caller. Both
+///    are pressed below, each on its own console.
 #[test]
 fn the_unwired_kind_pane_is_not_a_dead_end_and_esc_steps_back_from_where_it_is() {
     use ratatui::crossterm::event::KeyCode;
@@ -19224,9 +19265,10 @@ fn the_unwired_kind_pane_is_not_a_dead_end_and_esc_steps_back_from_where_it_is()
         "`esc back` from the entry state changed nothing a reader can see — the identity write"
     );
 
-    // 4. `tab` is what traps, and `esc` is the only key that opens it.
+    // 4. `tab` is what traps. `esc` is the only key *on the footer* that opens it — `tab` itself
+    //    opens it too, one press, and that half is driven below (D312's second amendment).
     let mut trapped = bare_console();
-    trapped.kinds = vec![listed];
+    trapped.kinds = vec![listed.clone()];
     opened(&mut trapped, &store);
     let _ = framed(&mut trapped, &store);
     let _ = keyed(&mut trapped, key(KeyCode::Tab), &store);
@@ -19257,21 +19299,64 @@ fn the_unwired_kind_pane_is_not_a_dead_end_and_esc_steps_back_from_where_it_is()
         Did::Changed
     ));
     assert_eq!(
-        trapped.app.focus,
-        views::Panel::Sidebar,
-        "`esc` did not hand focus back out of the trap"
+        trapped.app.view,
+        views::View::Alerts,
+        "`esc` from the trap did not leave the pane, so it drew the byte-identical frame D312's \
+         second amendment collapsed the arm for"
     );
     assert_eq!(
-        trapped.app.view,
-        views::View::Resources(0),
-        "the press spent both steps at once and took the pane away too"
+        trapped.app.focus,
+        views::Panel::Content,
+        "`esc` also moved focus, which is the second effect the collapsed arm stopped having"
     );
+    // **And the arrows answer again, because Alerts' own content pane has rows to move across** —
+    // the freeze stops mattering the moment the reader has left the pane, which is the whole of
+    // what one press buys here. The sidebar marker is not what moved: focus is still `Content`.
     let _ = framed(&mut trapped, &store);
-    let _ = keyed(&mut trapped, key(KeyCode::Down), &store);
+    assert!(
+        matches!(
+            keyed(&mut trapped, key(KeyCode::Down), &store),
+            Did::Changed
+        ),
+        "`↓` still answered nothing after `esc`, so the freeze followed the reader out"
+    );
     assert_eq!(
         cursor(&trapped),
-        frozen + 1,
-        "the marker stayed frozen after `esc`, so nothing was handed back"
+        frozen,
+        "the sidebar marker moved, so the press handed focus back after all"
+    );
+
+    // **`tab` opens the same trap, off the footer, in one press** — the half the *only key* claim
+    // used to deny. Its own console, because the `esc` above has already left the pane.
+    let mut tabbed = bare_console();
+    tabbed.kinds = vec![listed];
+    opened(&mut tabbed, &store);
+    let _ = framed(&mut tabbed, &store);
+    let _ = keyed(&mut tabbed, key(KeyCode::Tab), &store);
+    let stuck = cursor(&tabbed);
+    let _ = framed(&mut tabbed, &store);
+    assert!(
+        matches!(keyed(&mut tabbed, key(KeyCode::Down), &store), Did::Nothing),
+        "the trap is not set, so what `tab` opens below is nothing"
+    );
+    let _ = framed(&mut tabbed, &store);
+    let _ = keyed(&mut tabbed, key(KeyCode::Tab), &store);
+    assert_eq!(
+        tabbed.app.focus,
+        views::Panel::Sidebar,
+        "a second `tab` did not hand focus back, so `Panel::next` is not the toggle it is"
+    );
+    assert_eq!(
+        tabbed.app.view,
+        views::View::Resources(0),
+        "`tab` closed the pane, which is `esc`'s effect and not this key's"
+    );
+    let _ = framed(&mut tabbed, &store);
+    let _ = keyed(&mut tabbed, key(KeyCode::Down), &store);
+    assert_eq!(
+        cursor(&tabbed),
+        stuck + 1,
+        "the marker stayed frozen after `tab`, so nothing was handed back"
     );
 }
 
@@ -19494,15 +19579,20 @@ fn the_log_line_says_which_refusal_the_cluster_gave() {
     }
 }
 
-/// **What the two unwired panes actually draw, read off the cells** — the browser and each of the
-/// four detail tabs (`reports/2026-09-24-the-console-event-loop.md` § 4 and § 7 items 1 and 2,
-/// which asked for exactly this and could not run it).
+/// **What the five unwired panes actually draw, read off the cells** — the browser's kind pane and
+/// each of the four detail tabs (`reports/2026-09-24-the-console-event-loop.md` § 4 and § 7 items 1
+/// and 2, which asked for exactly this and could not run it).
 ///
-/// **Both say *still reading* and neither says *there is nothing*** (PRIOR-ART § C2): the fetches
-/// behind them are their own box, and until it lands the honest frame is the one that has not
-/// answered — not an empty pane claiming an answer.
+/// **None of them says *still reading* and none says *there is nothing*** (PRIOR-ART § C2,
+/// NOTES § D310, § D313): the fetches behind them are their own boxes, and until one lands the
+/// honest frame is the one that says the read was never built — not a promise that something is
+/// reading and will finish, and not an empty pane claiming an answer.
+///
+/// **Driven through [`framed`] and asserted off the drawn cells**, because the defect a user hit
+/// was a sentence on a screen and the four call sites it came from were each reachable by one
+/// keypress.
 #[test]
-fn the_panes_nothing_fetches_yet_say_they_are_still_reading() {
+fn the_panes_nothing_fetches_yet_say_they_are_not_built() {
     let store = a_cluster_with_cards();
 
     let mut browsing = bare_console();
@@ -19527,8 +19617,42 @@ fn the_panes_nothing_fetches_yet_say_they_are_still_reading() {
         "the browser drew the Alerts pane's own health sentence:\n{drawn}"
     );
 
-    // Each of the four tabs, over an object with no read behind it yet.
-    for tab in views::Tab::ALL {
+    assert!(
+        drawn.contains("not built yet — k8rs cannot list deployments"),
+        "the browser's unwired pane lost its own sentence:\n{drawn}"
+    );
+    assert!(
+        !drawn.contains("reading the cluster…"),
+        "a fetch nothing issues promised that something is reading:\n{drawn}"
+    );
+
+    // **Each of the four tabs, over an object with no read behind it yet, and each says what *it*
+    // cannot do** — `screens/detail.md` § Before any of the four tabs has read anything. The four
+    // differ only in that clause; the construction is one, and `ui::unbuilt` spells it.
+    let cannot = [
+        (
+            views::Tab::Logs,
+            "not built yet — k8rs cannot fetch this object's logs",
+        ),
+        (
+            views::Tab::Describe,
+            "not built yet — k8rs cannot describe this object",
+        ),
+        (
+            views::Tab::Yaml,
+            "not built yet — k8rs cannot show this object as YAML",
+        ),
+        (
+            views::Tab::Events,
+            "not built yet — k8rs cannot fetch this object's events",
+        ),
+    ];
+    assert_eq!(
+        cannot.len(),
+        views::Tab::ALL.len(),
+        "a fifth tab arrived with no sentence of its own"
+    );
+    for (tab, said) in cannot {
         let mut open = bare_console();
         open.app.tab = tab;
         open.opened = Some(Opened::Tabs {
@@ -19548,17 +19672,38 @@ fn the_panes_nothing_fetches_yet_say_they_are_still_reading() {
             tab.label()
         );
         assert!(
-            drawn.contains("reading the cluster…"),
-            "{} did not say it was still reading:\n{drawn}",
+            drawn.contains(said),
+            "{} did not say what it cannot do yet:\n{drawn}",
+            tab.label()
+        );
+        assert!(
+            !drawn.contains("reading the cluster…"),
+            "{} promised a read nothing issues:\n{drawn}",
             tab.label()
         );
         assert!(
             !drawn.contains("none right now") && !drawn.contains("no logs yet"),
-            "{} turned a read that has not answered into an empty answer:\n{drawn}",
+            "{} turned a read that was never sent into an empty answer:\n{drawn}",
             tab.label()
         );
+        // **The footer withholds the two keys that name a stream while this is true, and keeps the
+        // four that still work** (`screens/detail.md` § Before any of the four tabs has read
+        // anything, `screens/widgets.md`'s footer table).
+        assert!(
+            !drawn.contains("f follow") && !drawn.contains("c container"),
+            "{} offered a key for a stream it is not receiving:\n{drawn}",
+            tab.label()
+        );
+        for key in ["[ ] tabs", "esc back", "? all keys", "q quit"] {
+            assert!(
+                drawn.contains(key),
+                "{} withheld {key:?}, which still works:\n{drawn}",
+                tab.label()
+            );
+        }
         // **And it says nothing about the *cluster's* health** — `Screen::note` is the Alerts
-        // pane's and `ui::note` draws it from every caller, so a non-empty one lands in here too.
+        // pane's. Two things keep it out now: this driver fills it on that pane alone, and
+        // `ui::unsent` does not reach `ui::note` at all.
         assert!(
             !drawn.contains("in trouble right now"),
             "{} drew the Alerts pane's own health sentence:\n{drawn}",

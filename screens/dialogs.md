@@ -2202,33 +2202,44 @@ it is not part of this problem either way.
 
 **A detail tab's footer and Analysis's never had that problem, because
 neither ever names `r` at all**
-([widgets.md § 2a](widgets.md#2a-the-footer)'s own closed mode list: the logs
-tab reads `[ ] tabs  f follow  c container  esc back  ? all keys  q quit`;
-describe/yaml/events read `[ ] tabs  esc back  ? all keys  q quit`; Analysis
-reads `↑↓ move  ⏎ open  esc back  ? all keys  q quit`). Nothing on any of
-those three lines is made false by a call in flight, except the one word all
-three share: `q quit`. **That word drops, silently, for the same reason it
-already drops from Help's own footer in this same state** — not marked `q no
-quit`, because a call finishing is a wait
+([widgets.md § 2a](widgets.md#2a-the-footer)'s own closed mode list, cited
+there rather than re-spelled here: the logs tab's two rows —
+`Pane::Loading` and every other state — describe/yaml/events' one row, and
+Analysis's own row). Nothing on any of those rows is made false by a call in
+flight, except the one word every one of them shares: `q quit`. **That word
+drops, silently, for the same reason it already drops from Help's own
+footer in this same state** — not marked `q no quit`, because a call
+finishing is a wait
 ([help.md § While the call is running](help.md#while-the-call-is-running)).
-Everything else on the line stays bound and stays named: `[ ] tabs`,
-`f follow`, `c container` and `esc back` are viewing and moving, not
+Everything else on whichever row is current stays bound and stays named —
+`esc back`, and on the logs tab whichever of `[ ] tabs`, `f follow` and
+`c container` that row already draws — because viewing and moving is not
 mutating, and *navigation stays free* is the one promise this whole state
-makes — a promise a tab's own footer keeps by staying whole, not by being
-replaced with a line that has nothing on it to open or move to.
+makes: a promise a tab's own footer keeps by staying whole, not by being
+replaced with a line that has nothing on it to open or move to. **The logs
+tab's `Pane::Loading` row governs this the same way its other row does** —
+an in-flight call adds nothing to a footer the tab's own state has already
+narrowed, it only takes away the one word above.
 
 This is reached exactly as it sounds: confirm a scale on Alerts, then press
 `⏎` on a pod to watch its logs while that scale is still on the wire. Until
 this round, the logs tab's footer over that call drew the line above instead
 of its own — `⏎ open` on a pane with nothing to select, `esc back` gone with
-no other way out of the tab, and `[ ] tabs`, `f follow`, `c container` all
-still bound and none of them named. **No second in-flight line and no new
-mockup is needed to fix it** — every mode's own footer is already drawn, in
-the file that owns it; the one change is that `q quit` is missing from it
-while a call is on the wire, the same one-word drop
+no other way out of the tab, and whichever of `[ ] tabs`, `f follow` and
+`c container` its own row draws, still bound and none of them named. **Today
+that row is always the `Pane::Loading` one** — no fetch is wired yet, so `l`
+opens the tab straight into it
+([detail.md § Before any of the four tabs has read anything](detail.md#before-any-of-the-four-tabs-has-read-anything)) —
+and once a read is wired the same scenario reaches the tab's other row
+instead; either way the fix is the same one word, `q quit`. **No second
+in-flight line and no new mockup is needed to fix it** — every mode's own
+footer is already drawn, in the file that owns it; the one change is that
+`q quit` is missing from it while a call is on the wire, the same
+one-word drop
 [help.md § While the call is running](help.md#while-the-call-is-running)
 already makes. `detail.md` carries that note now, once, above its own tab
-table, governing all four tabs' footers rather than repeated under each one.
+table, governing all four tabs' footers — and both of the logs tab's rows —
+rather than repeated under each one.
 
 **Where the reason lives, if a tab's own footer never carried one even in the
 ordinary case, is unchanged by any of this.** The header's own `· changing…`
