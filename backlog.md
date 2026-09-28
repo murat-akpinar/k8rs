@@ -27,6 +27,25 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
 
 ## Open
 
+### With no terminal attached, `k8rs` prints the usage and names no cause
+
+`at_a_keyboard` requires both ends to be terminals and is deliberate (`src/main.rs:466`, PM ruling
+2026-09-23) — a pipeline gets the line that names `--once`. What has no ruling is the *sentence*:
+measured on the published binary over `ssh host 'k8rs'`, stderr is three lines of `USAGE` and exit
+`2`, with no mention of a terminal, and the one explanatory line in it reads *"without one, this
+build opens a console"* — which is exactly what it did not do. `ssh host 'cmd'` allocates no PTY, so
+this is an ordinary thing an operator types, not only a CI shape. Found 2026-09-28.
+
+### `release.yml`'s notes cut cannot see the shape of the file it is reading
+
+The awk's first rule matches *every* occurrence of the wanted `## [x.y.z]` header
+and `next`s past the `exit` rule, so two sections of one version merge in silence
+— which is how a duplicated header rode into `v0.1.0`'s tag unreported
+([D308](NOTES.md#d308--the-changelog-is-regenerated-whole-because---prepend-duplicated-a-released-versions-header-2026-09-28)).
+Harmless there, and the rule that prevents the duplicate is now written; what has
+no ruling is whether the workflow should refuse a second header rather than
+absorb it.
+
 ### The console draws two things it never fetches, and neither is boxed
 
 The browser's `Table` fetch (`k8s::Browsing`) and the four detail reads (pod read,
@@ -4144,7 +4163,14 @@ Phase 12 close triage fixes them; the rest are notes.
   is not wired — `src/main.rs:7386` says so in the code itself, *"what is not wired yet, said
   here rather than left to be found"*. **And there is no way back**: the footer collapses to
   `? all keys  q quit`, and `esc` does **not** return — measured, the pane is unchanged after
-  it. A reader who opens a kind can only quit the program.
+  it. **`Tab` does get out** — it is bound unconditionally and moves the focus — so *a reader can
+  only quit* is one key too strong, and the honest statement is worse for the reader: the key that
+  works is on no footer, and the key the help screen promises (`esc back / close`) is the inert one.
+  **The four detail tabs are the same dead end, advertised without the mark this help screen already
+  knows how to draw**: `?` lists `l logs`, `d describe` and `y view as YAML` under *Looking at things
+  (always available)* while marking *not built yet* on `s` and on the log tab's `c` / `⇧p`. All three
+  land on `reading the cluster…` for a fetch nothing issues — `esc` does close those, which the
+  browser's kind pane does not. Found by the Phase 13 close review, 2026-09-28.
   **Why it is a blocker and not a later box**: the sidebar draws five RESOURCES groups, every
   group expands, every kind row is selectable, and each one traps the reader — on the surface a
   stranger meets in their first minute, on a binary Phase 13 exists to publish. It is the class

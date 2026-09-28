@@ -713,13 +713,16 @@ a wall of refusals, not a full disk in 2036
 - GitHub Actions run with `permissions: contents: read` by default;
   third-party actions are pinned to commit SHAs; `pull_request_target` with
   secrets is forbidden.
-- Releases will ship with a `SHA256SUMS` file — **future tense on purpose**:
+- Releases ship with a `SHA256SUMS` file — **past tense since 2026-09-28**:
   [`release.yml`](../.github/workflows/release.yml) builds it and `sha256sum -c`
-  verifies it on the runner before anything is attached, but **the workflow has
-  never run**, so no release has shipped anything yet. It also does not push to
+  verifies it on the runner before anything is attached, and `v0.1.0`'s four
+  tarballs were checked against the published sums again after download, off
+  the release page rather than off the runner. It still does not push to
   crates.io: that is irreversible, so no registry token lives in repo secrets
-  and the maintainer runs `cargo publish` by hand
-  ([NOTES § D305](../NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)).
+  and the maintainer runs `cargo publish` by hand, from the one machine that
+  holds the credential
+  ([NOTES § D305](../NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)
+  · [§ D307](../NOTES.md#d307--the-registry-publish-ran-in-session-because-the-credential-is-on-the-pms-own-machine-2026-09-28)).
   Binary signing is deferred until there is an audience to verify it.
 
 ## Future trust-boundary changes (recorded now, on purpose)

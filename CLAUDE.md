@@ -896,7 +896,11 @@ in order, no skipping:
   `main` only ever advances by merging `development` into it, at phase close.
   Never commit directly to `main`.
 - **Before pushing**, update the CHANGELOG with
-  [git-cliff](https://github.com/orhun/git-cliff).
+  [git-cliff](https://github.com/orhun/git-cliff) — **regenerated whole,
+  `git cliff -o CHANGELOG.md`, and never `--prepend`**, which duplicated a
+  released version's header once and was invisible because the only reader of
+  the file swallows it
+  ([D308](NOTES.md#d308--the-changelog-is-regenerated-whole-because---prepend-duplicated-a-released-versions-header-2026-09-28)).
 
 Reference workflows: [titus-ai](https://github.com/ChrisTitusTech/titus-ai),
 [christitus.com/my-ai-workflow](https://christitus.com/my-ai-workflow/)

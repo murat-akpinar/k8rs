@@ -61,8 +61,9 @@ Two rules hold everywhere in it:
   kubeconfig's own certificate, live: a crashlooping container, a pod the
   scheduler could not place (quoting the scheduler's own reason), an image that
   will not pull, a missing ConfigMap or Secret, a container killed for its
-  memory limit, a pod running but out of its Service, a certificate about to
-  expire, and the rest.
+  memory limit, a pod running but out of its Service, a kubeconfig certificate
+  that has already expired, and the rest. One that is merely *close* to expiring
+  is in the **certificates** report instead: Alerts is what is broken now.
 - **Analysis** — seven whole-cluster reports: capacity, certificates, drain
   safety, posture, restarts, waste, versions.
 - **Fixing things** — `r` restarts a workload, `ctrl-d` deletes an object. Each
@@ -76,23 +77,33 @@ Two rules hold everywhere in it:
   nothing owes no record.
 
 **Not wired yet:** the **Resources** browser lists what your cluster serves,
-but opening a kind lands on a pane that stays empty — the row is drawn, the
-fetch behind it is not connected. The four detail tabs behind a card are the
-same. Both arrive in v0.2.
+but opening a kind lands on a pane that says *reading the cluster…* and stays
+there — the row is drawn, the fetch behind it is not connected, and `esc` does
+not come back from it. `tab` moves the focus away, which does. The four detail
+tabs behind a card — `l` logs, `d` describe, `y` YAML — say the same thing and
+never fill, though `esc` does close those. Until v0.2 wires them,
+`k8rs --logs`, `k8rs --describe` and `k8rs --yaml` are how you read a log, a
+description or a YAML out of a cluster.
 
 ## Install
 
-k8rs is not on crates.io yet — the name is reserved by a placeholder with no
-code in it, so `cargo install k8rs` today gets you nothing. Until the first
-release, build it:
-
 ```sh
-git clone https://github.com/murat-akpinar/k8rs
-cd k8rs
-cargo install --path .
+cargo install k8rs
 ```
 
-Rust 1.98.1 or newer. No other dependency, and nothing to deploy.
+Or take a prebuilt binary — Linux (musl, static) and macOS, x86_64 and
+aarch64 — from the
+[latest release](https://github.com/murat-akpinar/k8rs/releases/latest).
+Download `SHA256SUMS` beside it and check what you got with
+`sha256sum -c --ignore-missing SHA256SUMS` (`shasum -a 256 -c --ignore-missing`
+on macOS). The flag is not optional: the file lists all four tarballs, you
+downloaded one, and without it a good download reports three failures and exits
+non-zero. Then unpack the archive and put the `k8rs` inside it on your `PATH`.
+That way needs no Rust at all.
+
+The manifest asks for Rust 1.88 or newer, which is the floor `cargo` enforces
+and not a version anyone has compiled at; v0.1.0 was built and tested with
+1.98.1. No other dependency, and nothing to deploy.
 
 ## Running it
 
@@ -104,23 +115,38 @@ k8rs --read-only                # nothing can be changed, structurally
 k8rs --once [--analysis]        # one report on stdout, then exit
 ```
 
-With more than one context and no `--context`, k8rs asks which cluster before
-it connects. `?` shows every key. `q` quits.
+k8rs finds your kubeconfig the way `kubectl` does — every path in `$KUBECONFIG`,
+merged, or `~/.kube/config` when that is unset — and never changes it. With more
+than one context and no `--context`, it asks which cluster before it connects.
+`?` shows every key. `q` quits.
 
 ## What k8rs can change in your cluster
 
-Three operations exist in the code: **scale**, **restart** and **delete**. On
-this build the console offers **restart** and **delete**; `s scale` is withheld
-from every kind, on every login — a fact about the build, not about your
-permissions.
+Three operations exist: **scale**, **restart** and **delete**. In the console
+`s scale` is withheld from every kind, on every login — a fact about the build,
+not about your permissions — so there you get **restart** and **delete**.
+
+**All three run from the command line, scale included**, with no console and no
+terminal of any kind:
+
+```sh
+k8rs ops scale deploy/web 3 -n payments
+k8rs ops restart deploy/web -n payments
+k8rs ops delete pod/web-7d9f -n payments
+k8rs ops may-i delete pods. -n payments    # asks, changes nothing
+```
 
 Every one of them, without exception:
 
 1. An object you selected — there is no bulk anything, and no operation
    without a selection.
-2. A keypress.
+2. A keypress, or the `ops` line you typed yourself.
 3. A confirmation box that states the consequence in plain language, and shows
-   the `kubectl` line it is equivalent to.
+   the `kubectl` line it is equivalent to. On the command line it is the same
+   question on stderr, answered on stdin — and `--read-only` refuses every `ops`
+   line but `ops may-i`. The trailing dot in `pods.` is the core API group's real
+   name, and `may-i` requires the group rather than guessing it: a word it cannot
+   resolve is refused, never answered *no* on your behalf.
 4. A **server-side dry run** where the operation takes one, so the cluster
    checks the change before it is made. `delete` is the one that declines it,
    and says so in its own box and in the audit log.

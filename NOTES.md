@@ -328,6 +328,9 @@ its line moving with it.
 - [D304](#d304--the-documented-admin-role-grants-three-capabilities-the-binary-cannot-use-and-a-grant-nothing-uses-is-not-least-privilege-2026-09-28) — the documented admin role grants three capabilities the binary cannot use, and a grant nothing uses is not least privilege
 - [D305](#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28) — the release workflow: seven rulings, and the target list that is derived rather than copied
 - [D306](#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28) — v0.0.1 is skipped, because both halves of the reason for it are spent
+- [D307](#d307--the-registry-publish-ran-in-session-because-the-credential-is-on-the-pms-own-machine-2026-09-28) — the registry publish ran in-session, because the credential is on the PM's own machine
+- [D308](#d308--the-changelog-is-regenerated-whole-because---prepend-duplicated-a-released-versions-header-2026-09-28) — the changelog is regenerated whole, because `--prepend` duplicated a released version's header
+- [D309](#d309--the-cratesio-page-keeps-a-readme-that-says-the-crate-is-not-published-and-the-maintainer-will-not-spend-a-version-number-on-it-2026-09-28) — the crates.io page keeps a README that says the crate is not published, and the maintainer will not spend a version number on it
 
 ## Why it exists — where the gap is
 
@@ -27512,3 +27515,88 @@ corrected with this entry.
 name on a public registry, and they run the `cargo publish` either way; it is
 recorded here rather than asked because the workflow does not depend on the
 answer — it releases whatever is tagged.
+
+### D307 — the registry publish ran in-session, because the credential is on the PM's own machine (2026-09-28)
+
+Phase 13's release box is one of [CLAUDE.md § The boxes no agent can run](CLAUDE.md), and that
+section has the PM *print the command and wait for the user's real output*. **The user's instruction,
+2026-09-28:** *"cargo publish de sen yap"* — so the PM ran it instead.
+
+**Nothing in the rule was bent, and the reason is worth keeping.** That section's subject is the
+*agents*: they start cold, hold no credential, and a box whose evidence is "this would work" is an
+unchecked box. The PM is the main session on the user's own machine, and
+`~/.cargo/credentials.toml` is there. **Checked rather than assumed:** it is *not* on the test host,
+so this machine was the only one that could have run the publish at all.
+
+**Which also answers the question the box raised against
+[D267](#d267--nothing-builds-on-the-dev-machine-the-gate-the-sweep-and-the-binary-move-to-the-test-host-2026-09-17):**
+`cargo publish` compiles on the dev machine because the credential decides where it runs, not
+convenience — and what it uploads is a source tarball, so unlike every artifact D267 moved to the
+host, no byte of it depends on the machine that built it. The verify build is a check, not a
+deliverable.
+
+**What went up, verified against crates.io's API rather than cargo's own `Published` line:**
+`0.1.0`, `yanked: false`, `GPL-3.0-or-later`, `rust_version 1.88`, 2,314,922 bytes, checksum
+`b34c3b930b7e1339e2f88bf876da778c5fca2a4b81e35dd7323564c2a0cce07a`. 100 files, 8.0 MiB unpacked, of
+which 7.1 MiB is `src/` — the test modules, which `exclude` keeps in on purpose so a consumer can
+run the suite. **The two commits between the `v0.1.0` tag and the published tree touch only
+`todo.md`**, which `exclude` drops, so the registry carries the tagged sources.
+
+**And the install line was proven before it was written.** Both READMEs now say `cargo install k8rs`;
+that command was run end to end on the test host against the registry — 7m09s release build,
+`EXIT=0` — and the installed binary answers an unknown flag with the usage and exit `2`. A README
+line that tells a stranger to run something nobody has run is the same defect as a green test that
+cannot fail.
+
+### D308 — the changelog is regenerated whole, because `--prepend` duplicated a released version's header (2026-09-28)
+
+`5dc4b24`, the `chore(changelog): update` that `v0.1.0` was tagged on, added five lines to the top of
+`CHANGELOG.md` — and one of them was a second `## [0.1.0] - 2026-09-28`. `git cliff --prepend` writes
+the commits it has not seen above whatever is already there, and what was already there was the same
+release's own section: nothing is released in the sense cliff means it, so every commit is still
+unreleased and prepending re-states the version header it already wrote.
+
+**It survived a second pass because the only thing that reads the file is blind to it.**
+[`release.yml`](.github/workflows/release.yml) cuts the notes with `awk -v want="## [${TAG#v}]"`
+whose first rule — `index($0, want) == 1 { found = 1; next }` — matches the *duplicate* header too
+and `next`s straight past the `found && /^## \[/ { exit }` rule that would have truncated the body
+there. So the published notes are whole (301 lines, 124,981 bytes, under the 125,000 cap) and the
+defect stayed in the repository instead of in the release. **A guard that is accidentally robust
+does not report**, and a shape nothing reads is a shape nobody checks.
+
+**The rule, now in [CLAUDE.md § Git rules](CLAUDE.md#git-rules):** `git cliff -o CHANGELOG.md` —
+the whole file, every time. `--prepend` is never used. The file is generated output, so there is
+nothing in it to preserve by hand, and a whole regeneration is one command and idempotent. Proven by
+regenerating here: one `## [unreleased]` for the two post-tag commits and one `## [0.1.0]`, against
+the two `## [0.1.0]` headers the prepend left.
+
+### D309 — the crates.io page keeps a README that says the crate is not published, and the maintainer will not spend a version number on it (2026-09-28)
+
+**The finding.** `0.1.0`'s own done-when requires the install line to move to `cargo install k8rs`
+*"which only becomes true once the publish lands"* — so the only order it allows is publish first,
+README second, and the published tarball necessarily carries the **pre-move** README. crates.io
+renders the newest version's README as the crate's front page, so what a stranger reads there is
+*"k8rs is not on crates.io yet — the name is reserved by a placeholder with no code in it, so
+`cargo install k8rs` today gets you nothing"*, on the page that disproves it. Measured against the
+published bytes, not the working tree: the `.crate` fetched from `static.crates.io` hashes to the
+registry's own `b34c3b93…cce07a`, and `static.crates.io/readmes/k8rs/k8rs-0.1.0.html` (HTTP 200,
+16,395 bytes) carries the sentence verbatim. A registry version is immutable — no repository edit
+reaches it, and the only fix is a version whose tarball carries the corrected text.
+
+**The user's ruling, 2026-09-28:** *"0.1.0 güncelle yeni versiyona gerek yok şuan için daha hiç bir
+yerde paylaşmadım"* — no `0.1.1`. The repository is corrected and the registry page stays as
+published until the next release carries the fix. **What that costs, said now rather than found
+later:** for as long as `0.1.0` is the newest version, k8rs's crates.io page tells every visitor
+that installing it gets them nothing. The release has been announced nowhere, which is what makes
+that near-free today and what makes it expensive the moment it is announced.
+
+**The ordering is the part that generalises.** A done-when that asks for a README change *after* a
+publish can only ever ship the README from before it. The next release's box puts the README edit in
+the commit the tag is taken on, and the publish after both.
+
+**One fix was considered and refused.** Six links in `README.md` point at `docs/`, `screens/` and
+`NOTES.md`, all of which `exclude` drops from the package — so they are dead in the tarball a reader
+unpacks. Absolutising them would have fixed that and taken six links out of `check-docs.py`'s
+coverage. Measured first: crates.io already rewrites them to
+`https://github.com/murat-akpinar/k8rs/blob/HEAD/…`, so the public rendering is correct and the
+papercut exists only in a file almost nobody opens. The links stay relative and the guard keeps them.

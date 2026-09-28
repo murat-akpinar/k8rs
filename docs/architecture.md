@@ -1,20 +1,22 @@
 # k8rs Architecture
 
-> Status: **built, not yet published.** The whole pyramid exists and runs —
+> Status: **v0.1.0 is published.** The whole pyramid exists and runs —
 > `rules.rs`, `analysis.rs`, `k8s.rs`, `ops.rs`, and since Phase 12's close
 > (2026-09-26) the console on top of them: one binary with the event loop, the
 > Alerts view, the seven analysis panes, the dialogs, the write path and the
 > cluster picker wired, and since Phase 13's first box the permission probe that
 > marks a key this login may not use before it is pressed
 > ([NOTES § D292](../NOTES.md#d292--wiring-the-permission-probe-the-owner-the-dead-writes-gate-and-the-plural-three-existing-tables-refuse-to-give-2026-09-26)).
-> **Three reads are not**, each drawing an honest waiting
-> state rather than a wrong one: the browser's server-side `Table`, the four detail
-> tabs, and the log stream.
+> **Three reads are not**: the browser's server-side `Table`, the four detail
+> tabs, and the log stream. Each draws `ui::WAITING` — *reading the cluster…* —
+> for a fetch nothing issues, which is not a waiting state but the wrong one of
+> the three `PRIOR-ART § C2` names, and `esc` does not leave an opened browser
+> kind ([backlog](../backlog.md)).
 > `ui.rs` is frozen; `views.rs` is frozen against new behaviour, and the probe's
 > box reached it for one mechanical edit only — deleting the two
 > `expect(dead_code)` attributes that existed to say the probe was unwired, which
-> `-D warnings` turns into a red build the moment it is. What is left is shipping
-> it — Phase 13 — which since this line last moved has taken the README in both
+> `-D warnings` turns into a red build the moment it is. Phase 13 has shipped
+> `v0.1.0` — on crates.io and on the release page — over a README in both
 > languages and the one driver flag that came out of the ten
 > ([The command line](#the-command-line) states which flags this build accepts
 > and why the eight read flags stay).

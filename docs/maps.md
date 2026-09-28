@@ -190,8 +190,9 @@ and it deliberately does **not** run `cargo publish`
 ([D305](../NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)).
 Both default to `permissions: contents: read`, with `contents: write` elevated
 per job and never at file level; third-party actions pinned to commit SHAs.
-**`release.yml` has never run** — a real tag is the first thing that exercises
-it.
+**`release.yml` first ran on 2026-09-28 for `v0.1.0`**, and the first tag went
+red: `gh release create` refused a body over 125k, which nothing but a real tag
+could have found.
 
 ---
 

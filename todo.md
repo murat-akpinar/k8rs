@@ -5359,17 +5359,54 @@ behaves as specified.
       created, the tag was moved onto the fix and re-pushed
       ([D305](NOTES.md#d305--the-release-workflow-seven-rulings-and-the-target-list-that-is-derived-rather-than-copied-2026-09-28)
       ruling 8).
-      **What is left is only the registry**, and it is deliberately not
-      automated: `cargo publish --locked --dry-run` then `cargo publish
-      --locked`, from a machine holding the credential — then both READMEs'
-      install line moves from *build from source* to `cargo install k8rs`.
+      **The registry landed 2026-09-28 09:26 UTC** — `cargo publish --locked`
+      after a green `--dry-run`, from the dev machine, which is the only one
+      holding the credential; the test host has none, checked rather than
+      assumed ([D307](NOTES.md#d307--the-registry-publish-ran-in-session-because-the-credential-is-on-the-pms-own-machine-2026-09-28)).
+      Verified against crates.io's API and not cargo's own `Published` line:
+      `0.1.0`, `yanked: false`, `GPL-3.0-or-later`, `rust_version 1.88`,
+      2,314,922 bytes, checksum `b34c3b93…cce07a`. **The two commits between the
+      tag and the published tree touch only `todo.md`**, which `exclude` drops,
+      so the registry carries the tagged sources. Both READMEs' install line is
+      now `cargo install k8rs` — **and that command was run before the line
+      shipped**, on the test host against the registry: 7m09s release build,
+      `EXIT=0`, and the installed binary answers an unknown flag with the usage
+      and exit `2`.
       **Done when** a real `v0.1.0` tag has produced a GitHub release carrying
       four binaries and a verified `SHA256SUMS`, `cargo publish` has put that
       version on crates.io, **and both READMEs' install line has moved from
       *build from source* to `cargo install k8rs`** — which only becomes true
-      once the publish lands. All three need the maintainer's account, so this
-      is one of [§ The boxes no agent can run](CLAUDE.md) — the PM prints the
-      commands and waits for the real output
+      once the publish lands. All three needed the maintainer's account: the
+      GitHub half ran under it on the runner, and the registry half ran
+      in-session rather than being printed for the user, because the credential
+      is on the PM's own machine and on no other
+      ([D307](NOTES.md#d307--the-registry-publish-ran-in-session-because-the-credential-is-on-the-pms-own-machine-2026-09-28)).
+      **It stays open on one finding, and the finding is in this done-when.**
+      Moving the install line *after* the publish is the only order this wording
+      allows — *which only becomes true once the publish lands* — so the
+      published `0.1.0` tarball necessarily carries the **pre-move** README, and
+      crates.io renders the latest version's README as the crate's front page.
+      What a stranger reads there today is *"k8rs is not on crates.io yet — the
+      name is reserved by a placeholder with no code in it, so `cargo install
+      k8rs` today gets you nothing"*, on the page that proves otherwise. Checked
+      against the published artifact and not the working tree: the `.crate`
+      downloaded from `static.crates.io` hashes to the registry's own
+      `b34c3b93…cce07a`. That defeats the phase's done-when — *a stranger in
+      their first month, without asking us anything* — and the only fix is a
+      version whose tarball carries the corrected README, which is a release
+      decision and the maintainer's, not the PM's — and the maintainer ruled it:
+      no `0.1.1`, the repository is corrected and the registry page stays as
+      published until the next release carries the fix
+      ([D309](NOTES.md#d309--the-cratesio-page-keeps-a-readme-that-says-the-crate-is-not-published-and-the-maintainer-will-not-spend-a-version-number-on-it-2026-09-28)).
+      **The close is blocked by a second thing, and that one is code**:
+      [`backlog.md`](backlog.md)'s *opening a kind in the Resources browser is a
+      dead end on the real binary* is labelled a blocker for this very close and
+      was boxed instead of fixed, which
+      [CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+      step 6 does not allow. The close review added the half nobody had read: `?`
+      advertises `l logs`, `d describe` and `y view as YAML` under *always
+      available* while the same screen marks *not built yet* on `s`, and all
+      three land on `reading the cluster…` for a fetch nothing issues
 
 **🔒 Security gate:** `strings` the release binary — no path from the build
 machine that leaks a username, no embedded credential. `SHA256SUMS` published.

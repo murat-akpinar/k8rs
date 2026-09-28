@@ -1,23 +1,31 @@
 # k8rs — documentation
 
-> Status: **Phase 13 is running — shipping v0.1, milestone M4.** Every phase
-> through 12 is closed, and the one box left open underneath them is the crates.io
-> publish. The rules and the seven analysis reports are tested against real
+> Status: **v0.1.0 is released — milestone M4.** Every phase through 12 is
+> closed; Phase 13 has one box still open. `cargo install k8rs` takes it from
+> crates.io, and the GitHub release carries static musl and macOS binaries with
+> a `SHA256SUMS` beside them.
+> The rules and the seven analysis reports are tested against real
 > captures from a kind cluster you can stand up yourself
 > ([tech-stack § The test cluster](tech-stack.md#the-test-cluster--reproducing-it-yourself)).
 > **It runs**: `k8rs` opens the console against your current context — the Alerts
 > view, the seven analysis panes, the confirmation dialogs, the write path, the
 > cluster picker and the permission probe that marks a key this login may not use
 > are wired into one binary, while the reads behind the resource browser and the
-> detail tabs are not yet fetched and say so on screen — and `k8rs --once` prints
+> detail tabs are not fetched at all: both panes draw *reading the cluster…* and
+> never fill, and `esc` does not leave an opened browser kind
+> ([backlog](../backlog.md)) — and `k8rs --once` prints
 > the findings and exits
 > ([architecture § The command line](architecture.md#the-command-line)).
-> Phase 13 has landed the permission probe, the driver-flag removal,
-> [`README.md`](../README.md) with its Turkish translation, and the release
-> workflow. **The manifest is at `0.1.0` and what is left is the release
-> itself** — pushing the tag and running `cargo publish`, which need the
-> maintainer's account and no agent can run. v0.0.1 is skipped
-> ([NOTES § D306](../NOTES.md#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28))
+> Phase 13 landed the permission probe, the driver-flag removal,
+> [`README.md`](../README.md) with its Turkish translation, the release
+> workflow — and the release. **`v0.1.0` is on crates.io and on the GitHub
+> release page**, the tag pushed under the maintainer's account and
+> `cargo publish` run from the one machine holding the credential. What keeps
+> the box open is that the published tarball carries the README as it read
+> *before* the install line moved, which is the page crates.io shows. v0.0.1 is
+> skipped
+> ([NOTES § D306](../NOTES.md#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28)
+> · [§ D307](../NOTES.md#d307--the-registry-publish-ran-in-session-because-the-credential-is-on-the-pms-own-machine-2026-09-28))
 > · Last updated: 2026-09-28
 
 This directory is the **built** state: what is true of the shipped tool, written

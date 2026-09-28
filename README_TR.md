@@ -63,7 +63,9 @@ söylemez. k8rs, kümenin zaten bildiği şeyi okuyup o kısmı yüksek sesle s�
   zamanlayıcının yerleştiremediği bir pod (zamanlayıcının kendi gerekçesiyle),
   çekilemeyen bir imaj, eksik bir ConfigMap veya Secret, bellek sınırı yüzünden
   öldürülen bir konteyner, çalışan ama Service'inin dışında kalan bir pod,
-  süresi dolmak üzere olan bir sertifika ve diğerleri.
+  süresi çoktan dolmuş bir kubeconfig sertifikası ve diğerleri. Sadece dolmaya
+  *yakın* olan bir sertifika burada değil, **certificates** raporunda: Alerts şu
+  an bozuk olanı gösterir.
 - **Analysis** — küme geneli yedi rapor: kapasite, sertifikalar, boşaltma
   güvenliği, duruş, yeniden başlatmalar, israf, sürümler.
 - **Düzeltmek** — `r` bir iş yükünü yeniden başlatır, `ctrl-d` bir nesneyi
@@ -77,23 +79,32 @@ söylemez. k8rs, kümenin zaten bildiği şeyi okuyup o kısmı yüksek sesle s�
   hiçbir şeyi değiştiremeyen bir çalışmanın kaydı da olmaz.
 
 **Henüz bağlanmadı:** **Resources** tarayıcısı kümenizin sunduğu türleri
-listeler, ama bir tür açtığınızda boş kalan bir panele düşersiniz — satır
-çiziliyor, arkasındaki okuma bağlı değil. Bir kartın arkasındaki dört detay
-sekmesi de öyle. İkisi de v0.2'de geliyor.
+listeler, ama bir tür açtığınızda *reading the cluster…* yazıp orada kalan bir
+panele düşersiniz — satır çiziliyor, arkasındaki okuma bağlı değil, ve `esc`
+oradan geri getirmiyor. `tab` odağı başka yere taşır, o çalışır. Bir kartın
+arkasındaki dört detay sekmesi — `l` logs, `d` describe, `y` YAML — aynı şeyi
+yazıp hiç dolmuyor, ama onları `esc` kapatıyor. v0.2 bunları bağlayana kadar bir
+log'u, bir açıklamayı veya bir YAML'ı kümeden okumanın yolu `k8rs --logs`,
+`k8rs --describe` ve `k8rs --yaml`.
 
 ## Kurulum
 
-k8rs henüz crates.io'da değil — ad, içinde kod olmayan bir yer tutucuyla
-ayrılmış durumda, yani bugün `cargo install k8rs` size hiçbir şey getirmez. İlk
-sürüme kadar derleyin:
-
 ```sh
-git clone https://github.com/murat-akpinar/k8rs
-cd k8rs
-cargo install --path .
+cargo install k8rs
 ```
 
-Rust 1.98.1 veya üstü. Başka bağımlılık yok, kurulacak bir şey de yok.
+Ya da hazır bir ikili alın — Linux (musl, statik) ve macOS, x86_64 ve
+aarch64 — [son sürümden](https://github.com/murat-akpinar/k8rs/releases/latest).
+Yanındaki `SHA256SUMS`'ı da indirip indirdiğinizi
+`sha256sum -c --ignore-missing SHA256SUMS` ile (macOS'ta
+`shasum -a 256 -c --ignore-missing`) doğrulayın. Bayrak isteğe bağlı değil:
+dosya dört tarball'ı da listeler, siz birini indirdiniz, ve bayrak olmadan
+sağlam bir indirme üç başarısızlık bildirip sıfırdan farklı çıkar. Sonra arşivi
+açıp içindeki `k8rs`'i `PATH`'inize koyun. Bu yol hiç Rust istemez.
+
+Manifest Rust 1.88 veya üstünü ister — bu `cargo`'nun uyguladığı taban, kimsenin
+derlediği bir sürüm değil; v0.1.0 1.98.1 ile derlendi ve test edildi. Başka
+bağımlılık yok, kurulacak bir şey de yok.
 
 ## Çalıştırmak
 
@@ -105,23 +116,38 @@ k8rs --read-only                # hiçbir şey değiştirilemez, yapısal olarak
 k8rs --once [--analysis]        # stdout'a tek rapor, sonra çıkış
 ```
 
-Birden fazla bağlam varsa ve `--context` verilmemişse, k8rs bağlanmadan önce
-hangi kümeye gideceğini sorar. `?` bütün tuşları gösterir. `q` çıkar.
+k8rs kubeconfig'inizi `kubectl` gibi bulur — `$KUBECONFIG` içindeki her yol,
+birleştirilerek, o boşsa `~/.kube/config` — ve onu asla değiştirmez. Birden fazla
+bağlam varsa ve `--context` verilmemişse, bağlanmadan önce hangi kümeye
+gideceğini sorar. `?` bütün tuşları gösterir. `q` çıkar.
 
 ## k8rs kümenizde neyi değiştirebilir
 
-Kodda üç işlem var: **scale**, **restart** ve **delete**. Bu yapıda konsol
-**restart** ve **delete** sunuyor; `s scale` her tür ve her oturum için geri
-çekilmiş durumda — bu yapı hakkında bir gerçek, sizin yetkileriniz hakkında
-değil.
+Üç işlem var: **scale**, **restart** ve **delete**. Konsolda `s scale` her tür
+ve her oturum için geri çekilmiş durumda — bu yapı hakkında bir gerçek, sizin
+yetkileriniz hakkında değil — yani orada **restart** ve **delete** alıyorsunuz.
+
+**Üçü de komut satırından çalışır, scale dâhil**, hiç konsol ve hiç terminal
+olmadan:
+
+```sh
+k8rs ops scale deploy/web 3 -n payments
+k8rs ops restart deploy/web -n payments
+k8rs ops delete pod/web-7d9f -n payments
+k8rs ops may-i delete pods. -n payments    # sorar, hiçbir şeyi değiştirmez
+```
 
 İstisnasız hepsinde:
 
 1. Sizin seçtiğiniz bir nesne — toplu işlem diye bir şey yok, seçim olmadan da
    işlem yok.
-2. Bir tuşa basış.
+2. Bir tuşa basış, ya da kendi yazdığınız `ops` satırı.
 3. Sonucu sade bir dille yazan ve karşılığı olan `kubectl` satırını gösteren
-   bir onay kutusu.
+   bir onay kutusu. Komut satırında aynı soru stderr'e yazılır ve stdin'den
+   yanıtlanır — ve `--read-only`, `ops may-i` dışında her `ops` satırını
+   reddeder. `pods.` içindeki sondaki nokta çekirdek API grubunun gerçek adıdır;
+   `may-i` grubu tahmin etmek yerine ister: çözemediği bir kelimeyi reddeder,
+   sizin adınıza *hayır* diye yanıtlamaz.
 4. İşlem kabul ediyorsa **sunucu tarafında bir deneme çalıştırması**, yani
    değişiklik yapılmadan önce kümenin kontrol etmesi. Bunu reddeden tek işlem
    `delete`'tir ve bunu hem kendi kutusunda hem denetim günlüğünde söyler.
