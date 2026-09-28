@@ -3221,7 +3221,20 @@ public release.
       band never draws; both fixed in the same turn. **What it did not take**:
       C1's expiring band still has no trailer line while C2 has one, which is
       boxed in Phase 6, not here
-- [ ] **Release v0.0.1 to crates.io** — `k8rs --once`, exactly as
+- [x] **Release v0.0.1 to crates.io — CLOSED AS SUPERSEDED, not done**
+      (2026-09-28). `v0.1.0` is the first real release and shipped instead; both
+      halves of [D10](NOTES.md#d10--m1-ships-publicly-as-v001)'s reason for a
+      v0.0.1 were spent by then — there are no *months before the TUI* once the
+      TUI has closed, and rules frozen at Phase 3 are not *cheap to change*
+      ([D306](NOTES.md#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28)).
+      **Closing it makes Phase 5's own close ritual owed** — the whole ritual and
+      not a diff of it
+      ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22))
+      — which is listed with the rest in § What the v0.1 close still owes, at the
+      end of Phase 13. Everything below is the box as it stood; the routing note
+      it carried at the end is gone with it, and the head note of Phase 13 says
+      what that pair cost.
+      **Release v0.0.1 to crates.io** — `k8rs --once`, exactly as
       [screens/once.md](screens/once.md) draws it — **read as the shape that file
       fixes and not its sample blocks byte for byte**, because four known
       divergences stand and are boxed in Phase 6
@@ -3262,29 +3275,6 @@ public release.
       `exclude` no longer ships `reports/`, `backlog.md`, `PRIOR-ART.md` or
       `.claude/` — measured 145 files / 5.2 MiB before, **90 files / 4.3 MiB**
       after.
-      **This is the first unchecked box in the file and it is not the next one to
-      work.** Nothing here can move until the user runs `cargo publish` and until
-      Phase 13 writes the README. **The next box is the first unchecked one in the
-      lowest open phase below this one — Phase 13 today** (Phase 12 closed
-      2026-09-26, and Phase 11 with it —
-      [D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26)),
-      and that phase's head note says why a
-      later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
-      [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)).
-      **This line names a phase and so it goes stale at every close** — it has now
-      done so five times. The third was caught during Phase 8's own close ritual;
-      the fourth was caught at Phase 9's close, but only in the last check before
-      the context was cleared, *after* the phase-close ritual had already run and
-      the PR had merged. **The fifth was caught by neither** — Phase 10 closed
-      2026-09-06 and both copies still named Phase 10 when the next session
-      opened the file to pick a box, which is the first time this pair has been
-      found by the reader it misdirects rather than by a ritual. **The sixth
-      was moved inside the close that made it stale**, which is where it belongs;
-      the note it pairs with had by then gone unread for five sessions and four
-      closes, which is its own half of
-      [D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26). **The head note above the open phase and this line are two
-      copies of one fact, which is why one of them keeps going stale** — moving
-      both is part of the close ritual, not a thing to notice later
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
 kubeconfig sets `insecure-skip-tls-verify` it is honoured *and surfaced*, not
@@ -4872,22 +4862,19 @@ behaves as specified.
 
 *Also read: [PRIOR-ART § J](PRIOR-ART.md#j-distribution) (every packaging channel is a support queue) and [§ L1](PRIOR-ART.md#l-two-observations-about-the-tracker-itself) (most reports are about the environment — the README answers kubeconfig and RBAC plainly, or the tracker becomes a support desk).*
 
-> **Phase 5's release box is still unchecked, and it is still not next** — it
-> needs the maintainer's crates.io credential and a `README.md` that belongs to
-> Phase 13
-> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
-> It is the first unchecked box in this file, so a cold session lands on it. This
-> note moves forward with whichever phase is open and **has now moved six
-> times** — from Phase 6, Phase 7, Phase 8, Phase 9, Phase 10 and Phase 11, the
-> last of which closed 2026-09-26 alongside Phase 12
-> ([D287](NOTES.md#d287--phase-11s-half-finished-close-is-absorbed-into-phase-12s-because-the-artifacts-it-owed-a-review-on-no-longer-exist-2026-09-26)). Running a later phase over a deliberately open
-> earlier one is
+> **Phase 5's release box closed as superseded on 2026-09-28**
+> ([D306](NOTES.md#d306--v001-is-skipped-because-both-halves-of-the-reason-for-it-are-spent-2026-09-28)),
+> so this file now has exactly one unchecked box and a cold session lands on the
+> right one. The note that stood here — *Phase 5's box is first and it is still
+> not next* — had moved forward six times, Phase 6 through Phase 11, and is gone
+> with the box it pointed at; so is its second copy at the foot of that box, which
+> is the pair that kept going stale. **What it owed outlives it:** Phase 5's close
+> ritual has still never run and runs whole, not as a diff
+> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22) ·
 > [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
-> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
-> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
-> runs whole when that box closes**
-> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
-> The next box is the first unchecked one below.
+> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)),
+> and it is listed with the rest in § What the v0.1 close still owes, at the end
+> of this phase.
 
 > **The five boxes below came out of Phase 12's error-state pass, not out of
 > shipping.** They are here because a box is never added to the phase that is
@@ -5416,6 +5403,38 @@ The README states plainly what k8rs can change in a cluster, what
 **Done when:** a stranger in their first month on the job can download a
 binary, run it against their cluster, understand a finding, and fix it —
 without asking us anything.
+
+### What the v0.1 close still owes
+
+The close ran on 2026-09-28 and did not finish. In order — and nothing here is a
+new box, because a phase close is not a box:
+
+1. **The blocker in [`backlog.md`](backlog.md), *opening a kind in the Resources
+   browser is a dead end on the real binary*** — **fixed, not boxed**, which is
+   what [CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+   step 6 says about a blocker and what did not happen the first time. It reaches
+   `ui.rs` and `views.rs`, both frozen, so a recorded reversal comes before the
+   dispatch. The same entry carries the half the close review added: `?`
+   advertises `l logs`, `d describe` and `y view as YAML` under *always
+   available* on a screen that marks *not built yet* on `s`.
+2. **Close steps 1–5 again over what that fix could have broken** — always the
+   run and the security pass, and the family review too if it touched a shared
+   helper.
+3. **Phase 5's own close ritual**, owed from the moment its release box closed as
+   superseded above.
+4. **Then the rest of this ritual**: the phase's security gate, the whole-phase
+   second pass, `docs/`, the CHANGELOG, and the PR to `main`.
+
+**What is already true and is not re-done.** `just check` green on the test host
+and CI green at `7ce6ea7`; the registry-installed `0.1.0` run against a four-node
+kind cluster both headless (`--once`, `--once --analysis`, exit `0`) and in a PTY,
+where the console draws; the GitHub release verified against its published bytes
+rather than the runner's; the crate verified against crates.io's own API. **What
+stays wrong on purpose** is the registry page, on the maintainer's ruling
+([D309](NOTES.md#d309--the-cratesio-page-keeps-a-readme-that-says-the-crate-is-not-published-and-the-maintainer-will-not-spend-a-version-number-on-it-2026-09-28)).
+
+**A `k8rs` kind cluster is up on the host** as of 2026-09-28 — one cluster at a
+time, so `scripts/cluster.sh reset` it rather than standing a second one up.
 
 ---
 
