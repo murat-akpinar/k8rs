@@ -1,8 +1,10 @@
-## [0.1.0] - 2026-09-28
+## [unreleased]
 
-### 🐛 Bug Fixes
+### 📚 Documentation
 
-- *(ci)* Bound the release body, because GitHub refuses one over 125k ([0caa532](https://github.com/murat-akpinar/k8rs/commit/0caa5328703de16984808e59754d9c46799d7aa6)) — The first real tag found it: gh release create answered HTTP 422, body is too long, ten seconds in. v0.1.0's own changelog section is 143 816 bytes against a 125 000 cap — this repo writes long commit bodies and cliff.toml puts each one in its entry, so every release is over, not just this one.
+- *(docs)* Record where the v0.1.0 release run got to ([5c45709](https://github.com/murat-akpinar/k8rs/commit/5c45709a48ad42c54e20676520418e03853782c6))
+- *(docs)* Record the v0.1.0 GitHub release and what it was verified against ([0e2d335](https://github.com/murat-akpinar/k8rs/commit/0e2d3354725e47c242307a7d1d7869921fb3bdc5))
+- *(docs)* Record the crates.io publish and fix what the close review found ([c84a931](https://github.com/murat-akpinar/k8rs/commit/c84a931c96108294a3ea3abd0b7d397de72f48cc)) — cargo publish --locked put 0.1.0 on the registry, verified against crates.io's own API rather than cargo's Published line. Both READMEs' install line is now cargo install k8rs, and that command was run end to end on the test host against the registry before the line shipped — 7m09s release build, EXIT=0 — after which the installed binary ran against a four-node kind cluster and printed 17 critical and 14 warnings over 66 pods, plus the seven analysis reports.
 ## [0.1.0] - 2026-09-28
 
 ### 🚀 Features
@@ -158,6 +160,7 @@
 - *(ui)* Say when the cluster would not name the kinds it serves ([f96ad16](https://github.com/murat-akpinar/k8rs/commit/f96ad16724d57fda214fc982a5a82e9107ffcac6)) — A kubeconfig refused `get /apis` got a sidebar drawing all five RESOURCES groups over content that could never arrive, and no sentence anywhere — the refusal reached the headless drivers and no console frame.
 - *(k8s)* End a watch that stops delivering instead of reading it as live ([d276790](https://github.com/murat-akpinar/k8rs/commit/d276790e66563b49eaa8c22cb497407aded59937)) — A watch whose socket stays open and drops every byte raised nothing at all. kube's own bound returns None rather than Err, so the watcher re-watched in silence, Store::troubles stayed empty and every predicate over it was right to answer live over a cluster that had stopped arriving.
 - *(main)* Withhold the role errand from a 403 while nothing else answers ([9072188](https://github.com/murat-akpinar/k8rs/commit/9072188457b8fc6e9c01706829970cf6bf38e8e6)) — A kube-apiserver coming back up answers 403 before its authorizers are ready, so the banner told a reader whose Role is fine to go and fix it, under a header saying the cluster was unreachable. Every rolling control plane drew it.
+- *(ci)* Bound the release body, because GitHub refuses one over 125k ([0caa532](https://github.com/murat-akpinar/k8rs/commit/0caa5328703de16984808e59754d9c46799d7aa6)) — The first real tag found it: gh release create answered HTTP 422, body is too long, ten seconds in. v0.1.0's own changelog section is 143 816 bytes against a 125 000 cap — this repo writes long commit bodies and cliff.toml puts each one in its entry, so every release is over, not just this one.
 
 ### 💼 Other
 
