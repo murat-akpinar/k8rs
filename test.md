@@ -16,8 +16,8 @@ becomes a finding, and a finding becomes either a fix or a `backlog.md` line.
 
 | | |
 |---|---|
-| **Run so far** | § A (part) · § B · § C · § D · § E · § F · § G (part) · § H (part) · § M (part) · § N (part) |
-| **Not started** | **§ I** (Analysis, partly seen) · **§ J** (the browser — its fix landed 2026-09-28, so every row is now re-runnable) · **§ K** (the four detail tabs) · **§ L** (keys, footer, `?`) |
+| **Run so far** | § A (part) · § B · § C · § D · § E · § F · § G (part) · § H (part) · **§ K** (two rows of three, 2026-09-28 on the landed tree) · § M (part) · § N (part) |
+| **Not started** | **§ I** (Analysis, partly seen) · **§ J** (the browser — its fix landed 2026-09-28, so every row is now re-runnable) · **§ L** (keys, footer, `?`) |
 | **Findings** | 10, in § Findings at the end. F1/F2/F4 fixed — **F2 took two turns and five renderer arms** ([D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)); F3, F5, F6, F8, F9, F10 are `backlog.md` rulings; F7 judged and closed |
 | **Binary** | `cargo install k8rs` → `0.1.0` on the test host. The working-tree build is what a re-run after a fix uses. **`0.1.0` does not carry D310's fix** — it is tagged at `5dc4b24` and the fix is `1270675`, `git merge-base --is-ancestor` answers no — so every § J row run against the *released* binary is measuring F1 whole, on purpose ([D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)) |
 | **Cluster** | the four-node `k8rs` kind cluster is up. `scripts/cluster.sh reset` to re-break; never stand a second one up |
@@ -26,6 +26,8 @@ becomes a finding, and a finding becomes either a fix or a `backlog.md` line.
 nothing there has been run against it: open a kind, press `esc`, read the footer.
 Then § L, whose one row — *every key the help screen names either works or is marked
 not built yet* — is what F2 existed for and has never been checked as a whole.
+**§ K is closed bar its third row**, which cannot run at all while the logs read is
+unwired and says so in place of a tick.
 
 **What a run costs and where it goes.** Every row is driven on the test host, the
 console rows inside `tmux` (see below), and the result is written back into its own
@@ -468,32 +470,39 @@ see F1 in § Findings. Re-run every row below after that fix lands.
 
 ## K. The console — the detail tabs
 
-- [ ] `l` `d` `y` from a selected object — each says plainly it is not built yet
+- [x] `l` `d` `y` from a selected object — each says plainly it is not built yet
       (F2 in § Findings), and `esc` closes each one.
-      **This row is the measurement [D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)
-      owes and it has never been run.** Before the fix the four panes drew
-      `reading the cluster…` — read off the four `WAITING` draw sites in `ui.rs`,
-      *not* run. Run this row against the working-tree build once the fix lands:
-      the four sentences from `screens/detail.md` § Before any of the four tabs
-      has read anything, `esc` out of each, and **a pane that still says
-      `reading the cluster…` only where a read was actually issued**.
-      **Driven 2026-09-28 by `dev-ui` and the row stays open on purpose.** At
-      80×24 under `tmux` against `kind-k8rs`, `--read-only`: the logs tab drew
-      `not built yet — k8rs cannot fetch this object's logs`, `]` walked to
-      `… cannot describe this object`, `… cannot show this object as YAML`, and an
-      events sentence wrapping onto two rows; **`f follow` and `c container` were
-      on none of the four**, and `esc` returned to Alerts. **It is not ticked
-      because the family has not landed** — `tester` and `k8s-admin` are still
-      reading it, and a review round that changes a sentence would leave a ticked
-      row describing a build nobody ships. Tick it against the landed tree.
-      **And do not carry a count into this row.** D313's first draft said *four of
-      `WAITING`'s six call sites*; two of that six are the definition and a use
-      inside `note()`, and the same grep missed a bare literal on another
-      `Pane::Loading` arm — which turned out to be a real fifth site, so the fix
-      is five renderer arms. Run this row against what the fix did, never against
-      the number that briefed it
-- [ ] `[` `]` move between the four tabs
-- [ ] the container picker has nothing to pick, and says so rather than drawing empty
+      **Run 2026-09-28 on the landed tree, which is the measurement
+      [D313](NOTES.md#d313--the-four-detail-tabs-kept-the-sentence-the-browsers-pane-lost-and-a-user-found-it-before-the-close-did-2026-09-28)
+      owed** — the clean tree at `26556c7`, whose code commit is `e40aa8a`; a debug
+      build on the test host, 80×24 under `tmux` against `kind-k8rs`, `--read-only`.
+      All four sentences drew, exactly as
+      `screens/detail.md` § *Before any of the four tabs has read anything* spells
+      them: `not built yet — k8rs cannot fetch this object's logs` ·
+      `… cannot describe this object` · `… cannot show this object as YAML` ·
+      `… cannot fetch this object's events`, the last one wrapping onto a second
+      row at that width, which is ordinary paragraph wrapping and not a cut.
+      `esc` returned to Alerts **in one press from each of the four**, and the
+      footer read `[ ] tabs  esc back  ? all keys  q quit` on every one — so
+      `f follow` and `c container` are withheld, as that section requires.
+      **`reading the cluster…` only where a read was actually issued**: no tab
+      drew it, and the Alerts pane did — `reading the cluster… 0 pods` under a
+      header still saying `connecting…`, gone by 0.4 s, which is the promise that
+      sentence makes being kept. `ui.rs` spells it once (`:168`) and the only
+      other string literal of it in a product file is `main.rs:9775`'s
+      `reading the cluster… {} pods`, the Alerts paragraph
+- [x] `[` `]` move between the four tabs — same run. `]` from logs walked
+      `describe` → `yaml` → `events`, the `‹ … ›` marker and its underline moving
+      with it; `[` walked back to `yaml`. The object line
+      (`default/broken-rollout-5967d47d5b-rq7p2`) and the pinned finding stayed
+      put across all four
+- [ ] the container picker has nothing to pick, and says so rather than drawing
+      empty. **Cannot be run yet, and that is by design, not an omission**: `c` is
+      withheld while the logs read is unwired (`screens/detail.md` § *Before any
+      of the four tabs has read anything*), so the picker has no way in. Measured
+      rather than reasoned — `c` and `f` on the logs tab both produced a
+      byte-identical frame (`diff` over two `capture-pane` dumps). It runs when a
+      real log stream lands, which is nobody's box
 
 ## L. Keys, footer, help
 

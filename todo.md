@@ -5531,9 +5531,13 @@ new box, because a phase close is not a box:
    **`tester` planted eleven semantic defects `cargo mutants` cannot express; ten
    died and the survivor was the field both reviews had circled** — `stream`
    unpinned for `Pane::Denied`, now asserted. **This item is landed.**
-   **What it still owes is one run, not a dispatch**: `test.md` § K's first row on
-   the **landed tree**. Both dev runs were on their own trees; the row carries their
-   frames and is deliberately unticked until one is taken on what was committed.
+   **That run is taken and this item owes nothing** — `test.md` § K's first row, driven
+   2026-09-28 on the landed tree (`26556c7`, code commit `e40aa8a`; a debug build on the
+   test host, 80×24 under `tmux` against `kind-k8rs`, `--read-only`): all four drew as
+   `screens/detail.md` spells them, `esc` left each in one press, `f follow` and
+   `c container` were withheld on every footer, and no tab said `reading the cluster…`
+   while the Alerts pane did and finished inside 0.4 s. § K's second row ticked on the
+   same frames; its third cannot run while the read is unwired and says so instead.
 2. **No whole mutation sweep is owed, and that is answered rather than assumed.**
    `just mutants` mutates `rules.rs` and `analysis.rs` only, and `git log` over
    those two plus their tests is **empty for this phase** — the last touch to
