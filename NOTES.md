@@ -27436,6 +27436,29 @@ make:
 7. **No `RUSTFLAGS: -D warnings` in this file.** A release that refuses to build
    on a newer lint is a broken release for a non-defect; `ci.yml` is the lint
    gate and it keeps `-D warnings`.
+8. **The release body is bounded where it is assembled, and the first real tag
+   is what found it.** `gh release create` answered
+   `HTTP 422: body is too long (maximum is 125000 characters)` ten seconds into
+   the `v0.1.0` push — the section was **143 816 bytes**, 15% over, because this
+   repo writes long commit bodies and `cliff.toml` puts each one in its entry.
+   So the *normal* path for this repo is the cut one, and it is written first: if
+   the section fits it ships whole, otherwise a footer is written, its own length
+   subtracted from the budget, whole lines kept while they fit, and the footer
+   appended — the body then says it was cut and links to `CHANGELOG.md` at that
+   tag, because a release with a link beats a release with no notes. Bounded in
+   **bytes** with `LC_ALL=C`, deliberately stricter than a cap stated in
+   characters: a body inside 125 000 bytes is inside 125 000 characters whatever
+   the runner's locale, and the cost is cutting slightly early on emoji. The cut
+   lands on an entry boundary for free, because `cliff.toml` writes one entry per
+   line — the body is joined onto the subject with an em dash and its newlines
+   replaced — so no sentence and no URL can be severed. **`sort_commits = "oldest"`
+   means the entries dropped are the newest**, which is the ruling `tester`
+   surfaced rather than took: flipping it would reverse the committed changelog
+   for every reader to change which end of one release's notes is cut, and the
+   footer already makes the drop recoverable, so it stays. Proved both ways
+   against real generator output — the 143 816-byte section cut to 124 488 with
+   every kept line identical and in order, and a 678-byte section passing through
+   byte-identical with no footer and no link.
 
 **What is unexercised, stated rather than implied: the workflow has never run.**
 Every *shell body* inside it was extracted with `yaml.safe_load` — not retyped —

@@ -63,11 +63,39 @@ jobs:
       # **with the tag** before the tag was pushed. `git cliff -o CHANGELOG.md`
       # alone writes `## [unreleased]`, because at that moment the tag does not
       # exist yet; the failure below names the command that does not.
+      #
+      # **The body is bounded here and never at the API.** GitHub refuses a
+      # release body over 125 000 characters with an `HTTP 422: body is too
+      # long`, and v0.1.0's own section was 143 816 — this repo writes long
+      # commit bodies and `cliff.toml` puts each one in its entry, so the first
+      # release was 15% over on day one and later ones will be too. A 422 ten
+      # seconds into a tag push is a failure the reader has to decode; a
+      # measured cut with a link is one they can act on.
+      #
+      # **Bytes, not characters, and deliberately stricter than the rule.** The
+      # cap is stated in characters; in UTF-8 a character is one byte or more,
+      # so a body inside 125 000 *bytes* is always inside 125 000 characters —
+      # and `LC_ALL=C` makes awk's `length()` mean bytes on every runner rather
+      # than depending on its locale. The cost is a slightly earlier cut on a
+      # section full of emoji. The gain is that this cannot be wrong.
+      #
+      # **The cut lands on an entry boundary because `cliff.toml` writes one
+      # entry per line** — the commit body is joined onto the subject with an
+      # em dash, newlines replaced by spaces — so keeping whole lines keeps
+      # whole entries, and no URL is ever severed. `sort_commits = "oldest"`
+      # means the entries dropped are the newest ones; the footer is what makes
+      # that recoverable, and moving the cut to the other end is a `cliff.toml`
+      # change and not this file's.
       - name: the release notes, cut out of the committed CHANGELOG
         env:
           TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
         run: |
           set -euo pipefail
+          # GitHub's documented ceiling for a release body, in characters.
+          LIMIT=125000
+
           awk -v want="## [${TAG#v}]" '
             index($0, want) == 1 { found = 1; next }
             found && /^## \[/    { exit }
@@ -84,7 +112,31 @@ jobs:
             echo "    git tag ${TAG} && git push origin ${TAG}" >&2
             exit 1
           fi
-          echo "release notes: $(wc -l < notes.md) line(s) for ${TAG}"
+
+          size=$(wc -c < notes.md)
+          if [ "$size" -le "$LIMIT" ]; then
+            echo "release notes: $(wc -l < notes.md) line(s), ${size} bytes for ${TAG} — whole"
+            exit 0
+          fi
+
+          # Written first, because its own length comes out of the budget.
+          {
+            echo
+            echo "---"
+            echo
+            echo "**This list was too long for a GitHub release and has been cut.**"
+            echo "The complete changelog for ${TAG} is in the repository, at this tag:"
+            echo
+            echo "${SERVER}/${REPO}/blob/${TAG}/CHANGELOG.md"
+          } > footer.md
+          budget=$(( LIMIT - $(wc -c < footer.md) ))
+
+          LC_ALL=C awk -v b="$budget" '{ n += length($0) + 1; if (n > b) exit } 1' \
+            notes.md > cut.md
+          cat footer.md >> cut.md
+          mv cut.md notes.md
+          echo "release notes: ${size} bytes is over the ${LIMIT} limit, so ${TAG} keeps" \
+               "$(wc -l < notes.md) line(s) / $(wc -c < notes.md) bytes and links to the full changelog"
 
       # **A draft, so nothing is visible until every binary and the checksums
       # are on it.** A matrix row that fails leaves an unlisted draft rather
