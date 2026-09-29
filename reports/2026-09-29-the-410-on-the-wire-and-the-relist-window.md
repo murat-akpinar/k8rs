@@ -298,3 +298,200 @@ $ grep -n "\.said()" src/main.rs
 `format!("nothing usable came back when k8rs tried to {asked}")`). The server's own message
 for the LIST case is the M3 body — *"The provided continue parameter is too old to display a
 consistent list result. You can start a new list without the continue parameter, …"*
+
+---
+
+# Round three — the trailer line (`unverified`, D314's reader)
+
+Same run, appended. Nothing was run on the test host and no cluster was created; these are
+reads of the local tree at `M src/main.rs` / `M src/main_tests.rs` over `467e683`.
+
+## M18 — the trailer stack, code order against the page
+
+`render()` (`main.rs:855-931`), in call order:
+
+| Slot | Call | Gate |
+|---|---|---|
+| 1 | `clock(input.skew)` | `Some` skew past the threshold |
+| 2 | `serving_certificate(input.serving_expiry, now)` | `Some` expiry within `CERT_EXPIRY_WARN`; **two arms**, `left < 0` and `left >= 0` |
+| 3 | `login_certificate(...)` | `!drawn_as_a_row(..)` and the band |
+| 4 | `unverified(input.insecure)` | `input.insecure` |
+| 5 | `check_switched_off(namespace_scope)` | a namespace scope |
+
+`screens/once.md` § Stacked with the other trailer lines: *"clock, then C2, then C1, then the
+connection-unverified line, then the check-that-could-not-run line."* Same order.
+`spaced`'s doc reads `the five trailer lines`; the comment at `:860-864` names all five in
+order. Both match.
+
+## M19 — can C2's **expired** arm and `unverified` share a run?
+
+Three code facts, each read at its own site:
+
+1. `serving_certificate`'s expired arm is a **report** line, not a wall
+   (`main.rs`, `if left < SignedDuration::ZERO { return Some(format!("… expired {} ago …")) }`),
+   printed from slot 2 of the stack above.
+2. `k8s::Serving`'s own doc: *"**The date is no longer what separates this from `Until` — a
+   completed handshake is.** `Until` is proof some replica behind this address serves a
+   certificate a verifying client accepts"*, and `Expired` is *"The `notAfter` rustls **refused**
+   a sample over … a verifying kubeconfig never receives the bytes"*
+   (`k8s.rs:8907-8924`). So a handshake that **completes** over an already-expired certificate
+   yields `Serving::Until(<past timestamp>)`, not `Serving::Expired`.
+3. `certificate_is_why` — the wall — has **two** gates:
+
+```rust
+let k8s::Serving::Expired(at) = session.serving_expiry else { return None; };
+let unanswered = |fault: Option<k8s::Fault>| fault == Some(k8s::Fault::Unanswered);
+(unanswered(session.version.as_ref().err().map(k8s::fault))
+    && unanswered(session.served.as_ref().err().map(k8s::fault)))
+.then(|| …)
+```
+
+and `trust_only` copies the knob into the probe:
+
+```rust
+probe.accept_invalid_certs = config.accept_invalid_certs;
+```
+
+The matrix that follows, per `--once` run:
+
+| Knob | Server certificate | `serving_expiry` | `certificate_is_why` | What prints |
+|---|---|---|---|---|
+| on | already expired | `Until(past)` | `None` — not `Expired` | **report: C2 expired arm *and* `unverified`** |
+| off | already expired | `Expired(at)` | `Some` — version and served both `Unanswered` | wall, exit 2, no report |
+| off | expired on one replica behind a LB, session reads fine | `Expired(at)` | `None` — version and served succeeded | report: C2 expired arm, no `unverified` |
+| on | expiring, not expired | `Until(future)` | `None` | report: C2 expiring arm *and* `unverified` |
+
+`screens/once.md` § When the connection was never verified: *"The two sentences can never share
+a run for exactly that reason: this one only ever prints when the setting is true, and that wall
+is only ever reached when it is false."* And § Stacked: *"the expired-and-typed reading for C2 …
+do not join it, because when either fires there is no report for it to join."*
+
+The two sentences that co-occur in row 1, adjacent in the stack:
+
+```
+A certificate the API server presented — not your kubeconfig's — expired 12 days ago (was valid
+until T). When that happens, kubectl and everything else stop being able to reach a cluster until
+someone on the control plane renews its certificate — not something k8rs can do.
+
+k8rs never checked that the server on the other end of this connection is really this cluster —
+your kubeconfig sets `insecure-skip-tls-verify: true`, and `kubectl` would skip the same check
+with it. Everything above came back over that unchecked connection. …
+```
+
+Not measured against a live server: no cluster here serves an expired certificate. What would
+settle it is a kubeconfig with the knob on pointing at an apiserver past its `notAfter` — on kind,
+by rewinding the control-plane container's clock past the cert's expiry, or by re-signing the
+apiserver cert with a past `notAfter`. Both are cluster writes and are the PM's.
+
+## M20 — an RBAC refusal on pods is a wall, not a report
+
+```rust
+if let Some(why) = pods_unread(&store.troubles(), &coverage, at.renewal) {
+    ending = Some(why);
+    done = true;
+    stop.abort();
+    return;
+}
+if let Some(report) = live_report(store, now, &mut last, analysis, &at) {
+```
+
+`main.rs:3953-3958`, ahead of `live_report`, so `render()` and slot 4 are never reached.
+`pods_unread` fires on `trouble.kind == ObjectKind::Pod && !trouble.listed`, which is what a
+`Fault::Refused` watch leaves (`Watch::settled`). Its text asserts a fact about a named cluster
+and ends in an errand to a human:
+
+```
+  What k8rs asked for: pods <scope>
+  What happened: <because(Refused, "`list` and `watch` pods", …)>
+
+  Ask whoever runs this cluster for a role that may read pods in every namespace …
+```
+
+## M21 — is there any surface that claims a connection **was** verified?
+
+```
+$ grep -rn '"[^"]*verified' src/main.rs src/views.rs src/ui.rs
+src/ui.rs:1317:    format!("{} TLS not verified", mark(theme::ALARM))
+```
+
+One string, printed only when the flag is true. `unverified(false)` returns `None`. No surface
+prints a positive verification claim, so `insecure: false` produces silence.
+
+---
+
+# Round four — the clause, and the page's corrected disambiguation
+
+Same run, appended. Reads of the local tree only; no cluster, no host. Nothing here serves an
+expired certificate, so the pair itself is still unmeasured against a binary (see M25).
+
+## M22 — the clause, and where its two copies live
+
+```
+$ grep -rn "THE_WALL_CLAUSE\|connects to it the normal way" src/
+src/main.rs:1200:             connects to it the normal way stop being able to reach a cluster until someone on \
+src/main_tests.rs:5542:                       kubectl and everything else that connects to it the normal way stop being \
+src/main_tests.rs:5550:const THE_WALL_CLAUSE: &str = "connects to it the normal way";
+src/main_tests.rs:6603:        EXPIRED.contains(THE_WALL_CLAUSE),
+src/main_tests.rs:6617:        wall.contains(THE_WALL_CLAUSE),
+src/main_tests.rs:6634:        !EXPIRING.contains(THE_WALL_CLAUSE),
+```
+
+The const is in the **test** tree. The product holds two literal copies of the clause — one in
+`serving_certificate` (`main.rs:1200`) and one in `certificate_is_why`'s wall, pre-existing. The
+three assertions are what couples them; the wall comparison flattens whitespace first, because the
+wall is wrapped for a terminal block and the trailer is not.
+
+## M23 — the corrected disambiguation, clause by clause against the code
+
+| The page now says | Code | |
+|---|---|---|
+| with the setting **off**, an expired certificate refuses every sample's handshake, **and a session whose own two calls fail the same way** lands in the wall | `certificate_is_why` needs `Serving::Expired` **and** `version`/`served` both `Fault::Unanswered` | ✓ — this is the second gate the old passage omitted |
+| this line can never join the wall — a run with no report has nothing to print into | the wall `return`s from `live()` before `render()` | ✓ |
+| with the setting **on** the same certificate refuses nothing, so C2's expired **trailer** prints in the report this line prints in | `Serving::Until` is *"the soonest `notAfter` any sample read, over a handshake that **completed**"*; `Expired` is *"the `notAfter` rustls **refused** a sample over … a verifying kubeconfig never receives the bytes"* (`k8s.rs:8907-8924`). Knob on ⇒ completed ⇒ `Until(past)` ⇒ `left < 0` ⇒ expired arm | ✓ |
+| this line and C2's expired **wall** can never share a run | the wall needs `Serving::Expired`, which needs a rustls refusal, which needs verification on, i.e. the knob off | ✓ |
+| this line and C2's expired **trailer**, whenever the certificate warrants it, always do | scoped by the preceding *"With the setting on"*; the converse is not claimed, and § *A clean tally* now documents the knob-off HA path | ✓ |
+| § *Stacked*: C2's expired **trailer** is not the wall and takes a slot in the order | slot 2 of `render()` | ✓ — the old *"expired-and-typed reading"* ambiguity is gone |
+
+## M24 — the four cells of § *A clean tally*'s discriminator
+
+The page's closing sentence there: *"§ When the connection was never verified is the trailer line
+that tells this reader which one they are looking at."* Enumerated against `Serving::Until`'s
+own *soonest sample* rule:
+
+| Knob | Topology | `serving_expiry` | `unverified` line | Report |
+|---|---|---|---|---|
+| on | single server, expired | `Until(past)` | present | expired arm + unverified |
+| off | HA, one replica expired | `Expired(at)`, session calls succeed | absent | expired arm only |
+| **on** | **HA, one replica expired** | `Until(past)` — soonest sample | **present** | expired arm + unverified |
+| off | single server, expired | `Expired(at)`, both calls fail | — | wall, exit 2 |
+
+Row 3 has the line present and the HA cause.
+
+## M25 — the trailer/caveat join on the live `--analysis` path
+
+```rust
+let mut block = render(&findings, &input);
+if analysis {
+    block.push('\n');
+```
+
+`main.rs:2754-2756`. `render()` returns `lines.join("\n")` with no trailing newline and `spaced`
+puts a blank line *above* each block, so one `'\n'` here puts the `lists_were_read` caveat on the
+line immediately below the last trailer line, where every other block boundary on the page is
+`\n\n`. The line is not in this turn's diff.
+
+## M26 — the mockup's line count, before and after the clause
+
+`screens/once.md`'s two expired-certificate blocks, wrapped:
+
+```
+before: happens, kubectl and everything else stop being able to reach a
+        cluster until someone on the control plane renews its certificate —
+        not something k8rs can do.
+
+after:  happens, kubectl and everything else that connects to it the normal
+        way stop being able to reach a cluster until someone on the control
+        plane renews its certificate — not something k8rs can do.
+```
+
+Three lines both times, so the 80×24 budget every mockup on that page is held to is unmoved.

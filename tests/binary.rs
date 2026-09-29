@@ -1556,6 +1556,130 @@ fn analysis_under_once_reaches_stdout_and_plain_once_draws_no_panes() {
     }
 }
 
+/// The opening clause of the sentence `screens/once.md` § When the connection was never verified
+/// draws. **Deliberately not the whole paragraph**: `src/main_tests.rs`'s `UNVERIFIED` owns the
+/// byte-for-byte pin, and a second copy of four hundred characters here is a second thing to keep
+/// in step (NOTES § D103). A helper cannot cross from `tests/` into a private `mod tests`, so what
+/// is duplicated is kept to the shortest span that cannot match anything else.
+const NEVER_CHECKED: &str = "k8rs never checked that the server on the other end of this \
+                             connection is really this cluster";
+
+/// **Ruling 2 of `screens/once.md` § When the connection was never verified — *no report, no
+/// line* — and it is the half `src/main_tests.rs` cannot reach** (NOTES § D314).
+///
+/// That module compares the wall a lax kubeconfig produces against the wall a verified one
+/// produces, which pins the *words*. The ruling is about the process, and the two facts it turns
+/// on are only observable from here: a reader who pipes this run to a file gets an **empty file**
+/// and a **non-zero code**, not a warning dressed as a report.
+///
+/// **The knob is on in both halves, and that is the claim rather than the setup.** k8rs reads
+/// `insecure-skip-tls-verify` off the `Config` before a single request goes out
+/// (`k8s::connect_with`), so the walled run below *holds* the fact and withholds it. Turning the
+/// knob off for that half would leave it asserting nothing.
+///
+/// **The report half is the canary and not decoration** (CLAUDE.md § A derived list asserts it
+/// found something): `!contains` over a needle that had gone stale passes over every stream there
+/// is. So [`NEVER_CHECKED`] is first proven to be a sentence this binary really prints, over the
+/// same listener the tests above use, with the knob spliced into the kubeconfig pointing at it.
+/// That splice is asserted to have changed something, or the canary tests the wrong cluster.
+///
+/// **The dead address is the kernel's and never a literal**, which `scripts/security-guard.py`
+/// § no second outbound path requires of a URL under `tests/` — and the listener is dropped before
+/// the run, so the refusal is the kernel's and no handshake is invented (NOTES § D29). A port
+/// taken by something else between the drop and the dial fails this test loudly rather than
+/// passing it quietly, which is the right way round.
+///
+/// **Neither stub carries a credential** (`user: {}`), so there is nothing here to hold at mode
+/// 0600; both are removed before every assertion over a run, which is this region's own
+/// convention. The `assert_ne!` on the splice is the one exit above them, and it runs before the
+/// second file exists.
+#[test]
+fn an_unverified_connection_that_never_reported_is_exit_2_with_nothing_on_stdout() {
+    // **The canary.** The listener this starts is what the spliced kubeconfig then points at, so
+    // the file is rewritten in place rather than copied beside itself.
+    let stub = a_cluster_that_answers_with_nothing_in_it(Watches::HeldOpen);
+    let verified = std::fs::read_to_string(&stub).expect("the stub kubeconfig reads back");
+    let laxed = verified.replace("'}}]", "', insecure-skip-tls-verify: true}}]");
+    assert_ne!(
+        laxed, verified,
+        "the stub's cluster block is not the shape this splice expects, so the knob went nowhere \
+         and the canary below would describe a verified connection: {verified:?}"
+    );
+    std::fs::write(&stub, &laxed).expect("the knob is spliced into the stub kubeconfig");
+
+    let reported = k8rs_over_a_stub(&stub, &["--once"]);
+
+    // **The ruling.** The same setting, pointed at a port with nothing on it.
+    let dead = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        listener.local_addr().expect("the port it picked")
+        // Dropped here, so nothing is listening on it when the run below dials.
+    };
+    let nowhere = std::env::temp_dir().join(format!(
+        "k8rs-lax-dead-{}-{}.kubeconfig.yaml",
+        std::process::id(),
+        dead.port()
+    ));
+    std::fs::write(
+        &nowhere,
+        format!(
+            "apiVersion: v1\nkind: Config\ncurrent-context: lax\n\
+             clusters: [{{name: lax, cluster: {{server: 'https://{dead}', \
+             insecure-skip-tls-verify: true}}}}]\n\
+             contexts: [{{name: lax, context: {{cluster: lax, user: lax}}}}]\n\
+             users: [{{name: lax, user: {{}}}}]\n"
+        ),
+    )
+    .expect("the lax kubeconfig writes");
+
+    let out = k8rs_over_a_stub(&nowhere, &["--once"]);
+
+    std::fs::remove_file(&stub).expect("the stub kubeconfig is removed");
+    std::fs::remove_file(&nowhere).expect("the lax kubeconfig is removed");
+
+    // Read after both files are gone, so no assertion over a run can leave one behind.
+    let report = text(reported.stdout);
+    assert_eq!(
+        reported.status.code(),
+        Some(0),
+        "{:?}",
+        text(reported.stderr)
+    );
+    assert!(
+        report.contains(NEVER_CHECKED),
+        "a run that connected with the knob on printed no unverified-connection sentence, so the \
+         needle the wall half looks for matches nothing and that half asserts nothing: {report:?}"
+    );
+
+    let stdout = text(out.stdout);
+    let stderr = text(out.stderr);
+    println!(
+        "walled: exit {:?} · stdout {} bytes · stderr {} bytes",
+        out.status.code(),
+        stdout.len(),
+        stderr.len()
+    );
+    println!("{stderr}");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a run that never reached a cluster exited as if it had reported one: {stderr:?}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "`k8rs --once > cluster-report.txt` over a run with nothing to report left {} bytes in the \
+         file: {stdout:?}",
+        stdout.len()
+    );
+    for (stream, said) in [("stdout", &stdout), ("stderr", &stderr)] {
+        assert!(
+            !said.contains(NEVER_CHECKED),
+            "the wall grew the report's unverified-connection sentence on {stream}, over a run \
+             that asserted nothing about the cluster for a reader to mistake as verified: {said:?}"
+        );
+    }
+}
+
 // --- ONE REPORT AND OUT END ---
 
 // --- ONE OBJECT'S LOG START ---

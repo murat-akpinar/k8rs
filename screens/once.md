@@ -398,9 +398,9 @@ $ k8rs --once
 
 A certificate the API server presented — not your kubeconfig's —
 expired 3 days ago (was valid until 2026-08-25T00:00:00Z). When that
-happens, kubectl and everything else stop being able to reach a
-cluster until someone on the control plane renews its certificate —
-not something k8rs can do.
+happens, kubectl and everything else that connects to it the normal
+way stop being able to reach a cluster until someone on the control
+plane renews its certificate — not something k8rs can do.
 ```
 
 **Two different situations reach this sentence, and only one needs
@@ -429,6 +429,19 @@ tense stays timeless for the same reason as every other reading here —
 § the certificate rules) — a claim about clients that check, not about
 whichever connection this run happened to make.
 
+**The sentence itself carries the fix the first situation needs: `that
+connects to it the normal way`.** A reader there has just turned
+verification off in their own kubeconfig, so their own tools plainly did
+reach this cluster — the sentence cannot claim otherwise about them
+without contradicting the report they are holding. It says so directly
+rather than leaving the reader to work it out, reusing rather than
+inventing: the same clause [§ When the certificate is why nothing came
+back](#when-the-certificate-is-why-nothing-came-back)'s own wall already
+carries — *"kubectl and anything else that connects to it the normal way
+is refused too"*. The second situation needed no such rescue: its own
+article — *a* cluster, not *this* cluster — already keeps the claim
+narrower than the reader's own successful connection.
+
 ```
 $ k8rs --once
 84 pods · 3 nodes
@@ -437,16 +450,27 @@ $ k8rs --once
 
 A certificate the API server presented — not your kubeconfig's —
 expired 3 days ago (was valid until 2026-08-25T00:00:00Z). When that
-happens, kubectl and everything else stop being able to reach a
-cluster until someone on the control plane renews its certificate —
-not something k8rs can do.
+happens, kubectl and everything else that connects to it the normal
+way stop being able to reach a cluster until someone on the control
+plane renews its certificate — not something k8rs can do.
 ```
 
-**A clean tally does not mean every replica is current.** The other
-control-plane replicas are still carrying this cluster's traffic while
-this one waits on a renewal nobody has done yet — worth saying before a
-second replica also runs out and the balancer has nowhere healthy left
-to route around it.
+**A clean tally does not mean every replica is current — and it does
+not always mean there is more than one.** The other control-plane
+replicas are still carrying this cluster's traffic while this one waits
+on a renewal nobody has done yet — worth saying before a second replica
+also runs out and the balancer has nowhere healthy left to route around
+it. The same clean tally reaches this sentence just as easily behind a
+single server: `insecure-skip-tls-verify: true` lets an already-expired
+certificate through the handshake with nothing else in the way, so a
+one-node cluster with nothing else wrong prints this exact page too — no
+load balancer, no second replica, nothing to route around.
+[§ When the connection was never
+verified](#when-the-connection-was-never-verified) is what tells this
+reader whether the handshake was checked at all — which is what makes
+the single-server cause possible. It does not rule the load-balanced
+one out: the setting and the topology are independent, and a cluster
+can have both.
 
 **The same discipline picks the article, not only the verb.** This sentence
 says kubectl and everything else "stop being able to reach *a* cluster" —
@@ -790,20 +814,26 @@ reached stderr would never make it into that file at all
 **Not to be confused with the enabling condition named two sections up.**
 [§ When the API server's own certificate is running
 out](#when-the-api-servers-own-certificate-is-running-out) also reads
-`insecure-skip-tls-verify`, but only as the reason C2's *expired* reading
-is reachable at all: with the setting **off**, that same expired
-certificate fails the handshake outright and the run lands in
+`insecure-skip-tls-verify`, but the split is not *this prints when the
+setting is true, that prints when it is false* — that split belongs to
+the **wall**, not to this trailer line's sibling. With the setting
+**off**, an already-expired certificate refuses every sample's handshake
+outright, and a session whose own two calls fail the same way lands in
 [§ When the certificate is why nothing came
 back](#when-the-certificate-is-why-nothing-came-back) instead — a wall,
-not a report. That passage is about what C2 can read; this one is about
-telling the reader the setting is **on**, whether or not any certificate
-this run saw happens to be expiring at all. The two sentences can never
-share a run for exactly that reason: this one only ever prints when the
-setting is true, and that wall is only ever reached when it is false.
-They are *not* exclusive of C2's own **expiring** band — an
-expiring-but-not-yet-expired server certificate and an unverified
-connection are two independent facts about the same run, and both
-trailer lines print together when both are true.
+not a report, and this line can never join it: a run with no report has
+nothing here for it to print into. **With the setting on, the same
+certificate refuses nothing** — the handshake completes anyway, so C2's
+*expired* trailer prints inside the very report this line also prints
+in, on every run where the certificate this run saw really is already
+past its date. So the split that holds is not *this line or C2's
+trailer*, it is *this line or C2's wall*: this line and C2's expired
+wall can never share a run; this line and C2's expired trailer, whenever
+the certificate warrants it, always do. They stay independent of C2's
+own **expiring** band — an expiring-but-not-yet-expired server
+certificate and an unverified connection are two separate facts about
+the same run, and both trailer lines print together whenever both are
+true, without either causing the other.
 
 **No card, no severity band, no tally entry, and no analysis-pane row.**
 This fact is not a certificate or an expiry, so `--analysis` does not
@@ -854,12 +884,20 @@ urgency instead of arrival would mean weighing a certificate the cluster
 answers against one the reader's own laptop holds, which no rule on this
 page has ever had to do for two cards, let alone two trailer lines, and
 this box does not start now. This
-ordering is for the readings that print *inside* a report — the
-expired-and-typed reading for C2, and the connection-refused wall C1's
-expired band routinely produces instead of a report, do not join it,
-because when either fires there is no report for it to join. The
-connection-unverified line follows the same rule, and its own wall
-besides — see [§ When the connection was never
+ordering is for the readings that print *inside* a report. C2's own
+**wall** — the typed reading
+[§ When the certificate is why nothing came
+back](#when-the-certificate-is-why-nothing-came-back) prints in a
+report's place — and the connection-refused wall C1's expired band
+routinely produces instead of a report do not join it, because when
+either fires there is no report for it to join. **C2's expired
+*trailer* is not this wall**: it is the reading drawn in
+[§ When the API server's own certificate is running
+out](#when-the-api-servers-own-certificate-is-running-out), and it
+prints inside a report like every other line in this list, which is why
+it takes a slot in the order at all. The connection-unverified line
+follows the same wall-versus-trailer rule for its own wall besides —
+see [§ When the connection was never
 verified](#when-the-connection-was-never-verified).
 
 **The worked example below is the one this file had before this fact

@@ -4217,8 +4217,10 @@ fn saying(
         skew: None,
         serving_expiry: k8s::Serving::Unread,
         // The startup line is the cluster's answers; the unverified-connection sentence is
-        // stdout's, beside the findings, and `k8s_tests.rs` § CONNECTING is where the field is
-        // proven to travel (NOTES § D314).
+        // stdout's, beside the findings ([`UNVERIFIED`], NOTES § D314). `k8s_tests.rs`
+        // § CONNECTING proves the field is read off the kubeconfig;
+        // [`the_three_shapes_a_kubeconfig_writes_the_knob_in_reach_the_report`] proves it reaches
+        // a report from there.
         insecure: false,
     }
 }
@@ -5526,11 +5528,26 @@ const EXPIRING: &str = "A certificate the API server presented — not your kube
 /// **It says *a* cluster and not *this* one, and that is the article doing the work.** This report
 /// reached the reader, so this cluster was plainly reachable a moment ago; a sentence naming it
 /// beside a claim that it cannot be reached would contradict the page it is printed on.
+///
+/// **And `that connects to it the normal way`, which the article alone could not save**
+/// (`k8s-admin`'s blocker of 2026-09-29, and the page's own correction). The most ordinary way to
+/// reach this arm at all is a kubeconfig that sets `insecure-skip-tls-verify: true` — which is
+/// exactly the run that also prints [`UNVERIFIED`] lower in the same trailer, *everything above
+/// came back over that unchecked connection*. Without the clause the two could not both be
+/// obeyed, and the report above them proved the second one right. The words are the wall's own,
+/// reused rather than a second wording for one fact — [`THE_WALL_CLAUSE`] is what holds the two
+/// equal.
 const EXPIRED: &str = "A certificate the API server presented — not your kubeconfig's — expired \
                        14 days ago (was valid until 2026-08-09T00:00:00Z). When that happens, \
-                       kubectl and everything else stop being able to reach a cluster until \
-                       someone on the control plane renews its certificate — not something k8rs \
-                       can do.";
+                       kubectl and everything else that connects to it the normal way stop being \
+                       able to reach a cluster until someone on the control plane renews its \
+                       certificate — not something k8rs can do.";
+
+/// **The clause [`EXPIRED`] borrows, spelled once** — `certificate_is_why`'s wall has shipped it
+/// since C2 landed, and the trailer line now carries the same words rather than a paraphrase of
+/// them. A test asserts both sentences contain this, so the two cannot drift into two wordings for
+/// one fact (NOTES § D103).
+const THE_WALL_CLAUSE: &str = "connects to it the normal way";
 
 /// **A real certificate's DER goes in and C1's own answer comes back** — the positive
 /// [`k8s::expiry_of`] cannot have in `k8s_tests.rs`, because reading these bytes puts a file under
@@ -5867,6 +5884,11 @@ fn a_health_claim_is_never_made_over_a_watch_that_could_not_be_read() {
     );
 }
 
+/// The sentence a scoped run gets, as `screens/once.md` draws it — **absolutely last of the
+/// trailer**, which is why three tests in this file assert something that ends on it.
+const OFF: &str = "One node check is off: spotting a node someone started emptying and did not \
+                   finish needs every pod in the cluster.";
+
 /// **A check that is switched off and says nothing looks exactly like a check that passed**
 /// (`screens/once.md` § When a check could not run, `screens/states.md`
 /// § You can only see some namespaces).
@@ -5880,9 +5902,6 @@ fn a_health_claim_is_never_made_over_a_watch_that_could_not_be_read() {
 /// comment has reserved for it since before this file could draw it.
 #[test]
 fn a_namespace_scope_says_which_node_check_is_off_and_says_it_last() {
-    const OFF: &str = "One node check is off: spotting a node someone started emptying and did \
-                       not finish needs every pod in the cluster.";
-
     let mut input = read(&["oom.json"]);
     assert_eq!(
         check_switched_off(None),
@@ -6145,11 +6164,10 @@ fn the_last_day_of_a_login_is_words_and_not_a_zero() {
 
 /// **A default run puts one trailer line on the report, in the order `screens/once.md` fixes** —
 /// clock, then the certificate the *cluster* presented, then this, then the check that could not
-/// run.
+/// run. **The fifth line is missing from that list because this run verified**: an unverified
+/// connection joins between this one and the last ([`UNVERIFIED`]), which is its own test.
 #[test]
-fn the_login_line_is_last_but_one_in_the_trailer_and_is_no_card() {
-    const OFF: &str = "One node check is off: spotting a node someone started emptying and did \
-                       not finish needs every pod in the cluster.";
+fn the_login_line_is_third_in_the_trailer_and_is_no_card() {
     let mut input = read(&["oom.json"]);
     input.snapshot.client_certificate = Some(certificate("expiring-client"));
 
@@ -6324,6 +6342,356 @@ fn the_trailer_is_muted_only_where_the_pane_really_draws_the_row() {
             "{row}: the same fact printed twice in two shapes on one page"
         );
     }
+}
+
+// --- THE UNVERIFIED CONNECTION LINE ---
+//
+// **The fourth trailer fact, and the only one with no threshold** (`screens/once.md` § When the
+// connection was never verified, NOTES § D314). A certificate can be *close to* running out; a
+// connection cannot be close to unverified — the kubeconfig either turns the check off or it does
+// not — so this line prints on every run that connects with the setting on and on none that does
+// not.
+//
+// **It is the row Phase 5's security gate has never met on this surface.** *Honoured **and
+// surfaced*** was true in the console's header and false in the report, so a
+// `k8rs --once --analysis > cluster-report.txt` pasted into a ticket claimed a cluster's health
+// over a connection nothing had checked, with nothing on the page saying so.
+//
+// **The sentence is written out as a literal**, for [`BEHIND`]'s, [`EXPIRING`]'s and
+// [`LOGIN_EXPIRING`]'s reason: a test that composes the string the way the product does passes for
+// any wording, the wrong one included.
+
+/// The sentence a connection nothing verified gets, as `screens/once.md` draws it.
+const UNVERIFIED: &str = "k8rs never checked that the server on the other end of this connection \
+                          is really this cluster — your kubeconfig sets \
+                          `insecure-skip-tls-verify: true`, and `kubectl` would skip the same \
+                          check with it. Everything above came back over that unchecked \
+                          connection. If that was not deliberate, ask whoever gave you this \
+                          kubeconfig why the check is off — it is not something k8rs can turn \
+                          back on for you.";
+
+/// **The sentence `screens/once.md` draws, byte for byte, and nothing at all on the run that
+/// verified.**
+#[test]
+fn a_connection_nothing_verified_gets_the_sentence_screens_once_draws() {
+    let drawn = unverified(true).expect("the kubeconfig turns the check off");
+    println!("{drawn}");
+    assert_eq!(
+        drawn, UNVERIFIED,
+        "the trailer is not the sentence `screens/once.md` § When the connection was never \
+         verified draws"
+    );
+    // **The negative, and it is the common case**: an ordinary cluster verifies, and a warning
+    // printed on every cluster there is is printed on none of them.
+    assert_eq!(
+        unverified(false),
+        None,
+        "a verified connection was told nothing checked it, which is a warning with nothing \
+         behind it on every ordinary cluster"
+    );
+    // **No `⚠` and no band is asserted where it can fail, which is not here.** The equality above
+    // is byte for byte against the page's own sentence, so a glyph check beside it cannot fail
+    // unless that assertion already has — the second pass's own finding on this test. Where a
+    // symbol could really be prefixed is the report, and
+    // [`the_unverified_line_is_fourth_in_the_trailer_and_is_no_card`] is what checks it there.
+}
+
+/// **The trailer slot is C1's own line, then this, then the check that could not run** — the order
+/// `screens/once.md` § Stacked with the other trailer lines fixes, asserted as the whole
+/// five-line stack so that a later edit cannot reorder it and stay green.
+#[test]
+fn the_unverified_line_is_fourth_in_the_trailer_and_is_no_card() {
+    let mut input = read(&["oom.json"]);
+    input.insecure = true;
+
+    let alone = render(&[], &input);
+    println!("{alone}");
+    assert!(
+        alone.ends_with(UNVERIFIED),
+        "a run whose only trailer fact is an unverified connection did not print it: {alone}"
+    );
+
+    // Every other trailer fact switched on as well, so all five stack and the order is the claim.
+    input.skew = Some(SignedDuration::from_mins(-11));
+    input.serving_expiry = k8s::expiry_of(&der("expiring-client"));
+    input.snapshot.client_certificate = Some(certificate("expiring-client"));
+    input.snapshot.namespace_scope = Some("payments".to_string());
+    let stacked = render(&[], &input);
+    println!("{stacked}");
+    assert!(
+        stacked.ends_with(&format!(
+            "{BEHIND}\n\n{EXPIRING}\n\n{LOGIN_EXPIRING}\n\n{UNVERIFIED}\n\n{OFF}"
+        )),
+        "the trailer is not clock, the cluster's certificate, this login, the unverified \
+         connection, then the check that could not run: {stacked}"
+    );
+    assert_eq!(
+        stacked.matches("k8rs never checked").count(),
+        1,
+        "one connection is one sentence: {stacked}"
+    );
+
+    // **No card, no band, no tally entry** — the reasons C2's and C1's own lines already state.
+    let counted = render(
+        &[finding(Severity::Critical, pod_id("payments", "web-0"))],
+        &input,
+    );
+    assert!(
+        counted.contains("\n1 critical\n"),
+        "the tally counted the unverified line: {counted}"
+    );
+    // **No band asserted here either, for the reason the sentence test already states.** A `● `
+    // prefix on this line dies to the byte-equality in
+    // [`a_connection_nothing_verified_gets_the_sentence_screens_once_draws`] and to
+    // `alone.ends_with(UNVERIFIED)` twelve lines up — `tester` ran the glyph mutant against both
+    // (2026-09-29). This was the same redundant shape the second pass removed one test over, and
+    // it survived that audit.
+}
+
+/// **`--analysis` does not move this line the way it moves C1's** (`screens/once.md` § When the
+/// connection was never verified: *no analysis-pane row*).
+///
+/// **C1 is the only trailer line a pane can repeat**, because the Certificates pane draws that
+/// finding as a row. This fact is not a certificate and not an expiry, so no pane draws it and
+/// there is nothing for the flag to mute — it prints in the trailer on every run where the setting
+/// is on, flag or no flag.
+///
+/// **The flag and not the panes, which is where the muting really happens.** [`render`] draws no
+/// pane — [`reports`] does, one layer up — and the one line a pane can silence is silenced here,
+/// by [`drawn_as_a_row`] reading [`Input::analysis`]. So the flag on this `Input` is the whole of
+/// what this test has to set, and naming the panes would be naming a block that is not in the
+/// string under assertion.
+#[test]
+fn the_unverified_line_is_not_muted_by_the_analysis_flag() {
+    let mut input = read(&["oom.json"]);
+    input.insecure = true;
+    assert!(
+        render(&[], &input).contains(UNVERIFIED),
+        "the line is missing from a run that did not pass the flag"
+    );
+
+    let mut with_panes = read(&["oom.json"]);
+    with_panes.insecure = true;
+    with_panes.analysis = true;
+    let drawn = render(&[], &with_panes);
+    assert!(
+        drawn.contains(UNVERIFIED),
+        "`--analysis` muted a line no pane draws, so the run with more reporting said less: \
+         {drawn}"
+    );
+}
+
+/// **All three shapes a kubeconfig writes the knob in, read through the whole live path** — the
+/// knob on, the knob written off, and the ordinary cluster that never mentions it (NOTES § D29).
+///
+/// **Two values at this boundary would have been the easy answer and the wrong one.** What reaches
+/// [`render`] is a `bool`, so a pair of `true`/`false` calls looks like complete coverage — but the
+/// claim the security gate row makes is about a *kubeconfig*, and *absent* is the shape every real
+/// cluster has. A field hard-wired to `true` passes a single `true` assertion, and a `None` read as
+/// *off* puts the warning on every cluster there is.
+///
+/// **The cluster is never reached and does not need to be.** `k8rs-tests.invalid` is RFC 6761
+/// reserved, so [`k8s::connect_with`] builds a client off the `Config` and every call after that
+/// fails at the resolver; what is asserted is the value read off that `Config` travelling into a
+/// rendered report.
+///
+/// **The one link no test in this repo can close is `live`'s own read-out** — it needs a cluster
+/// that answers — and the two `--once` runs against kind in this box's report are what close it.
+#[tokio::test]
+async fn the_three_shapes_a_kubeconfig_writes_the_knob_in_reach_the_report() {
+    // **Scoped, and that one field is what guards the slot below this line** (`tester`,
+    // 2026-09-29). With no `namespace_scope` there is no check-that-could-not-run line, so P4 and
+    // P5 — appending under C1, and appending under the last line of the trailer — render the same
+    // bytes here, and the only assertion in the suite that could tell them apart was the file
+    // path's. P5 is the move *append, do not reorder* actively invites, so it gets two guards.
+    let store = identified(
+        objects::<Pod>("kube-system-pods.json"),
+        objects::<Node>("nodes.json"),
+        k8s::Identity {
+            namespace_scope: Some("payments".to_string()),
+            ..nearly_out(Some("v1.36.1"))
+        },
+    );
+    let reported = |insecure: bool| {
+        let mut last = String::new();
+        live_report(
+            &store,
+            now(),
+            &mut last,
+            false,
+            &AtConnect {
+                insecure,
+                ..Default::default()
+            },
+        )
+        .expect("every LIST landed")
+    };
+
+    for (shape, trust, expected) in [
+        ("the knob on", ", insecure-skip-tls-verify: true", true),
+        (
+            "the knob written off",
+            ", insecure-skip-tls-verify: false",
+            false,
+        ),
+        ("no such line at all", "", false),
+    ] {
+        let Ok(session) = k8s::connect_with(yaml_with(trust), None, None).await else {
+            panic!("{shape}: this kubeconfig did not build a client");
+        };
+        let report = reported(session.insecure);
+        let said = report.contains(UNVERIFIED);
+        println!(
+            "{shape} -> session.insecure={} report={said}",
+            session.insecure
+        );
+        assert_eq!(
+            said, expected,
+            "{shape}: the report is on the wrong side of this kubeconfig — either it claims a \
+             cluster's health over a connection nothing checked, or it warns about every cluster \
+             there is and so about none of them"
+        );
+        if expected {
+            // **Under C1's own trailer line on the live path too**, which is where this store's
+            // `nearly_out` identity puts it (`screens/once.md` § Stacked with the other trailer
+            // lines).
+            println!("{report}");
+            assert!(
+                report.ends_with(&format!("{LOGIN_EXPIRING}\n\n{UNVERIFIED}\n\n{OFF}")),
+                "the live renderer put the line somewhere the file renderer does not: {report}"
+            );
+        }
+    }
+}
+
+/// **The pair the operator review found, printing on one run — and the clause that lets both
+/// sentences be true at once** (`screens/once.md` § When the API server's own certificate is
+/// running out, `k8s-admin`'s blocker of 2026-09-29).
+///
+/// **This configuration is not exotic; it is the reason the knob gets set.** Verification off plus
+/// an API server certificate past its `notAfter` is the *only* way C2's expired arm is reachable on
+/// a single-server cluster at all: a verifying kubeconfig has the handshake refused and lands on
+/// the wall instead, with no report for a trailer line to join. So the pair below is the ordinary
+/// case, not the corner one — and before the clause landed, C2 said *kubectl and everything else
+/// stop being able to reach* higher in the same trailer than [`UNVERIFIED`] saying *everything
+/// above came back over that unchecked connection*, on a report that had plainly come back.
+///
+/// **It asserts the pair and the clause, because either alone would pass the defect.** The pair
+/// alone passed it for as long as C2 has shipped; the clause alone would not notice the day the two
+/// lines stopped being able to share a run.
+#[test]
+fn an_expired_certificate_and_an_unverified_connection_share_a_run_without_contradiction() {
+    let mut input = read(&["oom.json"]);
+    input.insecure = true;
+    input.serving_expiry = k8s::expiry_of(&der("expired-client"));
+
+    let report = render(&[], &input);
+    println!("{report}");
+    assert!(
+        report.ends_with(&format!("{EXPIRED}\n\n{UNVERIFIED}")),
+        "the two sentences the operator review found do not print together, so the contradiction \
+         this test pins is not the one on the page: {report}"
+    );
+    // **The three clause assertions below read the *expectations*, not the product, and that is
+    // what they are for.** Red A of this round proved the product→literal link: taking the clause
+    // out of `serving_certificate` killed this test and two byte-equality tests beside it. What no
+    // byte-equality can catch is somebody reaching green by editing the literal to match a
+    // regressed sentence — the one thing `CLAUDE.md` forbids by name — and these are the
+    // assertions that fail when they do. They are not the redundant shape the second pass removed
+    // twice: nothing else in the suite asserts a property of these literals.
+    assert!(
+        EXPIRED.contains(THE_WALL_CLAUSE),
+        "C2's expired sentence has lost the clause that keeps it from claiming the reader's own \
+         tools cannot reach a cluster whose report they are holding: {EXPIRED}"
+    );
+
+    // **One wording for one fact, and the comparison has to flatten the wall** (NOTES § D103).
+    // The wall is wrapped for a terminal block, so the clause spans a newline there; the trailer
+    // does not wrap at all (NOTES § D201). Collapsing whitespace is what makes the two comparable
+    // — a plain `contains` over the wall's own bytes answers `false` for a clause that is present.
+    let wall = CERTIFICATE_IS_WHY
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        wall.contains(THE_WALL_CLAUSE),
+        "the wall this clause was borrowed from no longer carries it, so the trailer is now a \
+         second wording for one fact: {CERTIFICATE_IS_WHY}"
+    );
+
+    // The negative: a certificate still inside the window makes no claim about being unreachable,
+    // so it needs no clause and must not grow one.
+    let mut expiring = read(&["oom.json"]);
+    expiring.insecure = true;
+    expiring.serving_expiry = k8s::expiry_of(&der("expiring-client"));
+    let soon = render(&[], &expiring);
+    assert!(
+        soon.ends_with(&format!("{EXPIRING}\n\n{UNVERIFIED}")),
+        "an unverified connection and a certificate still inside the window do not stack, which is \
+         the pair `screens/once.md` says is *not* exclusive: {soon}"
+    );
+    assert!(
+        !EXPIRING.contains(THE_WALL_CLAUSE),
+        "the expiring sentence grew a hedge for a claim it never makes — nothing has failed yet, \
+         and it names this cluster directly: {EXPIRING}"
+    );
+}
+
+/// **A run that ends at the wall says nothing about it, and the wall is the same sentence either
+/// way** (`screens/once.md` § When the connection was never verified: *No report, no line*).
+///
+/// **Upheld deliberately, and this is the assertion that holds it.** The setting is knowable
+/// before the wall ever prints — it needs no connection, only the file on disk — so bolting the
+/// sentence on is a one-line change somebody will reach for. What the gate row forbids is a
+/// *report* that hides an unverified connection; a wall asserts nothing about the cluster for a
+/// reader to mistake as verified, and it is on stderr with exit `2` besides.
+///
+/// **Byte-identical is the claim, not *does not contain*.** A wall that merely avoided this
+/// sentence while gaining some other clause about the same setting would pass a `!contains` and
+/// fail the ruling.
+#[tokio::test]
+async fn the_wall_is_the_same_sentence_whether_or_not_the_connection_was_verified() {
+    let lax = watching(
+        k8s::connect_with(yaml_with(", insecure-skip-tls-verify: true"), None, None).await,
+        false,
+    )
+    .await;
+    let strict = watching(
+        k8s::connect_with(yaml_with(", insecure-skip-tls-verify: false"), None, None).await,
+        false,
+    )
+    .await;
+    println!("insecure: {lax}\n  verified: {strict}");
+    assert!(
+        !lax.contains("k8rs never checked"),
+        "the wall grew a sentence about an unverified connection, over a run with no report for a \
+         reader to mistake as verified: {lax}"
+    );
+    assert_eq!(
+        lax, strict,
+        "the wall is worded differently for a kubeconfig that skips verification, which is the \
+         report's sentence leaking onto a path that has no report"
+    );
+}
+
+/// A kubeconfig this file wrote itself, pointed at a name RFC 6761 reserves so that it can never
+/// resolve — `trust` is spliced into the `cluster:` block, which is where
+/// `insecure-skip-tls-verify` lives.
+///
+/// **Written here rather than borrowed from `k8s_tests.rs` § CONNECTING**, which builds the same
+/// double: invariant 11 keeps `mod tests` private to its own product file, so a test helper cannot
+/// cross from one `*_tests` module to another — the same reason [`offline`] is written twice.
+fn yaml_with(trust: &str) -> kube::config::Kubeconfig {
+    kube::config::Kubeconfig::from_yaml(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: demo\n\
+         clusters: [{{name: demo, cluster: \
+         {{server: 'https://k8rs-tests.invalid:6443'{trust}}}}}]\n\
+         contexts: [{{name: demo, context: {{cluster: demo, user: demo}}}}]\n\
+         users: [{{name: demo, user: {{}}}}]\n"
+    ))
+    .expect("a kubeconfig this file wrote itself")
 }
 
 // --- WHEN THE CERTIFICATE IS WHY NOTHING CAME BACK ---

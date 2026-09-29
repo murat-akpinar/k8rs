@@ -4553,3 +4553,43 @@ Three residuals, none of them this turn's to close:
   holds no clock — and `updates()` already has `now` in hand at its `Ok` arm, which is where
   [invariant 5](CLAUDE.md) would put it. **The mechanism is measured; the frequency is not**, and
   that is the bullet above.
+
+### From the unverified-connection line and its two reviews (2026-09-29)
+
+`just check` green at `EXIT=0`, 1622 + 40 tests; `k8s-admin` says Phase 5's *honoured **and surfaced***
+row now ticks on both halves. One blocker was found in the trailer line **above** the new one and
+fixed in the turn ([D317](NOTES.md#d317--the-410-round-a-silence-with-no-counter-behind-it-and-the-paragraph-sixty-lines-up-that-had-already-ruled-that-state-a-harm-2026-09-29)).
+Four residuals, all pre-existing or asymmetries rather than defects:
+
+- **On the live `--analysis` path the last trailer line and the `lists_were_read` caveat are jammed
+  together with no blank line**, where every other block on the page is `\n\n`-separated.
+  `main.rs:2742` pushes a single `'\n'` after `render()` before the caveat. **Pre-existing and not
+  the unverified line's** — `tester` measured it identical on a fully verified kubeconfig with no
+  `unverified` line involved, so it is a one-character fix in a slot nothing owns yet.
+- **`insecure-skip-tls-verify: "true"`, quoted, is a divergence from `kubectl` in the safe
+  direction** (`tester`'s measurement, not `k8s-admin`'s, which did not re-run it). Eleven spellings
+  were fed and measured against both: k8rs and `kubectl` agree on
+  every spelling that means true (`true` `yes` `on` `True` `TRUE`), and `null`, an empty value and
+  an absent key read `false` in both. `1` and a duplicated key make the **whole kubeconfig
+  unreadable** in k8rs, which is fail-safe — it never connects and claims nothing. The one
+  disagreement is the quoted string: `kubectl` refuses the file (*"cannot unmarshal string into Go
+  struct field … of type bool"*) and k8rs reads it as `true` and warns. **k8rs is the more
+  permissive of the two and errs toward printing the warning**, so it cannot produce a silent
+  unverified report — which is why this is a line on the record rather than a defect.
+- **The RBAC wall is a surface where the connection completed, the fact is known, and nothing says
+  it** — `pods_unread` ends the run at `main.rs:3953`, ahead of `live_report`, so the trailer is
+  never reached. It stays here on the triage rule: it is not a report, it produces no file to
+  forward (stderr, exit `2`), and [D314](NOTES.md#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28)
+  routed it here deliberately. **But it may not inherit the page's general justification, and that
+  is the amendment**: *"a wall asserts nothing about the cluster for a reader to mistake as
+  verified"* is true of *no kubeconfig* and *unreachable*, and untrue here — this wall asserts that
+  **a named cluster refused this identity** and sends the reader to *ask whoever runs this cluster
+  for a role*. Over a connection nobody checked, that errand can be about the wrong machine: a
+  stale kubeconfig entry pointing at a rebuilt cluster on the same address is the mundane version,
+  and it is also a reason the knob was left on in the first place.
+- **The five-line trailer stack is the one combination no mockup draws.** Nothing gates any pair, so
+  all five can print at once; `screens/once.md`'s worked example reads four of five because five
+  breaks the 80×24 budget every mockup on that page is held to, and shortening a shipped sentence to
+  fit would be editing a decision that box did not make. `k8s-admin` re-read that reasoning and is
+  not reopening it — recorded only because if a five-line stack is ever drawn, it is drawn without a
+  page to check against.

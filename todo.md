@@ -5565,10 +5565,18 @@ new box, because a phase close is not a box:
    desync kube answers itself is dropped **one occurrence deep** — a second with no relist
    between them is reported, because nothing in the store counted relists and a walk that
    never completes was invisible on every surface. `just check` green at `EXIT=0`, 1617 + 40
-   tests, `mutants-diff` 15 / 9 caught / 0 missed. **The one thing this leaves is a `dev-ui`
-   turn**: the `greeting()` clause that reads `Session.insecure` — until it lands, step 5's
-   *honoured **and surfaced*** row is met in the header and **not** on the headless surface,
-   which is why that row stays open rather than ticking.
+   tests, `mutants-diff` 15 / 9 caught / 0 missed.
+   **The reader landed the same day and the gate row is met on both halves**
+   ([D318](NOTES.md#d318--the-fact-got-a-reader-and-the-line-above-it-had-been-contradicting-its-own-report-since-before-it-was-written-2026-09-29)):
+   **not a `greeting()` clause — this line said it was and was wrong.** `greeting()` writes to
+   stderr, and the whole reason the row exists is `k8rs --once --analysis > cluster-report.txt`,
+   so it is a **report trailer line on stdout**, slot 4 of five. `k8s-admin`, which ruled the row
+   could not tick, ruled that it does. **The blocker of that turn was in the line above it**:
+   C2's expired arm told the reader *kubectl and everything else stop being able to reach a
+   cluster* at the head of a report that had just come back, and it had been false since before
+   this line existed — corrected on the page and in the code with a clause borrowed from
+   `certificate_is_why` rather than invented. `just check` green at `EXIT=0`, 1623 + **41** tests,
+   `mutants-diff` 15 / 14 caught / 0 missed.
    **Still owed:** step 1 (`just check` green and the code exercised),
    step 2 (build and run the real binary on the test host and paste it), step 5's
    gate item by item, and — measured, not assumed — the **whole mutation sweep**,

@@ -543,6 +543,19 @@ struct Input {
     /// saying*. [`k8s::CERT_EXPIRY_WARN`] is applied where the sentence is drawn, because the days
     /// left move against `now` and a session outlives the instant it connected at.
     serving_expiry: Option<Timestamp>,
+    /// **Whether this connection was verified at all** — [`k8s::Session::insecure`], and
+    /// [`unverified`] is what spells it.
+    ///
+    /// **A `bool` and not an `Option`, unlike the two session facts above it.** Those two are
+    /// *readings* that can fail — no `Date` header, no certificate the handshake let through — so
+    /// they have a third state for *nothing was measured*. This one is read off the `Config` k8rs
+    /// built from the kubeconfig before a single request went out, so it has no failure mode: the
+    /// file either turns verification off or it does not.
+    ///
+    /// **`false` on the file-driven path, and that is the literal truth rather than a stand-in for
+    /// [`Input::skew`]'s silence.** A `.json` on disk made no connection, so nothing about it went
+    /// unverified — and the sentence is about a connection, not about the data.
+    insecure: bool,
     /// **Whether `--analysis`'s panes are printing under this report** — the one thing the
     /// trailer has to know ([`ANALYSIS`], `screens/once.md` § When your own login is running out).
     ///
@@ -606,6 +619,8 @@ fn load(paths: &[String], now: Time, analysis: bool) -> Result<Input, String> {
         // server presented a certificate to read ([`Input::serving_expiry`]).
         skew: None,
         serving_expiry: None,
+        // No connection was made, so none of it went unverified ([`Input::insecure`]).
+        insecure: false,
         analysis,
         snapshot: ClusterSnapshot {
             now,
@@ -845,8 +860,9 @@ fn render(findings: &[Finding], input: &Input) -> String {
     // **Under the clock line, which is the trailer order `screens/once.md` § Stacked with the
     // other trailer lines fixes**: clock first because it qualifies every line above it, cards
     // included; this next, because it was the newest fact when it landed and took the one open
-    // slot; C1's own line then took the next one under it; and the check-that-could-not-run line
-    // is absolutely last, which [`check_switched_off`] draws.
+    // slot; C1's own line then took the next one under it, and [`unverified`] the next one under
+    // that; and the check-that-could-not-run line is absolutely last, which [`check_switched_off`]
+    // draws.
     // **It never rode on [`Input::skipped`]** — that field is the header's, about kinds a file
     // held — and this comment said it did until the namespace-scoping box.
     //
@@ -863,8 +879,9 @@ fn render(findings: &[Finding], input: &Input) -> String {
         spaced(&mut lines, expiry);
     }
     // **Under the certificate the *cluster* presented, which is the trailer order
-    // `screens/once.md` § Stacked with the other trailer lines fixes**: it is the newest fact, so
-    // it takes the next open slot rather than displacing a line that already prints correctly
+    // `screens/once.md` § Stacked with the other trailer lines fixes**: it was the newest fact when
+    // it landed, so it took the next open slot rather than displacing a line that already prints
+    // correctly
     // (NOTES § D176's *append, do not reorder*). Ordering the two by urgency instead of arrival
     // would mean weighing a certificate the cluster answers against one the reader's own laptop
     // holds, which no rule on this page has ever had to do for two cards, let alone two trailer
@@ -895,11 +912,19 @@ fn render(findings: &[Finding], input: &Input) -> String {
     {
         spaced(&mut lines, login);
     }
+    // **Under C1's own line, which is the trailer order `screens/once.md` § Stacked with the other
+    // trailer lines fixes**: it was the newest fact when it landed, so it took the next open slot
+    // in turn rather than being weighed for urgency against the two certificate readings above it
+    // (NOTES § D176's *append, do not reorder*, applied one join later than C1's).
+    if let Some(unverified) = unverified(input.insecure) {
+        spaced(&mut lines, unverified);
+    }
     // **Absolutely last, under everything including both certificate lines**
     // (`screens/once.md` § Stacked with a check that could not run, and its § Stacked with the
     // other trailer lines, which fixes the whole order: clock, the cluster's certificate, this
-    // login's, then this). The comment above the clock line has claimed this slot since before it
-    // could be drawn; the certificate box filled it (NOTES § D176's *append, do not reorder*).
+    // login's, the unverified connection, then this). The comment above the clock line has claimed
+    // this slot since before it could be drawn; the certificate box filled it (NOTES § D176's
+    // *append, do not reorder*).
     if let Some(off) = check_switched_off(input.snapshot.namespace_scope.as_deref()) {
         spaced(&mut lines, off);
     }
@@ -929,7 +954,7 @@ fn drawn_as_a_row(input: &Input, findings: &[Finding]) -> bool {
 /// **One block, one blank line above it — unless there is nothing above it to separate from.**
 ///
 /// **Every block in a report is optional now, which is what this exists for.** The header can be
-/// empty ([`header`]), the health claim can be absent ([`health`]), and the four trailer lines
+/// empty ([`header`]), the health claim can be absent ([`health`]), and the five trailer lines
 /// each come and go — so a `push(String::new())` written beside any one of them prints a leading
 /// blank line on the run where everything before it was left out. A copy of *two lines that have
 /// to agree about emptiness* beside each block is one more place that gets missed once, and the
@@ -1137,8 +1162,22 @@ fn clock(skew: Option<SignedDuration>) -> Option<String> {
 /// doing work the tense cannot. This report exists, so this cluster was plainly reachable a moment
 /// ago; naming it beside a claim that it cannot be reached would contradict the page it is printed
 /// on. What really happened is narrower — the connection got through while that certificate is
-/// expired, which is ordinary behind a load-balanced control plane where one replica has fallen
-/// behind on renewal. The expiring sentence makes no such claim and names the cluster directly.
+/// expired — and it has two ordinary causes, not one: a load-balanced control plane where one
+/// replica has fallen behind on renewal, and a single server reached by a kubeconfig that sets
+/// `insecure-skip-tls-verify: true`. The expiring sentence makes no such claim and names the
+/// cluster directly.
+///
+/// **And *that connects to it the normal way*, which the article alone could not save**
+/// (`screens/once.md` § When the API server's own certificate is running out, `k8s-admin`'s
+/// blocker of 2026-09-29). On the second of those two causes this line prints in the same trailer
+/// as [`unverified`] and above it — *your kubeconfig sets `insecure-skip-tls-verify: true` …
+/// everything above came back over that unchecked connection* — and *kubectl and everything else
+/// stop being able to reach* flatly contradicted it: that reader's own tools plainly did reach
+/// the cluster, which is the whole point of the knob. The clause is the wall's own, reused rather
+/// than a second wording invented for one fact ([`certificate_is_why`]: *"kubectl and anything
+/// else that connects to it the normal way is refused too"*). It carries no hedge for the HA case,
+/// which needs none — the article above already keeps that claim narrower than the reader's own
+/// connection.
 ///
 /// **It does not touch the exit code.** `0` still means *k8rs ran and reported*: a certificate
 /// running out is a fact about the cluster, not a failure of this run to read it
@@ -1157,9 +1196,9 @@ fn serving_certificate(expiry: Option<Timestamp>, now: &Time) -> Option<String> 
     if left < SignedDuration::ZERO {
         return Some(format!(
             "A certificate the API server presented — not your kubeconfig's — expired {} ago \
-             (was valid until {expiry}). When that happens, kubectl and everything else stop \
-             being able to reach a cluster until someone on the control plane renews its \
-             certificate — not something k8rs can do.",
+             (was valid until {expiry}). When that happens, kubectl and everything else that \
+             connects to it the normal way stop being able to reach a cluster until someone on \
+             the control plane renews its certificate — not something k8rs can do.",
             in_days(left)
         ));
     }
@@ -1235,6 +1274,38 @@ fn login_certificate(expiry: Option<Timestamp>, now: &Time) -> Option<String> {
          access for a new kubeconfig before that date, because k8rs cannot renew it.",
         in_days(left)
     ))
+}
+
+/// **The one sentence that says nothing checked who answered** — or `None` on a connection that
+/// was verified (`screens/once.md` § When the connection was never verified, NOTES § D314).
+///
+/// **No threshold, no band, no `⚠`.** The two certificate lines above it count days, because a
+/// certificate can be *close to* running out; there is nothing here to be close to — the
+/// kubeconfig either turns the check off or it does not — so this prints on every run that connects
+/// with the setting on and on none that does not. `● ▲ ○` stays this report's whole vocabulary.
+///
+/// **It reads [`k8s::Session::insecure`] and not [`tls_unverified`].** Both answer the same
+/// question — one off the `Config` the session was built from, one off the row the picker marks
+/// `current` — and `k8s-admin` checked that they cannot disagree; a sentence about *this
+/// connection* belongs to the connection's own field, and two readers of one fact is the cost this
+/// repo keeps paying (NOTES § D103).
+///
+/// **No report, no line.** A run that ends at the wall `screens/states.md` § Before the TUI ever
+/// starts draws — no kubeconfig, refused, unreachable — never reaches this block at all, and that
+/// is the whole of the ruling: what the gate row forbids is a *report* that hides an unverified
+/// connection, and a wall asserts nothing about the cluster for a reader to mistake as verified.
+///
+/// **It does not touch the exit code.** `0` still means *k8rs ran and reported* — the distinction
+/// every line above it already draws (`screens/once.md` § Exit codes).
+fn unverified(insecure: bool) -> Option<String> {
+    insecure.then(|| {
+        "k8rs never checked that the server on the other end of this connection is really this \
+         cluster — your kubeconfig sets `insecure-skip-tls-verify: true`, and `kubectl` would skip \
+         the same check with it. Everything above came back over that unchecked connection. If \
+         that was not deliberate, ask whoever gave you this kubeconfig why the check is off — it \
+         is not something k8rs can turn back on for you."
+            .to_string()
+    })
 }
 
 /// **Whole days, in the words the sentence prints** — `12 days`, `1 day`, and **`less than a day`
@@ -2608,6 +2679,10 @@ struct AtConnect<'a> {
     /// the days left are measured against the snapshot's own `now`, so a session left open across
     /// a threshold starts saying so without reconnecting.
     serving_expiry: Option<Timestamp>,
+    /// **The same sentence for every report this session prints, like the skew above it**
+    /// ([`k8s::Session::insecure`]): the kubeconfig cannot change under a connected session, so a
+    /// run that has this to say says it on the first report and keeps saying it.
+    insecure: bool,
     /// **When the six on-demand lists were read** ([`lists_were_read`], which turns it into the
     /// line above the panes). `None` is a run that fetched nothing, or a clock this machine could
     /// not read.
@@ -2669,6 +2744,9 @@ fn live_report(
                 // left are measured against the snapshot's own `now`, so a session left open over
                 // a threshold starts saying so without reconnecting.
                 serving_expiry: at.serving_expiry,
+                // **Read at connect and the same on every report, like the skew** — the kubeconfig
+                // cannot change under a connected session ([`k8s::Session::insecure`]).
+                insecure: at.insecure,
                 // **The flag this function was already handed**, so the one trailer line a pane
                 // would repeat is silent on the same runs there ([`Input::analysis`]).
                 analysis,
@@ -3699,6 +3777,12 @@ async fn live(
     // (`screens/once.md` § *A clean tally does not mean every replica is current*). The
     // run-ending case returned above.
     let serving_expiry = session.serving_expiry.until();
+    // **Beside the two above it because it is the same kind of fact**: read at connect, off the
+    // kubeconfig rather than off anything the cluster answered ([`k8s::Session::insecure`]) — and
+    // a `Copy` read, so unlike `renewal` it is not here to outlive a borrow. It is what
+    // [`unverified`] spells, on stdout beside the findings rather than in the greeting on the line
+    // below (NOTES § D314).
+    let insecure = session.insecure;
     let mut err = std::io::stderr();
     let _ = writeln!(err, "k8rs: watching — {}", greeting(&session).join(" · "));
     // **The one line that says *why* this run is scoped**, and it is on stderr because the cause
@@ -3787,6 +3871,7 @@ async fn live(
         renewal,
         skew,
         serving_expiry,
+        insecure,
         lists_read_at,
     };
     // **`k8s::node_usage_poll` is not merged here, because a poll is a stream and this run has a

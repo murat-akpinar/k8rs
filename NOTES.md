@@ -339,6 +339,7 @@ its line moving with it.
 - [D315](#d315--the-fourth-member-of-a-class-the-code-had-already-named-found-by-the-closes-own-whole-phase-pass-2026-09-28) — the fourth member of a class the code had already named, found by the close's own whole-phase pass
 - [D316](#d316--the-operator-review-of-the-unwired-panes-no-blockers-and-the-four-findings-that-are-this-turns-own-second-copies-2026-09-28) — the operator review of the unwired panes: no blockers, and the four findings that are this turn's own second copies
 - [D317](#d317--the-410-round-a-silence-with-no-counter-behind-it-and-the-paragraph-sixty-lines-up-that-had-already-ruled-that-state-a-harm-2026-09-29) — the `410` round: a silence with no counter behind it, and the paragraph sixty lines up that had already ruled that state a harm
+- [D318](#d318--the-fact-got-a-reader-and-the-line-above-it-had-been-contradicting-its-own-report-since-before-it-was-written-2026-09-29) — the fact got a reader, and the line above it had been contradicting its own report since before it was written
 
 ## Why it exists — where the gap is
 
@@ -28724,3 +28725,122 @@ cannot see. That is [the family-review shape this project keeps
 measuring](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15),
 and the cheap lesson is in which reads paid: the ones that **fed a shape** or **planted a mutant**,
 never the ones that re-read a diff.
+
+### D318 — the fact got a reader, and the line above it had been contradicting its own report since before it was written (2026-09-29)
+
+[D314](#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28)'s
+gate row is met. `Session.insecure` has a reader, Phase 5's *honoured **and surfaced*** is true on
+both halves, and `k8s-admin` — which ruled last round that the row **could not** tick — ruled this
+round that it does.
+
+**It is not a `greeting()` clause, and `todo.md` said it was.** `greeting()` writes to **stderr**
+(`k8rs: watching — …`), and the whole reason the row exists is
+`k8rs --once --analysis > cluster-report.txt`: a fact on stderr never reaches that file. So it is a
+**report trailer line on stdout**, slot 4 of five, appended under C1 by the trailer stack's own
+*append, do not reorder* rule — which is the page's, recorded in D314's amendment above and in no
+`D##` of its own. The item's wording predates the screen ruling that settled it; the dev
+declined the brief's own phrasing and was right to, which is the report line
+[CLAUDE.md § The brief](CLAUDE.md#the-brief-the-pm-hands-out-and-the-report-it-gets-back) asks for
+working as intended.
+
+**The blocker was in the line above, and it had been false since before this turn existed.** C2's
+expired arm read *"When that happens, kubectl and everything else stop being able to reach a
+cluster"* — printed at the head of a report that had just come back. `k8s-admin` found the pair by
+reading three facts in three places: `serving_certificate`'s expired arm is a **trailer line, not a
+wall**; `Serving::Expired` is produced by a **refused handshake**, so with verification off an
+already-expired certificate completes and lands in `Serving::Until(<past>)`, which is exactly what
+makes `left < 0` true; and `certificate_is_why`'s wall additionally needs `version` **and** `served`
+both `Unanswered`, which both succeed. So on **knob on plus an expired server certificate — the
+single most ordinary reason anyone sets that knob** — both lines print three lines apart and cannot
+both be obeyed, with the report above them proving the new one is the true one. **The new line did
+not create that; it made it impossible to miss.**
+
+**The code was right and the decision was wrong, which is the second time in two days that has been
+the finding** ([D315](#d315--the-fourth-member-of-a-class-the-code-had-already-named-found-by-the-closes-own-whole-phase-pass-2026-09-28)
+was the first). `render()` printing both facts when both are true is correct; `screens/once.md`
+asserting they could never share a run was not. **An asserted impossibility costs more than a wrong
+sentence, because nobody writes the test and nobody reads the pair** — which is exactly how it
+survived.
+
+**Three generations of one defect in one paragraph, and the third was stopped by a reviewer rather
+than by a guard.** D314 records the disambiguation's first draft having the condition backwards,
+caught by its own author's second pass. This round found the second — *"can never share a run"* — in
+a different clause of the same passage. And the operator review of the **fix** found the third:
+*"§ When the connection was never verified is the trailer line that tells this reader which one they
+are looking at"* claims a discrimination the line cannot make, because the knob and the topology are
+independent — the fourth cell is **knob on, HA control plane, one replica expired**, where
+`Serving::Until` takes the soonest `notAfter` any sample read, the handshake completes, and both
+lines print with the **HA** cause. Mild, since the action is the same either way, and corrected in
+the same turn anyway: a paragraph whose entire history is claiming a relationship between two
+independent facts does not get a known over-claim left in it.
+
+**The clause is borrowed, not invented.** `certificate_is_why` already ships *"kubectl and anything
+else **that connects to it the normal way** is refused too"*, and the trailer now carries the same
+six words rather than a second wording for one fact
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+applied before the second copy exists). The HA run is left to the sentence's existing *"a cluster"*
+article deliberately, so two hedges do not stack on two different axes. **`k8s-admin` judged the
+clause a fix rather than a hedge** — it narrows the subject from *kubectl and everything else* to
+*clients that check*, making the sentence true instead of merely qualified — and judged the skim risk
+closed by ordering rather than wording: the claim comes first and the exception second, so *"the
+normal way"* invites the question the very next line answers. **The drift guard is weaker than the
+first draft of this entry said**: `THE_WALL_CLAUSE` lives in `main_tests.rs`, catches a *removal*
+from either sentence and the expiring sentence *gaining* one, and would not catch the two drifting to
+different full wordings that both contain the substring. That is the right trade — a shared product
+const for a fragment inside two sentences makes both unreadable at their site — and it is recorded as
+what it is rather than as what it sounded like.
+
+**The thin slot, found by moving the line rather than by reading it.** `tester` re-inserted the block
+at all four other positions: **no position produces a green suite**, so the reorder guard is real
+everywhere, but three slots kill two tests and **P5 — below the last line — killed one**, and P5 is
+exactly the move *append, do not reorder* invites, because appending below the last line *looks* like
+appending. One field on the live test's store (`namespace_scope`, so `check_switched_off` exists
+there at all) gave P5 the same two guards the others have.
+
+**Eleven kubeconfig spellings, and k8rs never diverges from `kubectl` in the unsafe direction.**
+`true` `yes` `on` `True` `TRUE` all read true in both; `null`, an empty value and an absent key read
+false in both; `1` and a duplicated key make the **whole kubeconfig unreadable**, so k8rs never
+connects and claims nothing. The one disagreement is `"true"` **quoted**: `kubectl` refuses the file
+and k8rs reads it as true and warns — the permissive side, and it cannot produce a silent unverified
+report. Measured by `tester`, and attributed to `tester` in
+[`backlog.md`](backlog.md) because `k8s-admin` did not re-run it.
+
+**The wall's ruling is now asserted where it actually lives.** *A run that ends at the stderr wall
+with exit `2` prints nothing of this* is a claim about a **process**, and `main_tests.rs` can only
+reach `render()`. `tests/binary.rs` gained the assertion: exit `2`, stdout **exactly zero bytes**,
+the sentence in neither stream — with a **canary** beside it, because a `!contains` over a stale
+needle passes against every stream there is. The canary splices the knob into a kubeconfig pointing
+at a live stub and asserts the sentence appears; with the knob spliced as `false` the report is
+`○ nothing is broken` and the canary goes red. **The limit is stated rather than hidden**: the three
+wall assertions are not knob-sensitive on their own — the wall is identical either way — so what makes
+the test about the *unverified* case is the canary plus the knob. It costs the binary suite 3.9 s →
+31.2 s, paid because it is the only end-to-end proof in the tree that the sentence reaches the
+process's stdout.
+
+**What nobody could see, and it stays unseen on purpose.** The binary has never printed the corrected
+C2 sentence: kind's apiserver certificate is healthy, so that arm is unreachable there, and
+`k8s-admin` argued against spending a cluster write on it — `--once` writes `render()`'s string
+verbatim with no terminal, wrapping or truncation on that path, so a `render()`-level test **is** the
+binary's output for those two lines, while re-signing kind's certificate breaks the fixture cluster,
+rewinding the container's clock breaks etcd leases, and a local expired-certificate server would have
+to answer `/version`, `/apis` and five LISTs to reach `render()` at all — a mock apiserver rather than
+a measurement. `dev-ui` saying plainly that it could not see it is the report this process wants.
+
+**Both agents hit the same two traps this session, and one of them was the trap in its own brief.**
+`dev-ui`'s first gate script **piped the guards and read `$?` from the pipe**, printing `width=0` over
+a real `FAIL`; unpiped, the next run came back `width=1` on two lines it had just written. And *is it
+still running* was answered with `pgrep -f` by both, matching the pipeline's own command line —
+[D275](#d275--the-wait-loop-watched-for-the-commands-own-name-so-it-matched-itself-and-never-ended-2026-09-24)
+one step over, twice more. `ps -eo comm` is the honest check. Neither trap is new and both are written
+down; what they cost here is two extra gate runs, which is cheap only because the guards were run at
+all.
+
+**`just check` green at `EXIT=0`** over md5-verified bytes — 1623 unit + **41** binary tests,
+`mutants-diff` 15 / 14 caught / 1 unviable / 0 missed with all three `serving_certificate` and all
+three `unverified` mutants caught, every guard including the four that read markdown tree-wide, and
+`cargo deny` clean. `Cargo.lock` does not move. **Four residuals are in [`backlog.md`](backlog.md)**,
+all pre-existing or asymmetries: a missing blank line between the last trailer line and the
+`lists_were_read` caveat on the live `--analysis` path, the quoted-`"true"` divergence, the RBAC wall
+whose general justification is **false of that particular wall** (it asserts a named cluster refused
+this identity, over a connection nobody checked, so the errand can be about the wrong machine), and
+the five-line trailer stack that no mockup draws.
