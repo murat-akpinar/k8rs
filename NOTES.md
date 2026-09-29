@@ -340,6 +340,7 @@ its line moving with it.
 - [D316](#d316--the-operator-review-of-the-unwired-panes-no-blockers-and-the-four-findings-that-are-this-turns-own-second-copies-2026-09-28) — the operator review of the unwired panes: no blockers, and the four findings that are this turn's own second copies
 - [D317](#d317--the-410-round-a-silence-with-no-counter-behind-it-and-the-paragraph-sixty-lines-up-that-had-already-ruled-that-state-a-harm-2026-09-29) — the `410` round: a silence with no counter behind it, and the paragraph sixty lines up that had already ruled that state a harm
 - [D318](#d318--the-fact-got-a-reader-and-the-line-above-it-had-been-contradicting-its-own-report-since-before-it-was-written-2026-09-29) — the fact got a reader, and the line above it had been contradicting its own report since before it was written
+- [D319](#d319--the-phase-close-sweep-was-re-measured-as-todomd-demanded-and-d118s-four-shards-are-fifty-two-2026-09-29) — the phase-close sweep was re-measured as todo.md demanded, and D118's four shards are fifty-two
 
 ## Why it exists — where the gap is
 
@@ -28844,3 +28845,56 @@ all pre-existing or asymmetries: a missing blank line between the last trailer l
 whose general justification is **false of that particular wall** (it asserts a named cluster refused
 this identity, over a connection nobody checked, so the errand can be about the wrong machine), and
 the five-line trailer stack that no mockup draws.
+
+### D319 — the phase-close sweep was re-measured as todo.md demanded, and D118's four shards are fifty-two (2026-09-29)
+
+[`todo.md`](todo.md) § *What the v0.1 close still owes* item 4 required the shard size to be
+**re-measured before the sweep rather than carried**, because
+[D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)'s
+guidance was measured against an 890-test suite and the suite is now **1623**. It was measured, and
+the answer is that the guidance no longer describes the run.
+
+**The numbers, taken rather than reasoned.** `cargo mutants --list` over `rules.rs` and `analysis.rs`
+answers **879**, unchanged from the figure the box already carried. One `--shard 0/32` slice at the
+script's default `--jobs 4`, under a 560 s cap: **the unmutated baseline alone costs 81 s build + 73 s
+test = 154 s**, and 17 mutants completed in the remaining ~406 s — **24 s per mutant**. So the mutant
+work is 879 × 24 s ≈ **5.9 hours**, and a foreground call's ten-minute cap leaves ~410 s of mutant
+budget per shard after the baseline, which is **17 mutants**. 879 ÷ 17 = **52 shards**, and 52 × 154 s
+of repeated baseline is **2.2 hours of pure overhead** on top — so the sharded shape costs about
+**8 hours** where one continuous run costs about **6**.
+
+**More parallelism makes it worse, and that is the measurement worth keeping.** This machine has 12
+cores and 18 GiB available. `CARGO_MUTANTS_JOBS=8` on the identical slice completed **5** mutants in
+~417 s — **83 s per mutant**, three and a half times *slower* than four jobs, because eight concurrent
+cargo builds each parallelising over 12 cores thrash both the cores and the memory. **The default is
+the right setting**, and anyone reaching for `--jobs` to make this cheaper should read this paragraph
+first. (`--jobs` on the command line is also refused: `scripts/mutants.sh` passes its own explicit
+`--jobs` from `jobs_of`, so a second one is `cannot be used multiple times` — the env var is the door,
+and the script's doc already said so.)
+
+**What this changes is the shape, and that is why it is a decision and not a note.** D118 ruled four
+shards because a foreground call is capped at ten minutes and the sweep was longer than one. The cap
+is unchanged and the ruling's *reasoning* is unchanged; what changed is the size of the object, and at
+879 mutants the cap produces fifty-two calls and pays the baseline fifty-two times. **The sweep
+therefore runs as one continuous background run with its log on disk, polled for its terminal line** —
+the pattern [CLAUDE.md § Running it](CLAUDE.md#running-it--and-just-check) already mandates for any run
+longer than ten minutes, and the one D118 could not use for a 136-mutant box because the whole run fit
+in fewer calls than the polling would cost. `--iterate` still composes shards for anyone who wants to
+resume rather than restart.
+
+**Two things this does not change.** The sweep still runs **on this machine** and not the test host —
+82 s per mutant was measured there, which at 879 mutants is twenty hours. And
+`scripts/mutants.sh` is still the only door: it names the scratch volume, refuses to start without
+headroom, and reads the run's logs afterwards, because cargo-mutants files a build that never happened
+as `unviable` and the count cannot tell that from a type error
+([D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)).
+Its refusal was also the thing that caught a **stale `lock.json`** from an interrupted probe and
+declined to report the previous run's counts as this one's
+([D182](#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)
+working exactly as written).
+
+**Phase 5's close step 2 is done in the same session and is not waiting on the sweep.** The release
+binary — `cargo build --release --locked`, 6 m 07 s on the test host — ran against the four-node `k8rs`
+kind cluster three ways: `--once` exit `0` (`66 pods · 4 nodes`, `26 critical, 6 warnings`),
+`--once --analysis` exit `0` with all seven reports drawing, and the console in a PTY at 100×32 under
+`tmux`, header `ctx: kind-k8rs · live · admin`, `23 ● 2 ▲`, cards and footer correct.

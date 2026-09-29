@@ -5577,15 +5577,29 @@ new box, because a phase close is not a box:
    this line existed — corrected on the page and in the code with a clause borrowed from
    `certificate_is_why` rather than invented. `just check` green at `EXIT=0`, 1623 + **41** tests,
    `mutants-diff` 15 / 14 caught / 0 missed.
-   **Still owed:** step 1 (`just check` green and the code exercised),
-   step 2 (build and run the real binary on the test host and paste it), step 5's
-   gate item by item, and — measured, not assumed — the **whole mutation sweep**,
+   **Steps 1 and 2 are done, 2026-09-29.** Step 1: `just check` green at `EXIT=0` over
+   md5-verified bytes, 1623 unit + 41 binary tests. Step 2: the release binary
+   (`cargo build --release --locked`, 6 m 07 s on the test host) run against the four-node
+   `k8rs` kind cluster three ways — `--once` exit `0` (`66 pods · 4 nodes`,
+   `26 critical, 6 warnings`), `--once --analysis` exit `0` with all seven reports
+   drawing, and the console in a PTY at 100×32 under `tmux`, header
+   `ctx: kind-k8rs · live · admin`, `23 ● 2 ▲`
+   ([D319](NOTES.md#d319--the-phase-close-sweep-was-re-measured-as-todomd-demanded-and-d118s-four-shards-are-fifty-two-2026-09-29)).
+   **Still owed:** step 5's gate item by item, and the **whole mutation sweep** — owed
    because Phase 5 touched `rules.rs`, `rules_tests.rs` and `analysis.rs` after the
-   last clean sweep of 2026-08-22 (`57a7336`, `048f46d`, `e1db3b4`). `cargo mutants
-   --list` over the two files answers **879**; D210's shard guidance was measured
-   against an 890-test suite and the suite is now over 1,600, so the shard size is
-   re-measured before the sweep rather than carried
-   ([D210](NOTES.md#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03)).
+   last clean sweep of 2026-08-22 (`57a7336`, `048f46d`, `e1db3b4`).
+   **The sweep's shape was re-measured as this line demanded, and the answer changes it**
+   (D319): `cargo mutants --list` still answers **879**, the unmutated baseline alone is
+   **154 s**, and one slice at the default `--jobs 4` runs at **24 s per mutant** — so the
+   mutant work is **≈5.9 h**, a ten-minute foreground call fits **17** mutants after its
+   baseline, and D118's four shards are **fifty-two**, paying the baseline fifty-two times
+   for **≈8 h** against **≈6 h** for one continuous run. `CARGO_MUTANTS_JOBS=8` is
+   **three and a half times slower** (83 s per mutant) on 12 cores and 18 GiB, so the
+   default is the setting. **It therefore runs as one background run with its log on disk,
+   polled for its terminal line**, which is what
+   [CLAUDE.md § Running it](CLAUDE.md#running-it--and-just-check) already mandates for a run
+   longer than ten minutes; `--iterate` composes shards for a resume. It still runs on the
+   **dev machine**, not the test host, where 82 s per mutant would be twenty hours.
 5. **Then the rest of this ritual**: the phase's security gate, the whole-phase
    second pass, `docs/`, the CHANGELOG, and the PR to `main`.
 
