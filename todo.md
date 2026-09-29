@@ -5557,12 +5557,19 @@ new box, because a phase close is not a box:
    **step 7 then found one, and it is the first cross-box defect this project's
    whole-phase pass has caught**
    ([D315](NOTES.md#d315--the-fourth-member-of-a-class-the-code-had-already-named-found-by-the-closes-own-whole-phase-pass-2026-09-28)).
-   **Two code changes are owed and both are `k8s.rs`, so they are one `dev-core`
-   turn**: an arm for `410`/`Expired` in `answer()`, and the `insecure` field on
-   `Session` that step 5's own security gate row needs. Each is a narrow reversal
-   of that file's freeze, both recorded before being acted on. The `greeting()`
-   clause that reads the field is `main.rs`'s and stays a separate `dev-ui` turn.
-   **Still owed after those:** step 1 (`just check` green and the code exercised),
+   **Both `k8s.rs` changes landed 2026-09-29 in one `dev-core` turn and three review
+   rounds** — the `410`/`Expired` arm and `Session.insecure`
+   ([D317](NOTES.md#d317--the-410-round-a-silence-with-no-counter-behind-it-and-the-paragraph-sixty-lines-up-that-had-already-ruled-that-state-a-harm-2026-09-29)).
+   The arm went **upstream** of `answer()`, which cannot say *this is not trouble* because it
+   returns a bare `Fault`: `Watch::failed` is now the only place a failure is recorded, and a
+   desync kube answers itself is dropped **one occurrence deep** — a second with no relist
+   between them is reported, because nothing in the store counted relists and a walk that
+   never completes was invisible on every surface. `just check` green at `EXIT=0`, 1617 + 40
+   tests, `mutants-diff` 15 / 9 caught / 0 missed. **The one thing this leaves is a `dev-ui`
+   turn**: the `greeting()` clause that reads `Session.insecure` — until it lands, step 5's
+   *honoured **and surfaced*** row is met in the header and **not** on the headless surface,
+   which is why that row stays open rather than ticking.
+   **Still owed:** step 1 (`just check` green and the code exercised),
    step 2 (build and run the real binary on the test host and paste it), step 5's
    gate item by item, and — measured, not assumed — the **whole mutation sweep**,
    because Phase 5 touched `rules.rs`, `rules_tests.rs` and `analysis.rs` after the

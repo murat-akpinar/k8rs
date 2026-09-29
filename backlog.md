@@ -4470,3 +4470,86 @@ Two residuals:
   assertion cannot see it. **Pre-existing and not this diff's**, and the `stream` field beside it is a
   literal that does fail, which is what keeps the test meaningful today. Recorded so it is fixed as a
   pattern rather than re-discovered as a surprise.
+
+### From the `410` round's two reviews (2026-09-29)
+
+`just check` green at `EXIT=0`, `k8s-admin` **no blockers**, one should-fix promoted by the PM and
+fixed in the turn ([D317](NOTES.md#d317--the-410-round-a-silence-with-no-counter-behind-it-and-the-paragraph-sixty-lines-up-that-had-already-ruled-that-state-a-harm-2026-09-29)).
+Three residuals, none of them this turn's to close:
+
+- **`Fault::Unanswered`'s *next step* is a wrong errand for four codes, and losing its oldest member
+  did not close the class.** The sentence — *"nothing usable came back when k8rs tried to `list` and
+  `watch` pods"* — is honest for a `500`. The errand under it is not: *"Check the server address this
+  kubeconfig names, and that this machine can reach it"*, printed for `NoResourceVersion`, `500`,
+  `503` and `429` alike, every one of which comes from a server whose address is fine and which just
+  answered. `429` additionally has no arm in `answer()` at all, so tower's exhausted retries arrive as
+  a network accusation. `answer()`'s own doc declares the missing-arm fallback a **class** and `410`
+  was its fourth member; this is the same class read from the other end — not *which sentence* but
+  *which next step*. **And the item is two halves, only one of which is a ruling.** `because()`
+  already receives `trouble.said()` (`main.rs:2884`) and `Fault::Unanswered`'s arm **discards** it,
+  where `Fault::Rejected`'s interpolates it — *"… and said: {said}"*. For the compacted-token case
+  the discarded message is the diagnosis **and** the remedy, in the server's own words: *"The
+  provided continue parameter is too old to display a consistent list result. You can start a new
+  list without the continue parameter…"*. That is `PRIOR-ART § C3` — *the apiserver already tells
+  you things nobody shows* — with us as the one dropping it, and quoting it needs **no** ruling
+  because the words are not ours and the precedent is one arm over. The other half, one errand that
+  fits a server that answered, is a wording question with a screen in it and is a ruling before it
+  is code. Both halves land together: they cover the second `410`, the `500`, the `503` and the
+  `NoResourceVersion` in one change.
+- **A cluster desyncing repeatedly serves a store up to a minute old with nothing on screen.**
+  `Backoff::reset` is a no-op, so desyncs recurring inside 120 s ramp to the 30–60 s plateau, and
+  D317's fix makes the *second* dropped `410` visible without making the plateau visible. Unchanged
+  for every other non-standing failure, and still better than the wrong errand it replaced. The
+  question is whether the store should say it is re-listing at all — `PRIOR-ART § C2`'s three states
+  (*loading* · *empty* · *denied*) have no fourth for **loaded, but from before**, which is what the
+  post-LIST case publishes.
+  **At bootstrap the same state is reported twice, and the two reports contradict each other.**
+  `complete` is `false` and `Fault::standing(Unanswered)` is `false` (`k8s.rs:1039-1041`), so
+  `settled()` stays `false` and `Watch::settled` does not remove the kind from `still_listing` —
+  after the second drop it is in **both** lists: `troubles()` says *nothing usable came back* while
+  `still_listing()` says *pods, 0 so far, since just now*, with `filling.len()` reset to `0` by each
+  `Init` and `last_progress` restamped by each. `Store::troubles`'s own doc claims *"this call and
+  `Store::still_listing` can no longer disagree about a kind"*, and that claim is scoped to
+  refusals, which are `standing`. **Pre-existing and unchanged by D317** — a bootstrap `410`
+  recorded `Unanswered` before it too — and it is the same question as the plateau, which is why it
+  is in this bullet: a count that resets to zero under a timestamp that is always *just now* is
+  `Watch::settled`'s own named harm, *a screen actively lying about progress*, surviving for the one
+  fault [D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) left
+  non-standing. In the **post-LIST** case there is no contradiction: `complete` is `true`, so
+  `outstanding()` is gated off and the restamped `last_progress` is never read.
+- **How often a real `410` recurs is unmeasured, and the honest form of the claim is structural.**
+  `v1.36.1` exposes no `apiserver_watch_cache_capacity`, so the ring size that decides the frequency
+  could not be read. What would settle it: `kubectl get --raw /metrics | grep
+  apiserver_watch_cache_capacity` on a server that exposes it, or `--watch-cache-sizes` off the
+  apiserver manifest — plus the `InitialListFailed(410)` loop on a real kind of **more than 500
+  objects** with an etcd compaction inside the walk, which is the only way to produce **that** shape
+  rather than reason about it.
+- **The second loop shape, which D317's counter does not catch: a walk that *completes* and a watch
+  that desyncs at once** (2026-09-29, `k8s-admin`, measured). `desynced` is cleared by `answered`,
+  which is true at `InitDone` — so the exemption resets **every time the walk completes**, and the
+  loop `Init → pages → InitDone (clears it) → watch from a stale RV → WatchError(410) → dropped →
+  Init → …` is silent on every pass, forever. Two measurements make it reachable and neither was
+  reasoned: **`metadata.resourceVersion` is constant across the pages of one LIST** (all three pages
+  of `/api/v1/pods?limit=5` returned `3185615`), which `watcher.rs:555-559` carries into the watch —
+  so after a walk of T seconds the watch starts from an RV T seconds old, and § WHAT A THROTTLE
+  LOOKS LIKE puts one page at up to 164–491 s while tower absorbs a `429` in silence. And **a
+  too-old watch RV is `200 OK`**, not an HTTP error: `status="200 OK"` with the `410` arriving as an
+  in-band `ERROR` frame, so it becomes `WatchError` — the variant that is dropped — and never
+  `WatchStartFailed`, which `relisting` correctly leaves recorded.
+  **Not promoted to a blocker, and the reason is the difference from D317's loop.** There the store
+  is **frozen**; here `live` is replaced whole at each `InitDone`, so the data is one cycle stale
+  rather than dead — up to the 30–60 s plateau, because `StandingBackoff::reset` is a no-op. The
+  harm is real and is two things: a pod that starts crashlooping is shown up to a minute late from a
+  screen that says nothing, and **k8rs has silently become a poller** — five full paginated LISTs of
+  the cluster every 30–60 s, ~37 MB of pods per cycle on a 5000-pod cluster at
+  `INITIAL_LIST_PAGE`'s own 7451 B/pod, with nothing on any surface saying so. That is what
+  [invariant 6](CLAUDE.md) exists to prevent, read from the other side: not a queue we could draw, a
+  LIST rate we cannot see. **The resource cost is not this turn's doing** — the pre-D315 code polled
+  identically and merely also printed a wrong errand — so what D317 changed is the visibility, which
+  is the bullet above's question.
+  **The distinguishing fact is D317's own, read over time rather than over events.** A desync an
+  hour after the last one is the client working; a desync two seconds after the last `InitDone`,
+  repeatedly, is not. Nothing in `Watch` can see that, because `desynced` is a bool and the store
+  holds no clock — and `updates()` already has `now` in hand at its `Ok` arm, which is where
+  [invariant 5](CLAUDE.md) would put it. **The mechanism is measured; the frequency is not**, and
+  that is the bullet above.

@@ -4216,6 +4216,10 @@ fn saying(
         // the same reason.
         skew: None,
         serving_expiry: k8s::Serving::Unread,
+        // The startup line is the cluster's answers; the unverified-connection sentence is
+        // stdout's, beside the findings, and `k8s_tests.rs` § CONNECTING is where the field is
+        // proven to travel (NOTES § D314).
+        insecure: false,
     }
 }
 

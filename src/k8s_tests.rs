@@ -1246,6 +1246,24 @@ fn trouble_for(store: &Store, kind: ObjectKind) -> Option<Trouble<'_>> {
     store.troubles().into_iter().find(|t| t.kind == kind)
 }
 
+/// **One `Status` as a watch failure carries it** — for `WatchError`, which holds one directly, and
+/// for the three variants that wrap it in `kube::Error::Api`; the call site spells which
+/// (§ WHAT A THROTTLE LOOKS LIKE).
+///
+/// **Hand-built, and NOTES § D53 is not what it bans.** That rule is about captures of cluster
+/// *objects*; a `Status` is a failure this file has to be able to construct. **Neither `410` shape
+/// can be asked for on demand** (NOTES § D317): the paginated one needs a kind of more than 500
+/// objects, which the fixture cluster does not have, and the in-watch one needs the API server to
+/// evict the `resourceVersion` from its watch cache — a ring whose size `v1.36.1` exposes no metric
+/// for.
+fn status(code: u16, reason: &str) -> Box<kube::core::Status> {
+    Box::new(kube::core::Status {
+        code,
+        reason: reason.to_string(),
+        ..Default::default()
+    })
+}
+
 /// Every watch that is *failing*, as opposed to merely finished. `ended` is true of every stream
 /// in this file — `stream::iter` runs out — so a failure assertion says which watch, and an
 /// `ended` assertion is its own test below.
@@ -1726,6 +1744,18 @@ async fn a_stream_that_ends_is_recorded_and_the_other_watches_are_not() {
 ///
 /// The `InitDone` at the end is what is allowed to clear it, and it is asserted too, or this
 /// test would pass on a watch that never recovers at all.
+///
+/// **The failure below was a `410 Expired` until 2026-09-28 and is a `500` now** (NOTES § D315,
+/// § D317). The subject never was the code — it is `Watch::take`'s clearing rule — but a `410` is
+/// the failure [`relisting`] now drops on its first occurrence, so it can no longer be the vehicle
+/// for a test about *not withdrawing* one that was recorded.
+///
+/// **What makes the `500` equivalent is `answer()` and not kube's state machine.** A first draft of
+/// this paragraph argued it off `watcher.rs:584`, which **never runs here**: this test feeds a
+/// hand-built `Vec` through [`drive`] and no `watcher()` is involved. The load-bearing facts are
+/// that [`answer`] gives a `500` the same [`Fault::Unanswered`] the `410` used to get — so
+/// `settled()` and every predicate over it are unchanged — and that `Watch::take`'s clear is
+/// indifferent to the code: it reads the *event*, never the failure it is withdrawing.
 #[tokio::test]
 async fn a_relist_in_flight_does_not_withdraw_the_failure_it_is_answering() {
     let pods = items::<Pod>("kube-system-pods");
@@ -1741,13 +1771,15 @@ async fn a_relist_in_flight_does_not_withdraw_the_failure_it_is_answering() {
         "a watch that listed cleanly was reported as failing"
     );
 
-    // The 410 a compacted `continue` token produces, then the relist kube starts for it — its
-    // `Init` and its first object, and no more.
+    // A LIST that failed, then the relist that answers it — its `Init` and its first object, and
+    // no more. **The code is free because [`answer`] reads it, not because kube does**: nothing in
+    // `watcher.rs` runs here (the events below are a hand-built `Vec`), and what this failure has
+    // to be is one [`answer`] calls [`Fault::Unanswered`] and [`relisting`] does not drop.
     let mut relist: Vec<watcher::Result<Event<Pod>>> = vec![
         Err(watcher::Error::InitialListFailed(kube::Error::Api(
             Box::new(kube::core::Status {
-                code: 410,
-                reason: "Expired".to_string(),
+                code: 500,
+                reason: "InternalError".to_string(),
                 ..Default::default()
             }),
         ))),
@@ -1769,7 +1801,7 @@ async fn a_relist_in_flight_does_not_withdraw_the_failure_it_is_answering() {
         vec![ObjectKind::Pod],
         "one object of an unfinished relist withdrew the failure it was sent to answer, and \
          `complete` is still true so nothing else on this store says a LIST is running: the \
-         store reads fully healthy while it serves a cluster from before the 410"
+         store reads fully healthy while it serves a cluster from before the failure"
     );
 
     // And the LIST that finishes *is* what clears it, or the rule above would just be "never".
@@ -1784,6 +1816,306 @@ async fn a_relist_in_flight_does_not_withdraw_the_failure_it_is_answering() {
         failing_kinds(&store),
         Vec::new(),
         "the relist finished and the failure it answered is still standing"
+    );
+}
+
+/// **The first `410` the client fixes by itself is not recorded, and every other watch failure
+/// is** — [`relisting`], NOTES § D315, § D317.
+///
+/// **The table is the test, because the defect was one HTTP code with no arm and the fix is one
+/// HTTP code that is no longer a failure.** A `410` desync used to reach [`Fault::Unanswered`] —
+/// *nothing usable came back*, a next step sending the operator to check an address the API server
+/// had just answered on, and `○ nothing is broken` withheld — over a cluster that was working and a
+/// client that was re-listing by itself.
+///
+/// **One failure per store, so every row is a *first* desync.** What a second one does is
+/// [`a_second_desync_with_no_list_between_them_is_reported_and_the_first_is_not`]'s, and it is a
+/// different question: this table is about which shapes are the client's own business at all.
+///
+/// **Most rows are shapes the real stream hands `updates`; the three with a field missing are
+/// guards against a future code change**, which is a distinction worth drawing rather than calling
+/// every row measured (NOTES § D136). `k8s-admin` measured a live `v1.36.1` writing
+/// `"reason":"Expired"` and `"code":410` **together** on the `WatchError` path, so **the two rows
+/// with no code and the one with no reason are shapes no server sends**: they exist because every
+/// field of `Status` is `#[serde(default)]`, because [`answer`] legitimately reads the reason when
+/// there is no code, and because [`relisting`] must not.
+///
+/// **`Gone` and `Expired` are both real and the file used to name only one.** A compacted
+/// `continue` token is `410 Gone` in this file's own prose
+/// ([`a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land`]) and `Expired` in
+/// the measurement above, so both appear — and the reason is not what [`relisting`] keys on either
+/// way, which is what the no-reason row pins.
+///
+/// **The rows that must still be recorded are the point of the table and not its padding.** Two
+/// are `410`s on the variants kube does *not* start over from — under [`relisting`]'s own caveat —
+/// one is a `410` whose HTTP code kube never saw, one is an `InitialListFailed` whose inner error
+/// is not an `Api` at all (the `_ => false` leg, and the shape a dead socket mid-pagination has),
+/// one is [`Fault::Unanswered`]'s `NoResourceVersion`, which re-lists like a desync and is
+/// deliberately not one, and two are the `403`s that arrive on the very variant the first row
+/// does, in both of the shapes [`answer`] reads a `Status` in.
+///
+/// **No row may come out [`Fault::Expired`]**, which the `shown` column already forbids and is
+/// worth naming: that variant is a `401`, and routing `reason::EXPIRED` to it would tell somebody
+/// to sign in again because their watch caught up (its own doc says so).
+///
+/// **The LIST completes first**, so `complete` is true on every row and the only thing that moves
+/// between them is whether the failure was recorded. This one goes through [`drive`] because the
+/// wiring is half of the claim — [`updates`] must route an `Err` through [`Watch::failed`] and not
+/// onto the field. The three tests below reach [`Watch::failed`] directly, for the store states a
+/// stream that ends cannot show.
+#[tokio::test]
+async fn a_watch_failure_kube_answers_by_relisting_is_not_recorded_as_trouble() {
+    let api = |code: u16, reason: &str| kube::Error::Api(status(code, reason));
+
+    // `(what the stream hands us, what a reader is shown for it)`.
+    let shapes: Vec<(&str, watcher::Error, Option<Fault>)> = vec![
+        (
+            "the desync that ends a watch, which `k8s.rs` § WHAT A THROTTLE LOOKS LIKE calls the \
+             one a busy cluster produces most",
+            watcher::Error::WatchError(status(410, "Expired")),
+            None,
+        ),
+        (
+            "the same desync spelled `Gone`, which is what this file's own prose calls it",
+            watcher::Error::WatchError(status(410, "Gone")),
+            None,
+        ),
+        (
+            "a `continue` token the server has already compacted",
+            watcher::Error::InitialListFailed(api(410, "Gone")),
+            None,
+        ),
+        (
+            "the compacted token spelled `Expired`, the pairing a live v1.36.1 was measured \
+             writing",
+            watcher::Error::InitialListFailed(api(410, "Expired")),
+            None,
+        ),
+        (
+            "a 410 with no reason at all, because the reason is not what the predicate reads",
+            watcher::Error::WatchError(status(410, "")),
+            None,
+        ),
+        (
+            "`Expired` with no HTTP code beside it, which kube does not start over for",
+            watcher::Error::WatchError(status(0, "Expired")),
+            Some(Fault::Unanswered),
+        ),
+        (
+            "a 410 starting the watch, which kube retries with the same too-old resourceVersion",
+            watcher::Error::WatchStartFailed(api(410, "Expired")),
+            Some(Fault::Unanswered),
+        ),
+        (
+            "a 410 on an established stream, which kube polls again on the same stream",
+            watcher::Error::WatchFailed(api(410, "Expired")),
+            Some(Fault::Unanswered),
+        ),
+        (
+            "a LIST whose inner error is not an `Api` at all — a socket that died mid-pagination",
+            watcher::Error::InitialListFailed(kube::Error::Service(Box::new(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out",
+            )))),
+            Some(Fault::Unanswered),
+        ),
+        (
+            "an answer no watch can be built on, which re-lists like a desync and is not one",
+            watcher::Error::NoResourceVersion,
+            Some(Fault::Unanswered),
+        ),
+        (
+            "an in-band refusal on the variant the desync arrives on",
+            watcher::Error::WatchError(status(403, "Forbidden")),
+            Some(Fault::Refused),
+        ),
+        (
+            "the same refusal with no HTTP code, which `answer` reads off the reason",
+            watcher::Error::WatchError(status(0, "Forbidden")),
+            Some(Fault::Refused),
+        ),
+    ];
+
+    for (what, failure, shown) in shapes {
+        let mut store = all_but("pods");
+        let mut events = listing(items::<Pod>("kube-system-pods"));
+        events.push(Err(failure));
+        drive(vec![one_watch(events, |s| &mut s.pods)], &mut store).await;
+
+        let fault = trouble_for(&store, ObjectKind::Pod).and_then(|trouble| trouble.fault());
+        println!("{what} -> {fault:?}");
+        assert_eq!(
+            fault, shown,
+            "{what}: the reader is shown {fault:?} and the honest answer is {shown:?}"
+        );
+    }
+}
+
+/// **A dropped desync leaves a store with nothing wrong with it, and that sentence is the whole
+/// box** (NOTES § D315, § D317) — `main.rs` withholds `○ nothing is broken` on
+/// `!troubles().is_empty()`, so this is the assertion the change exists to make and it lived only
+/// in a doc comment for one round.
+///
+/// **It goes through [`Watch::failed`] and not through [`drive`], because a stream is what made the
+/// claim unassertable.** `stream::iter` runs out, so `ended` is true on every watch a driven test
+/// builds and `troubles()` is never empty there — an artefact [`Watch::settled`]'s own doc records
+/// and kube's `watcher()` provably cannot produce (§ THE DRIVER). The wiring from `updates` to this
+/// method is [`a_watch_failure_kube_answers_by_relisting_is_not_recorded_as_trouble`]'s; this is
+/// the store state that wiring reaches.
+///
+/// **The cluster is still served, asserted against the answer from before the desync** rather than
+/// against a number written here: the harm being ruled out is a report that has gone quiet *and*
+/// lost its objects, and a count in the assertion would be a fact about the fixture.
+#[test]
+fn a_dropped_desync_leaves_the_store_saying_nothing_is_broken() {
+    let mut store = bootstrapped();
+    let before = store.snapshot(now()).expect("every initial LIST landed");
+
+    store
+        .pods
+        .failed(watcher::Error::WatchError(status(410, "Gone")));
+
+    // **`troubles()` and not [`failing_kinds`]**: what `main.rs` reads is the whole list, so a row
+    // this store grew for any other reason would withhold the sentence just as well.
+    let troubled: Vec<ObjectKind> = store
+        .troubles()
+        .into_iter()
+        .map(|trouble| trouble.kind)
+        .collect();
+    println!(
+        "after one dropped desync: troubles {troubled:?} · pods {:?}",
+        store.snapshot(now()).map(|cluster| cluster.pods.len()),
+    );
+    assert!(
+        troubled.is_empty(),
+        "a desync the client answers by itself put a kind on `troubles()`, so `main.rs` withholds \
+         `○ nothing is broken` and `views.rs` sends the reader to check an address the API server \
+         had just answered on: {troubled:?}"
+    );
+    assert_eq!(
+        store.snapshot(now()),
+        Some(before),
+        "the cluster this watch had already listed stopped being published, so the report went \
+         quiet about objects it still holds"
+    );
+}
+
+/// **A dropped desync does not take a failure that is standing quiet with it** — the reason
+/// [`Watch::failed`] drops here and not in [`Store::troubles`] (NOTES § D317).
+///
+/// **Filtering downstream would fail the assertion below, and nothing else in the suite would
+/// notice.** `failure` holds one value, so a desync arriving over a recorded `403` would overwrite
+/// it, and a filter in `troubles()` would then hide the row that replaced it — a refusal the reader
+/// has to act on, gone because the client re-listed. This is the test that tells the two designs
+/// apart.
+#[test]
+fn a_desync_does_not_take_a_standing_failure_quiet_with_it() {
+    let mut store = bootstrapped();
+    store
+        .pods
+        .failed(watcher::Error::WatchError(status(403, "Forbidden")));
+    store
+        .pods
+        .failed(watcher::Error::WatchError(status(410, "Gone")));
+
+    let fault = trouble_for(&store, ObjectKind::Pod).and_then(|trouble| trouble.fault());
+    println!("403 then a dropped 410 -> {fault:?}");
+    assert_eq!(
+        fault,
+        Some(Fault::Refused),
+        "the desync replaced the refusal standing under it, so a login that may not `watch` pods \
+         is told its cluster is fine"
+    );
+}
+
+/// **A walk that never completes is visible, and one desync is not** (NOTES § D317).
+///
+/// **The state this exists for has no other witness in the store.** `410 → drop → Init → list →
+/// 410 → drop` moves nothing: `failure` stays `None`, `complete` is only ever written by
+/// `InitDone`, `live` still holds the pre-desync objects, `outstanding()` is gated on `!complete`,
+/// and `last_progress` is *restamped* by the relist's own `Init` — so [`Store::still_listing`]
+/// reads as a LIST moving briskly while the cluster on screen is frozen. `k8s-admin` measured
+/// every one of those fields in that state.
+///
+/// **This is [`Watch::take`]'s own ruling applied to the new code.** Its doc at the `Init` arm ends
+/// *"what ends it is an error the relist reports, never this arm clearing"*, and a dropped `410` is
+/// the relist's error not being reported. The distinguishing fact is whether a complete LIST has
+/// landed since the drop, which is one bool and no new [`Fault`].
+///
+/// **The third drop is the assertion that says the bool clears.** Without it the rule would be
+/// *every desync after the first is reported for the life of the process*, which is the same
+/// silence inverted: one compaction an hour on a healthy cluster would light up a kind forever.
+///
+/// **The last sequence is the loop's real shape and it is the one the others do not pin.** Two
+/// drops with nothing between them prove the counter arms; a complete relist between them proves it
+/// clears. Neither says what a relist that merely *started* does — and the failing walk is
+/// `Init`, `InitApply`s, `Err`, repeating, so if an `Init` disarmed the counter every iteration
+/// would go silent and the blocker would be back with the fix in place. **Measured**: a mutant
+/// clearing [`Watch::desynced`] at the top of [`Watch::take`] leaves all 1 616 other tests in the
+/// suite green and fails only this row, which is what says the row carries the claim alone.
+///
+/// **It is the same line [`a_relist_in_flight_does_not_withdraw_the_failure_it_is_answering`] draws
+/// for `failure`**, one field over: a LIST in flight is not an answer.
+#[test]
+fn a_second_desync_with_no_list_between_them_is_reported_and_the_first_is_not() {
+    let desync = || watcher::Error::WatchError(status(410, "Gone"));
+    let mut store = bootstrapped();
+
+    store.pods.failed(desync());
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "the first desync was reported, which is the wrong errand D315 removed"
+    );
+
+    store.pods.failed(desync());
+    println!(
+        "second desync with no LIST between -> {:?}",
+        failing_kinds(&store)
+    );
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "a walk that cannot get past its own pagination is invisible on every surface: nothing \
+         else in this store moves, and `main.rs` prints `○ nothing is broken` over a frozen cluster"
+    );
+
+    // The relist that answers it, whole — `Init`, one object, `InitDone`.
+    list(&mut store, Store::pod, vec![object::<Pod>("crashloop")]);
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "the LIST that answered the desyncs left the watch reported as failing"
+    );
+
+    store.pods.failed(desync());
+    println!(
+        "desync after a complete relist -> {:?}",
+        failing_kinds(&store)
+    );
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "a complete LIST landed and the next ordinary desync was still reported, so one \
+         compaction an hour lights a kind up for the life of the process"
+    );
+
+    // The relist that answers *that* drop, started and not finished — `Init` and one object, which
+    // is what kube emits on the way back from `State::Empty` and is where the failing walk spends
+    // all of its time.
+    store.pod(&now(), Event::Init);
+    store.pod(&now(), Event::InitApply(object::<Pod>("crashloop")));
+    store.pods.failed(desync());
+    println!(
+        "410 · Init · InitApply · 410 -> {:?}",
+        failing_kinds(&store)
+    );
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "a relist that merely started disarmed the counter, so `Init InitApply Err` repeating goes \
+         silent on every iteration — the walk that never completes is invisible again, with the \
+         counter in place"
     );
 }
 
@@ -2181,16 +2513,27 @@ async fn a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land(
         BTreeSet::from(["broken-crashloop"]),
         "the pages the failed attempt had already delivered were published as part of the cluster"
     );
-    // **The 410 is cleared by the relist that answered it, and that is the point of the box.**
-    // The old store-wide field could not clear, because it could not tell whose failure it held
-    // (NOTES § D145); this one can, because the events that cleared it arrived on the same watch
-    // (NOTES § D162). What survives is the *observation* — the pages the dead attempt delivered
-    // were still thrown away, asserted above.
+    // **The 410 never became a failure at all, and until 2026-09-28 it was one this relist then
+    // cleared** (NOTES § D315). The observation this box is about is untouched — the pages the
+    // dead attempt delivered were still thrown away, asserted above — and so is the end state
+    // asserted here. What moved is *why* it holds: [`relisting`] refuses to record a compacted
+    // `continue` token on its first occurrence, so there is nothing for the relist to withdraw.
+    //
+    // **So this assertion now holds for two independent reasons and no longer discriminates the
+    // clearing rule** (NOTES § D317): the `410` is dropped, *and* the relist that finishes would
+    // have cleared it anyway. A mutant reverting the drop leaves it green, which is the proof. Read
+    // it as the end state this box is about — nothing reports failing — and not as a pin on
+    // `Watch::take`.
+    //
+    // **The clearing rule is pinned one test up** by
+    // `a_relist_in_flight_does_not_withdraw_the_failure_it_is_answering`, over a failure that *is*
+    // recorded; the clause about the store-wide field that could not tell whose failure it held
+    // (NOTES § D145, § D162) is that test's, not this one's.
     assert_eq!(
         failing_kinds(&store),
         Vec::new(),
-        "the LIST that failed was answered by a complete relist on the same watch and the store \
-         still reports it as failing"
+        "a compacted `continue` token was reported as a watch this reader has to do something \
+         about, over a cluster whose API server answered the relist correctly"
     );
 }
 
@@ -7627,6 +7970,7 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
         client_certificate,
         skew,
         serving_expiry,
+        insecure,
     } = session(offline(), Coverage::Cluster).await;
 
     assert_eq!(
@@ -7652,6 +7996,11 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
     assert_eq!(
         renewal, None,
         "a client is not a file: `session` has no kubeconfig to read a login program out of"
+    );
+    assert!(
+        !insecure,
+        "a seam with no `Config` at all claimed the reader had turned TLS verification off — a \
+         warning about a knob nobody could have read (NOTES § D314)"
     );
     assert_eq!(
         (
@@ -8513,6 +8862,9 @@ async fn a_session_hands_the_store_what_it_learned_and_a_question_that_failed_is
         client_certificate: Some(certificate.clone()),
         skew: None,
         serving_expiry: Serving::Unread,
+        // Not one of the facts `Identity` carries: it is the *connection*, and the rules ask about
+        // the cluster (NOTES § D314).
+        insecure: false,
     };
     let identity = Identity::of(&session);
     assert_eq!(
@@ -8857,6 +9209,70 @@ async fn the_certificate_a_kubeconfig_logs_in_with_reaches_the_session() {
             .any(|window| window == b"KEY-"),
         "the private key travelled beside the certificate — a key in our own types is one `{{:?}}` \
          from a backtrace (invariant 8)"
+    );
+}
+
+/// **A kubeconfig that turns TLS verification off says so on the session it opened**
+/// (NOTES § D314, Phase 5's 🔒 gate: *honoured **and surfaced**, not swallowed*).
+///
+/// **All three shapes a kubeconfig writes the line in, because a field is proven only for the ones
+/// it was fed** (NOTES § D29): the knob on, the knob written off, and — the ordinary cluster — no
+/// such line at all. A single assertion over `true` would pass on a field hard-wired to `true` as
+/// happily as on one that is read, and this is the field a report's whole claim about a connection
+/// rests on.
+///
+/// **The cluster is never reached and does not need to be.** What is asserted is what
+/// [`connect_with`] read off the `Config` before `Client::try_from` consumed it —
+/// `k8rs-tests.invalid` is RFC 6761 reserved, so every call after that fails at the resolver.
+///
+/// **`tls-server-name` is [`kubeconfig_for`]'s and is inert on every run here**: nothing completes
+/// a handshake. The trust line is the whole of the difference between the first two.
+#[tokio::test]
+async fn a_kubeconfig_that_skips_verification_says_so_on_the_session() {
+    const SERVER: &str = "https://k8rs-tests.invalid:6443";
+    // `let … else` and not `expect`: [`NotConnected`] has no `Debug`, because `Display` on the
+    // errors it carries interpolates an `exec` plugin's stdout (invariant 8).
+    let Ok(lax) = connect_with(
+        kubeconfig_for(SERVER, "insecure-skip-tls-verify: true", "kubernetes"),
+        None,
+        None,
+    )
+    .await
+    else {
+        panic!("a kubeconfig that skips verification did not build a client");
+    };
+    let Ok(strict) = connect_with(
+        kubeconfig_for(SERVER, "insecure-skip-tls-verify: false", "kubernetes"),
+        None,
+        None,
+    )
+    .await
+    else {
+        panic!("a kubeconfig that keeps verification did not build a client");
+    };
+    // The shape every ordinary cluster has: a `cluster:` block that never mentions the knob.
+    let Ok(silent) = connect_with(kubeconfig("k8rs-tests", "{}"), None, None).await else {
+        panic!("a kubeconfig that says nothing about verification did not build a client");
+    };
+    println!(
+        "insecure-skip-tls-verify true -> {}, false -> {}, absent -> {}",
+        lax.insecure, strict.insecure, silent.insecure
+    );
+
+    assert!(
+        lax.insecure,
+        "the reader turned verification off and the session does not know it, so a report says \
+         nothing about a connection nothing verified — the gate row Phase 5 has never met"
+    );
+    assert!(
+        !strict.insecure,
+        "a verified connection is reported as unverified, which is a warning with nothing behind \
+         it on every ordinary cluster"
+    );
+    assert!(
+        !silent.insecure,
+        "a kubeconfig that never mentions the knob was read as turning it off, which puts the \
+         warning on every cluster there is and so on none of them"
     );
 }
 

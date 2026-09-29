@@ -921,11 +921,21 @@ pub enum Fault {
     /// **They are 200 lines apart and mean opposite things.** `kube::core::response::reason`'s
     /// `EXPIRED` is `"Expired"` on a `410` — *the `resourceVersion` you asked from is too old*,
     /// which a watch answers by re-listing and which is routine desync, not a credential.
-    /// [`answer`] matches it on neither a code arm nor a reason arm, so it comes out
-    /// [`Unanswered`](Fault::Unanswered) for the second before `InitDone` clears the line; that
-    /// behaviour is boxed in `backlog.md` (`k8s-admin`, 2026-08-27) and is **not** to be closed
-    /// by routing `reason::EXPIRED` here. A relist is not a dead login, and wiring the two words
-    /// together would tell somebody to go and sign in again because their watch caught up.
+    ///
+    /// **[`answer`] still matches it on neither a code arm nor a reason arm, and that is now the
+    /// design rather than the gap it was** (NOTES § D315). Until 2026-09-28 a desync came out
+    /// [`Unanswered`](Fault::Unanswered) — fourth member of the `400`/`409`/`422` class
+    /// [`answer`]'s own doc names: a fallback about the network, printed over a cluster that had
+    /// just answered correctly. **An arm here was not the fix.** Every `Fault`
+    /// is by construction something that went wrong, so *this is not trouble* cannot be said in
+    /// this enum at all; [`relisting`] says it one layer up, by never recording the failure, and
+    /// a failure that is never recorded needs no variant and no sentence. **A `410` on the two
+    /// variants kube does *not* start over from is still [`Unanswered`](Fault::Unanswered), and
+    /// correctly so** — [`relisting`] carries which two and why.
+    ///
+    /// **So `reason::EXPIRED` is still not to be routed here.** A relist is not a dead login, and
+    /// wiring the two words together would tell somebody to go and sign in again because their
+    /// watch caught up.
     Expired,
     /// **The server knows who this is and will not allow it** — `403`. One feature degraded and
     /// never a session that failed (§ CONNECTING); the caller names the verb and the resource,
@@ -1370,6 +1380,58 @@ fn watch_said(failure: &watcher::Error) -> Option<String> {
     }
 }
 
+/// **This failure is the client starting over, so there is no fault in it to name** — the one
+/// answer § WHAT WENT WRONG gives that is not a failure at all (NOTES § D315, § D317).
+///
+/// **It answers *what shape is this* and never *how often*.** [`Watch::failed`] is what spends the
+/// answer, and it spends it once: the first desync since a watch last delivered a complete answer
+/// is dropped, a second with nothing between them is recorded. The two are apart because *is this
+/// the client's own business* is a fact about the error and *has this stopped being transient* is a
+/// fact about the watch.
+///
+/// **It is here rather than as an arm in [`answer`] because a [`Fault`] cannot say it.** Every
+/// variant of that enum is something that went wrong, so *this is not trouble* is unsayable inside
+/// a function returning one — and a `410` had no arm there, which made it the fourth member of the
+/// class [`answer`]'s own doc names: the fallback is a claim about the cluster, so every code
+/// without an arm silently accuses the network. Not recording it removes the wrong sentence, the
+/// wrong next step and the withheld *nothing is broken* together, and needs no variant and no
+/// wording.
+///
+/// **The code and only the code, because kube's own test is the code** — `if err.code == 410 {
+/// State::default() }` (`kube-runtime-4.2.0/src/watcher.rs:688-689`). A `WatchError` carrying
+/// `reason: "Expired"` and no `code` goes to `State::Watching` with the **same**
+/// `resourceVersion`, so it is not a client starting over, it is a watch that cannot get past the
+/// version it was refused — and reading the reason there, which [`answer`] legitimately does for
+/// the `code == 0` shape, would drop exactly that. **The two questions this asks are *does the
+/// client fix it by itself* and *is the cluster fine*, and the second is why a `410` is named at
+/// all** where `InitialListFailed` is concerned: `:584` returns `State::Empty` for **any** list
+/// error, so that variant always re-lists, and a `500` on the way is still the reader's news. A
+/// compacted `continue` token is ordinary pagination.
+///
+/// **`WatchStartFailed` and `WatchFailed` are out because under `ListWatch` neither re-lists.** The
+/// first goes back to `State::InitListed` with the same `resourceVersion` (`:650-652`), the second
+/// back to `State::Watching` with the same stream (`:709`) — so a `410` on either is a kind that
+/// has stopped for good, and dropping it would hide that behind a screen with nothing on it.
+///
+/// **Under `StreamingList` the first half of that would not hold, and nothing here would notice** —
+/// the same shape [`Watch::live`]'s doc carries for the same conditional. `WatchStartFailed` has a
+/// **second** site (`:537`), reached only from that strategy, and it returns `State::default()`,
+/// which does re-list. It is unreachable today — kube's default is `ListWatch` (`:201-202`), the
+/// one [`watches`] builds its `watcher::Config` from, and `k8s_tests.rs` pins it — and the cost of
+/// being wrong is a silent kind rather than a false one, which is the right way round for a claim
+/// that may go stale. `WatchFailed`'s conclusion needs no caveat: `:630` is same-stream too.
+///
+/// **`NoResourceVersion` re-lists too (`:568`) and is deliberately still recorded.** That one is
+/// the server answering with something no watch can be built on, which is a cluster doing
+/// something wrong; a compacted `resourceVersion` is a cluster doing something normal.
+fn relisting(failure: &watcher::Error) -> bool {
+    match failure {
+        watcher::Error::WatchError(status)
+        | watcher::Error::InitialListFailed(kube::Error::Api(status)) => status.code == 410,
+        _ => false,
+    }
+}
+
 // --- WHAT WENT WRONG END ---
 
 // --- THE STORE START ---
@@ -1478,6 +1540,26 @@ struct Watch<T> {
     /// gate lets through. One flag in both, for the reason [`Watch::settled`]'s own doc gives:
     /// *the screen stops claiming a LIST is moving* and *the gate opens* may not be two changes.
     unfinished: bool,
+    /// **A desync was dropped and this watch has not delivered an answer since** — the one fact
+    /// that tells *the client re-listed* from *the client cannot get past this* (NOTES § D317).
+    ///
+    /// **It exists because nothing else in this struct moves while a walk fails forever.**
+    /// `410 → drop → Init → list → 410 → drop` leaves `failure` `None`, `complete` `true` (only
+    /// `InitDone` writes it), `live` holding the pre-desync objects and `outstanding` gated on
+    /// `!complete` — and `last_progress` *restamped* by the relist's own `Init`, so
+    /// [`Store::still_listing`] reads as a LIST moving briskly over a frozen cluster. That is the
+    /// state [`Watch::take`]'s `Init` arm already ruled a harm, and the drop [`Watch::failed`]
+    /// performs on a [`relisting`] failure is the error it says must be reported.
+    ///
+    /// **Nothing reads it but [`Watch::failed`]**, deliberately: it is not a reportable state of
+    /// its own, it is what makes the *second* occurrence reportable. One desync is the client
+    /// working, and a screen that named it would be one more thing a newcomer has to be told not
+    /// to worry about (invariant 13).
+    ///
+    /// **Cleared where `failure` is cleared and at no second point** ([`Watch::take`]). Both
+    /// answer *has this watch delivered a complete answer*, and two clear points for one question
+    /// is how they come to disagree (NOTES § D145).
+    desynced: bool,
 }
 
 // Written out rather than derived: `#[derive(Default)]` would demand `T: Default`, which no
@@ -1492,6 +1574,7 @@ impl<T> Default for Watch<T> {
             failure: None,
             ended: false,
             unfinished: false,
+            desynced: false,
         }
     }
 }
@@ -1552,6 +1635,16 @@ impl<T: Watched> Watch<T> {
         // from before the failure, and 292 s of that is still long enough for the argument to
         // hold: what ends it is an error the relist reports, never this arm clearing.
         //
+        // **One failure is exempt from that last clause and it is the only one** (NOTES § D317).
+        // [`relisting`] drops the first `410` since this watch last answered, so for exactly that
+        // relist there *is* no error reported and nothing ends the quiet — deliberately, because a
+        // desync is the client re-listing and a sentence about it is one more thing a newcomer has
+        // to be told not to worry about. **What keeps the paragraph above true is that the
+        // exemption is one occurrence deep**: a second dropped desync with no `InitDone` between
+        // them is recorded ([`Watch::failed`]) — the second attempt's error, not the first's, which
+        // is this clause satisfied one relist late rather than not at all. A walk that never
+        // completes therefore still ends the quiet; a single compaction does not.
+        //
         // **This is the same fact D150 reads for a different question, not a contradiction of
         // it.** There, `Init` and `InitApply` both count, because the question is *is this LIST
         // moving* and an object arriving proves it is. Here neither counts, because the question
@@ -1568,6 +1661,26 @@ impl<T: Watched> Watch<T> {
         };
         if answered {
             self.failure = None;
+            // **[`Watch::desynced`] clears with it and not at a second point.** Both answer *has
+            // this watch delivered a complete answer*, so the two cannot come to disagree about
+            // one relist (NOTES § D317).
+            //
+            // **The `match` three lines up is the whole reason that is safe.** A failing walk is
+            // `Init`, `InitApply`s, `Err`, repeating, and `answered` is `false` for both of its
+            // `Ok` members — so nothing inside the loop can reach this line, whatever is
+            // reachable elsewhere. `Event` has five variants, so the `_` arm is exactly `Apply`
+            // and `Delete`, and kube constructs them in one place each
+            // (`watcher.rs:665`, `:676`), both inside
+            // `State::Watching`, which is entered only after an `Event::InitDone` has been
+            // emitted: `:559` under `ListWatch` and the end bookmark at `:602` under
+            // `StreamingList`. **So this one does not rest on the `ListWatch` pin** — unlike
+            // [`relisting`]'s sibling claim about `WatchStartFailed`, which does and says so.
+            //
+            // **`filling.is_some()` is load-bearing here and not a formality**: it is the one way
+            // `answered` is `false` for a non-initial event, so an `InitDone` on a stream that
+            // never sent an `Init` leaves the counter armed rather than announcing a relist that
+            // did not happen.
+            self.desynced = false;
         }
         match event {
             Event::Init => self.filling = Some(BTreeMap::new()),
@@ -1604,6 +1717,44 @@ impl<T: Watched> Watch<T> {
                 self.live.remove(&key(&object));
             }
         }
+    }
+
+    /// **One failure this watch reported, recorded — unless it is the *first* desync since this
+    /// watch last answered**, which is the client's own business and nobody else's
+    /// ([`relisting`], NOTES § D315, § D317).
+    ///
+    /// **The only place a failure is recorded**, which is what makes the exception four lines
+    /// rather than a condition every reader of [`failure`](Watch::failure) has to remember;
+    /// [`take`] is the only place one is cleared.
+    ///
+    /// **A second desync with no answer between them is reported, and that half is not a
+    /// refinement — it is what keeps the drop from creating the state [`take`]'s `Init` arm exists
+    /// to prevent.** `410 → drop → Init → list → 410 → drop` moves nothing else in this struct
+    /// ([`desynced`](Watch::desynced) carries the measured list), so without a counter a walk that
+    /// never completes is a frozen cluster under `○ nothing is broken`. One desync is silence
+    /// because the client fixes it in one relist; two with no LIST between them is not a fix.
+    ///
+    /// **A recorded desync replaces whatever stood**, which is [`failure`](Watch::failure)'s own
+    /// last-wins rule and not a decision taken here. **What that costs is a downgrade**, and it is
+    /// reachable on the wire — a `WatchError(403)` stays in `State::Watching`, a `410` on that
+    /// stream goes to `Empty`, and a `410` on page 2 of the relist is the second one: *this login
+    /// needs permission to list pods* becomes *nothing usable came back*, which is the wrong next
+    /// step for a refusal. **It is still strictly better than before 2026-09-28**, when *every*
+    /// `410` overwrote a standing `403` — the exemption being one occurrence deep is what makes the
+    /// first one harmless, and `a_desync_does_not_take_a_standing_failure_quiet_with_it` pins that
+    /// half.
+    ///
+    /// **Dropping it here and not in [`Store::troubles`] is the difference between *this never
+    /// happened* and *this hid something that did*:** filtering downstream would let a desync
+    /// overwrite a failure the watch really is carrying and then take that one quiet with it —
+    /// `a_desync_does_not_take_a_standing_failure_quiet_with_it` is the test that tells the two
+    /// designs apart.
+    fn failed(&mut self, failure: watcher::Error) {
+        if relisting(&failure) && !self.desynced {
+            self.desynced = true;
+            return;
+        }
+        self.failure = Some(failure);
     }
 
     /// **What this watch's unfinished initial LIST has to show for itself, while a screen may
@@ -3999,9 +4150,10 @@ where
                 let now = Time(Timestamp::now());
                 Box::new(move |store: &mut Store| of(store).take(&now, event)) as Update
             }
-            Err(failure) => {
-                Box::new(move |store: &mut Store| of(store).failure = Some(failure)) as Update
-            }
+            // **Through [`Watch::failed`] and never onto the field**, so the one failure the
+            // client answers by itself is dropped in the watch that owns it rather than in the
+            // driver that has no idea whose it is (NOTES § D315).
+            Err(failure) => Box::new(move |store: &mut Store| of(store).failed(failure)) as Update,
         })
         .chain(stream::once(async move {
             Box::new(move |store: &mut Store| of(store).ended = true) as Update
@@ -7177,6 +7329,23 @@ pub(crate) struct Session {
     /// [`renewal`](Session::renewal) and [`client_certificate`](Session::client_certificate) are
     /// filled from.
     pub(crate) serving_expiry: Serving,
+    /// **Nothing verified the certificate [`serving_expiry`](Session::serving_expiry) was read
+    /// off** — the kubeconfig's own `insecure-skip-tls-verify`, as `Config::accept_invalid_certs`
+    /// at the one place [`connect_with`] still has a `Config` (NOTES § D314).
+    ///
+    /// **Honoured because it is the reader's own file, and never set by us**: the security gate's
+    /// *TLS verification is never disabled by us* is what `scripts/security-guard.py` reads, and
+    /// *and surfaced* is the half of that row no script can see — which is what this field is for.
+    ///
+    /// **Not a second source of truth for [`Choice::insecure`]**, which answers the same question
+    /// about a kubeconfig *entry* nobody has connected to yet, so the picker can warn before the
+    /// switch. This one is the connection that happened, which is the only thing a report may
+    /// claim. `main.rs` spells the sentence (`screens/once.md` § When the connection was never
+    /// verified); a second vocabulary for one fact is what NOTES § D103 exists to stop.
+    ///
+    /// **`false` for a session built from a client rather than a kubeconfig**, for the reason every
+    /// field [`connect_with`] fills is empty there: [`session`] has no `Config` to read.
+    pub(crate) insecure: bool,
 }
 
 /// **What one discovery answer says**, read twice at connect so nothing asks again
@@ -7402,6 +7571,16 @@ pub(crate) async fn connect_with(
     // whole of [`SERVING_PROBE`] first: measured at 10.008 s of a dead terminal before an error
     // that was available in zero (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 5).
     let probe = probe(&config);
+    // **Read before `Client::try_from` consumes the `Config`, exactly as [`renewal`] and
+    // [`kubeconfig_certificate`] above are — and off the same field [`trust_only`] copies into the
+    // probe**, so what a report says about this connection and what the probe actually verified
+    // cannot come apart (NOTES § D314). Nothing here sets it: it is the
+    // reader's own `insecure-skip-tls-verify`, and `scripts/security-guard.py` bans assigning
+    // **`Config::accept_invalid_certs`** `true` anywhere in this tree while leaving a read of it —
+    // this line — alone, which its own self-test pins. **The guard has never heard of
+    // [`Session::insecure`]** and there is nothing for it to hear: that field is a fact this file
+    // reports, not a knob anything turns.
+    let insecure = config.accept_invalid_certs;
     // **Both halves are asserted: that the probe runs, and that its answer lands in the field
     // below.** `a_completed_handshake_reads_the_expiry_and_connect_with_files_it` stands up a real
     // TLS server and compares the field with what the wire said, and
@@ -7426,6 +7605,7 @@ pub(crate) async fn connect_with(
                 context: named,
                 namespace: context_namespace,
                 client_certificate,
+                insecure,
                 serving_expiry: serving_expiry(probe, SERVING_PROBE, SERVING_SAMPLES).await,
                 ..session(client, coverage).await
             })
@@ -8206,14 +8386,16 @@ pub(crate) async fn session(client: Client, coverage: Coverage) -> Session {
         watches,
         skew,
         coverage,
-        // **`None` here and filled in by [`connect_with`]**, which is the only caller that has a
-        // kubeconfig to read them from. A client is not a file: it carries no context name and no
-        // certificate that could be read back off it.
+        // **Empty here and filled in by [`connect_with`]**, which is the only caller that has a
+        // kubeconfig to read them from. A client is not a file: it carries no context name, no
+        // certificate that could be read back off it, and no `Config` left to ask whether
+        // verification was turned off.
         renewal: None,
         context: None,
         namespace: None,
         client_certificate: None,
         serving_expiry: Serving::Unread,
+        insecure: false,
     }
 }
 

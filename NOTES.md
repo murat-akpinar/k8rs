@@ -338,6 +338,7 @@ its line moving with it.
 - [D314](#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28) — Phase 5's close family review: no blockers, two box bodies that do not describe their own code, and a security gate row the headless surface does not meet
 - [D315](#d315--the-fourth-member-of-a-class-the-code-had-already-named-found-by-the-closes-own-whole-phase-pass-2026-09-28) — the fourth member of a class the code had already named, found by the close's own whole-phase pass
 - [D316](#d316--the-operator-review-of-the-unwired-panes-no-blockers-and-the-four-findings-that-are-this-turns-own-second-copies-2026-09-28) — the operator review of the unwired panes: no blockers, and the four findings that are this turn's own second copies
+- [D317](#d317--the-410-round-a-silence-with-no-counter-behind-it-and-the-paragraph-sixty-lines-up-that-had-already-ruled-that-state-a-harm-2026-09-29) — the `410` round: a silence with no counter behind it, and the paragraph sixty lines up that had already ruled that state a harm
 
 ## Why it exists — where the gap is
 
@@ -28467,3 +28468,259 @@ D312 lost.
 sentence wraps at the floor (`padded()` is 53 columns and the sentence is 54), and the four sentences on
 a real binary **on the landed tree** — `dev-ui`'s run was on its own tree and `test.md` § K's first row
 is deliberately unticked until one is taken on what is committed.
+
+### D317 — the `410` round: a silence with no counter behind it, and the paragraph sixty lines up that had already ruled that state a harm (2026-09-29)
+
+[D315](#d315--the-fourth-member-of-a-class-the-code-had-already-named-found-by-the-closes-own-whole-phase-pass-2026-09-28)
+and [D314](#d314--phase-5s-close-family-review-no-blockers-two-box-bodies-that-do-not-describe-their-own-code-and-a-security-gate-row-the-headless-surface-does-not-meet-2026-09-28)
+landed as one `dev-core` turn. `just check` is green at `EXIT=0` on those bytes and the
+dev's own `mutants-diff` caught 7 of 7 viable, 0 missed — **and both reviews still came
+back with work, which is the ordinary number of rounds for this project** and not a
+failure of the turn. `k8s-admin` reported **no blockers**; the PM promotes one of its
+should-fixes, and the reason is not a new measurement.
+
+**The promoted finding: nothing counts a relist, so a watch that cannot get past its own
+pagination is invisible on every surface.** `relisting` drops a `410` unconditionally for
+`InitialListFailed(kube::Error::Api(status))`, so the loop `410 → drop → Init → list → 410
+→ drop` records nothing, forever. `k8s-admin` **read** the store in that state off
+`Watch::take`, `outstanding` and `troubles` at the diff — not observed at runtime, and it asked for
+that distinction itself — and **no field moves**: `failure` stays `None`, `complete` stays `true` (only `InitDone` writes it),
+`live` still holds the pre-desync objects (`Init` writes `filling`), `outstanding()` is
+gated on `!complete`, and `troubles()`' filter is `failure.is_some() || ended ||
+unfinished` — all three false. `main.rs:988` then prints `○ nothing is broken` over a
+frozen cluster, and the one field that does move, `last_progress`, is *restamped* by the
+relist's own `Init`, so `still_listing` reads as a LIST moving briskly.
+
+**What makes it a blocker rather than a fourth opinion is that this file already ruled that
+state a harm, sixty lines above the new function.** `Watch::take`'s doc
+(`k8s.rs:1592-1602`) is the recorded reason `Init`/`InitApply` do not clear `failure`, and
+it says: *"the store would read perfectly healthy while it served a cluster from before the
+failure, and 292 s of that is still long enough for the argument to hold: **what ends it is
+an error the relist reports, never this arm clearing**."* The `410` drop is the relist's
+error not being reported. So the new code creates exactly the state its neighbour exists to
+prevent, and that neighbour's closing clause is now false — two places in one file reading
+one container and disagreeing, which is
+[CLAUDE.md § step 6](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it)'s
+own defect class in literal form. **The stale-doc half is not a later box**: *stale docs are
+a failed step; do not commit them*.
+
+**The scope is measured and is why the reviewer read it as narrower than the PM does.**
+`ListSemantic::MostRecent` sends `resource_version: None` (`watcher.rs:393-396`), so the
+first page cannot `410`; `InitialListFailed(410)` needs a `continue` token, which needs a
+kind of **more than 500 objects**. On the 41-pod fixture cluster the arm is unreachable and
+the only live path is `WatchError(410)`, which self-heals in one relist. **That is an
+argument about the fixture, not about the product** — `k8s.rs:3577` already calls a
+restart on a compacted `continue` token *"the ordinary path … not a rare one"*, and the
+cluster the tool is for is the one with more than 500 pods. A defect that is unreachable
+only on our own test cluster is not a narrow defect.
+
+**The fix is the distinguishing fact and not a new `Fault`.** Nothing in the store separates
+*one desync* from *a walk that never completes*, and the cheapest thing that does is whether
+an `InitDone` has landed since the last dropped `410` — one bool on `Watch`, no new variant,
+no sentence, no screen ruling. **D315's own preference for the smaller candidate is
+unchanged by this**; what changes is that *smaller* has to include the second occurrence,
+because a silence that cannot end is not the same object as a silence that lasts one relist.
+The alternative — dropping only `WatchError(410)` and leaving `InitialListFailed(410)`
+recorded — is smaller still and is handed to the dev beside it, at the cost of the wrong
+errand returning on ordinary big-cluster pagination. **Either way the evidence decides**,
+which is the same instruction D315 gave and the same one that produced the reversal below.
+
+**D315 spent half of an earlier recorded ruling without naming it, and that is the PM's
+defect, not the code's.** D315 counts *removing the health suppression* as a win. That
+suppression is the PM's ruling of 2026-08-29, carried in `main.rs:961-970`, and it has two
+reasons: a report that contradicts itself, **and** *"a watch refused after a good LIST keeps
+a list that can no longer see a pod that broke."* The first survives intact — with no
+trouble recorded there is nothing to contradict. The second is violated exactly, and is the
+state the promoted finding above is about. So the clause is **scoped rather than spent**: it
+is honoured for the case the earlier ruling was written about — a watch whose failure stands
+— and a single self-healing desync on a kind small enough not to paginate is outside it. The
+loop is not, which is why the loop is recorded. **A reversal is written before it is acted
+on, and this one was not** — it is written here, and the code that needs it is the same turn's.
+
+**The gate row D314 exists for cannot tick on this turn, and the half that is unmet is
+narrower than D314 said.** `k8s-admin` re-read `CLAUDE.md`'s wording — *honoured and shown in
+the header* — and the **header half is already met at HEAD and was before this turn**:
+`ui.rs:2005` draws the badge off `Screen::insecure`, fed by `main::tls_unverified` →
+`k8s::Choice::insecure`. D314's finding is the **headless** surface, which is Phase 5's own
+🔒 wording (*surfaced*), and it is the only half still open. `Session.insecure` has no reader,
+and a field with no reader tells nobody: `k8rs --once --analysis` against an unverified
+connection produces **byte-identical** output before and after this diff — measured twice on the
+live cluster with a CA-less kubeconfig copy by **`tester`**, which is the only one of the two
+reviewers that may build, and not by `k8s-admin`, which asked for the attribution to be right. **So Phase 5 step 5 ticks that row after the
+`dev-ui` turn, not this one**, and that turn's clause reads the `Session` field rather than
+reaching for `tls_unverified` — two readers of one fact is what this repo keeps paying for
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+`k8s-admin` went looking for a disagreement between the two and **could not construct one**:
+`contexts(kubeconfig, asked_for)` derives `current` from `wanted(…)`, so `--context` is
+honoured, and the two places `Choice::insecure` forces `false` are entries `connect_with`
+cannot open.
+
+**The box's own headline was the thing nothing asserted, and `tester` found it by measuring
+what the diff only claimed in prose.** Two product claims lived only in doc comments: that a
+dropped `410` leaves `troubles()` empty so `○ nothing is broken` comes back with the cluster
+still served, and that dropping in `Watch::failed` rather than in `Store::troubles` stops a
+desync overwriting a real failure. `tester` drove both off a `bootstrapped()` store — `403`
+then `410` keeps `Fault::Refused`, and a dropped `410` leaves `troubles []` with
+`snapshot Some(14)` — so the committed table's *"cannot show this half"* was true of its own
+fixture and **not of the code**. Both are pinned in this round. **That is the same shape as
+the `137` and `exit 0` rounds**: the sentence a card exists to say is the one nobody asserts.
+
+**`tester`'s five semantic mutants say the new table is the sole guard for three separate
+claims**, each killing exactly one test: the variant split, the code-vs-reason reversal that
+the dev's own second pass had already caught, and the drop itself. A twelve-test kill on
+over-matching `InitialListFailed(Api(_))` at any code is the one that says the split is load
+bearing. **The fixture retarget from `410 Expired` to `500 InternalError` survives both
+reviews** — the identity, name, doc claim and both assertions are unchanged, mutant M5
+(reverting the drop) leaves it green so it never depended on the drop, and an apiserver
+answering `500` mid-pagination is a shape the repo has a neighbouring capture of. **Its
+stated reason is wrong and is corrected**: `watcher.rs:584` does not run in that test at all,
+which feeds a hand-built `Vec` through `drive`; the load-bearing equivalence is that
+`answer()` gives a `500` the same `Fault::Unanswered`.
+
+**Six more findings ride this round, all in the dev's own regions.** Four shapes the
+committed table reasons about and does not feed ([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)) — `410 Gone`
+on both dropped variants, a `410` with no reason, an `InitialListFailed` wrapping a
+non-`Api` inner, and `NoResourceVersion`, whose three sentences of doc have no row —
+**and rows 1 and 2 pin `Expired` where this file's own prose (`k8s_tests.rs:2239`) calls the
+real reason `Gone`**. `relisting`'s doc states as a fact about kube that `WatchStartFailed`
+never re-lists, and `watcher.rs:537` under `StreamingList` does; it is unreachable only
+because k8rs pins `ListWatch`, and `k8s.rs:1474-1480` already sets the exact caveat clause
+for the same conditional. `a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land`'s
+second assertion now holds for **two** reasons and M5 proves it no longer discriminates the
+clearing rule. A guard claim says *this field* where it means `accept_invalid_certs`, and
+`security-guard.py` has never heard of `Session::insecure`. And the new table's doc calls all
+seven rows shapes the real stream hands `updates`, where row 3 is a guard against a future
+code change rather than a cluster state — the
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+class, in a turn whose own headline finding was the same class.
+
+**What goes to [`backlog.md`](backlog.md) rather than here.** `Fault::Unanswered`'s **next
+step** — *"Check the server address this kubeconfig names, and that this machine can reach
+it"* — is a wrong errand for `NoResourceVersion`, `500`, `503` and `429` alike, all of which
+come from a server whose address is fine and which just answered. The class `answer()`'s doc
+declares is not closed by this turn; it lost its oldest member. The line names the errand,
+not the sentence, because *"nothing usable came back"* is honest for a `500`. Also there: the
+repeated-desync plateau (`Backoff::reset` is a no-op, so desyncs inside 120 s ramp to 30–60 s
+and the store serves a cluster up to a minute old), and the watch-cache ring size that would
+say how often a real `410` recurs — `k8s-admin` could not measure it, `v1.36.1` exposes no
+`apiserver_watch_cache_capacity`, and the honest form of the claim is structural rather than
+frequency-based.
+
+**Two process notes worth keeping, both `tester`'s own second pass on itself.** It put a
+restore trap on the launching `ssh` shell, which exited in three seconds and restored a file
+**while cargo was compiling against it** — [D185](#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)'s
+exact failure, committed by the agent whose brief cites it, and caught by a `grep -c` that
+returned 0 rather than by the build. And `pkill -f "cargo test …"` killed its own `ssh` shell
+because the pattern matched the remote command line running the `pkill` —
+[D275](#d275--the-wait-loop-watched-for-the-commands-own-name-so-it-matched-itself-and-never-ended-2026-09-24)'s
+shape one step over, which is now two spellings of *a pattern that matches the process using
+it* in five days. Both left the tree correct, verified by looking rather than by claiming.
+
+**Round two: the blocker closed, and the round found the thing neither earlier read could.** The
+fix is one bool, `Watch::desynced`, cleared in `Watch::take` on the **existing `answered` gate**, so
+the drop is **one occurrence deep** — the first `410` is silent, a second with no relist between
+them is recorded. The narrow alternative (dropping only `WatchError(410)`) was falsified on two
+counts by the dev: it restores the wrong errand for exactly the paginating clusters, **and** it
+leaves a repeated `WatchError(410)` invisible forever, which is the same blocker on the other
+variant. `k8s-admin` says it would ship it; `tester`'s `just check` is green at `EXIT=0` over
+md5-verified bytes; `mutants-diff` is 15 mutants, 9 caught, 6 unviable, 0 missed.
+
+**And the sentence the dev used to reject the alternative is true of the fix that replaced it** —
+which is the finding, and neither review's fault, because it needed a round that asked what the fix
+could break rather than what the code does. `desynced` is cleared by `answered`, and `answered` is
+true at `InitDone`, so **the exemption resets every time the walk completes.** That splits the
+pathological cases in two and the counter catches one: a walk that never completes is reported on
+pass two, while a walk that **completes** and a watch that desyncs at once is dropped on every pass,
+forever. `k8s-admin` measured the two facts that make it reachable rather than reasoning them — a
+LIST's `metadata.resourceVersion` is **constant across its pages**, so the watch starts from an `RV`
+as old as the whole walk, and **a too-old watch `RV` is `200 OK`** with the `410` arriving as an
+in-band `ERROR` frame, so it becomes `WatchError`, the variant that is dropped, and never
+`WatchStartFailed`, which `relisting` correctly keeps.
+
+**It is ruled to [`backlog.md`](backlog.md) and not promoted, and the line is the difference between
+the two loops.** D317's loop leaves the store **frozen**; this one replaces `live` whole at every
+`InitDone`, so the data is one cycle stale rather than dead — up to the 30–60 s plateau, because
+`StandingBackoff::reset` is a no-op. The harms are real (a pod that starts crashlooping is shown up
+to a minute late from a screen that says nothing, and k8rs has silently become a poller at roughly
+37 MB of pods per cycle on a 5000-pod cluster) but the **resource cost is not this turn's doing** —
+the pre-D315 code polled identically and merely also printed a wrong errand. What this turn changed
+is the visibility, which is the same question the plateau bullet already asks. And the fix is not one
+line: the distinguishing fact is *has anything happened between them* read **over time** rather than
+over events, which needs a clock the store does not hold — `updates()` has `now` in hand at its `Ok`
+arm, which is where [invariant 5](CLAUDE.md) would put it. **The frequency is still unmeasured**:
+`v1.36.1` exposes no `apiserver_watch_cache_capacity`, so the mechanism is measured and how often it
+fires is not, and the claim is written as structural rather than as a rate.
+
+**No screen ruling is commissioned, and that is the reviewer answering the opposite of what the
+question expected.** The PM asked whether the second `410` needs its own sentence, since it now draws
+`Fault::Unanswered`'s wrong errand. `k8s-admin`'s answer is no, on the ground that decides it: **the
+sentence already exists and we are throwing it away.** `because()` receives `trouble.said()`
+(`main.rs:2884`); `Fault::Rejected`'s arm interpolates it and `Fault::Unanswered`'s **discards** it —
+and for the compacted-token case the discarded message is the server's own diagnosis *and* remedy.
+That is `PRIOR-ART § C3` with us as the one dropping it, it needs no new wording because the words
+are not ours, and it covers the `500`, the `503` and the `NoResourceVersion` in the same change. A
+`410`-specific `Fault` would have fixed one member of a family of five, which is how `answer()`'s
+class reached four members in the first place. **So the backlog item is two halves and only one of
+them is a ruling**, which is a sharper shape than the line it replaced.
+
+**Round three is one test row and three doc clauses, and the row is the one that matters.**
+`tester` planted `self.desynced = false;` at the **top** of `take` — any event disarms the counter —
+and **1617 tests stayed green.** That mutant is the blocker returning, because the failing-walk loop
+is `Init · InitApply · Err` and a relist merely *starting* would disarm it. The shipped code is
+correct — `410 · Init · 410` and `410 · Init · InitApply · 410` both record, fed — but the committed
+test goes `410 · 410` with **no event between them**, so it proves the counter arms and that a
+*complete* relist disarms it, and never that a *started* relist leaves it armed, which is the whole
+of the item. **That is three assertions in this one turn that existed and did not cover the thing
+they were written for** — not three rounds, which is what a first draft of this sentence said and
+which the rounds themselves falsify: the round-one table's *"cannot show this half"* and
+`a_page_that_fails…`'s double-covered assertion were **both** found in `tester`'s first read, and
+this one in its second. What holds across all three is not the cadence but the method: every one was
+found by a **tool or a fed shape**, and none by re-reading the diff.
+
+**Three smaller things the fed shapes settled.** The clear point survived fifteen sequences and
+could not be falsified — but `Apply` and `Delete` **do** clear `desynced`, and what makes that
+harmless is only that kube cannot deliver one in that window (`Event::Apply` is constructed at
+exactly one place, `watcher.rs:665`, and `Event::Delete` at one, `:676`, both inside
+`State::Watching`). So the doc's chain is a **detour** — the short reason is the `match` three lines
+above the clear — and it **under-claims**, because `:602`'s end bookmark gates the same thing under
+`StreamingList`, so this unreachability does not depend on the `ListWatch` pin the sibling claim
+sixty lines up correctly carries. `403 · 410 · 410` is reachable and **downgrades** a standing
+refusal to *nothing usable came back*: the mechanism is named in `failed`'s last-wins paragraph and
+the consequence is not, and it is strictly better than before this turn, when every `410` overwrote a
+standing `403`. And `tester`'s R2 mutant — clearing on `InitDone` alone — **survived**, so nothing
+pins the dev's choice between the two clear points; that is deliberately where it stays, carried by
+the doc comment, because the difference is unreachable and a test for it would assert kube's state
+machine rather than k8rs's behaviour.
+
+**Round three landed, and the row was seen red against the reviewer's own mutant.** With the clear
+moved to the top of `take`, the new sequence fails and **1616 of 1617 pass** — so the row carries the
+claim alone, which is the same number `tester` measured from the other side and is now in the test's
+doc as a measurement rather than a reasoned claim. Restored, green, and the sweep is unchanged at
+15 mutants / 9 caught / 6 unviable / 0 missed, because cargo-mutants mutates neither test modules nor
+comments. The dev's own second pass caught four more of its own, three of them counts — *the two arms
+that would are `Apply` and `Delete`* (an `Event` has five variants and the `_` arm covers two of
+them, so *arms* and *events* are not the same count), *two fields apart* (three, and a geometric claim
+that goes stale for no gain), and *leaves the rest of this file green* where it had measured the whole
+suite — and it verified every `watcher.rs` coordinate before writing it, including the `:602`
+end bookmark, which is the one that de-caveats the clear point and so the one worth not taking on
+trust.
+
+**The landing gate is green over the delivered bytes** — `just check` `EXIT=0`, 1617 + 40 tests, every
+guard including `check-docs` over this entry, `reports-guard` over 106 reports with its canary firing,
+and `cargo deny` clean; `Cargo.lock` does not move, because nothing was added. The cross matrix is
+skipped as always on that host ([D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03)).
+**The phase's security gate passes with exactly one row open, and that row is open on the record
+rather than skipped**: `insecure-skip-tls-verify` is *honoured and shown in the header* today, and
+*surfaced* on the headless surface after the `dev-ui` turn. Nothing else in the diff reaches the write
+path, the command log, a filesystem path or a free-text field — both new fields are `bool`s and
+`Fault` still carries no string — and both `403` shapes stay recorded, so a refusal still names its
+verb and resource.
+
+**Three rounds, and each one found something the one before it could not have.** Round one wrote the
+code and caught its own predicate. Round two asked what the code does and found the box's headline
+unasserted, the neighbouring paragraph falsified, and a ruling half-spent. Round three asked what the
+fix could break and found the blocker's own condition unpinned and a second loop shape the counter
+cannot see. That is [the family-review shape this project keeps
+measuring](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15),
+and the cheap lesson is in which reads paid: the ones that **fed a shape** or **planted a mutant**,
+never the ones that re-read a diff.
